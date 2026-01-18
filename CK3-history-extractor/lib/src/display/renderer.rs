@@ -180,13 +180,27 @@ impl<'a> Renderer<'a> {
     /// Renders the [Renderable] object.
     fn render<T: Renderable, D: Deref<Target = T>>(&self, obj: D, env: &Environment<'_>) {
         //render the object
-        let template = env.get_template(T::TEMPLATE_NAME).unwrap();
+        let template = match env.get_template(T::TEMPLATE_NAME) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("Warning: Failed to get template {}: {}", T::TEMPLATE_NAME, e);
+                return;
+            }
+        };
         let path = obj.get_path(self.path);
         obj.render(&self.path, &self.state, self.grapher, self.data);
-        let contents = template.render(obj.deref()).unwrap();
+        let contents = match template.render(obj.deref()) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Warning: Failed to render {}: {}. Skipping this entity.", T::TEMPLATE_NAME, e);
+                return;
+            }
+        };
         thread::spawn(move || {
             //IO heavy, so spawn a thread
-            fs::write(path, contents).unwrap();
+            if let Err(e) = fs::write(&path, contents) {
+                eprintln!("Warning: Failed to write file {:?}: {}", path, e);
+            }
         });
     }
 
@@ -237,7 +251,7 @@ impl<'a> Renderer<'a> {
                     break;
                 }
                 queue.push_back(None);
-                if queue.front().unwrap().is_none() {
+                if queue.front().map(|f| f.is_none()).unwrap_or(true) {
                     break;
                 }
             }

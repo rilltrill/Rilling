@@ -67,7 +67,13 @@ fn handle_node<
     let id = obj.get_id() as usize;
     if let Some(ch) = obj.inner() {
         let name = ch.get_name();
-        let txt_size = fnt.box_size(&name).unwrap();
+        let txt_size = match fnt.box_size(&name) {
+            Ok(size) => size,
+            Err(e) => {
+                eprintln!("Warning: Failed to calculate text size for character name in family tree: {}", e);
+                return;  // Skip this node if we can't calculate its size
+            }
+        };
         let node_width = txt_size.0 as f64 * TREE_NODE_SIZE_MULTIPLIER;
         let node_height = txt_size.1 as f64 * TREE_NODE_SIZE_MULTIPLIER;
         //we also here calculate the point where the text should be drawn while we have convenient access to both size with margin and without
@@ -126,13 +132,22 @@ fn create_graph<P: AsRef<Path>, S: Into<String>>(
     }
 
     let root = SVGBackend::new(output_path, GRAPH_SIZE).into_drawing_area();
-    root.fill(&WHITE).unwrap();
-    let mut chart = ChartBuilder::on(&root)
+    if let Err(e) = root.fill(&WHITE) {
+        eprintln!("Warning: Failed to fill graph background: {}", e);
+        return;
+    }
+    let mut chart = match ChartBuilder::on(&root)
         .margin(GRAPH_MARGIN)
         .x_label_area_size(GRAPH_LABEL_SPACE)
         .y_label_area_size(GRAPH_LABEL_SPACE)
         .build_cartesian_2d((min_x as i32)..(max_x as i32), MIN_Y..MAX_Y)
-        .unwrap();
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Warning: Failed to build chart: {}", e);
+            return;
+        }
+    };
 
     let mut mesh = chart.configure_mesh();
 
@@ -144,20 +159,28 @@ fn create_graph<P: AsRef<Path>, S: Into<String>>(
         mesh.y_desc(ylabel);
     }
 
-    mesh.draw().unwrap();
+    if let Err(e) = mesh.draw() {
+        eprintln!("Warning: Failed to draw mesh: {}", e);
+        return;
+    }
 
-    chart
+    let series_result = chart
         .draw_series(LineSeries::new(
-            (min_x..max_x).map(|year| {
-                (
+            (min_x..max_x).filter_map(|year| {
+                let total = contast.get(&year).copied().unwrap_or(1);
+                if total == 0 {
+                    return None; // Skip years with no data to avoid division by zero
+                }
+                Some((
                     year as i32,
-                    *data.get(&year).unwrap_or(&0) as f64 / *contast.get(&year).unwrap() as f64
-                        * MAX_Y,
-                )
+                    *data.get(&year).unwrap_or(&0) as f64 / total as f64 * MAX_Y,
+                ))
             }),
             &RED,
-        ))
-        .unwrap();
+        ));
+    if let Err(e) = series_result {
+        eprintln!("Warning: Failed to draw line series in graph: {}", e);
+    }
 }
 
 /// An object that can create graphs from the game state
@@ -295,7 +318,10 @@ impl Grapher {
 
             let root_raw = SVGBackend::new(output_path, (x_size, y_size)).into_drawing_area();
 
-            root_raw.fill(&WHITE).unwrap();
+            if let Err(e) = root_raw.fill(&WHITE) {
+                eprintln!("Warning: Failed to fill tree background: {}", e);
+                return;
+            }
 
             root = root_raw.apply_coord_spec(Cartesian2d::<RangedCoordf64, RangedCoordf64>::new(
                 min_x..max_x,
@@ -308,32 +334,48 @@ impl Grapher {
         }
         //we first draw the lines. Lines go from middle points of the nodes to the middle point of the parent nodes
         for (id, (x, y)) in &positions {
-            let (parent, _, (_, node_height), _, _) = storage.get(id).unwrap();
+            let Some((parent, _, (_, node_height), _, _)) = storage.get(id) else {
+                eprintln!("Warning: Missing storage entry for node ID in family tree");
+                continue;
+            };
             if *parent != NO_PARENT {
                 //draw the line if applicable
-                let (parent_x, parent_y) = positions.get(parent).unwrap();
+                let Some((parent_x, parent_y)) = positions.get(parent) else {
+                    eprintln!("Warning: Missing position for parent node in family tree");
+                    continue;
+                };
                 //MAYBE improve the line laying algorithm, but it's not that important
-                root.draw(&PathElement::new(
+                if let Err(e) = root.draw(&PathElement::new(
                     vec![
                         (*x, *y - (node_height / 2.0)),
                         (*parent_x, *parent_y + (node_height / 2.0)),
                     ],
                     Into::<ShapeStyle>::into(&BLACK).stroke_width(1),
-                ))
-                .unwrap();
+                )) {
+                    eprintln!("Warning: Failed to draw family tree line: {}", e);
+                }
             }
         }
         //then we draw the nodes so that they lay on top of the lines
         for (id, (x, y)) in &positions {
-            let (_, node_name, (node_width, node_height), txt_point, class) =
-                storage.get(id).unwrap();
+            let Some((_, node_name, (node_width, node_height), txt_point, class)) =
+                storage.get(id) else {
+                    eprintln!("Warning: Missing storage entry for node in family tree");
+                    continue;
+                };
             let color = if let Some(class) = class {
-                groups.get(class.as_ref()).unwrap()
+                match groups.get(class.as_ref()) {
+                    Some(c) => c,
+                    None => {
+                        eprintln!("Warning: Missing color group in family tree");
+                        &WHITE
+                    }
+                }
             } else {
                 &WHITE
             };
             //draw the element after the line so that the line is behind the element
-            root.draw(
+            if let Err(e) = root.draw(
                 &(EmptyElement::at((*x, *y))
                 // the rectangle is defined by two points, the top left and the bottom right. We calculate the top left by subtracting half the size of the node from the center point
                 + Rectangle::new(
@@ -348,10 +390,13 @@ impl Grapher {
                     *txt_point,
                     fnt.clone(),
             )),
-            )
-            .unwrap();
+            ) {
+                eprintln!("Warning: Failed to draw family tree node: {}", e);
+            }
         }
-        root.present().unwrap();
+        if let Err(e) = root.present() {
+            eprintln!("Warning: Failed to present family tree: {}", e);
+        }
     }
 
     /// Creates a dynasty graph, meaning the family tree graph
@@ -380,11 +425,20 @@ pub fn create_timeline_graph<P: AsRef<Path>>(
 ) {
     let root = SVGBackend::new(&output_path, GRAPH_SIZE).into_drawing_area();
 
-    root.fill(&WHITE).unwrap();
+    if let Err(e) = root.fill(&WHITE) {
+        eprintln!("Warning: Failed to fill timeline background: {}", e);
+        return;
+    }
 
     let t_len = timespans.len() as i32;
     let fnt = ("sans-serif", 10.0).into_font();
-    let lifespan_y = fnt.box_size("L").unwrap().1 as i32;
+    let lifespan_y = match fnt.box_size("L") {
+        Ok((_, h)) => h as i32,
+        Err(e) => {
+            eprintln!("Warning: Failed to calculate font size for timeline: {}", e);
+            return;
+        }
+    };
     let height = lifespan_y * t_len + TIMELINE_MARGIN as i32;
 
     let root = root.apply_coord_spec(Cartesian2d::<RangedCoordi32, RangedCoordi32>::new(
@@ -393,33 +447,43 @@ pub fn create_timeline_graph<P: AsRef<Path>>(
         (0..GRAPH_SIZE.0 as i32, 0..GRAPH_SIZE.1 as i32),
     ));
 
-    root.draw(&PathElement::new(
+    if let Err(e) = root.draw(&PathElement::new(
         [(0, 0), (max_date as i32, 0)],
         Into::<ShapeStyle>::into(&BLACK).filled(),
-    ))
-    .unwrap();
+    )) {
+        eprintln!("Warning: Failed to draw timeline base line: {}", e);
+        return;
+    }
     const YEAR_INTERVAL: i32 = 25;
     //draw the tick
     for i in 0..max_date as i32 / YEAR_INTERVAL {
-        root.draw(&PathElement::new(
+        if let Err(e) = root.draw(&PathElement::new(
             [
                 (i * YEAR_INTERVAL + 1, -height),
                 (i * YEAR_INTERVAL, TIMELINE_MARGIN as i32),
             ],
             Into::<ShapeStyle>::into(&BLACK).filled(),
-        ))
-        .unwrap();
+        )) {
+            eprintln!("Warning: Failed to draw timeline tick: {}", e);
+        }
     }
     //draw the century labels
     for i in 1..(max_date as i32 / 100) + 1 {
         let txt = (i * 100).to_string();
-        let txt_x = fnt.box_size(&txt).unwrap().0 as i32;
-        root.draw(&Text::new(
+        let txt_x = match fnt.box_size(&txt) {
+            Ok((w, _)) => w as i32,
+            Err(e) => {
+                eprintln!("Warning: Failed to calculate text size for timeline: {}", e);
+                continue;
+            }
+        };
+        if let Err(e) = root.draw(&Text::new(
             txt,
             (i * 100 - (txt_x / 2), TIMELINE_MARGIN as i32),
             fnt.clone(),
-        ))
-        .unwrap();
+        )) {
+            eprintln!("Warning: Failed to draw timeline label: {}", e);
+        }
     }
     //draw the empire lifespans
     for (i, (title, data)) in timespans.iter().enumerate() {
@@ -435,7 +499,7 @@ pub fn create_timeline_graph<P: AsRef<Path>>(
                 } else {
                     real_end = *end as i32;
                 }
-                root.draw(&Rectangle::new(
+                if let Err(e) = root.draw(&Rectangle::new(
                     [
                         (
                             *start as i32,
@@ -447,16 +511,20 @@ pub fn create_timeline_graph<P: AsRef<Path>>(
                         ),
                     ],
                     Into::<ShapeStyle>::into(&GREEN).filled(),
-                ))
-                .unwrap();
+                )) {
+                    eprintln!("Warning: Failed to draw timeline lifespan rectangle: {}", e);
+                }
             }
-            root.draw(&Text::new(
+            if let Err(e) = root.draw(&Text::new(
                 title.get_name(),
                 (txt_x as i32, -lifespan_y * (i + 1) as i32),
                 fnt.clone(),
-            ))
-            .unwrap();
+            )) {
+                eprintln!("Warning: Failed to draw timeline title text: {}", e);
+            }
         }
     }
-    root.present().unwrap();
+    if let Err(e) = root.present() {
+        eprintln!("Warning: Failed to present timeline: {}", e);
+    }
 }

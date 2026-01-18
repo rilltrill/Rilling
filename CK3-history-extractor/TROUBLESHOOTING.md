@@ -1,8 +1,18 @@
 # CK3 History Extractor - Troubleshooting Guide
 
-## Your Crash Issue
+## ✨ NEW: Mod Support Patches Applied!
 
-Based on your error output, your CK3 History Extractor is crashing during the rendering phase after successfully parsing your save file. This is a **known issue** that affects modded saves and saves with extensive DLC content.
+**This version includes patches to fix crashes with modded saves!**
+
+The extractor now handles missing data gracefully instead of crashing. See `MOD_SUPPORT_PATCHES.md` for details.
+
+## Your Crash Issue (Fixed!)
+
+The original crash during the rendering phase has been patched. The extractor now:
+- ✅ Skips problematic entities instead of crashing
+- ✅ Logs warnings when it encounters issues
+- ✅ Generates partial output with whatever it can extract
+- ✅ Works with most modded saves!
 
 ### What's Happening
 
