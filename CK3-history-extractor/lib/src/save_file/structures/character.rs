@@ -461,7 +461,9 @@ impl GameObjectDerived for Character {
             match s {
                 Vassal::Character(c) => collection.extend([E::from(c.clone().into())]),
                 Vassal::Reference(c) => {
-                    collection.extend([E::from(c.get_internal().as_ref().unwrap().clone().into())])
+                    if let Some(internal) = c.get_internal().as_ref() {
+                        collection.extend([E::from(internal.clone().into())]);
+                    }
                 }
             }
         }

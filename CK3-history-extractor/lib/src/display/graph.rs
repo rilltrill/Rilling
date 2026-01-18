@@ -262,7 +262,10 @@ impl Grapher {
                 let id = layout[i * 3] as usize;
                 let x = layout[i * 3 + 1];
                 let y = layout[i * 3 + 2];
-                let (_, _, (node_width, node_height), _, class) = storage.get(&id).unwrap();
+                let Some((_, _, (node_width, node_height), _, class)) = storage.get(&id) else {
+                    eprintln!("Warning: Missing storage entry for node {} in family tree layout", id);
+                    continue;
+                };
                 if let Some(class) = class {
                     // group resolving
                     if !groups.contains_key(class.as_ref()) {

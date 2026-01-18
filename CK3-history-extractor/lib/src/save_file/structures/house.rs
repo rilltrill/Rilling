@@ -85,12 +85,9 @@ impl FromGameObject for House {
 impl Finalize for GameRef<House> {
     fn finalize(&mut self) {
         if let Some(house) = self.get_internal_mut().inner_mut() {
-            house
-                .parent
-                .get_internal_mut()
-                .inner_mut()
-                .unwrap()
-                .register_house(self.clone());
+            if let Some(parent) = house.parent.get_internal_mut().inner_mut() {
+                parent.register_house(self.clone());
+            }
         }
     }
 }
@@ -121,48 +118,49 @@ impl Localizable for House {
                                 .iter()
                                 .find(|l| l.get_internal().inner().is_some())
                             {
-                                let leader = leader.get_internal();
-                                let leader = leader.inner().unwrap();
-                                match stack[1].0.as_str() {
-                                    "Custom" => {
-                                        if stack[1].1[0] == "GetAppropriateGodname" {
-                                            // TODO localize the godname properly here
-                                            return Some("God".into());
-                                        } else if stack[1].1[0] == "QueenKing" {
-                                            if leader.get_female() {
-                                                return Some("Queen".into());
-                                            } else {
-                                                return Some("King".into());
+                                let leader_ref = leader.get_internal();
+                                if let Some(leader) = leader_ref.inner() {
+                                    match stack[1].0.as_str() {
+                                        "Custom" => {
+                                            if stack[1].1[0] == "GetAppropriateGodname" {
+                                                // TODO localize the godname properly here
+                                                return Some("God".into());
+                                            } else if stack[1].1[0] == "QueenKing" {
+                                                if leader.get_female() {
+                                                    return Some("Queen".into());
+                                                } else {
+                                                    return Some("King".into());
+                                                }
+                                            } else if stack[1].1[0] == "GetDaughterSon" {
+                                                if leader.get_female() {
+                                                    return Some("Daughter".into());
+                                                } else {
+                                                    return Some("Son".into());
+                                                }
                                             }
-                                        } else if stack[1].1[0] == "GetDaughterSon" {
+                                        }
+                                        "GetFirstName" => {
+                                            return Some(leader.get_name().clone());
+                                        }
+                                        "GetSheHe" => {
                                             if leader.get_female() {
-                                                return Some("Daughter".into());
+                                                return Some("She".into());
                                             } else {
-                                                return Some("Son".into());
+                                                return Some("He".into());
                                             }
                                         }
-                                    }
-                                    "GetFirstName" => {
-                                        return Some(leader.get_name().clone());
-                                    }
-                                    "GetSheHe" => {
-                                        if leader.get_female() {
-                                            return Some("She".into());
-                                        } else {
-                                            return Some("He".into());
+                                        "GetWomenMen" => {
+                                            if leader.get_female() {
+                                                return Some("Women".into());
+                                            } else {
+                                                return Some("Men".into());
+                                            }
                                         }
+                                        _ => {}
                                     }
-                                    "GetWomenMen" => {
-                                        if leader.get_female() {
-                                            return Some("Women".into());
-                                        } else {
-                                            return Some("Men".into());
-                                        }
-                                    }
-                                    _ => {}
+                                } else {
+                                    return Some("House".into());
                                 }
-                            } else {
-                                return Some("House".into());
                             }
                         }
                         _ => {}
@@ -205,8 +203,10 @@ impl House {
     pub fn get_faith(&self) -> Option<GameRef<Faith>> {
         for leader in self.leaders.iter().rev() {
             if let Ok(faith) = leader.try_get_internal() {
-                if let Some(faith) = faith.inner().unwrap().get_faith() {
-                    return Some(faith);
+                if let Some(character) = faith.inner() {
+                    if let Some(faith) = character.get_faith() {
+                        return Some(faith);
+                    }
                 }
             }
         }
@@ -216,8 +216,10 @@ impl House {
     pub fn get_culture(&self) -> Option<GameRef<Culture>> {
         for leader in self.leaders.iter().rev() {
             if let Ok(culture) = leader.try_get_internal() {
-                if let Some(culture) = culture.inner().unwrap().get_culture() {
-                    return Some(culture);
+                if let Some(character) = culture.inner() {
+                    if let Some(culture) = character.get_culture() {
+                        return Some(culture);
+                    }
                 }
             }
         }
@@ -228,12 +230,20 @@ impl House {
         if let Some(leader) = self.leaders.first() {
             leader.clone()
         } else {
-            self.parent
-                .get_internal()
-                .inner()
-                .unwrap()
-                .get_leader()
-                .unwrap()
+            // Try to get from parent dynasty
+            if let Some(parent) = self.parent.get_internal().inner() {
+                if let Some(leader) = parent.get_leader() {
+                    return leader;
+                }
+            }
+            // Return empty reference if nothing found
+            eprintln!("Warning: House has no founder, returning empty character reference");
+            use super::GameObjectEntity;
+            use super::super::parser::types::Wrapper;
+            GameRef::wrap(GameObjectEntity {
+                id: 0u32.into(),
+                entity: None,
+            })
         }
     }
 

@@ -48,9 +48,9 @@ impl TitleData {
                 .transpose()?
                 .map_or([70, 255, 70], |color_obj| {
                     [
-                        color_obj[0].as_integer().unwrap() as u8,
-                        color_obj[1].as_integer().unwrap() as u8,
-                        color_obj[2].as_integer().unwrap() as u8,
+                        color_obj[0].as_integer().unwrap_or(70) as u8,
+                        color_obj[1].as_integer().unwrap_or(255) as u8,
+                        color_obj[2].as_integer().unwrap_or(70) as u8,
                     ]
                 }),
             de_jure: base
@@ -278,7 +278,8 @@ impl FromGameObject for Title {
             base.get_string("name")?
         };
         let inner = TitleData::new(key.clone(), base, game_state)?;
-        Ok(match key.as_ref().chars().next().unwrap() {
+        let first_char = key.as_ref().chars().next().unwrap_or('b');
+        Ok(match first_char {
             'e' => Self::Empire(inner),
             'k' => Self::Kingdom(inner),
             'd' => Self::Duchy(inner),
@@ -409,11 +410,12 @@ mod display {
                     let mut buf = path.join(Title::SUBDIR);
                     buf.push(self.id.to_string() + ".png");
                     let mut title_map = map.create_map_flat(title.get_barony_keys(), title.color);
-                    title_map.draw_text(format!(
-                        "{} at {}",
-                        title.name,
-                        game_state.get_current_date().unwrap().iso_8601()
-                    ));
+                    let date_text = if let Some(date) = game_state.get_current_date() {
+                        format!("{} at {}", title.name, date.iso_8601())
+                    } else {
+                        format!("{} at Unknown Date", title.name)
+                    };
+                    title_map.draw_text(date_text);
                     title_map.save_in_thread(&buf);
                 }
             }

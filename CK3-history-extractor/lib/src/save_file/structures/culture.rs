@@ -90,9 +90,11 @@ impl Finalize for GameRef<Culture> {
 
             if culture.language.is_none() {
                 for p in &culture.parents {
-                    if let Some(lang) = p.get_internal().inner().unwrap().get_language() {
-                        culture.language = Some(lang);
-                        break;
+                    if let Some(parent) = p.get_internal().inner() {
+                        if let Some(lang) = parent.get_language() {
+                            culture.language = Some(lang);
+                            break;
+                        }
                     }
                 }
             }

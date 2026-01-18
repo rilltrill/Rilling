@@ -25,11 +25,17 @@ enum MemoryVariable {
 
 impl From<&GameObjectMap> for MemoryVariable {
     fn from(value: &GameObjectMap) -> Self {
-        let tp = value.get_string("type").unwrap();
+        let tp = match value.get_string("type") {
+            Ok(t) => t,
+            Err(_) => {
+                eprintln!("Warning: Memory variable missing 'type' field, defaulting to None");
+                return MemoryVariable::None;
+            }
+        };
         match tp.as_ref() {
             "value" => MemoryVariable::None,
-            "boolean" => MemoryVariable::Bool(value.get_integer("identity").unwrap() != 0),
-            "trait" => MemoryVariable::String(value.get_string("key").unwrap()),
+            "boolean" => MemoryVariable::Bool(value.get_integer("identity").unwrap_or(0) != 0),
+            "trait" => MemoryVariable::String(value.get_string("key").unwrap_or_default()),
             "flag" => {
                 if let Some(v) = value.get("flag") {
                     match v {
@@ -159,7 +165,9 @@ impl Localizable for Memory {
                             if let Some(guy) =
                                 self.participants.get(stack[1].1[1].as_str().trim_start())
                             {
-                                return Some(guy.get_internal().inner().unwrap().get_name());
+                                if let Some(character) = guy.get_internal().inner() {
+                                    return Some(character.get_name());
+                                }
                             }
                         }
                     } else if stack[0].0 == "predecessor" {
@@ -170,10 +178,16 @@ impl Localizable for Memory {
                         }
                     } else if let Some(part) = self.participants.get(stack[0].0.as_str()) {
                         if stack[1].0 == "GetName" || stack[1].0 == "GetTitledFirstName" {
-                            return Some(part.get_internal().inner().unwrap().get_name());
+                            if let Some(character) = part.get_internal().inner() {
+                                return Some(character.get_name());
+                            }
                         } else if stack[1].0 == "GetHerHis" || stack[1].0 == "GetNamePossessive" {
-                            if part.get_internal().inner().unwrap().get_female() {
-                                return Some("Her".into());
+                            if let Some(character) = part.get_internal().inner() {
+                                if character.get_female() {
+                                    return Some("Her".into());
+                                } else {
+                                    return Some("His".into());
+                                }
                             } else {
                                 return Some("His".into());
                             }

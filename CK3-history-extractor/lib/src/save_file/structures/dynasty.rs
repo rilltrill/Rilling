@@ -52,7 +52,13 @@ impl FromGameObject for Dynasty {
                 let mut level: u8 = 0;
                 for el in perk.rsplitn(2, '_') {
                     if i == 0 {
-                        level = el.parse::<u8>().unwrap();
+                        level = match el.parse::<u8>() {
+                            Ok(l) => l,
+                            Err(_) => {
+                                eprintln!("Warning: Failed to parse perk level from '{}', skipping", el);
+                                continue;
+                            }
+                        };
                     } else {
                         key = Some(el);
                     }
@@ -91,26 +97,23 @@ impl Finalize for GameRef<Dynasty> {
     fn finalize(&mut self) {
         if let Some(dynasty) = self.get_internal_mut().inner_mut() {
             dynasty.houses.sort_by(|a, b| {
-                a.get_internal()
+                let a_date = a.get_internal()
                     .inner()
-                    .unwrap()
-                    .get_found_date()
-                    .cmp(&b.get_internal().inner().unwrap().get_found_date())
+                    .map(|h| h.get_found_date())
+                    .unwrap_or_default();
+                let b_date = b.get_internal()
+                    .inner()
+                    .map(|h| h.get_found_date())
+                    .unwrap_or_default();
+                a_date.cmp(&b_date)
             });
             // instead of resolving game files we can just get the name from the first house
             if dynasty.name.is_none() {
-                dynasty.name = Some(
-                    dynasty
-                        .houses
-                        .first()
-                        .unwrap()
-                        .clone()
-                        .get_internal()
-                        .inner()
-                        .unwrap()
-                        .get_name()
-                        .clone(),
-                );
+                if let Some(first_house) = dynasty.houses.first() {
+                    if let Some(house) = first_house.get_internal().inner() {
+                        dynasty.name = Some(house.get_name().clone());
+                    }
+                }
             }
         }
     }
@@ -122,14 +125,19 @@ impl Dynasty {
     }
 
     pub fn get_founder(&self) -> GameRef<Character> {
-        self.houses
-            .first()
-            .unwrap()
-            .clone()
-            .get_internal()
-            .inner()
-            .unwrap()
-            .get_founder()
+        if let Some(first_house) = self.houses.first() {
+            if let Some(house) = first_house.get_internal().inner() {
+                return house.get_founder();
+            }
+        }
+        // Return a default/empty character reference if no founder found
+        eprintln!("Warning: Dynasty has no founder, returning empty character reference");
+        use super::GameObjectEntity;
+        use super::super::parser::types::Wrapper;
+        GameRef::wrap(GameObjectEntity {
+            id: 0u32.into(),
+            entity: None,
+        })
     }
 
     pub fn get_leader(&self) -> Option<GameRef<Character>> {
@@ -139,7 +147,9 @@ impl Dynasty {
 
 impl GameObjectDerived for Dynasty {
     fn get_name(&self) -> GameString {
-        self.name.as_ref().unwrap().clone()
+        self.name.as_ref()
+            .map(|n| n.clone())
+            .unwrap_or_else(|| GameString::from("Unknown Dynasty"))
     }
 
     fn get_references<E: From<EntityRef>, C: Extend<E>>(&self, collection: &mut C) {

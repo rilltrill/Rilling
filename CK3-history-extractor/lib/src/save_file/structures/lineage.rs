@@ -84,8 +84,8 @@ impl GameObjectDerived for LineageNode {
         self.character
             .get_internal()
             .inner()
-            .expect("Character in lineage must be initialized")
-            .get_name()
+            .map(|c| c.get_name())
+            .unwrap_or_else(|| GameString::from("Unknown Character"))
     }
 
     fn get_references<E: From<EntityRef>, C: Extend<E>>(&self, collection: &mut C) {
@@ -101,15 +101,14 @@ impl Localizable for LineageNode {
         for perk in self.perks.iter_mut() {
             let mut perk_key = perk.to_string();
             if perk_key == "family_man_perk" {
-                perk_key += if self
-                    .character
-                    .get_internal()
-                    .inner()
-                    .expect("Character in lineage must be initialized")
-                    .get_female()
-                {
-                    "_female_name"
+                perk_key += if let Some(character) = self.character.get_internal().inner() {
+                    if character.get_female() {
+                        "_female_name"
+                    } else {
+                        "_male_name"
+                    }
                 } else {
+                    // If character isn't initialized, default to male form
                     "_male_name"
                 }
             } else {

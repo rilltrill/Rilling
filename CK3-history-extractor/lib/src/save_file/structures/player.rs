@@ -45,7 +45,9 @@ impl GameObjectDerived for Player {
     }
 
     fn get_references<E: From<EntityRef>, C: Extend<E>>(&self, collection: &mut C) {
-        collection.extend([E::from(self.character.as_ref().unwrap().clone().into())]);
+        if let Some(character) = self.character.as_ref() {
+            collection.extend([E::from(character.clone().into())]);
+        }
         for node in self.lineage.iter() {
             collection.extend([E::from(node.get_character().clone().into())]);
         }
@@ -108,7 +110,13 @@ mod display {
         ) {
             if let Some(map) = data.get_map() {
                 //timelapse rendering
-                let mut file = File::create(path.join("timelapse.gif")).unwrap();
+                let mut file = match File::create(path.join("timelapse.gif")) {
+                    Ok(f) => f,
+                    Err(e) => {
+                        eprintln!("Warning: Failed to create timelapse.gif: {}", e);
+                        return;
+                    }
+                };
                 let mut gif_encoder = GifEncoder::new(&mut file);
                 for char in self.lineage.iter() {
                     /* Note on timelapse:
@@ -123,9 +131,11 @@ mod display {
                         //This is the closes approximation we can get of changes in the map that are 100% accurate
                         let death_date = char.get_death_date();
                         let date = if let Some(death_date) = &death_date {
-                            death_date.iso_8601()
+                            format!("{}", death_date.iso_8601())
+                        } else if let Some(current_date) = game_state.get_current_date() {
+                            format!("{}", current_date.iso_8601())
                         } else {
-                            game_state.get_current_date().unwrap().iso_8601()
+                            "Unknown Date".to_string()
                         };
                         let mut barony_map =
                             map.create_map_flat(char.get_barony_keys(true), TARGET_COLOR);
@@ -140,49 +150,53 @@ mod display {
                             height,
                             Delay::from_numer_denom_ms(3000, 1),
                         );
-                        gif_encoder.encode_frame(frame).unwrap();
+                        if let Err(e) = gif_encoder.encode_frame(frame) {
+                            eprintln!("Warning: Failed to encode gif frame: {}", e);
+                        }
                     }
                 }
-                gif_encoder.set_repeat(Repeat::Infinite).unwrap();
+                if let Err(e) = gif_encoder.set_repeat(Repeat::Infinite) {
+                    eprintln!("Warning: Failed to set gif repeat: {}", e);
+                }
                 let mut direct_titles = HashSet::new();
                 let mut descendant_title = HashSet::new();
-                let first = self.lineage.first().unwrap().get_character();
-                if let Some(first) = first.get_internal().inner() {
-                    let dynasty = first.get_house();
-                    let dynasty = dynasty.as_ref().unwrap().get_internal();
-                    for desc in dynasty
-                        .inner()
-                        .unwrap()
-                        .get_founder()
-                        .get_internal()
-                        .inner()
-                        .unwrap()
-                        .get_descendants()
-                    {
-                        if let Some(desc) = desc.get_internal().inner() {
-                            if desc.get_death_date().is_some() {
-                                continue;
-                            }
-                            let target = if desc.get_house().map_or(false, |d| {
-                                d.get_internal()
-                                    .inner()
-                                    .unwrap()
-                                    .get_dynasty()
-                                    .get_internal()
-                                    .deref()
-                                    == dynasty
-                                        .inner()
-                                        .unwrap()
-                                        .get_dynasty()
-                                        .get_internal()
-                                        .deref()
-                            }) {
-                                &mut direct_titles
-                            } else {
-                                &mut descendant_title
-                            };
-                            for title in desc.get_barony_keys(false) {
-                                target.insert(title.clone());
+                if let Some(first_node) = self.lineage.first() {
+                    let first_char = first_node.get_character();
+                    let first_internal = first_char.get_internal();
+                    if let Some(first) = first_internal.inner() {
+                        if let Some(dynasty_ref) = first.get_house() {
+                            let dynasty = dynasty_ref.get_internal();
+                            if let Some(dynasty_inner) = dynasty.inner() {
+                                let founder_ref = dynasty_inner.get_founder();
+                                let founder_internal = founder_ref.get_internal();
+                                if let Some(founder_inner) = founder_internal.inner() {
+                                    for desc in founder_inner.get_descendants() {
+                                        if let Some(desc) = desc.get_internal().inner() {
+                                            if desc.get_death_date().is_some() {
+                                                continue;
+                                            }
+                                            let target = if desc.get_house().map_or(false, |d| {
+                                                if let Some(desc_house) = d.get_internal().inner() {
+                                                    if let Some(dynasty_inner_cmp) = dynasty.inner() {
+                                                        desc_house.get_dynasty().get_internal().deref()
+                                                            == dynasty_inner_cmp.get_dynasty().get_internal().deref()
+                                                    } else {
+                                                        false
+                                                    }
+                                                } else {
+                                                    false
+                                                }
+                                            }) {
+                                                &mut direct_titles
+                                            } else {
+                                                &mut descendant_title
+                                            };
+                                            for title in desc.get_barony_keys(false) {
+                                                target.insert(title.clone());
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -206,8 +220,10 @@ mod display {
                 dynasty_map.save_in_thread(path.join("dynastyMap.png"));
             }
             if let Some(grapher) = grapher {
-                let last = self.lineage.last().unwrap().get_character();
-                grapher.create_tree_graph(last, true, &path.join("line.svg"));
+                if let Some(last_node) = self.lineage.last() {
+                    let last = last_node.get_character();
+                    grapher.create_tree_graph(last, true, &path.join("line.svg"));
+                }
             }
         }
     }

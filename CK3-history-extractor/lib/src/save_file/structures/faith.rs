@@ -32,7 +32,7 @@ impl FromGameObject for Faith {
                 .or(base.get("template"))
                 .map(|v| v.as_string())
                 .transpose()?
-                .unwrap(),
+                .unwrap_or_else(|| GameString::from("Unknown Faith")),
             fervor: base.get_real("fervor")? as f32,
             head_title: base
                 .get_game_id("religious_head")
