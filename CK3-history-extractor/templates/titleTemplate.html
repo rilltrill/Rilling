@@ -1,0 +1,95 @@
+{% extends "base" %}
+
+{% block title %}
+{%if tier != "Other"%}{{tier}}{%endif%} {{name}}
+{% endblock %}
+
+{% block header %}
+<p class="h1 my-0 me-md-auto fw-normal">{%if tier != "Other"%}{{tier}}{%endif%} {{name}}</p>
+<a class="btn btn-outline-primary btn-sm" href="../index.html">Home</a>
+{% endblock %}
+
+{% block main %}
+<div class="row">
+    <div class="col w-50">
+        {%if capital is not none and capital.id != id%}
+        Capital: {{capital|render_ref}}
+        <br>
+        {%endif%}
+        {%if de_jure is not none%}
+        De jure title liege: 
+        {{de_jure|render_ref}}
+        <br>
+        {%endif%}
+        {%if de_facto is not none and de_facto != de_jure%}
+        De facto title liege:
+        {{de_facto|render_ref}}
+        <br>
+        {%endif%}
+        {%if de_jure_vassals|length != 0%}
+        De jure vassals:
+        <ul>
+            {%for vassal in de_jure_vassals%}
+                {{vassal|render_ref}}
+            {%endfor%}
+        </ul>
+        {%endif%}
+        {%if de_facto_vassals|length != 0 and de_facto_vassals != de_jure_vassals%}
+        De facto vassals:
+        <ul>
+            {%for vassal in de_facto_vassals%}
+            {{vassal|render_ref}}
+            {%endfor%}
+        </ul>
+        {%endif%}
+        {%if claims|length != 0%}
+        Claimants:
+        <ul>
+            {%for claimant in claims%}
+            {{claimant|render_ref}}
+            {%endfor%}
+        </ul>
+        {%endif%}
+        {%if faith is defined %}
+        Faith: {{faith|render_ref}}
+        <br>
+        {%endif%}
+        {%if culture is defined %}
+        Culture: {{culture|render_ref}}
+        <br>
+        {%endif%}
+        {%if map_present and de_facto_vassals|length != 0%}
+        <div class="card">
+            <div class="card-header">
+                De facto title map
+            </div>
+            <div class="card-body">
+                <a href="./{{id}}.png" target="_blank"><img src="./{{id}}.png" class="img-fluid" alt="Map of {{name}}"></a>
+            </div>
+        </div>
+        {%endif%}
+    </div>
+    <div class="col w-50">
+        <div class="card">
+            <div class="card-header">
+                Title History
+            </div>
+            {%if history|length != 0%}
+            <ul class="list-group list-group-flush">
+                {%for item in history%}
+                {%if item[1] != none%}
+                <li class="list-group-item">{{item[0]}}:{{item[1]|render_ref}} {{item[2]}}</li>
+                {%else%}
+                <li class="list-group-item">{{item[0]}}:{{item[2]}}</li>
+                {%endif%}
+                {%endfor%}
+            </ul>
+            {%else%}
+            <div class="card-body">
+            There is no history to display
+            </div>
+            {%endif%}
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,13 @@
+*.ck3
+*history/*
+target*
+*.lock
+*.log
+*'s history
+*.svg
+*.zip
+!examples/*
+*.data
+*.old
+*.json
+tokens_1.tok

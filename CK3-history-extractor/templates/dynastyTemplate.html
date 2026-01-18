@@ -1,0 +1,62 @@
+{% extends "base" %}
+
+{% block title %}
+{{name}}
+{% endblock %}
+
+{% block header %}
+<p class="h1 my-0 me-md-auto fw-normal">{{name}}</p>
+<a class="btn btn-outline-primary btn-sm" href="../index.html">Home</a>
+{% endblock %}
+
+{% block main %}
+<div class="row text-start w-100">
+    <div class="col">
+        Total accumulated renown: {{prestige_tot}}<br>
+        Current renown: {{prestige}}<br>
+        {%if leader is not none%}
+        Dynasty head: {{leader|render_ref}}<br>
+        {%endif%}
+        {%if perks is not none%}
+        Dynasty Legacies:
+        <table class="table table-bordered w-auto">
+        {%for key, value in perks|items%}
+        <tr>
+            <td>{{key}}</td>
+            {%for i in range(value)%}
+            <td class= "bg-success" style="width:20px"></td>
+            {%endfor%}
+            {%for i in range(5 - value)%}
+            <td style="width:20px"></td>
+            {%endfor%}
+        </tr>
+        {%endfor%}
+        </table>
+        {%endif%}
+        {%if not no_vis%}
+        <div class="card">
+            <div class="card-header">
+            Family tree:
+            </div>
+            <div class="card-body overflow-auto p-0">
+                <a href="./{{id}}.svg" target="_blank"><img src="./{{id}}.svg" alt="Family tree"></a>
+            </div>
+        </div>
+        {%endif%}
+    </div>
+    <div class="col">
+        {%if houses|length > 0%}
+        <div class="card">
+            <div class="card-header">
+                Dynasty houses:
+            </div>
+            <ol class="list-group list-group-numbered list-group-flush">
+                {%for house in houses%}
+                <li class="list-group-item">{{house|render_ref}}</li>
+                {%endfor%}
+            </ol>
+        </div>
+        {%endif%}
+    </div>
+</div>
+{% endblock %}

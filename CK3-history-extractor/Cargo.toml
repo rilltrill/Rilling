@@ -1,0 +1,46 @@
+[package]
+name = "ck3_history_extractor"
+version = "2.4.7"
+edition = "2021"
+authors = ["TCA"]
+description = "A tool for generating an encyclopedia from your Crusader Kings III save file"
+readme = "./README.md"
+repository = "https://github.com/TCA166/CK3-history-extractor"
+license = "MIT"
+keywords = [
+    "crusader-kings-3",
+    "save-files",
+    "visualiser",
+    "extractor",
+    "utility",
+]
+build = "build.rs"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[dependencies]
+minijinja = { version = "2.14.0", features = ["loader"] }
+serde_json = "1.0.147"
+dialoguer = { version = "0.12.0", features = ["completion", "history"] }
+open = "5.3.3"
+indicatif = "0.18.3"
+keyvalues-parser = "0.2.2"
+human-panic = "=2.0.6"
+clap = {version="4.5.53", features = ["derive"]}
+derive_more = { version = "2.1.1", features = ["from", "display"] }
+jomini = "0.34.0"
+phf = "0.13.1"
+ck3_history_extractor_lib = { path = "lib", features = ["display"] }
+
+[features]
+internal = []
+permissive = ["ck3_history_extractor_lib/permissive"]
+tokens = []
+
+[build-dependencies]
+phf_codegen = "0.13.1"
+
+[workspace]
+members = ["lib"]

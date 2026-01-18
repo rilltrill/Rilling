@@ -1,0 +1,48 @@
+{% extends "base" %}
+
+{% block title %}
+Timeline
+{% endblock %}
+
+{% block header %}
+<p class="h1 my-0 me-md-auto fw-normal">CK3 Timeline</p>
+<div>
+    <a class="btn btn-outline-primary btn-sm" href="index.html">
+        Home
+    </a>
+</div>
+{% endblock %}
+
+{% block main %}
+<div class="row">
+    <div class="col">
+        <div class="card mb-3">
+            <div class="card-body">
+                <a href="./timeline.svg" target="_blank"><img src="./timeline.svg" class="img-fluid" alt="The timeline"></a>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                Notable events
+            </div>
+            <ul class="list-group list-group-flush">
+                {%for event in events%}
+                <li class="list-group-item">{{event[0]}}:{{event[1]|render_ref(true)}} conquered {{event[2]|render_ref(true)}} for the {{event[4]|render_ref(true)}} {{event[3]}}</li>
+                {%endfor%}
+            </ul>
+        </div>
+    </div>
+    <div class="col-2">
+        <div class="card">
+            <div class="card-header">
+                Great Empires of history
+            </div>
+            <ul class="list-group list-group-flush">
+                {%for span in lifespans%}
+                <li class="list-group-item">{{span[0]|render_ref(true)}}</li>
+                {%endfor%}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
