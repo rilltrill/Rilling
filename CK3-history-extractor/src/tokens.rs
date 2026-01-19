@@ -14,11 +14,11 @@ pub struct TokenTranslator {
 
 impl TokenResolver for TokenTranslator {
     fn resolve(&self, token: u16) -> Option<&str> {
-        self.tokens.as_ref().unwrap().get(&token).map(|v| &**v)
+        self.tokens.and_then(|t| t.get(&token).map(|v| &**v))
     }
 
     fn is_empty(&self) -> bool {
-        self.tokens.as_ref().unwrap().is_empty()
+        self.tokens.map_or(true, |t| t.is_empty())
     }
 }
 
