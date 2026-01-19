@@ -131,7 +131,13 @@ fn main() -> Result<(), UserError> {
     let progress_bar = ProgressBar::new_spinner();
     progress_bar.set_style(spinner_style.clone());
     progress_bar.enable_steady_tick(INTERVAL);
-    let mut reader = save.section_reader(Some(&TOKEN_TRANSLATOR)).unwrap();
+    let mut reader = match save.section_reader(Some(&TOKEN_TRANSLATOR)) {
+        Some(r) => r,
+        None => {
+            eprintln!("Error: Failed to create save file section reader");
+            return Err(UserError::NoTerminal);
+        }
+    };
     while let Some(res) = reader.next() {
         let section = res.unwrap();
         progress_bar.set_message(section.get_name().to_owned());
