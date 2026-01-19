@@ -143,7 +143,10 @@ fn main() -> Result<(), UserError> {
     }
     progress_bar.finish_with_message("Save parsing complete");
     //prepare things for rendering
-    game_state.localize(&mut data).unwrap();
+    if let Err(e) = game_state.localize(&mut data) {
+        eprintln!("Warning: Localization error: {}", e);
+        eprintln!("Continuing with partial localization...");
+    }
     let grapher = args.no_vis.not().then(|| game_state.new_grapher());
     let timeline = args.no_vis.not().then(|| game_state.new_timeline());
     let mut env = create_env(
