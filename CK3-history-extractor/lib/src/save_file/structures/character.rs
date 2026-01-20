@@ -60,7 +60,7 @@ pub struct Character {
     liege: Option<GameRef<Character>>,
     female: bool,
     artifacts: Vec<GameRef<Artifact>>,
-    narrative: Vec<String>,
+    pub narrative: Vec<String>,
 }
 
 // So both faith and culture can be stored for a character in the latest leader of their house.
