@@ -340,12 +340,17 @@ impl Localizable for GameState {
 
         // Generate narratives in a separate pass after all localization is complete
         // This prevents RefCell borrow conflicts when characters access each other
+        let mut narrative_count = 0;
         for character in self.characters.values_mut() {
             if let Some(internal) = character.get_internal_mut().inner_mut() {
                 let narrative = internal.generate_narrative();
+                if !narrative.is_empty() {
+                    narrative_count += 1;
+                }
                 internal.set_narrative(narrative);
             }
         }
+        eprintln!("Generated narratives for {} characters", narrative_count);
 
         Ok(())
     }

@@ -431,6 +431,9 @@ impl Character {
             paragraphs.push(death);
         }
 
+        if !paragraphs.is_empty() {
+            eprintln!("Generated {} paragraph narrative for {}", paragraphs.len(), self.name.as_ref());
+        }
         paragraphs
     }
 
