@@ -181,6 +181,12 @@ impl Character {
 
     /// Generates a narrative life story for the character (1-5 paragraphs)
     pub fn generate_narrative(&self) -> Vec<String> {
+        // TEST: Return a distinctive message to verify this function is being called
+        return vec![
+            format!("GENERATED NARRATIVE TEST for {}", self.name.as_ref()),
+            "If you see this, generate_narrative() is working!".to_string()
+        ];
+
         let mut paragraphs = Vec::new();
 
         let pronoun = if self.female { "She" } else { "He" };
