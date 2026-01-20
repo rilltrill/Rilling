@@ -493,7 +493,7 @@ impl FromGameObject for Character {
             vassals: Vec::new(),
             liege: None,
             artifacts: Vec::new(),
-            narrative: Vec::new(),
+            narrative: vec!["TEST: This is a hardcoded narrative to verify the template works.".to_string()],
         };
         for s in base.get_object("skill")?.as_array()?.into_iter() {
             val.skills.push(s.as_integer()? as i8);
