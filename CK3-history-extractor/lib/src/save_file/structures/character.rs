@@ -183,52 +183,58 @@ impl Character {
     pub fn generate_narrative(&self) -> Vec<String> {
         let mut paragraphs = Vec::new();
 
-        // Paragraph 1: Birth and Origins
-        let mut origin = String::new();
         let pronoun = if self.female { "She" } else { "He" };
         let possessive = if self.female { "her" } else { "his" };
 
-        origin.push_str(&format!("{} was born on {}",
-            self.name.as_ref(),
-            self.birth.iso_8601()
-        ));
+        // Collect all data upfront to avoid RefCell borrow issues
+        let culture_name = self.culture.as_ref()
+            .and_then(|c| c.get_internal().inner().map(|x| x.get_name().to_string()));
 
-        if let Some(culture_ref) = &self.culture {
-            if let Some(culture) = culture_ref.get_internal().inner() {
-                origin.push_str(&format!(", a member of the {} culture",
-                    culture.get_name().as_ref()));
-            }
+        let faith_name = self.faith.as_ref()
+            .and_then(|f| f.get_internal().inner().map(|x| x.get_name().to_string()));
+
+        let house_name = self.house.as_ref()
+            .and_then(|h| h.get_internal().inner().map(|x| x.get_name().to_string()));
+
+        let parent_names: Vec<String> = self.parents.iter()
+            .filter_map(|p| p.get_internal().inner().map(|c| c.get_name().to_string()))
+            .collect();
+
+        let title_names: Vec<String> = self.titles.iter()
+            .filter_map(|t| t.get_internal().inner().map(|title| title.get_name().to_string()))
+            .collect();
+
+        let liege_name = self.liege.as_ref()
+            .and_then(|l| l.get_internal().inner().map(|x| x.get_name().to_string()));
+
+        let child_names: Vec<String> = self.children.iter()
+            .filter_map(|c| c.get_internal().inner().map(|ch| ch.get_name().to_string()))
+            .take(3)
+            .collect();
+
+        let spouse_name = self.spouses.iter()
+            .chain(self.former.iter())
+            .find_map(|s| s.get_internal().inner().map(|c| c.get_name().to_string()));
+
+        // Paragraph 1: Birth and Origins
+        let mut origin = format!("{} was born on {}", self.name.as_ref(), self.birth.iso_8601());
+
+        if let Some(ref culture) = culture_name {
+            origin.push_str(&format!(", a member of the {} culture", culture));
         }
 
-        if let Some(faith_ref) = &self.faith {
-            if let Some(faith) = faith_ref.get_internal().inner() {
-                origin.push_str(&format!(" following the {} faith",
-                    faith.get_name().as_ref()));
-            }
+        if let Some(ref faith) = faith_name {
+            origin.push_str(&format!(" following the {} faith", faith));
         }
 
-        if let Some(house_ref) = &self.house {
-            if let Some(house) = house_ref.get_internal().inner() {
-                origin.push_str(&format!(". {} belonged to the noble house of {}",
-                    pronoun, house.get_name().as_ref()));
-            }
+        if let Some(ref house) = house_name {
+            origin.push_str(&format!(". {} belonged to the noble house of {}", pronoun, house));
         } else {
             origin.push_str(". Born of lowborn origins");
         }
 
-        if !self.parents.is_empty() {
-            let parent_count = self.parents.iter()
-                .filter(|p| p.get_internal().inner().is_some())
-                .count();
-            if parent_count > 0 {
-                origin.push_str(&format!(", {} was raised by ", possessive));
-                let parent_names: Vec<String> = self.parents.iter()
-                    .filter_map(|p| p.get_internal().inner().map(|c| c.get_name().to_string()))
-                    .collect();
-                if !parent_names.is_empty() {
-                    origin.push_str(&parent_names.join(" and "));
-                }
-            }
+        if !parent_names.is_empty() {
+            origin.push_str(&format!(", {} was raised by {}", possessive, parent_names.join(" and ")));
         }
 
         origin.push('.');
@@ -236,12 +242,9 @@ impl Character {
 
         // Paragraph 2: Personality and Traits
         if !self.traits.is_empty() {
-            let mut personality = String::new();
+            let mut personality = format!("{} was known for {} character", pronoun, possessive);
+
             let trait_count = self.traits.len().min(6);
-
-            personality.push_str(&format!("{} was known for {} character",
-                pronoun, possessive));
-
             if trait_count > 0 {
                 personality.push_str(", described as ");
                 let traits_str: Vec<String> = self.traits.iter()
@@ -254,24 +257,19 @@ impl Character {
                 } else if traits_str.len() == 2 {
                     personality.push_str(&format!("{} and {}", traits_str[0], traits_str[1]));
                 } else {
-                    let last = traits_str.last().unwrap();
+                    let last = &traits_str[traits_str.len()-1];
                     let rest = &traits_str[..traits_str.len()-1];
                     personality.push_str(&format!("{}, and {}", rest.join(", "), last));
                 }
             }
 
-            // Add skills context
             if self.skills.len() >= 6 {
                 let skill_names = ["diplomacy", "stewardship", "martial prowess",
                                    "intrigue", "learning", "combat skill"];
-                let max_skill = self.skills.iter().enumerate()
-                    .max_by_key(|(_, &val)| val)
-                    .map(|(idx, &val)| (idx, val));
-
-                if let Some((idx, val)) = max_skill {
+                if let Some((idx, &val)) = self.skills.iter().enumerate()
+                    .max_by_key(|(_, &val)| val) {
                     if val > 12 {
-                        personality.push_str(&format!(". {} excelled in {}",
-                            pronoun, skill_names[idx]));
+                        personality.push_str(&format!(". {} excelled in {}", pronoun, skill_names[idx]));
                     }
                 }
             }
@@ -280,42 +278,32 @@ impl Character {
             paragraphs.push(personality);
         }
 
-        // Paragraph 3: Political Career and Titles
-        if !self.titles.is_empty() {
-            let mut political = String::new();
-
-            political.push_str(&format!("{} ruled over ", pronoun));
-
-            let title_names: Vec<String> = self.titles.iter()
-                .filter_map(|t| t.get_internal().inner().map(|title| title.get_name().to_string()))
-                .collect();
+        // Paragraph 3: Political Career
+        if !title_names.is_empty() {
+            let mut political = format!("{} ruled over ", pronoun);
 
             if title_names.len() == 1 {
                 political.push_str(&title_names[0]);
             } else if title_names.len() == 2 {
                 political.push_str(&format!("{} and {}", title_names[0], title_names[1]));
-            } else if title_names.len() > 2 {
+            } else {
                 political.push_str(&format!("{} titles including {} and {}",
                     title_names.len(), title_names[0], title_names[1]));
             }
 
-            if let Some(liege_ref) = &self.liege {
-                if let Some(liege) = liege_ref.get_internal().inner() {
-                    political.push_str(&format!(", serving as vassal to {}",
-                        liege.get_name().as_ref()));
-                }
+            if let Some(ref liege) = liege_name {
+                political.push_str(&format!(", serving as vassal to {}", liege));
             }
 
-            // Add wealth/prestige context for living characters
             if !self.dead {
                 if self.prestige > 1000.0 {
                     political.push_str(&format!(". {} accumulated great prestige", pronoun));
                 }
                 if self.gold > 500.0 {
-                    political.push_str(&format!(" and considerable wealth"));
+                    political.push_str(" and considerable wealth");
                 }
                 if self.dread > 50.0 {
-                    political.push_str(&format!(", ruling through fear and intimidation"));
+                    political.push_str(", ruling through fear and intimidation");
                 }
             }
 
@@ -323,58 +311,37 @@ impl Character {
             paragraphs.push(political);
         }
 
-        // Paragraph 4: Relationships and Family
-        if !self.spouses.is_empty() || !self.former.is_empty() || !self.children.is_empty() {
+        // Paragraph 4: Family
+        let total_spouses = self.spouses.len() + self.former.len();
+        let child_count = self.children.len();
+
+        if total_spouses > 0 || child_count > 0 {
             let mut family = String::new();
 
-            let total_spouses = self.spouses.len() + self.former.len();
-            if total_spouses > 0 {
-                if total_spouses == 1 {
-                    let spouse_name = self.spouses.iter()
-                        .chain(self.former.iter())
-                        .find_map(|s| {
-                            s.get_internal().inner().map(|c| c.get_name().to_string())
-                        });
-                    if let Some(name) = spouse_name {
-                        family.push_str(&format!("{} married {}", pronoun, name));
-                    }
-                } else {
-                    family.push_str(&format!("{} married {} times", pronoun, total_spouses));
+            if total_spouses == 1 {
+                if let Some(ref spouse) = spouse_name {
+                    family.push_str(&format!("{} married {}", pronoun, spouse));
                 }
+            } else if total_spouses > 1 {
+                family.push_str(&format!("{} married {} times", pronoun, total_spouses));
             }
 
-            if !self.children.is_empty() {
-                let child_count = self.children.iter()
-                    .filter(|c| c.get_internal().inner().is_some())
-                    .count();
+            if child_count > 0 {
+                if !family.is_empty() {
+                    family.push_str(&format!(" and had {} ", child_count));
+                } else {
+                    family.push_str(&format!("{} had {} ", pronoun, child_count));
+                }
 
-                if child_count > 0 {
-                    if !family.is_empty() {
-                        family.push_str(&format!(" and had {} ", child_count));
-                    } else {
-                        family.push_str(&format!("{} had {} ", pronoun, child_count));
+                if child_count == 1 {
+                    family.push_str("child");
+                    if !child_names.is_empty() {
+                        family.push_str(&format!(", {}", child_names[0]));
                     }
-
-                    if child_count == 1 {
-                        family.push_str("child");
-                        let child_name = self.children.iter()
-                            .find_map(|c| {
-                                c.get_internal().inner().map(|ch| ch.get_name().to_string())
-                            });
-                        if let Some(name) = child_name {
-                            family.push_str(&format!(", {}", name));
-                        }
-                    } else {
-                        family.push_str("children");
-                        let child_names: Vec<String> = self.children.iter()
-                            .filter_map(|c| {
-                                c.get_internal().inner().map(|ch| ch.get_name().to_string())
-                            })
-                            .take(3)
-                            .collect();
-                        if !child_names.is_empty() {
-                            family.push_str(&format!(", including {}", child_names.join(", ")));
-                        }
+                } else {
+                    family.push_str("children");
+                    if !child_names.is_empty() {
+                        family.push_str(&format!(", including {}", child_names.join(", ")));
                     }
                 }
             }
@@ -385,19 +352,15 @@ impl Character {
             }
         }
 
-        // Paragraph 5: Achievements and Notable Events
+        // Paragraph 5: Achievements
         let mut achievements = String::new();
         let mut has_achievements = false;
 
-        if !self.kills.is_empty() {
-            let kill_count = self.kills.iter()
-                .filter(|k| k.get_internal().inner().is_some())
-                .count();
-            if kill_count > 0 {
-                achievements.push_str(&format!("{} personally slew {} {} in combat",
-                    pronoun, kill_count, if kill_count == 1 { "foe" } else { "foes" }));
-                has_achievements = true;
-            }
+        let kill_count = self.kills.len();
+        if kill_count > 0 {
+            achievements.push_str(&format!("{} personally slew {} {} in combat",
+                pronoun, kill_count, if kill_count == 1 { "foe" } else { "foes" }));
+            has_achievements = true;
         }
 
         if !self.artifacts.is_empty() {
@@ -412,7 +375,7 @@ impl Character {
             has_achievements = true;
         }
 
-        if !self.memories.is_empty() && self.memories.len() > 3 {
+        if self.memories.len() > 3 {
             if has_achievements {
                 achievements.push_str(&format!(". Throughout {} life, ", possessive));
             } else {
@@ -423,7 +386,7 @@ impl Character {
             has_achievements = true;
         }
 
-        if !self.languages.is_empty() && self.languages.len() > 1 {
+        if self.languages.len() > 1 {
             if has_achievements {
                 achievements.push_str(&format!(". {} was also multilingual, speaking {} languages",
                     pronoun, self.languages.len()));
@@ -439,39 +402,29 @@ impl Character {
             paragraphs.push(achievements);
         }
 
-        // Final Paragraph: Death (if applicable)
+        // Death paragraph
         if self.dead {
             let mut death = String::new();
 
-            if let Some(death_date) = &self.date {
+            if let Some(ref death_date) = self.date {
                 death.push_str(&format!("{} met {} end on {}",
                     self.name.as_ref(), possessive, death_date.iso_8601()));
 
-                if let Some(reason) = &self.reason {
+                if let Some(ref reason) = self.reason {
                     death.push_str(&format!(", {}", reason.as_ref()));
                 }
+
+                let age = death_date.year() - self.birth.year();
+                death.push_str(&format!(", at the age of {}", age));
             } else {
                 death.push_str(&format!("{} passed away", self.name.as_ref()));
             }
 
-            // Calculate age at death
-            if let Some(death_date) = &self.date {
-                let birth_year = self.birth.year();
-                let death_year = death_date.year();
-                let age = death_year - birth_year;
-                death.push_str(&format!(", at the age of {}", age));
-            }
-
-            // Legacy summary
-            if !self.children.is_empty() {
-                let descendants = self.get_descendants();
-                if descendants.len() > 10 {
-                    death.push_str(&format!(", leaving behind a dynasty of over {} descendants",
-                        descendants.len()));
-                } else if !self.children.is_empty() {
-                    death.push_str(&format!(", {} legacy lived on through {} children",
-                        possessive, self.children.len()));
-                }
+            if child_count > 10 {
+                death.push_str(", leaving behind a dynasty of descendants");
+            } else if child_count > 0 {
+                death.push_str(&format!(", {} legacy lived on through {} children",
+                    possessive, child_count));
             }
 
             death.push('.');
