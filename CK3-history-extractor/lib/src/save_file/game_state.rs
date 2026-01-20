@@ -337,6 +337,16 @@ impl Localizable for GameState {
         for artifact in &mut self.artifacts.values_mut() {
             artifact.localize(localization)?;
         }
+
+        // Generate narratives in a separate pass after all localization is complete
+        // This prevents RefCell borrow conflicts when characters access each other
+        for character in self.characters.values_mut() {
+            if let Some(internal) = character.get_internal_mut().inner_mut() {
+                let narrative = internal.generate_narrative();
+                internal.set_narrative(narrative);
+            }
+        }
+
         Ok(())
     }
 }

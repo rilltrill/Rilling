@@ -433,6 +433,11 @@ impl Character {
 
         paragraphs
     }
+
+    /// Sets the narrative for this character
+    pub fn set_narrative(&mut self, narrative: Vec<String>) {
+        self.narrative = narrative;
+    }
 }
 
 impl FromGameObject for Character {
@@ -809,9 +814,6 @@ impl Localizable for Character {
         for t in self.languages.iter_mut() {
             *t = localization.localize(t.to_string() + "_name")?;
         }
-
-        // Generate narrative life story after all localization is complete
-        self.narrative = self.generate_narrative();
 
         Ok(())
     }
