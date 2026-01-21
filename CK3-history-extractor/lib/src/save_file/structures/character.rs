@@ -114,6 +114,11 @@ impl Character {
         self.liege = Some(liege);
     }
 
+    /// Gets the children of this character
+    pub fn get_children(&self) -> &Vec<GameRef<Character>> {
+        &self.children
+    }
+
     /// Gets all of the held de jure barony keys of the character and their vassals
     pub fn get_barony_keys(&self, de_jure: bool) -> Vec<GameString> {
         let mut provinces = Vec::new();
@@ -185,6 +190,7 @@ impl Character {
 
         let pronoun = if self.female { "She" } else { "He" };
         let possessive = if self.female { "her" } else { "his" };
+        let objective = if self.female { "her" } else { "him" };
 
         // Collect all data upfront to avoid RefCell borrow issues
         let culture_name = self.culture.as_ref()
@@ -209,49 +215,117 @@ impl Character {
 
         let child_names: Vec<String> = self.children.iter()
             .filter_map(|c| c.get_internal().inner().map(|ch| ch.get_name().to_string()))
-            .take(3)
+            .take(5)
             .collect();
 
-        let spouse_name = self.spouses.iter()
+        let child_count = self.children.len();
+
+        // Collect spouse information and detect incestuous relationships
+        let all_spouses: Vec<_> = self.spouses.iter()
             .chain(self.former.iter())
-            .find_map(|s| s.get_internal().inner().map(|c| c.get_name().to_string()));
+            .collect();
+
+        let mut spouse_info: Vec<(String, Option<String>)> = Vec::new();
+
+        for spouse_ref in &all_spouses {
+            if let Some(spouse) = spouse_ref.get_internal().inner() {
+                let spouse_name = spouse.get_name().to_string();
+                let mut relationship = None;
+
+                // Check for incestuous relationships
+                // Check if spouse is a child
+                if self.children.iter().any(|c| {
+                    c.get_internal().inner().map(|ch| ch.get_name().to_string()) == Some(spouse_name.clone())
+                }) {
+                    relationship = Some(format!("{} own child", possessive));
+                }
+                // Check if spouse is a parent
+                else if self.parents.iter().any(|p| {
+                    p.get_internal().inner().map(|pa| pa.get_name().to_string()) == Some(spouse_name.clone())
+                }) {
+                    relationship = Some(format!("{} own parent", possessive));
+                }
+                // Check if spouse is a grandchild
+                else if self.children.iter().any(|child_ref| {
+                    if let Some(child) = child_ref.get_internal().inner() {
+                        child.get_children().iter().any(|grandchild_ref| {
+                            grandchild_ref.get_internal().inner()
+                                .map(|gc| gc.get_name().to_string()) == Some(spouse_name.clone())
+                        })
+                    } else {
+                        false
+                    }
+                }) {
+                    relationship = Some(format!("{} own grandchild", possessive));
+                }
+                // Check if spouse is a sibling
+                else if !self.parents.is_empty() && self.parents.iter().any(|parent_ref| {
+                    if let Some(parent) = parent_ref.get_internal().inner() {
+                        parent.get_children().iter().any(|sibling_ref| {
+                            if let Some(sibling) = sibling_ref.get_internal().inner() {
+                                sibling.get_name().to_string() == spouse_name &&
+                                sibling.get_name().to_string() != self.name.to_string()
+                            } else {
+                                false
+                            }
+                        })
+                    } else {
+                        false
+                    }
+                }) {
+                    relationship = Some(format!("{} own sibling", possessive));
+                }
+
+                spouse_info.push((spouse_name, relationship));
+            }
+        }
 
         // Paragraph 1: Birth and Origins
         let mut origin = format!("{} was born on {}", self.name.as_ref(), self.birth.iso_8601());
 
         if let Some(ref culture) = culture_name {
-            origin.push_str(&format!(", a member of the {} culture", culture));
+            origin.push_str(&format!(", into the {} culture", culture));
         }
 
         if let Some(ref faith) = faith_name {
-            origin.push_str(&format!(" following the {} faith", faith));
+            origin.push_str(&format!(", adhering to the {} faith", faith));
         }
 
         if let Some(ref house) = house_name {
-            origin.push_str(&format!(". {} belonged to the noble house of {}", pronoun, house));
+            origin.push_str(&format!(". {} belonged to the distinguished house of {}", pronoun, house));
         } else {
-            origin.push_str(". Born of lowborn origins");
+            origin.push_str(". Despite {} lowborn origins".to_string().replace("{}", possessive).as_str());
         }
 
         if !parent_names.is_empty() {
-            origin.push_str(&format!(", {} was raised by {}", possessive, parent_names.join(" and ")));
+            origin.push_str(&format!(", the {} of {}",
+                if self.female { "daughter" } else { "son" },
+                parent_names.join(" and ")));
         }
 
         origin.push('.');
         paragraphs.push(origin);
 
         // Paragraph 2: Personality and Traits
-        if !self.traits.is_empty() {
-            let mut personality = format!("{} was known for {} character", pronoun, possessive);
+        if !self.traits.is_empty() || self.skills.len() >= 6 {
+            let mut personality = format!("{} was ", self.name.as_ref());
 
-            let trait_count = self.traits.len().min(6);
+            let trait_count = self.traits.len().min(8);
             if trait_count > 0 {
-                personality.push_str(", described as ");
                 let traits_str: Vec<String> = self.traits.iter()
                     .take(trait_count)
-                    .map(|t| t.to_string().to_lowercase())
+                    .map(|t| {
+                        let trait_str = t.to_string().to_lowercase();
+                        // Add articles for traits
+                        if trait_str.starts_with(|c: char| "aeiou".contains(c)) {
+                            format!("an {}", trait_str)
+                        } else {
+                            format!("a {}", trait_str)
+                        }
+                    })
                     .collect();
 
+                personality.push_str("renowned as ");
                 if traits_str.len() == 1 {
                     personality.push_str(&traits_str[0]);
                 } else if traits_str.len() == 2 {
@@ -261,15 +335,33 @@ impl Character {
                     let rest = &traits_str[..traits_str.len()-1];
                     personality.push_str(&format!("{}, and {}", rest.join(", "), last));
                 }
+                personality.push_str(" individual");
             }
 
             if self.skills.len() >= 6 {
-                let skill_names = ["diplomacy", "stewardship", "martial prowess",
-                                   "intrigue", "learning", "combat skill"];
-                if let Some((idx, &val)) = self.skills.iter().enumerate()
-                    .max_by_key(|(_, &val)| val) {
-                    if val > 12 {
-                        personality.push_str(&format!(". {} excelled in {}", pronoun, skill_names[idx]));
+                let skill_names = ["diplomacy", "martial prowess", "stewardship",
+                                   "intrigue", "learning", "prowess"];
+                let mut notable_skills: Vec<(usize, i8)> = self.skills.iter().enumerate()
+                    .filter(|(_, &val)| val > 12)
+                    .map(|(idx, &val)| (idx, val))
+                    .collect();
+                notable_skills.sort_by_key(|(_, val)| -val);
+
+                if !notable_skills.is_empty() {
+                    if trait_count > 0 {
+                        personality.push_str(". ");
+                    }
+                    personality.push_str(&format!("{} demonstrated exceptional skill in ", pronoun));
+                    let skill_strs: Vec<String> = notable_skills.iter()
+                        .take(3)
+                        .map(|(idx, _)| skill_names[*idx].to_string())
+                        .collect();
+                    if skill_strs.len() == 1 {
+                        personality.push_str(&skill_strs[0]);
+                    } else {
+                        personality.push_str(&format!("{} and {}",
+                            skill_strs[..skill_strs.len()-1].join(", "),
+                            skill_strs[skill_strs.len()-1]));
                     }
                 }
             }
@@ -280,58 +372,109 @@ impl Character {
 
         // Paragraph 3: Political Career
         if !title_names.is_empty() {
-            let mut political = format!("{} ruled over ", pronoun);
+            let mut political = format!("During {} reign, {} ruled ", possessive, self.name.as_ref());
 
             if title_names.len() == 1 {
-                political.push_str(&title_names[0]);
+                political.push_str(&format!("as {}", title_names[0]));
             } else if title_names.len() == 2 {
-                political.push_str(&format!("{} and {}", title_names[0], title_names[1]));
+                political.push_str(&format!("as {} and {}", title_names[0], title_names[1]));
             } else {
-                political.push_str(&format!("{} titles including {} and {}",
+                political.push_str(&format!("over {} titles, most notably as {} and {}",
                     title_names.len(), title_names[0], title_names[1]));
             }
 
             if let Some(ref liege) = liege_name {
-                political.push_str(&format!(", serving as vassal to {}", liege));
+                political.push_str(&format!(", serving as a vassal under {}", liege));
             }
 
-            if !self.dead {
-                if self.prestige > 1000.0 {
-                    political.push_str(&format!(". {} accumulated great prestige", pronoun));
-                }
-                if self.gold > 500.0 {
-                    political.push_str(" and considerable wealth");
-                }
-                if self.dread > 50.0 {
-                    political.push_str(", ruling through fear and intimidation");
-                }
+            // Add achievements based on stats
+            let mut achievements = Vec::new();
+            if self.prestige > 2000.0 {
+                achievements.push(format!("{} accumulated immense prestige throughout {} rule", pronoun, possessive));
+            } else if self.prestige > 1000.0 {
+                achievements.push(format!("{} gained considerable prestige", pronoun));
+            }
+
+            if self.gold > 1000.0 {
+                achievements.push(format!("amassed great wealth"));
+            }
+
+            if self.dread > 80.0 {
+                achievements.push(format!("ruled through terror and intimidation, commanding absolute fear from {} subjects", possessive));
+            } else if self.dread > 50.0 {
+                achievements.push(format!("maintained order through fear and force"));
+            }
+
+            if self.piety > 2000.0 {
+                achievements.push(format!("was renowned for {} exceptional piety and devotion", possessive));
+            } else if self.piety > 1000.0 {
+                achievements.push(format!("gained recognition for {} religious devotion", possessive));
+            }
+
+            if !achievements.is_empty() {
+                political.push_str(". ");
+                political.push_str(&achievements.join(", and "));
             }
 
             political.push('.');
             paragraphs.push(political);
         }
 
-        // Paragraph 4: Family
-        let total_spouses = self.spouses.len() + self.former.len();
-        let child_count = self.children.len();
-
-        if total_spouses > 0 || child_count > 0 {
+        // Paragraph 4: Family and Personal Life (including scandalous relationships)
+        if !spouse_info.is_empty() || child_count > 0 {
             let mut family = String::new();
 
-            if total_spouses == 1 {
-                if let Some(ref spouse) = spouse_name {
-                    family.push_str(&format!("{} married {}", pronoun, spouse));
+            // Handle marriages and relationships
+            if !spouse_info.is_empty() {
+                let scandalous: Vec<_> = spouse_info.iter()
+                    .filter(|(_, rel)| rel.is_some())
+                    .collect();
+                let normal: Vec<_> = spouse_info.iter()
+                    .filter(|(_, rel)| rel.is_none())
+                    .collect();
+
+                if !normal.is_empty() {
+                    if normal.len() == 1 {
+                        family.push_str(&format!("{} married {}", self.name.as_ref(), normal[0].0));
+                    } else {
+                        family.push_str(&format!("{} married {} times", self.name.as_ref(), normal.len()));
+                    }
                 }
-            } else if total_spouses > 1 {
-                family.push_str(&format!("{} married {} times", pronoun, total_spouses));
+
+                // Add scandalous relationships with disdain
+                if !scandalous.is_empty() {
+                    if !normal.is_empty() {
+                        family.push_str(". ");
+                    }
+
+                    for (i, (spouse_name, relationship)) in scandalous.iter().enumerate() {
+                        if i == 0 {
+                            family.push_str(&format!("Controversially, {} took {} as {} lover",
+                                pronoun.to_lowercase(), spouse_name, possessive));
+                            if let Some(rel) = relationship {
+                                family.push_str(&format!("—{}", rel));
+                            }
+                        } else {
+                            family.push_str(&format!(", and later {}", spouse_name));
+                            if let Some(rel) = relationship {
+                                family.push_str(&format!(", {}", rel));
+                            }
+                        }
+                    }
+
+                    family.push_str("—a transgression that scandalized contemporaries and violated established moral and religious norms");
+                }
             }
 
             if child_count > 0 {
                 if !family.is_empty() {
-                    family.push_str(&format!(" and had {} ", child_count));
-                } else {
-                    family.push_str(&format!("{} had {} ", pronoun, child_count));
+                    family.push_str(". ");
                 }
+
+                family.push_str(&format!("{} {} {} ",
+                    self.name.as_ref(),
+                    if self.dead { "left behind" } else { "has" },
+                    child_count));
 
                 if child_count == 1 {
                     family.push_str("child");
@@ -344,6 +487,10 @@ impl Character {
                         family.push_str(&format!(", including {}", child_names.join(", ")));
                     }
                 }
+
+                if child_count > 10 {
+                    family.push_str(&format!(", establishing a substantial dynastic legacy through {} numerous descendants", possessive));
+                }
             }
 
             if !family.is_empty() {
@@ -352,47 +499,69 @@ impl Character {
             }
         }
 
-        // Paragraph 5: Achievements
+        // Paragraph 5: Military Achievements and Possessions
         let mut achievements = String::new();
         let mut has_achievements = false;
 
         let kill_count = self.kills.len();
-        if kill_count > 0 {
-            achievements.push_str(&format!("{} personally slew {} {} in combat",
-                pronoun, kill_count, if kill_count == 1 { "foe" } else { "foes" }));
+        if kill_count > 5 {
+            achievements.push_str(&format!("A formidable warrior, {} personally slew {} enemies in combat",
+                self.name.as_ref(), kill_count));
+            has_achievements = true;
+        } else if kill_count > 0 {
+            achievements.push_str(&format!("{} claimed {} {} in personal combat",
+                self.name.as_ref(), kill_count, if kill_count == 1 { "life" } else { "lives" }));
             has_achievements = true;
         }
 
-        if !self.artifacts.is_empty() {
+        if self.artifacts.len() > 3 {
             if has_achievements {
-                achievements.push_str(&format!(". {} also possessed ", pronoun));
+                achievements.push_str(&format!(". {} also amassed ", pronoun));
             } else {
-                achievements.push_str(&format!("{} possessed ", pronoun));
+                achievements.push_str(&format!("{} possessed ", self.name.as_ref()));
             }
-            achievements.push_str(&format!("{} notable {}",
-                self.artifacts.len(),
-                if self.artifacts.len() == 1 { "artifact" } else { "artifacts" }));
+            achievements.push_str(&format!("a notable collection of {} artifacts",
+                self.artifacts.len()));
             has_achievements = true;
+        } else if !self.artifacts.is_empty() {
+            if has_achievements {
+                achievements.push_str(&format!(", and possessed {} notable {}",
+                    self.artifacts.len(),
+                    if self.artifacts.len() == 1 { "artifact" } else { "artifacts" }));
+            } else {
+                achievements.push_str(&format!("{} possessed {} notable {}",
+                    self.name.as_ref(),
+                    self.artifacts.len(),
+                    if self.artifacts.len() == 1 { "artifact" } else { "artifacts" }));
+                has_achievements = true;
+            }
         }
 
-        if self.memories.len() > 3 {
+        if self.memories.len() > 5 {
             if has_achievements {
-                achievements.push_str(&format!(". Throughout {} life, ", possessive));
+                achievements.push_str(&format!(". Throughout {} lifetime, ", possessive));
             } else {
-                achievements.push_str(&format!("Throughout {} life, ", possessive));
+                achievements.push_str(&format!("Throughout {} lifetime, ", possessive));
             }
-            achievements.push_str(&format!("{} experienced {} significant events that shaped {} legacy",
+            achievements.push_str(&format!("{} experienced {} significant events that defined {} legacy",
                 self.name.as_ref(), self.memories.len(), possessive));
             has_achievements = true;
         }
 
-        if self.languages.len() > 1 {
+        if self.languages.len() > 2 {
             if has_achievements {
-                achievements.push_str(&format!(". {} was also multilingual, speaking {} languages",
-                    pronoun, self.languages.len()));
+                achievements.push_str(&format!(". A polyglot, {} was fluent in {} languages",
+                    pronoun.to_lowercase(), self.languages.len()));
             } else {
-                achievements.push_str(&format!("{} was multilingual, speaking {} languages",
-                    pronoun, self.languages.len()));
+                achievements.push_str(&format!("{} was a polyglot, fluent in {} languages",
+                    self.name.as_ref(), self.languages.len()));
+                has_achievements = true;
+            }
+        } else if self.languages.len() == 2 {
+            if has_achievements {
+                achievements.push_str(&format!(". {} was also bilingual", pronoun));
+            } else {
+                achievements.push_str(&format!("{} was bilingual", self.name.as_ref()));
                 has_achievements = true;
             }
         }
@@ -407,24 +576,42 @@ impl Character {
             let mut death = String::new();
 
             if let Some(ref death_date) = self.date {
-                death.push_str(&format!("{} met {} end on {}",
-                    self.name.as_ref(), possessive, death_date.iso_8601()));
+                let age = death_date.year() - self.birth.year();
+
+                death.push_str(&format!("{} met {} end on {}", self.name.as_ref(), possessive, death_date.iso_8601()));
 
                 if let Some(ref reason) = self.reason {
-                    death.push_str(&format!(", {}", reason.as_ref()));
+                    let reason_str = reason.as_ref().to_lowercase();
+                    if reason_str.contains("murder") || reason_str.contains("execution") {
+                        death.push_str(&format!(", {}", reason.as_ref()));
+                    } else {
+                        death.push_str(&format!(", dying of {}", reason.as_ref()));
+                    }
                 }
 
-                let age = death_date.year() - self.birth.year();
                 death.push_str(&format!(", at the age of {}", age));
+
+                if age > 70 {
+                    death.push_str(&format!(", having lived a remarkably long life for the era"));
+                } else if age < 30 {
+                    death.push_str(&format!(", cut down in {} youth", possessive));
+                }
             } else {
                 death.push_str(&format!("{} passed away", self.name.as_ref()));
             }
 
-            if child_count > 10 {
-                death.push_str(", leaving behind a dynasty of descendants");
-            } else if child_count > 0 {
-                death.push_str(&format!(", {} legacy lived on through {} children",
+            if child_count > 15 {
+                death.push_str(&format!(". {} prolific legacy endured through {} many descendants",
+                    possessive.chars().next().unwrap().to_uppercase().to_string() + &possessive[1..],
+                    possessive));
+            } else if child_count > 5 {
+                death.push_str(&format!(". {} legacy continued through {} {} children",
+                    possessive.chars().next().unwrap().to_uppercase().to_string() + &possessive[1..],
                     possessive, child_count));
+            } else if child_count > 0 {
+                death.push_str(&format!(", leaving behind {} to carry on {} lineage",
+                    if child_count == 1 { "an heir" } else { "heirs" },
+                    possessive));
             }
 
             death.push('.');
