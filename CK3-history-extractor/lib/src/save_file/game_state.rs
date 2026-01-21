@@ -309,7 +309,10 @@ impl Localizable for GameState {
         }
         for title in &mut self.titles.values_mut() {
             title.finalize();
-            title.localize(localization)?;
+            if let Err(e) = title.localize(localization) {
+                eprintln!("Warning: Title localization error: {}", e);
+                // Continue with other titles even if one fails
+            }
             if let Some(internal) = title.get_internal_mut().inner_mut() {
                 if let Some(assoc) = self.county_data.get_mut(internal.get_key().as_ref()) {
                     if let Title::County { faith, culture, .. } = internal {
@@ -321,25 +324,43 @@ impl Localizable for GameState {
         }
         for faith in &mut self.faiths.values_mut() {
             faith.finalize();
-            faith.localize(localization)?;
+            if let Err(e) = faith.localize(localization) {
+                eprintln!("Warning: Faith localization error: {}", e);
+                // Continue with other faiths even if one fails
+            }
         }
         for culture in &mut self.cultures.values_mut() {
             culture.finalize();
-            culture.localize(localization)?;
+            if let Err(e) = culture.localize(localization) {
+                eprintln!("Warning: Culture localization error: {}", e);
+                // Continue with other cultures even if one fails
+            }
         }
         for house in &mut self.houses.values_mut() {
             house.finalize();
-            house.localize(localization)?;
+            if let Err(e) = house.localize(localization) {
+                eprintln!("Warning: House localization error: {}", e);
+                // Continue with other houses even if one fails
+            }
         }
         for dynasty in &mut self.dynasties.values_mut() {
             dynasty.finalize();
-            dynasty.localize(localization)?;
+            if let Err(e) = dynasty.localize(localization) {
+                eprintln!("Warning: Dynasty localization error: {}", e);
+                // Continue with other dynasties even if one fails
+            }
         }
         for memory in &mut self.memories.values_mut() {
-            memory.localize(localization)?;
+            if let Err(e) = memory.localize(localization) {
+                eprintln!("Warning: Memory localization error: {}", e);
+                // Continue with other memories even if one fails
+            }
         }
         for artifact in &mut self.artifacts.values_mut() {
-            artifact.localize(localization)?;
+            if let Err(e) = artifact.localize(localization) {
+                eprintln!("Warning: Artifact localization error: {}", e);
+                // Continue with other artifacts even if one fails
+            }
         }
 
         // Generate narratives in a separate pass after all localization is complete
