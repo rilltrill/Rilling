@@ -281,6 +281,52 @@ impl<'a> Renderer<'a> {
             }
         }
         env.add_global("depth_map", Value::from_serialize(global_depth_map));
+
+        // Generate narratives for characters that will be rendered
+        // Do this in two passes to avoid RefCell borrow conflicts:
+        // Pass 1: Generate all narratives (immutable borrows)
+        // Pass 2: Set all narratives (mutable borrows)
+        eprintln!("Generating narratives for characters...");
+        let mut narratives: HashMap<GameId, Vec<String>> = HashMap::new();
+        let mut generated_count = 0;
+        let mut error_count = 0;
+        for obj in self.depth_map.keys() {
+            if let EntityRef::Character(character) = obj {
+                // Try to generate narrative, catching any panics
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if let Some(internal) = character.get_internal().inner() {
+                        internal.generate_narrative()
+                    } else {
+                        Vec::new()
+                    }
+                }));
+
+                match result {
+                    Ok(narrative) => {
+                        if !narrative.is_empty() {
+                            narratives.insert(character.get_internal().get_id(), narrative);
+                            generated_count += 1;
+                        }
+                    }
+                    Err(_) => {
+                        error_count += 1;
+                        // Skip this character's narrative if there's an error
+                    }
+                }
+            }
+        }
+
+        // Pass 2: Set all the narratives
+        for (id, narrative) in narratives {
+            // Find the character and set its narrative
+            if let Some(character) = self.state.get_characters().get(&id) {
+                if let Some(internal) = character.get_internal_mut().inner_mut() {
+                    internal.set_narrative(narrative);
+                }
+            }
+        }
+        eprintln!("Generated {} narratives ({} errors skipped)", generated_count, error_count);
+
         for root in &self.roots {
             match root {
                 EntryPoint::Player(p) => self.render(*p, env),

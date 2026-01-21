@@ -163,6 +163,11 @@ impl GameState {
         get_or_insert_dummy(&mut self.characters, key)
     }
 
+    /// Get the characters map
+    pub fn get_characters(&self) -> &HashMap<GameId, GameRef<Character>> {
+        &self.characters
+    }
+
     /// Gets the vassal associated with the contract with the given id
     pub fn get_vassal(&mut self, contract_id: &GameId) -> Shared<Option<GameRef<Character>>> {
         if let Some(v) = self.contract_transform.get(contract_id) {
@@ -362,22 +367,8 @@ impl Localizable for GameState {
             }
         }
 
-        // Generate narratives in a separate pass after all localization is complete
-        // This prevents RefCell borrow conflicts when characters access each other
-        eprintln!("DEBUG: Starting narrative generation for {} total characters", self.characters.len());
-        let mut narrative_count = 0;
-        let mut processed = 0;
-        for character in self.characters.values_mut() {
-            if let Some(internal) = character.get_internal_mut().inner_mut() {
-                processed += 1;
-                let narrative = internal.generate_narrative();
-                if !narrative.is_empty() {
-                    narrative_count += 1;
-                }
-                internal.set_narrative(narrative);
-            }
-        }
-        eprintln!("DEBUG: Processed {} characters, generated narratives for {} characters", processed, narrative_count);
+        // NOTE: Narrative generation moved to render() method to avoid RefCell borrow conflicts
+        // and to only generate narratives for characters that will actually be rendered
 
         Ok(())
     }
