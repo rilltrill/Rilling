@@ -153,7 +153,7 @@ pub fn get_library_path() -> Result<PathBuf, SteamError> {
         }
     }
     if let Some(library_path) = library_path {
-        let lib_path = Path::new(library_path.as_ref()).join(APPS_PATH);
+        let lib_path = Path::new(library_path.as_ref() as &str).join(APPS_PATH);
         if lib_path.exists() {
             Ok(lib_path)
         } else {

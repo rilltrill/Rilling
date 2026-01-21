@@ -15,7 +15,7 @@ use super::{
     super::{
         game_data::{GameData, Localize},
         save_file::{
-            parser::types::{GameId, Wrapper},
+            parser::types::{GameId, Wrapper, WrapperMut},
             structures::{
                 Character, Culture, Dynasty, EntityRef, Faith, FromGameObject, GameObjectDerived,
                 GameObjectEntity, GameRef, House, Player, Title,
@@ -317,15 +317,29 @@ impl<'a> Renderer<'a> {
         }
 
         // Pass 2: Set all the narratives
+        let mut set_count = 0;
+        let mut set_error_count = 0;
         for (id, narrative) in narratives {
             // Find the character and set its narrative
             if let Some(character) = self.state.get_characters().get(&id) {
-                if let Some(internal) = character.get_internal_mut().inner_mut() {
-                    internal.set_narrative(narrative);
+                // Use try_get_internal_mut to handle RefCell borrow errors gracefully
+                match character.try_get_internal_mut() {
+                    Ok(mut game_obj) => {
+                        if let Some(internal) = game_obj.inner_mut() {
+                            internal.set_narrative(narrative);
+                            set_count += 1;
+                        }
+                    }
+                    Err(_) => {
+                        set_error_count += 1;
+                        // Skip this character if we can't get mutable access
+                        // This can happen if the character is borrowed elsewhere
+                    }
                 }
             }
         }
         eprintln!("Generated {} narratives ({} errors skipped)", generated_count, error_count);
+        eprintln!("Set {} narratives on characters ({} skipped due to borrow conflicts)", set_count, set_error_count);
 
         for root in &self.roots {
             match root {
