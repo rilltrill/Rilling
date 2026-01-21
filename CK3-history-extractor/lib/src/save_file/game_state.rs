@@ -299,7 +299,6 @@ impl GameState {
 
 impl Localizable for GameState {
     fn localize(&mut self, localization: &GameData) -> Result<(), LocalizationError> {
-        eprintln!("=== GameState::localize() CALLED ===");
         for character in self.characters.values_mut() {
             character.finalize();
             if let Err(e) = character.localize(localization) {

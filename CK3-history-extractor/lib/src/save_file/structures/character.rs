@@ -181,12 +181,6 @@ impl Character {
 
     /// Generates a narrative life story for the character (1-5 paragraphs)
     pub fn generate_narrative(&self) -> Vec<String> {
-        // TEST: Return a distinctive message to verify this function is being called
-        return vec![
-            format!("GENERATED NARRATIVE TEST for {}", self.name.as_ref()),
-            "If you see this, generate_narrative() is working!".to_string()
-        ];
-
         let mut paragraphs = Vec::new();
 
         let pronoun = if self.female { "She" } else { "He" };
@@ -499,7 +493,7 @@ impl FromGameObject for Character {
             vassals: Vec::new(),
             liege: None,
             artifacts: Vec::new(),
-            narrative: vec!["TEST: This is a hardcoded narrative to verify the template works.".to_string()],
+            narrative: Vec::new(),
         };
         for s in base.get_object("skill")?.as_array()?.into_iter() {
             val.skills.push(s.as_integer()? as i8);
