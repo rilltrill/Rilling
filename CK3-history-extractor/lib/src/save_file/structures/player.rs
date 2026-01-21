@@ -54,6 +54,13 @@ impl GameObjectDerived for Player {
     }
 }
 
+impl Player {
+    /// Gets the lineage of this player (all characters played)
+    pub fn get_lineage(&self) -> &[LineageNode] {
+        &self.lineage
+    }
+}
+
 impl Localizable for Player {
     fn localize(&mut self, localization: &GameData) -> Result<(), LocalizationError> {
         for node in self.lineage.iter_mut() {

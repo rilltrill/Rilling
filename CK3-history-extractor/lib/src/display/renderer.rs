@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fs,
     ops::Deref,
     path::{Path, PathBuf},
@@ -282,64 +282,87 @@ impl<'a> Renderer<'a> {
         }
         env.add_global("depth_map", Value::from_serialize(global_depth_map));
 
-        // Generate narratives for characters that will be rendered
+        // Collect all character IDs from player lineages to limit narrative generation
+        let mut player_lineage_chars: HashSet<GameId> = HashSet::new();
+        for root in &self.roots {
+            if let EntryPoint::Player(player) = root {
+                // Get the player's lineage characters
+                for lineage_node in player.get_lineage() {
+                    let char_id = lineage_node.get_character().get_internal().get_id();
+                    player_lineage_chars.insert(char_id);
+                }
+            }
+        }
+
+        // Generate narratives ONLY for characters in the player's lineage
         // Do this in two passes to avoid RefCell borrow conflicts:
         // Pass 1: Generate all narratives (immutable borrows)
         // Pass 2: Set all narratives (mutable borrows)
-        eprintln!("Generating narratives for characters...");
-        let mut narratives: HashMap<GameId, Vec<String>> = HashMap::new();
-        let mut generated_count = 0;
-        let mut error_count = 0;
-        for obj in self.depth_map.keys() {
-            if let EntityRef::Character(character) = obj {
-                // Try to generate narrative, catching any panics
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    if let Some(internal) = character.get_internal().inner() {
-                        internal.generate_narrative()
-                    } else {
-                        Vec::new()
-                    }
-                }));
+        if player_lineage_chars.is_empty() {
+            eprintln!("No player lineage found - skipping narrative generation");
+        } else {
+            eprintln!("Generating narratives for {} characters in player lineage...", player_lineage_chars.len());
+            let mut narratives: HashMap<GameId, Vec<String>> = HashMap::new();
+            let mut generated_count = 0;
+            let mut error_count = 0;
+            for obj in self.depth_map.keys() {
+                if let EntityRef::Character(character) = obj {
+                    let char_id = character.get_internal().get_id();
 
-                match result {
-                    Ok(narrative) => {
-                        if !narrative.is_empty() {
-                            narratives.insert(character.get_internal().get_id(), narrative);
-                            generated_count += 1;
-                        }
+                    // Only generate narratives for characters in the player's lineage
+                    if !player_lineage_chars.contains(&char_id) {
+                        continue;
                     }
-                    Err(_) => {
-                        error_count += 1;
-                        // Skip this character's narrative if there's an error
+
+                    // Try to generate narrative, catching any panics
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        if let Some(internal) = character.get_internal().inner() {
+                            internal.generate_narrative()
+                        } else {
+                            Vec::new()
+                        }
+                    }));
+
+                    match result {
+                        Ok(narrative) => {
+                            if !narrative.is_empty() {
+                                narratives.insert(char_id, narrative);
+                                generated_count += 1;
+                            }
+                        }
+                        Err(_) => {
+                            error_count += 1;
+                            // Skip this character's narrative if there's an error
+                        }
                     }
                 }
             }
-        }
 
-        // Pass 2: Set all the narratives
-        let mut set_count = 0;
-        let mut set_error_count = 0;
-        for (id, narrative) in narratives {
-            // Find the character and set its narrative
-            if let Some(character) = self.state.get_characters().get(&id) {
-                // Use try_get_internal_mut to handle RefCell borrow errors gracefully
-                match character.try_get_internal_mut() {
-                    Ok(mut game_obj) => {
-                        if let Some(internal) = game_obj.inner_mut() {
-                            internal.set_narrative(narrative);
-                            set_count += 1;
+            // Pass 2: Set all the narratives
+            let mut set_count = 0;
+            let mut set_error_count = 0;
+            for (id, narrative) in narratives {
+                // Find the character and set its narrative
+                if let Some(character) = self.state.get_characters().get(&id) {
+                    // Use try_get_internal_mut to handle RefCell borrow errors gracefully
+                    match character.try_get_internal_mut() {
+                        Ok(mut game_obj) => {
+                            if let Some(internal) = game_obj.inner_mut() {
+                                internal.set_narrative(narrative);
+                                set_count += 1;
+                            }
                         }
-                    }
-                    Err(_) => {
-                        set_error_count += 1;
-                        // Skip this character if we can't get mutable access
-                        // This can happen if the character is borrowed elsewhere
+                        Err(_) => {
+                            set_error_count += 1;
+                            // Skip this character if we can't get mutable access
+                            // This can happen if the character is borrowed elsewhere
+                        }
                     }
                 }
             }
+            eprintln!("Generated {} narratives ({} errors skipped)", generated_count, error_count);
+            eprintln!("Set {} narratives on characters ({} skipped due to borrow conflicts)", set_count, set_error_count);
         }
-        eprintln!("Generated {} narratives ({} errors skipped)", generated_count, error_count);
-        eprintln!("Set {} narratives on characters ({} skipped due to borrow conflicts)", set_count, set_error_count);
 
         for root in &self.roots {
             match root {
