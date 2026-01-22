@@ -66,3 +66,24 @@ pub mod game_data;
 ///
 #[cfg(feature = "display")]
 pub mod display;
+
+/// A module for searching and filtering characters in save files.
+///
+/// ## Getting Started
+///
+/// The main feature is the [search::search_characters] function which allows
+/// filtering characters based on various criteria like name, culture, faith, traits, etc.
+///
+/// ## Example
+///
+/// ```rust,ignore
+/// use ck3_history_extractor_lib::search::{search_characters, SearchFilters};
+///
+/// let filters = SearchFilters {
+///     name: Some("Brian".to_string()),
+///     culture: Some("Irish".to_string()),
+///     ..Default::default()
+/// };
+/// let results = search_characters(&game_state, &filters);
+/// ```
+pub mod search;

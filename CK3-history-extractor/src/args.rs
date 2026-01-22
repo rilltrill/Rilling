@@ -152,6 +152,36 @@ pub struct Args {
     #[arg(short, long, default_value_t = false)]
     /// A flag that tells the program to use the internal templates instead of the templates in the `templates` folder.
     pub use_internal: bool,
+    #[arg(long, default_value = None)]
+    /// Search mode: Search for characters by name (partial match). Instead of rendering, outputs matching characters.
+    pub search: Option<String>,
+    #[arg(long, default_value = None)]
+    /// Filter search results by culture (exact match).
+    pub culture: Option<String>,
+    #[arg(long, default_value = None)]
+    /// Filter search results by faith/religion (exact match).
+    pub faith: Option<String>,
+    #[arg(long, default_value = None)]
+    /// Filter search results by dynasty/house name (partial match).
+    pub house: Option<String>,
+    #[arg(long)]
+    /// Filter search results by traits (comma-separated, e.g., "brave,ambitious").
+    pub traits: Vec<String>,
+    #[arg(long, default_value = None)]
+    /// Filter search results by minimum prestige.
+    pub min_prestige: Option<f32>,
+    #[arg(long, default_value = None)]
+    /// Filter search results by minimum gold.
+    pub min_gold: Option<f32>,
+    #[arg(long, default_value_t = false)]
+    /// Only show living characters in search results.
+    pub living_only: bool,
+    #[arg(long, default_value_t = false)]
+    /// Only show dead characters in search results.
+    pub dead_only: bool,
+    #[arg(long, default_value = None)]
+    /// Output format for search results: "text" (default), "json", or "detailed".
+    pub format: Option<String>,
 }
 
 impl Args {
@@ -257,6 +287,16 @@ impl Args {
             no_vis: false,
             no_interaction: false,
             use_internal: false,
+            search: None,
+            culture: None,
+            faith: None,
+            house: None,
+            traits: Vec::new(),
+            min_prestige: None,
+            min_gold: None,
+            living_only: false,
+            dead_only: false,
+            format: None,
         }
     }
 }

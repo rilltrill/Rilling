@@ -20,6 +20,7 @@ use ck3_history_extractor_lib::{
         structures::{GameObjectDerived, Player},
         GameState, SaveFile, SaveFileError,
     },
+    search::{search_characters, SearchFilters, format_results_text, format_results_json, format_results_detailed},
 };
 
 /// The submodule responsible for creating the [minijinja::Environment] and loading of templates.
@@ -153,6 +154,38 @@ fn main() -> Result<(), UserError> {
         eprintln!("Warning: Localization error: {}", e);
         eprintln!("Continuing with partial localization...");
     }
+
+    // Check if search mode is enabled
+    if let Some(ref search_name) = args.search {
+        // Build search filters from command line arguments
+        let filters = SearchFilters {
+            name: Some(search_name.clone()),
+            culture: args.culture.clone(),
+            faith: args.faith.clone(),
+            house: args.house.clone(),
+            traits: args.traits.clone(),
+            min_prestige: args.min_prestige,
+            min_gold: args.min_gold,
+            living_only: args.living_only,
+            dead_only: args.dead_only,
+        };
+
+        println!("Searching for characters...");
+        let results = search_characters(&game_state, &filters);
+
+        // Format and output results
+        let output = match args.format.as_deref() {
+            Some("json") => format_results_json(&results),
+            Some("detailed") => format_results_detailed(&results),
+            _ => format_results_text(&results),
+        };
+
+        println!("{}", output);
+
+        // Exit early - don't render in search mode
+        return Ok(());
+    }
+
     let grapher = args.no_vis.not().then(|| game_state.new_grapher());
     let timeline = args.no_vis.not().then(|| game_state.new_timeline());
     let mut env = create_env(

@@ -184,6 +184,51 @@ impl Character {
         }
     }
 
+    /// Gets the birth date of the character
+    pub fn get_birth(&self) -> &Date {
+        &self.birth
+    }
+
+    /// Returns whether the character is dead
+    pub fn is_dead(&self) -> bool {
+        self.dead
+    }
+
+    /// Gets the character's prestige
+    pub fn get_prestige(&self) -> f32 {
+        self.prestige
+    }
+
+    /// Gets the character's gold
+    pub fn get_gold(&self) -> f32 {
+        self.gold
+    }
+
+    /// Gets the character's piety
+    pub fn get_piety(&self) -> f32 {
+        self.piety
+    }
+
+    /// Gets the character's dread
+    pub fn get_dread(&self) -> f32 {
+        self.dread
+    }
+
+    /// Gets the character's traits
+    pub fn get_traits(&self) -> &Vec<GameString> {
+        &self.traits
+    }
+
+    /// Gets the character's titles
+    pub fn get_titles(&self) -> &Vec<GameRef<Title>> {
+        &self.titles
+    }
+
+    /// Gets the character's skills [Diplomacy, Martial, Stewardship, Intrigue, Learning, Prowess]
+    pub fn get_skills(&self) -> &Vec<i8> {
+        &self.skills
+    }
+
     /// Generates a comprehensive narrative life story for the character (extensive, detailed biography)
     pub fn generate_narrative(&self) -> Vec<String> {
         let mut paragraphs = Vec::new();
