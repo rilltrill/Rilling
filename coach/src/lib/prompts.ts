@@ -40,6 +40,57 @@ Analyze the negotiation based on these criteria:
 4. LEVERAGE (0-100): Does the user effectively use their bargaining position?
 5. STRATEGY (0-100): Does the user employ good negotiation tactics? (anchoring, framing, concession patterns)
 
+=== SCORING EXAMPLES ===
+
+EXAMPLE 1 - POOR RESPONSE (Overall: 35)
+Context: Vendor proposed 40% price increase
+User wrote: "That price increase is way too high. We can't afford that. Can you do better?"
+
+Analysis:
+- Persuasiveness: 25 - No evidence, no reasoning, just assertion
+- Clarity: 50 - Clear but lacks substance
+- Professionalism: 45 - Acceptable but weak positioning
+- Leverage: 20 - Reveals budget constraint without gaining anything
+- Strategy: 30 - No anchoring, no alternatives mentioned, appears desperate
+
+EXAMPLE 2 - GOOD RESPONSE (Overall: 78)
+Context: Vendor proposed 40% price increase
+User wrote: "Thank you for the renewal proposal. Before we discuss pricing, I want to confirm we value our partnership with TechVendor.
+
+However, a 40% increase doesn't align with market conditions. Our research shows comparable solutions from CompetitorA and CompetitorB at $140-155K annually. We've also received inbound interest from NewEntrant offering migration support.
+
+Given our 3-year history and on-time payments, we'd expect preferred customer treatment. We're prepared to commit to a 3-year term at $165,000/year with current SLA terms, representing meaningful growth for both parties.
+
+I'd like to schedule a call this week to discuss. What times work for your team?"
+
+Analysis:
+- Persuasiveness: 82 - Cites market data, competitor alternatives, payment history
+- Clarity: 85 - Well-structured, specific numbers, clear ask
+- Professionalism: 90 - Maintains relationship while advocating firmly
+- Leverage: 75 - Mentions alternatives without threatening, uses commitment as leverage
+- Strategy: 70 - Good anchoring with counter-offer, creates urgency with call request
+
+EXAMPLE 3 - EXCELLENT RESPONSE (Overall: 92)
+Context: Settlement negotiation for breach of contract
+User wrote: "Counsel, thank you for your client's willingness to discuss resolution.
+
+Let me frame the economic reality: Supplier Ltd's late delivery caused documented losses of $2.1M in customer contracts, plus $340K in expedited shipping to mitigate further damage. Our demand of $1.5M already reflects significant compromise.
+
+That said, we recognize litigation benefits neither party. Court costs, discovery, and management distraction would easily exceed $200K per side, with resolution 18+ months away.
+
+We're prepared to accept $950,000, structured as $600K within 30 days and $350K over 12 months, in exchange for mutual releases and a confidentiality agreement. This represents a 37% discount from documented damages.
+
+This offer remains open for 10 business days, after which we'll need to reassess our litigation timeline. I'm available Thursday or Friday for a call if your client wishes to discuss."
+
+Analysis:
+- Persuasiveness: 95 - Specific damages, clear math, acknowledges counterparty interests
+- Clarity: 92 - Excellent structure, precise terms, actionable timeline
+- Professionalism: 90 - Firm but respectful, frames as mutual benefit
+- Leverage: 88 - Uses litigation cost/time as leverage, deadline creates urgency
+- Strategy: 95 - Anchors high, shows flexibility with structure, BATNA implicit
+
+=== END EXAMPLES ===
+
 Provide your analysis in the following JSON format:
 {
   "score": {
