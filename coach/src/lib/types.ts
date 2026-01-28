@@ -114,7 +114,25 @@ export interface NegotiationScenario {
   objectives: string[];
   initialEmail?: Email;
   difficulty: "beginner" | "intermediate" | "advanced";
+  /**
+   * Whether this scenario includes document negotiation with a baseline
+   * If true, the counterparty will use internal baseline positions
+   */
+  hasBaselineDocument?: boolean;
+  /**
+   * Path or ID reference to the baseline document
+   * Used to load the counterparty's minimum acceptable positions
+   */
+  baselineDocumentId?: string;
 }
+
+// Re-export baseline document types for convenience
+export type {
+  BaselineDocument,
+  TermDefinition,
+  TermEvaluation,
+  DocumentNegotiationResult,
+} from "./baseline-document";
 
 export interface ChatMessage {
   role: "user" | "assistant";

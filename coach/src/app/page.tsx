@@ -166,39 +166,63 @@ export default function Home() {
       }
 
       try {
-        // Build context including document info for counterparty
-        const chatPayload: any = {
-          scenario,
-          emails: updatedEmails.map((e) => ({
-            ...e,
-            timestamp: e.timestamp.toISOString(),
-          })),
-        };
+        let counterpartyResponseBody: string;
 
-        // Include document summary for counterparty to respond to
+        // If there's a document with track changes, use the document negotiation API
+        // which applies the hidden baseline to evaluate and respond to changes
         if (newDocument && newDocument.trackChanges.length > 0) {
-          chatPayload.documentContext = `The user has attached a marked-up document with ${
-            newDocument.trackChanges.filter((c) => c.type === "insertion").length
-          } insertions and ${
-            newDocument.trackChanges.filter((c) => c.type === "deletion").length
-          } deletions. Key changes include: ${newDocument.trackChanges
-            .slice(0, 5)
-            .map((c) => `${c.type}: "${c.text.slice(0, 50)}..."`)
-            .join("; ")}`;
+          const negotiateResponse = await fetch("/api/negotiate-document", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              scenario,
+              userDocument: newDocument,
+              previousEmails: updatedEmails.map((e) => ({
+                from: e.from,
+                fromName: e.fromName,
+                toName: e.toName,
+                subject: e.subject,
+                body: e.body,
+              })),
+              previousDocuments: documentHistory,
+            }),
+          });
+
+          if (!negotiateResponse.ok) {
+            throw new Error("Failed to negotiate document");
+          }
+
+          const negotiateData = await negotiateResponse.json();
+          counterpartyResponseBody = negotiateData.emailResponse ||
+            "Thank you for your proposed revisions. We are reviewing them carefully.";
+
+          // Store negotiation result for potential display
+          if (negotiateData.negotiationResult) {
+            console.log("Document negotiation result:", negotiateData.negotiationResult);
+          }
+        } else {
+          // No document - use regular chat API
+          const chatPayload: any = {
+            scenario,
+            emails: updatedEmails.map((e) => ({
+              ...e,
+              timestamp: e.timestamp.toISOString(),
+            })),
+          };
+
+          const response = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(chatPayload),
+          });
+
+          if (!response.ok) {
+            throw new Error("Failed to get response");
+          }
+
+          const data = await response.json();
+          counterpartyResponseBody = data.response;
         }
-
-        // Get counterparty response
-        const response = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(chatPayload),
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to get response");
-        }
-
-        const data = await response.json();
 
         // Add counterparty email
         const counterpartyEmail: Email = {
@@ -207,7 +231,7 @@ export default function Home() {
           fromName: scenario.counterpartyRole,
           toName: scenario.userRole,
           subject,
-          body: data.response,
+          body: counterpartyResponseBody,
           timestamp: new Date(),
         };
 
