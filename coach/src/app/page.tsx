@@ -1,27 +1,45 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { EmailThread } from "@/components/email-thread";
 import { EmailComposer } from "@/components/email-composer";
 import { AnalysisPanel } from "@/components/analysis-panel";
 import { ScenarioSelector } from "@/components/scenario-selector";
+import { DocumentViewer } from "@/components/document-viewer";
 import { DEFAULT_SCENARIOS } from "@/lib/prompts";
 import { generateId } from "@/lib/utils";
 import {
   Email,
   NegotiationScenario,
   NegotiationAnalysis,
+  ParsedDocumentData,
+  Attachment,
+  DocumentAnalysis,
 } from "@/lib/types";
-import { BookOpen, RotateCcw, Gavel } from "lucide-react";
+import { BookOpen, RotateCcw, Gavel, FileText, X } from "lucide-react";
+
+interface AttachedFile {
+  file: File;
+  name: string;
+  parsed?: ParsedDocumentData;
+  parsing?: boolean;
+  error?: string;
+}
 
 export default function Home() {
   const [scenario, setScenario] = useState<NegotiationScenario | null>(null);
   const [emails, setEmails] = useState<Email[]>([]);
   const [analysis, setAnalysis] = useState<NegotiationAnalysis | null>(null);
+  const [documentAnalysis, setDocumentAnalysis] = useState<DocumentAnalysis | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showScenarioSelector, setShowScenarioSelector] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Document-related state
+  const [documentHistory, setDocumentHistory] = useState<ParsedDocumentData[]>([]);
+  const [currentDocument, setCurrentDocument] = useState<ParsedDocumentData | null>(null);
+  const [showDocumentPanel, setShowDocumentPanel] = useState(false);
 
   // Get subject line from scenario
   const subject = scenario?.title || "Negotiation";
@@ -53,7 +71,6 @@ export default function Home() {
         setAnalysis(data.analysis);
       } catch (err) {
         console.error("Analysis error:", err);
-        // Don't show error for analysis - it's supplementary
       } finally {
         setIsAnalyzing(false);
       }
@@ -61,13 +78,63 @@ export default function Home() {
     []
   );
 
+  // Analyze document markup
+  const analyzeDocument = useCallback(
+    async (
+      document: ParsedDocumentData,
+      currentScenario: NegotiationScenario,
+      previousVersions: ParsedDocumentData[]
+    ) => {
+      try {
+        const response = await fetch("/api/analyze-document", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            scenario: currentScenario,
+            document,
+            previousVersions: previousVersions.length > 0 ? previousVersions : undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to analyze document");
+        }
+
+        const data = await response.json();
+        setDocumentAnalysis(data.analysis);
+      } catch (err) {
+        console.error("Document analysis error:", err);
+      }
+    },
+    []
+  );
+
   // Send user email and get counterparty response
   const handleSendEmail = useCallback(
-    async (body: string) => {
+    async (body: string, attachments?: AttachedFile[]) => {
       if (!scenario) return;
 
       setError(null);
       setIsLoading(true);
+
+      // Process attachments
+      const emailAttachments: Attachment[] = [];
+      let newDocument: ParsedDocumentData | null = null;
+
+      if (attachments) {
+        for (const attachment of attachments) {
+          if (attachment.parsed) {
+            emailAttachments.push({
+              id: generateId(),
+              name: attachment.name,
+              type: "markup",
+              content: attachment.parsed.fullText,
+              parsedDocument: attachment.parsed,
+            });
+            newDocument = attachment.parsed;
+          }
+        }
+      }
 
       // Add user email
       const userEmail: Email = {
@@ -78,23 +145,53 @@ export default function Home() {
         subject,
         body,
         timestamp: new Date(),
+        attachments: emailAttachments.length > 0 ? emailAttachments : undefined,
       };
 
       const updatedEmails = [...emails, userEmail];
       setEmails(updatedEmails);
 
+      // If there's a new document, update document state and trigger analysis
+      if (newDocument) {
+        const newHistory = currentDocument
+          ? [...documentHistory, currentDocument]
+          : documentHistory;
+
+        setDocumentHistory(newHistory);
+        setCurrentDocument(newDocument);
+        setShowDocumentPanel(true);
+
+        // Analyze the document
+        analyzeDocument(newDocument, scenario, newHistory);
+      }
+
       try {
+        // Build context including document info for counterparty
+        const chatPayload: any = {
+          scenario,
+          emails: updatedEmails.map((e) => ({
+            ...e,
+            timestamp: e.timestamp.toISOString(),
+          })),
+        };
+
+        // Include document summary for counterparty to respond to
+        if (newDocument && newDocument.trackChanges.length > 0) {
+          chatPayload.documentContext = `The user has attached a marked-up document with ${
+            newDocument.trackChanges.filter((c) => c.type === "insertion").length
+          } insertions and ${
+            newDocument.trackChanges.filter((c) => c.type === "deletion").length
+          } deletions. Key changes include: ${newDocument.trackChanges
+            .slice(0, 5)
+            .map((c) => `${c.type}: "${c.text.slice(0, 50)}..."`)
+            .join("; ")}`;
+        }
+
         // Get counterparty response
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            scenario,
-            emails: updatedEmails.map((e) => ({
-              ...e,
-              timestamp: e.timestamp.toISOString(),
-            })),
-          }),
+          body: JSON.stringify(chatPayload),
         });
 
         if (!response.ok) {
@@ -126,7 +223,7 @@ export default function Home() {
         setIsLoading(false);
       }
     },
-    [scenario, emails, subject, analyzeNegotiation]
+    [scenario, emails, subject, analyzeNegotiation, analyzeDocument, currentDocument, documentHistory]
   );
 
   // Start a scenario with initial counterparty email
@@ -135,6 +232,10 @@ export default function Home() {
       setScenario(selectedScenario);
       setEmails([]);
       setAnalysis(null);
+      setDocumentAnalysis(null);
+      setDocumentHistory([]);
+      setCurrentDocument(null);
+      setShowDocumentPanel(false);
       setError(null);
       setIsLoading(true);
 
@@ -145,7 +246,7 @@ export default function Home() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             scenario: selectedScenario,
-            emails: [], // Empty - will trigger initial email
+            emails: [],
           }),
         });
 
@@ -198,6 +299,22 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-2">
+          {currentDocument && (
+            <button
+              onClick={() => setShowDocumentPanel(!showDocumentPanel)}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                showDocumentPanel
+                  ? "bg-blue-100 text-blue-700"
+                  : "text-gray-700 bg-gray-100 hover:bg-gray-200"
+              }`}
+            >
+              <FileText className="w-4 h-4" />
+              Document
+              <span className="text-xs bg-blue-200 text-blue-700 px-1.5 py-0.5 rounded">
+                {currentDocument.trackChanges.length}
+              </span>
+            </button>
+          )}
           <button
             onClick={() => setShowScenarioSelector(true)}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
@@ -220,7 +337,7 @@ export default function Home() {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Email Panel - Left Side */}
-        <div className="flex-1 flex flex-col bg-white border-r">
+        <div className="flex-1 flex flex-col bg-white border-r min-w-0">
           {/* Email Thread */}
           <div className="flex-1 overflow-hidden">
             <EmailThread emails={emails} subject={subject} />
@@ -240,10 +357,50 @@ export default function Home() {
               subject={subject}
               onSend={handleSendEmail}
               disabled={isLoading}
-              placeholder="Write your negotiation response..."
+              placeholder="Write your negotiation response... Attach a marked-up .docx for redline analysis."
             />
           )}
         </div>
+
+        {/* Document Panel - Middle (conditional) */}
+        {showDocumentPanel && currentDocument && (
+          <div className="w-96 bg-white border-r overflow-hidden shrink-0 flex flex-col">
+            <div className="flex items-center justify-between p-3 border-b bg-gray-50">
+              <span className="font-medium text-sm text-gray-700">
+                Document Markup
+              </span>
+              <button
+                onClick={() => setShowDocumentPanel(false)}
+                className="p-1 hover:bg-gray-200 rounded"
+              >
+                <X className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <DocumentViewer document={currentDocument} />
+            </div>
+            {documentAnalysis && (
+              <div className="border-t p-3 bg-blue-50 max-h-48 overflow-y-auto">
+                <div className="text-xs font-medium text-blue-700 mb-2">
+                  AI Assessment
+                </div>
+                <p className="text-xs text-blue-900">
+                  {documentAnalysis.overallAssessment}
+                </p>
+                {documentAnalysis.scores && (
+                  <div className="mt-2 flex gap-2 flex-wrap">
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                      Overall: {documentAnalysis.scores.overall}/100
+                    </span>
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">
+                      Drafting: {documentAnalysis.scores.draftingQuality}/100
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Analysis Panel - Right Side */}
         <div className="w-96 bg-gray-50 border-l overflow-hidden shrink-0">
