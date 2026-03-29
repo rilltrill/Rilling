@@ -17,6 +17,7 @@ import io
 import argparse
 import time
 from pathlib import Path
+from typing import Optional
 
 
 def load_save_text(filepath: str) -> str:
@@ -114,7 +115,7 @@ def parse_large_save(text: str) -> dict:
     return result
 
 
-def extract_top_level_section(text: str, section_name: str) -> str | None:
+def extract_top_level_section(text: str, section_name: str) -> Optional[str]:
     """
     Extract a top-level section's content from save text.
     Finds 'section_name={...}' at the top level and returns the {...} part.
