@@ -96,25 +96,11 @@ class ClausewitzParser:
 
             value = self._parse_value()
 
-            # Handle duplicate keys by accumulating into a list
-            if key in result:
-                existing = result[key]
-                if isinstance(existing, list) and len(existing) > 0 and not isinstance(existing[0], (dict,)):
-                    # If existing is a plain list from array parsing, wrap differently
-                    # Actually, for duplicate keys we want a list of values
-                    pass
-                if not isinstance(existing, list) or (isinstance(existing, list) and len(existing) > 0 and isinstance(existing, list) and key + "_is_multi" in result):
-                    result[key].append(value)
-                else:
-                    result[key] = [existing, value]
-                    result[key + "_is_multi"] = True
-            else:
-                result[key] = value
-
-        # Clean up multi markers
-        for k in list(result.keys()):
-            if k.endswith("_is_multi"):
-                del result[k]
+            # Handle duplicate keys: for CK3 saves, duplicate keys at the
+            # same level are common. We keep the LAST value for each key,
+            # which matches how the game engine resolves duplicates.
+            # (Wrapping into lists causes downstream issues with 416MB saves.)
+            result[key] = value
 
         return result
 
