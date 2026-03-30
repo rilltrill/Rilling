@@ -138,25 +138,34 @@ class CK3Extractor:
                 if isinstance(char_data, dict):
                     characters[str(char_id)] = self._extract_character(char_id, char_data, alive=True)
 
-        # Dead characters
-        dead = self._get_section("dead_unpruned") or {}
-        if isinstance(dead, dict):
-            for char_id, char_data in dead.items():
-                if isinstance(char_data, dict):
-                    characters[str(char_id)] = self._extract_character(char_id, char_data, alive=False)
+        # Dead characters (CK3 uses "dead_unprunable" not "dead_unpruned")
+        for dead_key in ["dead_unprunable", "dead_unpruned"]:
+            dead = self._get_section(dead_key) or {}
+            if isinstance(dead, dict):
+                for char_id, char_data in dead.items():
+                    if isinstance(char_data, dict) and str(char_id) not in characters:
+                        characters[str(char_id)] = self._extract_character(char_id, char_data, alive=False)
 
-        # Also check for characters in character_database or similar keys
-        char_db = self._get_section("character_database") or {}
-        if isinstance(char_db, dict):
-            for char_id, char_data in char_db.items():
-                if isinstance(char_data, dict) and str(char_id) not in characters:
-                    characters[str(char_id)] = self._extract_character(char_id, char_data, alive=None)
+        # Dead prunable characters (inside "characters" section)
+        chars_section = self._get_section("characters") or {}
+        if isinstance(chars_section, dict):
+            dead_prunable = chars_section.get("dead_prunable", {})
+            if isinstance(dead_prunable, dict):
+                for char_id, char_data in dead_prunable.items():
+                    if isinstance(char_data, dict) and str(char_id) not in characters:
+                        characters[str(char_id)] = self._extract_character(char_id, char_data, alive=False)
 
         self._characters_cache = characters
         return characters
 
     def _extract_character(self, char_id: Any, data: Dict[str, Any], alive: Optional[bool]) -> Dict[str, Any]:
         """Extract a single character's data into a clean dict."""
+        # CK3 saves split data into subsections for dead vs alive characters
+        dead_data = data.get("dead_data", {}) if isinstance(data.get("dead_data"), dict) else {}
+        alive_data = data.get("alive_data", {}) if isinstance(data.get("alive_data"), dict) else {}
+        family_data = data.get("family_data", {}) if isinstance(data.get("family_data"), dict) else {}
+        landed_data = data.get("landed_data", {}) if isinstance(data.get("landed_data"), dict) else {}
+
         # Skills
         skills_raw = data.get("skill", [])
         if isinstance(skills_raw, list):
@@ -164,38 +173,49 @@ class CK3Extractor:
         else:
             skills = {}
 
-        # Traits
+        # Traits — use save file's traits_lookup if available
+        traits_lookup = getattr(self, '_traits_lookup', TRAIT_NAMES)
         traits_raw = _ensure_list(data.get("traits", []))
-        traits = [resolve_trait(t) for t in traits_raw]
+        traits = []
+        for t in traits_raw:
+            if isinstance(t, int) and t in traits_lookup:
+                traits.append(traits_lookup[t])
+            elif isinstance(t, int):
+                traits.append(f"trait_{t}")
+            else:
+                traits.append(str(t))
 
-        # Spouses
-        spouses = _ensure_list(data.get("spouse", data.get("former_spouses", [])))
-        if not spouses:
-            spouses = _ensure_list(data.get("former_spouses", []))
+        # Spouses — check both top-level and family_data
+        spouses = _ensure_list(family_data.get("spouse", data.get("spouse", [])))
+        former = _ensure_list(family_data.get("former_spouses", data.get("former_spouses", [])))
+        all_spouses = list(spouses) + [s for s in former if s not in spouses]
+        if not all_spouses:
             current_spouse = data.get("spouse")
             if current_spouse is not None:
-                spouses = _ensure_list(current_spouse) + [s for s in spouses if s != current_spouse]
+                all_spouses = _ensure_list(current_spouse)
 
-        # Children
-        children = _ensure_list(data.get("child", []))
+        # Children — check both top-level and family_data
+        children = _ensure_list(family_data.get("child", data.get("child", [])))
 
         # Parents
         parents = []
-        real_father = data.get("real_father", data.get("father"))
-        mother = data.get("mother")
+        real_father = data.get("real_father", data.get("father", family_data.get("real_father", family_data.get("father"))))
+        mother = data.get("mother", family_data.get("mother"))
         if real_father is not None:
             parents.append({"role": "father", "id": str(real_father)})
         if mother is not None:
             parents.append({"role": "mother", "id": str(mother)})
 
-        # Titles held
-        domain = data.get("domain", data.get("landed_data", {}))
+        # Titles held — check landed_data subsection
         titles_held = []
-        if isinstance(domain, dict):
-            domain_list = domain.get("domain", [])
+        domain_data = landed_data.get("domain", data.get("domain", []))
+        if isinstance(domain_data, dict):
+            domain_list = domain_data.get("domain", [])
             titles_held = _ensure_list(domain_list)
-        elif isinstance(domain, list):
-            titles_held = domain
+        elif isinstance(domain_data, list):
+            titles_held = domain_data
+        else:
+            titles_held = _ensure_list(domain_data)
 
         # Claims
         claims = _ensure_list(data.get("claim", []))
@@ -209,9 +229,15 @@ class CK3Extractor:
         # Dynasty
         dynasty_id = data.get("dynasty_house", data.get("dynasty"))
 
-        # Cause of death
-        death_reason = data.get("death_reason") or data.get("reason")
-        killer = data.get("killer")
+        # Cause of death — check dead_data subsection
+        death_reason = dead_data.get("reason", data.get("death_reason", data.get("reason")))
+        killer = dead_data.get("killer", data.get("killer"))
+        death_date = dead_data.get("date", data.get("death"))
+
+        # Resources — check alive_data subsection
+        gold = alive_data.get("gold", data.get("gold"))
+        piety = alive_data.get("piety", data.get("piety", data.get("accumulated_piety")))
+        prestige = alive_data.get("prestige", data.get("prestige", data.get("accumulated_prestige")))
 
         char = {
             "id": str(char_id),
@@ -219,8 +245,8 @@ class CK3Extractor:
             "birth_name": data.get("birth_name"),
             "nickname": data.get("nickname"),
             "birth_date": _get_date(data.get("birth")),
-            "death_date": _get_date(data.get("death")),
-            "alive": alive if alive is not None else (data.get("death") is None),
+            "death_date": _get_date(death_date),
+            "alive": alive if alive is not None else (death_date is None),
             "female": data.get("female", False),
             "sexuality": data.get("sexuality"),
             "culture": data.get("culture"),
@@ -228,30 +254,23 @@ class CK3Extractor:
             "dynasty_house": str(dynasty_id) if dynasty_id else None,
             "skills": skills,
             "traits": traits,
-            "spouses": [str(s) for s in spouses if s],
+            "spouses": [str(s) for s in all_spouses if s],
             "children": [str(c) for c in children if c],
             "parents": parents,
             "titles_held": [str(t) for t in titles_held if t],
             "claims": claim_list,
-            "gold": data.get("gold"),
-            "piety": data.get("piety") or data.get("accumulated_piety"),
-            "prestige": data.get("prestige") or data.get("accumulated_prestige"),
-            "dread": data.get("dread"),
-            "stress": data.get("stress"),
+            "gold": gold,
+            "piety": piety,
+            "prestige": prestige,
+            "dread": landed_data.get("dread", data.get("dread")),
+            "stress": alive_data.get("stress", data.get("stress")),
             "death_reason": death_reason,
             "killer_id": str(killer) if killer else None,
             "ai": data.get("ai") is not None or data.get("is_ai", False),
+            "realm_capital": landed_data.get("realm_capital"),
+            "government": landed_data.get("government"),
+            "succession_laws": _ensure_list(landed_data.get("succession", [])),
         }
-
-        # Landed data (if present as a sub-object)
-        landed = data.get("landed_data")
-        if isinstance(landed, dict):
-            char["realm_capital"] = landed.get("realm_capital")
-            char["government"] = landed.get("government")
-            char["succession_laws"] = _ensure_list(landed.get("succession", []))
-            domain_data = landed.get("domain", [])
-            if isinstance(domain_data, list) and not char["titles_held"]:
-                char["titles_held"] = [str(t) for t in domain_data]
 
         return char
 
@@ -454,45 +473,117 @@ class CK3Extractor:
             "succession": data.get("succession"),
         }
 
+    def get_player_characters(self) -> List[Dict[str, Any]]:
+        """
+        Get ALL player characters (current + past rulers from lineage).
+        CK3 saves have multiple played_character entries, each with a
+        'character' ID and 'legacy' array of past rulers.
+        """
+        players = []
+        seen_ids = set()
+
+        # New format: played_characters is a list (extracted from multiple sections)
+        played_list = self._get_section("played_characters") or []
+        if isinstance(played_list, list):
+            for entry in played_list:
+                if isinstance(entry, dict):
+                    char_id = entry.get("character")
+                    if char_id is not None and str(char_id) not in seen_ids:
+                        seen_ids.add(str(char_id))
+                        players.append({
+                            "id": str(char_id),
+                            "name": entry.get("name", "Unknown"),
+                            "is_current": True,
+                        })
+                    # Also extract legacy (past rulers)
+                    legacy = entry.get("legacy", [])
+                    if isinstance(legacy, list):
+                        for leg in legacy:
+                            if isinstance(leg, dict):
+                                leg_id = leg.get("character")
+                                if leg_id is not None and str(leg_id) not in seen_ids:
+                                    seen_ids.add(str(leg_id))
+                                    players.append({
+                                        "id": str(leg_id),
+                                        "name": leg.get("name", "Unknown"),
+                                        "date": _get_date(leg.get("date")),
+                                        "score": leg.get("score"),
+                                        "is_current": False,
+                                    })
+                    elif isinstance(legacy, dict):
+                        for leg_key, leg in legacy.items():
+                            if isinstance(leg, dict):
+                                leg_id = leg.get("character")
+                                if leg_id is not None and str(leg_id) not in seen_ids:
+                                    seen_ids.add(str(leg_id))
+                                    players.append({
+                                        "id": str(leg_id),
+                                        "name": leg.get("name", "Unknown"),
+                                        "is_current": False,
+                                    })
+
+        # Fallback: old format single played_character
+        if not players:
+            played = self._get_section("played_character") or {}
+            if isinstance(played, dict):
+                char_id = played.get("character")
+                if char_id is not None:
+                    players.append({"id": str(char_id), "name": "Unknown", "is_current": True})
+
+        return players
+
     def get_player_character_id(self) -> Optional[str]:
-        """Get the player's character ID."""
-        played = self._get_section("played_character") or {}
-        if isinstance(played, dict):
-            # Could be a list of played characters or a single one
-            char_id = played.get("character")
-            if char_id is not None:
-                return str(char_id)
-
-            # Try first entry
-            for key, val in played.items():
-                if isinstance(val, dict) and "character" in val:
-                    return str(val["character"])
-                elif isinstance(val, (int, str)):
-                    return str(val)
-
-        # Try other common locations
-        player = self._get_section("player") or self._get_section("currently_played")
-        if player is not None:
-            if isinstance(player, dict):
-                return str(player.get("character", player.get("id", "")))
-            return str(player)
-
+        """Get the current player's character ID."""
+        players = self.get_player_characters()
+        # The last played_character entry with is_current=True is the active one
+        for p in reversed(players):
+            if p.get("is_current"):
+                return p["id"]
+        if players:
+            return players[0]["id"]
         return None
+
+    def get_traits_lookup(self) -> Dict[int, str]:
+        """Get trait ID to name mapping from save file's traits_lookup section."""
+        lookup = self._get_section("traits_lookup") or {}
+        result = dict(TRAIT_NAMES)  # Start with our hardcoded fallback
+        if isinstance(lookup, list):
+            for i, name in enumerate(lookup):
+                if isinstance(name, str):
+                    result[i] = name
+        elif isinstance(lookup, dict):
+            for idx, name in lookup.items():
+                try:
+                    result[int(idx)] = str(name)
+                except (ValueError, TypeError):
+                    pass
+        return result
 
     def extract_all(self) -> Dict[str, Any]:
         """Extract all entities into a single structured dict."""
         meta = self.get_meta()
+        player_characters = self.get_player_characters()
         player_id = self.get_player_character_id()
+
+        # Get traits lookup from save file if available
+        self._traits_lookup = self.get_traits_lookup()
+
         characters = self.get_all_characters()
         dynasties = self.get_dynasties()
         wars = self.get_wars()
         titles = self.get_titles()
 
+        # Enrich player character entries with names from character data
+        for pc in player_characters:
+            if pc["id"] in characters:
+                pc["name"] = characters[pc["id"]].get("first_name", pc.get("name", "Unknown"))
+                pc["titles"] = characters[pc["id"]].get("titles_held", [])
+                pc["alive"] = characters[pc["id"]].get("alive", False)
+
         # Build neighbor information for the player's realm
         neighbors = []
         if player_id and player_id in characters:
             player = characters[player_id]
-            player_titles = set(player.get("titles_held", []))
             # Find titles at kingdom/empire level held by other characters
             for title_id, title in titles.items():
                 if title["tier"] in ("kingdom", "empire") and title.get("holder"):
@@ -509,6 +600,7 @@ class CK3Extractor:
         return {
             "meta": meta,
             "player_id": player_id,
+            "player_characters": player_characters,
             "characters": characters,
             "dynasties": dynasties,
             "wars": wars,
@@ -522,5 +614,6 @@ class CK3Extractor:
                 "active_wars": sum(1 for w in wars if not w.get("concluded")),
                 "total_titles": len(titles),
                 "total_dynasties": len(dynasties),
+                "total_player_characters": len(player_characters),
             },
         }

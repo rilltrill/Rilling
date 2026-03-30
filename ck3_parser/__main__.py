@@ -88,18 +88,35 @@ def parse_large_save(text: str) -> dict:
     """
     from .parser import parse_clausewitz
 
-    # Sections we care about
+    # Sections we care about (names match actual CK3 save format)
     needed_sections = [
-        "meta_data", "living", "dead_unpruned", "dynasties",
+        "meta_data", "living", "dead_unprunable", "characters",
+        "dynasties", "traits_lookup", "character_lookup",
         "wars", "active_wars", "previous_wars",
-        "landed_titles", "played_character", "player",
-        "currently_played", "date", "character_database",
+        "landed_titles", "played_character", "date",
     ]
 
     result = {}
 
     for section_name in needed_sections:
         print(f"  Extracting section: {section_name}...")
+
+        if section_name == "played_character":
+            # played_character appears MULTIPLE times (once per ruler played)
+            all_sections = extract_all_top_level_sections(text, section_name)
+            if all_sections:
+                players = []
+                for sec_text in all_sections:
+                    try:
+                        parsed = parse_clausewitz(f"{section_name}={sec_text}")
+                        if section_name in parsed:
+                            players.append(parsed[section_name])
+                    except Exception as e:
+                        print(f"    Warning: Failed to parse a played_character entry: {e}")
+                result["played_characters"] = players
+                print(f"    Found {len(players)} played character entries")
+            continue
+
         section_text = extract_top_level_section(text, section_name)
         if section_text is not None:
             try:
@@ -113,6 +130,53 @@ def parse_large_save(text: str) -> dict:
                 print(f"    Warning: Failed to parse {section_name}: {e}")
 
     return result
+
+
+def extract_all_top_level_sections(text: str, section_name: str) -> list:
+    """Extract ALL occurrences of a top-level section (e.g. played_character appears multiple times)."""
+    import re
+    results = []
+    pattern = re.compile(r'(?:^|\n)\s*' + re.escape(section_name) + r'\s*=\s*', re.MULTILINE)
+    for match in pattern.finditer(text):
+        pos = match.end()
+        while pos < len(text) and text[pos] in ' \t\n\r':
+            pos += 1
+        if pos >= len(text):
+            continue
+        if text[pos] == '{':
+            section_text = _extract_brace_block(text, pos)
+            if section_text:
+                results.append(section_text)
+        else:
+            end = text.find('\n', pos)
+            if end == -1:
+                end = len(text)
+            results.append(text[pos:end].strip())
+    return results
+
+
+def _extract_brace_block(text: str, start: int) -> Optional[str]:
+    """Extract a {...} block starting at position start."""
+    brace_count = 0
+    in_quote = False
+    i = start
+    while i < len(text):
+        c = text[i]
+        if c == '"' and (i == 0 or text[i-1] != '\\'):
+            in_quote = not in_quote
+        elif not in_quote:
+            if c == '{':
+                brace_count += 1
+            elif c == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    return text[start:i+1]
+            elif c == '#':
+                while i < len(text) and text[i] != '\n':
+                    i += 1
+                continue
+        i += 1
+    return text[start:]
 
 
 def extract_top_level_section(text: str, section_name: str) -> Optional[str]:
@@ -182,6 +246,7 @@ def write_output(data: dict, output_dir: str):
         json.dump({
             "meta": data["meta"],
             "player_id": data["player_id"],
+            "player_characters": data.get("player_characters", []),
             "stats": data["stats"],
             "neighbors": data["neighbors"],
         }, f, indent=2, default=str)

@@ -252,6 +252,9 @@ class CK3Handler(BaseHTTPRequestHandler):
             else:
                 self._respond(f"<h1>Dynasty {dyn_id} not found</h1>", 404)
 
+        elif path == "/player-rulers":
+            self._respond(pages.player_rulers_page(gd, api_key))
+
         elif path == "/characters":
             self._respond(pages.characters_list_page(gd))
 

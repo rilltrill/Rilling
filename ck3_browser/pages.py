@@ -238,7 +238,26 @@ def portal_page(gd):
         stat_cards += f'<div class="stat-card"><span class="stat-number">{stats.get(key,0)}</span><span class="stat-label">{label}</span></div>'
 
     player_section = ""
-    if player_id and player:
+    pcs = gd.get("player_characters", [])
+    if pcs:
+        ruler_items = ""
+        for pc in pcs:
+            c = chars.get(pc["id"], {})
+            name = c.get("first_name", pc.get("name", "Unknown"))
+            icon = "&#x1f451;" if pc.get("is_current") else "&#x26b0;"
+            status = "Current ruler" if pc.get("is_current") else "Past ruler"
+            titles_str = ", ".join(c.get("titles_held", [])[:2]) or "No titles"
+            ruler_items += f'''<div class="char-list-item">
+                <div class="char-icon">{icon}</div>
+                <div class="char-info">
+                    <div class="char-name"><a href="/character/{pc['id']}">{_esc(name)}</a></div>
+                    <div class="char-detail">{status} &mdash; {_esc(titles_str)}</div>
+                </div></div>'''
+        player_section = f'''<div class="portal-box">
+            <h3>Your Rulers</h3>{ruler_items}
+            <p style="margin-top:8px"><a href="/player-rulers">View all player rulers &rarr;</a></p>
+        </div>'''
+    elif player_id and player:
         titles_str = ", ".join(player.get("titles_held", [])[:3]) or "No titles"
         player_section = f'''<div class="portal-box">
             <h3>Your Ruler</h3>
@@ -528,6 +547,38 @@ def neighbors_page(gd, api_key):
         holder = chars.get(str(n.get("holder_id")), {})
         items += f'<div class="portal-box" style="margin-bottom:16px"><h3><a href="/title/{n["title_id"]}">{_esc(n["title_name"])}</a></h3><p><strong>Ruler:</strong> {char_link(n["holder_id"],chars)} &middot; <strong>Type:</strong> {_esc(n.get("tier","").title())}</p><p>Culture: {_esc(str(holder.get("culture","")).replace("_"," ").title())} &middot; Faith: {_esc(str(holder.get("faith","")).replace("_"," ").title())}</p></div>'
     return base_html("Neighboring Realms", f'<h1 class="page-title">Neighboring Realms</h1><p class="hatnote">The political landscape surrounding {_esc(player.get("first_name","the player"))}\'s domain</p>{items or "<p>No neighbors detected</p>"}', game_data=gd)
+
+
+def player_rulers_page(gd, api_key):
+    """Page listing all player-controlled rulers throughout the campaign."""
+    chars = gd.get("characters", {})
+    pcs = gd.get("player_characters", [])
+    items = ""
+    for pc in pcs:
+        c = chars.get(pc["id"], {})
+        name = c.get("first_name", pc.get("name", "Unknown"))
+        icon = "&#x1f451;" if pc.get("is_current") else "&#x26b0;"
+        status = "Current Ruler" if pc.get("is_current") else "Past Ruler"
+        born = ck3_date_to_str(c.get("birth_date"))
+        died = ck3_date_to_str(c.get("death_date")) if c.get("death_date") else "Present"
+        titles = ", ".join(c.get("titles_held", [])[:3]) or "No titles"
+        traits = ", ".join(t.replace("_"," ").title() for t in c.get("traits",[])[:5])
+        items += f'''<div class="char-list-item" style="padding:12px">
+            <div class="char-icon" style="font-size:24px">{icon}</div>
+            <div class="char-info">
+                <div class="char-name" style="font-size:16px"><a href="/character/{pc['id']}">{_esc(name)}</a> &mdash; {status}</div>
+                <div class="char-detail">{_esc(titles)}</div>
+                <div class="char-detail">{born} &ndash; {died}</div>
+                <div class="char-detail" style="color:#555">{_esc(traits)}</div>
+            </div></div>'''
+    if not items:
+        items = "<p>No player characters found in this save.</p>"
+    return base_html("Player Rulers", f'''
+        <h1 class="page-title">Player Rulers</h1>
+        <p class="hatnote">All characters controlled during this campaign, from first to current</p>
+        {items}
+        <div class="page-footer"><a href="/portal">&larr; Back to Portal</a></div>
+    ''', game_data=gd)
 
 
 def search_results_page(query, results, gd):
