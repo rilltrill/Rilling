@@ -1,0 +1,31 @@
+# Extracted game assets — never commit, proprietary
+extract/scratch/
+extract/staging/
+extract/output/
+*.vbf
+*.scd
+*.gtf
+*.smdl
+*.stex
+*.akb
+*.bik
+
+# Runtime asset dir (populated on install)
+assets/
+
+# Swift / Xcode
+screensaver/build/
+screensaver/.build/
+*.saver
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# macOS
+.DS_Store
