@@ -50,7 +50,10 @@ final class Renderer: NSObject, MTKViewDelegate {
         queue = dev.makeCommandQueue()!
 
         let bundle = Bundle(for: BesaidScreensaverView.self)
-        if let url = bundle.url(forResource: "default", withExtension: "metallib") {
+        if let url = bundle.url(forResource: "Shaders", withExtension: "metal"),
+           let source = try? String(contentsOf: url, encoding: .utf8) {
+            library = try dev.makeLibrary(source: source, options: nil)
+        } else if let url = bundle.url(forResource: "default", withExtension: "metallib") {
             library = try dev.makeLibrary(URL: url)
         } else {
             throw RendererError.noLibrary

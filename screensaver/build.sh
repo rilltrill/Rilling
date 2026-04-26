@@ -1,24 +1,19 @@
 #!/bin/bash
-# Assemble BesaidScreensaver.saver without needing an .xcodeproj.
-# Compiles Swift sources into a dylib, bundles with Info.plist + metallib.
+# Assemble BesaidScreensaver.saver without needing an .xcodeproj or full Xcode.
+# Shaders are compiled at runtime from source (no `metal` toolchain required —
+# only macOS Command Line Tools).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD="$HERE/build"
 BUNDLE="$BUILD/BesaidScreensaver.saver"
 MODULE=BesaidScreensaver
-SDK="$(xcrun --sdk macosx --show-sdk-path)"
 
 rm -rf "$BUILD"
 mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 
-# --- Metal shaders → default.metallib ---
-METAL_AIR="$BUILD/shaders.air"
-METALLIB="$BUNDLE/Contents/Resources/default.metallib"
-xcrun -sdk macosx metal -c \
-    "$HERE/Shaders/Shaders.metal" \
-    -o "$METAL_AIR"
-xcrun -sdk macosx metallib "$METAL_AIR" -o "$METALLIB"
+# Shaders shipped as source — Renderer compiles via makeLibrary(source:)
+cp "$HERE/Shaders/Shaders.metal" "$BUNDLE/Contents/Resources/Shaders.metal"
 
 # --- Swift sources → dylib executable ---
 SWIFT_SRCS=(
