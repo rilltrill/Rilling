@@ -6,14 +6,14 @@ reflection, shore foam, drifting clouds, and an optional "Besaid Island" BGM
 track.
 
 > **Personal use only.** This repo contains no game assets. You supply your own
-> legally-owned copy of *Final Fantasy X / X-2 HD Remaster* (Steam), run the
-> extraction pipeline locally, and the resulting asset bundle stays on your
-> machine. Do not redistribute.
+> legally-owned copy of *Final Fantasy X* (PS2 ISO — NTSC-U / NTSC-J / PAL /
+> International all work), run the extraction pipeline locally, and the
+> resulting asset bundle stays on your machine. Do not redistribute.
 
 ## Layout
 
 ```
-extract/      # Python pipeline: VBF unpack → Besaid meshes/textures/audio
+extract/      # Python pipeline: ISO → FFX.IMG → Besaid meshes/textures/audio
 screensaver/  # Swift + Metal .saver bundle
 assets/       # (gitignored) extracted assets loaded at runtime
 ```
@@ -23,11 +23,12 @@ assets/       # (gitignored) extracted assets loaded at runtime
 Install external tools (all free):
 
 ```sh
-brew install python@3.12 vgmstream
-# Noesis: download from https://richwhitehouse.com/index.php?content=inc_projects.php
+brew install python@3.12 vgmstream p7zip
+# Noesis: https://richwhitehouse.com/index.php?content=inc_projects.php
 #   — place Noesis.app anywhere; the extractor calls it headlessly.
-# YojimboVBFTool: https://forums.qhimm.com/index.php?topic=17299.0
-#   — a small C# CLI for unpacking FFX_Data.vbf. Place the binary on your PATH.
+# Noesis FFX-PS2 plugin: drop fmt_ffx_ps2.py (or fmt_ffx_psx.py from the
+#   community fork at https://github.com/SquallFromFFVIII/Noesis-FFX) into
+#   Noesis.app/Contents/Resources/plugins/python/.
 ```
 
 Then from the repo root:
@@ -39,20 +40,23 @@ pip install -r extract/requirements.txt
 
 ## Extract Besaid assets
 
-Point the extractor at your Steam install:
+Point the extractor at your PS2 ISO:
 
 ```sh
 python extract/extract_besaid.py \
-    --ffx-dir "$HOME/Library/Application Support/Steam/steamapps/common/FINAL FANTASY FFX&FFX-2 HD Remaster" \
+    --iso "/path/to/FFX.iso" \
     --noesis /Applications/Noesis.app \
     --out ./assets
 ```
 
 This will:
-1. Unpack `FFX_Data.vbf` to a scratch dir.
-2. Locate Besaid field data (`bsil*`, `bsyt*`) and copy to staging.
-3. Drive Noesis to convert meshes + textures → `assets/besaid.usdz` + PNGs.
-4. Convert the Besaid BGM (`music013.scd`) → `assets/besaid.m4a` via vgmstream.
+1. `7z` extracts the ISO9660 filesystem into a scratch dir.
+2. Locates `FFX.IMG` + `FFX.BIN` (the bundled disc archive).
+3. Drives Noesis with the FFX-PS2 plugin to enumerate the archive,
+   pick out Besaid field meshes (`bsil*`, `bsyt*`) and TIM2 textures,
+   and write a single `assets/besaid.usdz` + PNGs.
+4. vgmstream converts the Besaid BGM (`bgm015.akb` or equivalent) →
+   `assets/besaid.m4a`.
 
 The screensaver reads from `~/Library/Application Support/BesaidScreensaver/`
 at runtime. The install step below copies `./assets` there.
@@ -80,6 +84,10 @@ night).
   target triple in `build.sh` for Intel.
 - **First frame can be slow.** Loading `besaid.usdz` through ModelIO on cold
   start can take a second or two; the procedural water/sky draws immediately.
+- **PS2-era assets.** Field textures top out at 256×256 and meshes are low-poly
+  (~5–15k tris per field) — the island will look 2001-vintage. The Metal water
+  + sky run at modern fidelity on top, so the overall scene still pops, but
+  don't expect HD Remaster-quality terrain.
 
 ## Graceful degradation
 
