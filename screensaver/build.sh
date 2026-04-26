@@ -37,7 +37,6 @@ xcrun -sdk macosx swiftc \
     -framework MetalKit \
     -framework AVFoundation \
     -framework ModelIO \
-    -framework simd \
     -O \
     -o "$BUNDLE/Contents/MacOS/BesaidScreensaver" \
     "${SWIFT_SRCS[@]}"
