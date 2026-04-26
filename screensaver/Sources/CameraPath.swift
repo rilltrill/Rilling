@@ -35,11 +35,12 @@ struct CameraPath {
     private func catmullRom(_ p0: SIMD3<Float>, _ p1: SIMD3<Float>,
                             _ p2: SIMD3<Float>, _ p3: SIMD3<Float>,
                             _ t: Float) -> SIMD3<Float> {
-        let t2 = t * t
-        let t3 = t2 * t
-        return 0.5 * ((2 * p1)
-                   + (-p0 + p2) * t
-                   + (2*p0 - 5*p1 + 4*p2 - p3) * t2
-                   + (-p0 + 3*p1 - 3*p2 + p3) * t3)
+        let t2: Float = t * t
+        let t3: Float = t2 * t
+        let a: SIMD3<Float> = 2 * p1
+        let b: SIMD3<Float> = (p2 - p0) * t
+        let c: SIMD3<Float> = (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+        let d: SIMD3<Float> = (3 * p1 - p0 - 3 * p2 + p3) * t3
+        return 0.5 * (a + b + c + d)
     }
 }
