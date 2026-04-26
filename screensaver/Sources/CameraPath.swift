@@ -37,10 +37,19 @@ struct CameraPath {
                             _ t: Float) -> SIMD3<Float> {
         let t2: Float = t * t
         let t3: Float = t2 * t
-        let a: SIMD3<Float> = 2 * p1
+        let a: SIMD3<Float> = p1 * 2
         let b: SIMD3<Float> = (p2 - p0) * t
-        let c: SIMD3<Float> = (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
-        let d: SIMD3<Float> = (3 * p1 - p0 - 3 * p2 + p3) * t3
-        return 0.5 * (a + b + c + d)
+        var c: SIMD3<Float> = p0 * 2
+        c -= p1 * 5
+        c += p2 * 4
+        c -= p3
+        c *= t2
+        var d: SIMD3<Float> = p1 * 3
+        d -= p0
+        d -= p2 * 3
+        d += p3
+        d *= t3
+        let sum: SIMD3<Float> = a + b + c + d
+        return sum * 0.5
     }
 }
