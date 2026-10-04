@@ -260,8 +260,6 @@ export class Tyrant extends Boss {
   private veerTarget: number = D.HELI_APPROACH;
   /** The current lunge is the quick follow-up of a chain (phase 3). */
   private chained = false;
-  /** Seconds an attack has been held back because the head was out of the play area. */
-  private heldT = 0;
   /** The last attack connected (→ a longer breather and an easier next attack). */
   private justLanded = false;
   /** The current attack follows a landed one: its interrupt threshold is lowered. */
@@ -815,13 +813,8 @@ export class Tyrant extends Boss {
   private tryAttack(dt: number) {
     this.cooldown -= dt;
     if (this.cooldown > 0) return;
-    if (!this.inPlayArea(this.head, 0.85)) {
-      this.heldT += dt;
-      return;
-    }
-    this.heldT = 0;
-    const next = this.chooseAttack();
-    this.go(next);
+    if (!this.inPlayArea(this.head, 0.85)) return;
+    this.go(this.chooseAttack());
     // The mercy (lower interrupt threshold) carries into this one attack only.
     this.mercyNext = this.justLanded;
     this.justLanded = false;

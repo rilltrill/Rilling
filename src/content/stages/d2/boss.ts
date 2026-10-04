@@ -27,7 +27,7 @@ import { labs } from './env';
  *                 FADE         (phase 2+) cloaks, slips behind a pillar, ambushes with a
  *                              short-fuse pounce from close range         (ring on the chest)
  *   Enough HITS during a wind-up (or mid-leap) knock it down: free hits
- *   (3–4 stop a pounce, 3 a tail whip — an enraged pounce takes one more
+ *   (3–4 stop a pounce, 3 a tail whip — from phase 2 a pounce takes one more
  *   against a healthy player; glowing weak points count double).
  *   Fairness: attacks only start framed in the play area, never on top of two
  *   other live warnings; while it attacks at most one raptor may lunge and
@@ -199,6 +199,8 @@ export class SpecimenX extends Boss {
   private breathT = 0;
   /** Seconds spent holding an attack back while minion warnings are live. */
   private holdOff = 0;
+  /** Extra breather owed after a landed hit on a hurt player (see breather()). */
+  private relief = 0;
   /** Staggered reinforcements (the pack arrives in waves, not all at once). */
   private reinforcements: { t: number; type: string; n: number; variant?: string }[] = [];
 
@@ -485,14 +487,14 @@ export class SpecimenX extends Boss {
    * who starts shooting ~0.35 s into the ring (≈ 4–5 taps per pounce, ~3 per whip):
    *   pounce  1.5/1.35/1.3 s wind + 0.5 s leap → 3 / 4 / 4  (2 weak hits)
    *   tail    1.4/1.3/1.2 s, ring on the glowing tail base → 3 / 3 / 3  (2 weak hits)
-   * Enraged, the POUNCE presses a player who is still healthy (4+ hearts): one
-   * more hit (5 over its 1.8 s ≈ 4–5 taps: two stripe shots + one). The whip
-   * never gets the extra hit — its 1.2 s wind-up leaves only ~3 taps after
-   * reacting. Someone hanging on gets the base numbers.
+   * From phase 2 the POUNCE presses a player who is still healthy (4+ hearts):
+   * one more hit (5 over its ~1.8 s ≈ 4–5 taps: two stripe shots + one). The
+   * whip never gets the extra hit — its 1.2–1.3 s wind-up leaves only ~3 taps
+   * after reacting. Someone hanging on gets the base numbers.
    */
   private interruptThreshold() {
     if (this.state === 'tailWind') return [3, 3, 3][this.phase] ?? 3;
-    const pressed = this.phase >= 2 && this.world.player.hp >= 4 ? 1 : 0;
+    const pressed = this.phase >= 1 && this.world.player.hp >= 4 ? 1 : 0;
     return ([3, 4, 4][this.phase] ?? 4) + pressed;
   }
 
@@ -504,11 +506,21 @@ export class SpecimenX extends Boss {
   /**
    * Tempo between attacks. A healthy player (4+ hearts) gets pressed harder —
    * shorter breathers, never shorter wind-ups — so the fight stays tense for
-   * good shots and eases off for someone hanging on.
+   * good shots and eases off for someone hanging on: down to 2 hearts the
+   * breathers stretch, and after a bite that hurt it backs off a moment longer
+   * (no chains of unanswered bites on a struggling player).
    */
   private breather(base: number[]) {
     const b = base[this.phase] ?? base[base.length - 1];
-    return this.world.player.hp >= 4 ? b * 0.7 : b;
+    const hp = this.world.player.hp;
+    const relief = this.relief;
+    this.relief = 0;
+    return (hp >= 4 ? b * 0.7 : hp <= 2 ? b * 1.5 + 0.5 : b) + relief;
+  }
+
+  /** After landing a hit: a hurt player (≤ 3 hearts left) gets an extra second before the next attack. */
+  private landed() {
+    this.relief = this.world.player.hp <= 3 ? 1.0 : 0;
   }
 
   private interrupt() {
@@ -997,11 +1009,12 @@ export class SpecimenX extends Boss {
           this.telegraph = null;
           this.winding = false;
           w.hurtPlayer(1, this.title, this);
+          this.landed();
           w.audio.play('bite', { volume: 1, pitch: 0.7 });
           w.rig.shake(0.8);
           w.hitStop(0.06);
-          // Enraged double pounce — never onto a player down to their last two hearts.
-          if (this.phase >= 2 && this.chain === 0 && w.player.hp >= 3 && w.rng.chance(w.player.hp >= 4 ? 0.5 : 0.35)) {
+          // Enraged double pounce — only onto a player who is still healthy.
+          if (this.phase >= 2 && this.chain === 0 && w.player.hp >= 4 && w.rng.chance(0.5)) {
             this.chain = 1;
           } else this.chain = 0;
           this.pFrom.copy(p);
@@ -1072,6 +1085,7 @@ export class SpecimenX extends Boss {
           dur,
           () => {
             w.hurtPlayer(1, this.title, this);
+            this.landed();
             w.audio.play('whoosh', { volume: 1, pitch: 0.6 });
             w.audio.play('hit_world', { volume: 0.8, pitch: 0.6 });
             w.rig.shake(0.7);

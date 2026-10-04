@@ -71,6 +71,8 @@ const CRAWL_PTS: [number, number][] = [
 const CRAWL_RANGE = 4.8;
 /** At most this many pool crawlers alive at once. */
 const CRAWL_MAX = 3;
+/** Lateral slot (−1 … 1) of each glob in a volley, in launch order. */
+const VOLLEY_SLOTS = [-1, 1, 0];
 /** Seconds without a new attack after the player loses a heart. */
 const BREATHER = 1.6;
 
@@ -85,7 +87,9 @@ const UP = new THREE.Vector3(0, 1, 0);
 /**
  * A bile glob that fans out sideways from the volley line (rig-frame metres at
  * the camera end), so the globs of one volley never line up behind each other
- * on screen — every one shows its own ring and can be tapped on its own.
+ * on screen — every one shows its own ring and can be tapped on its own. It
+ * comes in at chest height: from PZ's high mouth a face-height path would keep
+ * the growing ring up against the boss health bar for the whole approach.
  */
 class BileGlob extends Projectile {
   constructor(
@@ -98,8 +102,9 @@ class BileGlob extends Projectile {
 
   override onAdded(): void {
     super.onAdded();
-    this.from.x += this.lateral * 0.6;
+    this.from.x += this.lateral * 0.8;
     this.to.x += this.lateral;
+    this.to.y -= 0.25;
     this.root.position.copy(this.from);
   }
 }
@@ -1016,17 +1021,17 @@ export class PatientZero extends Boss {
     mesh.add(core);
     const skinM = new THREE.Mesh(Kit.ico(0.36, 0), Kit.mat(0x4a6a10, { transparent: true, opacity: 0.55 }));
     mesh.add(skinM);
-    // Fan the volley out left / centre / right (alternating start side).
+    // Fan the volley out: one side, the other side, then the middle (start side alternates).
     const n = this.volley;
-    const slot = n <= 1 ? 0 : (this.spat / (n - 1)) * 2 - 1;
-    const lateral = slot * (n >= 3 ? 0.75 : 0.6) * this.lastSlamSide;
+    const slot = n <= 1 ? 0 : (VOLLEY_SLOTS[this.spat] ?? 0);
+    const lateral = slot * (n >= 3 ? 0.6 : 0.5) * this.lastSlamSide;
     const glob = new BileGlob(this.world, {
       from,
       mesh,
       flightTime: ft,
       // (A low lob: the mouth is high in the frame, so a big arc would carry the
       // glob — and its ring — up under the boss health bar.)
-      arc: 0.3 + Math.abs(slot) * 0.15,
+      arc: 0.15 + Math.abs(slot) * 0.1,
       damage: 1,
       hp: 1,
       points: 150,
