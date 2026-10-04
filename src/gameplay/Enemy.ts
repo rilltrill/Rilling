@@ -28,6 +28,18 @@ const _q = new THREE.Quaternion();
 const GROUND_STATES = new Set<string>(['advance', 'windup', 'recover', 'stagger']);
 
 /**
+ * NDC play-area test shared by enemies and tools: inside |x|,|y| < margin, in
+ * front of the camera, and not under the HUD corner panels or the boss bar.
+ */
+export function ndcInPlayArea(x: number, y: number, z: number, margin = 0.9): boolean {
+  if (z >= 1 || Math.abs(x) > margin || Math.abs(y) > margin) return false;
+  if (y < -0.55 && (x < -0.55 || x > 0.45)) return false; // bottom HUD panels
+  if (y > 0.72 && (x < -0.6 || x > 0.78)) return false; // score / pause
+  if (y > 0.8 && Math.abs(x) < 0.45) return false; // boss bar / progress rail
+  return true;
+}
+
+/**
  * Base class for every enemy (and boss). Subclasses:
  *  1. set stats in `configure()` (hp, speed, attackRange, windup, damage, points, sounds…)
  *  2. build the model in `build()` — add meshes under `this.model` FACING +Z,
@@ -237,6 +249,19 @@ export abstract class Enemy extends Entity {
     return remaining - step;
   }
 
+  /**
+   * Fair framing for starting an attack: the object projects inside the view
+   * (|NDC| < margin) AND outside the HUD's corner panels (lives/bomb bottom-left,
+   * weapon/reload bottom-right, score top-left, pause top-right) and the boss bar.
+   * Attack telegraphs must only begin when this holds, so a player on a phone can
+   * always see — and shoot — what's about to hit them.
+   */
+  inPlayArea(obj: THREE.Object3D = this.anchor, margin = 0.9): boolean {
+    obj.getWorldPosition(_w);
+    _w.project(this.world.camera);
+    return ndcInPlayArea(_w.x, _w.y, _w.z, margin);
+  }
+
   /** Is the anchor inside the camera view (with margin)? */
   onScreen(margin = 0.92): boolean {
     this.anchor.getWorldPosition(_w);
@@ -406,6 +431,14 @@ export abstract class Enemy extends Entity {
         this.moveToward(_v, this.speed * 0.8, dt);
         return;
       }
+      if (!this.inPlayArea()) {
+        // On screen but tucked under a HUD panel: edge toward the centre first.
+        this.world.camera.getWorldDirection(_v).setY(0).normalize();
+        _v.multiplyScalar(this.attackRange).add(this.world.rig.space.position);
+        if (this.frame === 'rig') this.world.rig.space.worldToLocal(_v);
+        this.moveToward(_v, this.speed * 0.8, dt);
+        return;
+      }
       if (this.acquireSlot()) this.setState('windup');
     }
   }
@@ -487,7 +520,7 @@ export abstract class Enemy extends Entity {
       case 'recover':
         if (this.stateTime >= this.recoverTime) {
           // Never re-attack from off-screen (look-back chases pitch the camera around).
-          this.setState(this.distToPlayer <= this.attackRange * 1.25 && this.onScreen() && this.acquireSlot() ? 'windup' : 'advance');
+          this.setState(this.distToPlayer <= this.attackRange * 1.25 && this.inPlayArea() && this.acquireSlot() ? 'windup' : 'advance');
         }
         break;
       case 'stagger':

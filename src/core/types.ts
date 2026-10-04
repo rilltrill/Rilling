@@ -59,6 +59,10 @@ export interface Settings {
   quality: QualityLevel;
   /** Arcade-monitor post effect. */
   retro: RetroMode;
+  /** Photosensitivity: tone down full-screen flashes (lightning, explosions, damage, hit flashes). */
+  reduceFlashes: boolean;
+  /** Screen-shake intensity multiplier 0..1. */
+  screenShake: number;
   showFps: boolean;
 }
 
@@ -71,6 +75,8 @@ export const DEFAULT_SETTINGS: Settings = {
   leftHanded: false,
   quality: 'medium',
   retro: 'crt',
+  reduceFlashes: false,
+  screenShake: 1,
   showFps: false,
 };
 
