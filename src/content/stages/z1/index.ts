@@ -296,7 +296,8 @@ const beats: Beat[] = [
   {
     kind: 'hold',
     label: 'town square',
-    look: { at: [0, 2.2, 14], blend: 1.3 },
+    // Slightly up: spitters climb onto the two newsstand roofs ahead.
+    look: { at: [-1.5, 2.6, 12], blend: 1.3 },
     pickups: [
       { kind: 'health', pos: [3.6, 1.3, 6.5] },
       { kind: 'bomb', pos: [-3.8, 1.5, 8], t: 12 },
@@ -306,7 +307,7 @@ const beats: Beat[] = [
         spawns: [
           { type: 'walker', pos: [-3, 0, 16], t: 0.4, opts: { variant: 'office' } },
           { type: 'walker', pos: [4, 0, 19], t: 1.2, opts: { variant: 'civilian' } },
-          { type: 'spitter', pos: [-9, 4.4, 6], t: 2.0, entry: 'rise' },
+          { type: 'spitter', pos: [-4.6, 3.0, 8.7], t: 2.0, entry: 'rise' },
         ],
       },
       {
@@ -315,7 +316,7 @@ const beats: Beat[] = [
           { type: 'brute', pos: [0.5, 0, 22] },
           { type: 'walker', pos: [-5, 0, 18], t: 1, opts: { variant: 'soldier' } },
           { type: 'walker', pos: [5, 0, 17], t: 1.6, opts: { variant: 'cop' } },
-          { type: 'spitter', pos: [8.2, 3.75, 5], t: 2.5, entry: 'rise' },
+          { type: 'spitter', pos: [4.3, 3.0, 8.9], t: 2.5, entry: 'rise' },
         ],
       },
       {

@@ -107,6 +107,10 @@ export class Herd {
     }
   }
 
+  dispose() {
+    for (const m of [this.hBody, this.hLegs, this.sBody, this.sLegs]) m.dispose();
+  }
+
   get active() {
     return this.startT >= 0;
   }
@@ -121,7 +125,8 @@ export class Herd {
     if (this.startT >= 0) {
       const t = world.time - this.startT;
       let any = false;
-      this.runners.forEach((r, i) => {
+      for (let i = 0; i < this.runners.length; i++) {
+        const r = this.runners[i];
         const tt = t - r.delay;
         const k = tt <= 0 ? 0 : (tt * r.speed) / r.len;
         const vis = tt > 0 && k < 1;
@@ -143,7 +148,7 @@ export class Herd {
           _m.compose(_hip, _q, _s);
           this.hLegs.setMatrixAt(i * 2 + s, _m);
         }
-      });
+      }
       this.hBody.visible = any;
       this.hLegs.visible = any;
       this.hBody.instanceMatrix.needsUpdate = true;
@@ -182,7 +187,8 @@ export class Herd {
     this.sBody.visible = show;
     this.sLegs.visible = show;
     if (!show) return;
-    this.giants.forEach((g, i) => {
+    for (let i = 0; i < this.giants.length; i++) {
+      const g = this.giants[i];
       const k = Math.min(1, ((this.time * g.speed) % g.len) / g.len);
       _p.lerpVectors(g.from, g.to, k);
       const ph = this.time * g.speed * 0.5 + g.phase;
@@ -202,7 +208,7 @@ export class Herd {
         _m.compose(_hip, _q, _s);
         this.sLegs.setMatrixAt(i * 4 + k2, _m);
       }
-    });
+    }
     this.sBody.instanceMatrix.needsUpdate = true;
     this.sLegs.instanceMatrix.needsUpdate = true;
   }

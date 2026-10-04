@@ -414,7 +414,7 @@ abstract class Theropod extends Dino {
         this.rear * (first ? 0.45 : 0.35) -
         this.lookPitch * 0.25 +
         bobComp +
-        this.air * (first ? 0.45 : -0.25) +
+        this.air * (first ? 0.75 : -0.15) +
         this.recoil * (first ? -0.25 : 0.1);
       n[i].rotation.y = this.lookYaw * 0.3;
     }
@@ -574,6 +574,7 @@ export class Compy extends Theropod {
       quills: 0,
       eyeSize: 0.022,
       compact: true,
+      texDensity: 4,
     };
   }
 
@@ -862,7 +863,7 @@ export class Dilo extends Theropod {
     super.build();
     // Collapsible neck frill: two fans around the upper neck, folded back along it.
     const head = this.r.head;
-    const mat = skinMat();
+    const mat = skinMat(2);
     const fp: PaintFn = (x, y, _z, _nx, _ny, nz) => {
       const rr = Math.hypot(x, y) / 0.46;
       if (nz < -0.3) return rr > 0.8 ? DILO_PAL.back : DILO_PAL.base;

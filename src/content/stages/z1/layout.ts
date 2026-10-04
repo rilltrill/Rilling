@@ -82,8 +82,7 @@ export interface RoofPad {
   y: number;
 }
 export const ROOF_PADS: RoofPad[] = [
-  // Low shop row on the west side of the square.
-  { x0: -82, x1: -66, z0: -284, z1: -264, y: 4.4 },
-  // Bandstand roof (square, east of the rail).
-  { x0: -51.6, x1: -44.4, z0: -277.6, z1: -270.4, y: 3.75 },
+  // Newsstand kiosks in the square (spitter perches, within 9 m of the camera hold).
+  { x0: -64.6, x1: -61.4, z0: -278.4, z1: -275.6, y: 3.0 },
+  { x0: -55.2, x1: -52.0, z0: -278.6, z1: -275.8, y: 3.0 },
 ];

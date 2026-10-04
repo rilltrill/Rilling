@@ -37,8 +37,13 @@ export function dgeo(key: string, make: () => THREE.BufferGeometry): THREE.Buffe
   return g;
 }
 
-/** The single shared vertex-coloured skin material. */
-export const skinMat = () => Kit.mat(0xffffff, { vertexColors: true });
+/**
+ * Shared vertex-coloured skin material with the Kit's retro 'scales' detail map
+ * multiplied in (object-space projected, see kit/Textures.ts). `density` sets the
+ * scale size per species (bigger = finer). Cached per density.
+ */
+export const skinMat = (density = 1): THREE.MeshLambertMaterial =>
+  Kit.mat(0xffffff, { vertexColors: true, tex: 'scales', texScale: density, texStrength: 0.4 });
 
 const _e = new THREE.Euler();
 const _q = new THREE.Quaternion();
@@ -326,6 +331,8 @@ export interface TheroSpec {
   eyeSize: number;
   /** Compsognathus-style mesh budget: merge hips+arms into torso, jaw into head, meta+foot. */
   compact?: boolean;
+  /** Scale-texture density (bigger = finer scales). */
+  texDensity?: number;
 }
 
 export interface TheroLeg {
@@ -379,7 +386,7 @@ function eyesGeo(x: number, y: number, z: number, size: number): THREE.BufferGeo
 
 /** Builds the theropod skeleton + painted meshes under `model` (facing +Z, feet at y = 0). */
 export function buildTheropod(model: THREE.Group, s: TheroSpec): TheroRig {
-  const mat = skinMat();
+  const mat = skinMat(s.texDensity ?? 1.6);
   const p = s.pal;
   const K = `${s.key}|${p.key}`;
   const meshes: TheroRig['meshes'] = { head: [], torso: [], limb: [], tail: [] };
@@ -723,7 +730,7 @@ export const PTERO_PAL: Palette = {
 };
 
 export function buildPtero(model: THREE.Group, p: Palette = PTERO_PAL): PteroRig {
-  const mat = skinMat();
+  const mat = skinMat(2);
   const K = `ptero|${p.key}`;
   const body = Kit.pivot(model, 0, 0, 0, 'body');
   const meshes: PteroRig['meshes'] = { head: [], torso: [], limb: [] };
@@ -852,7 +859,7 @@ export const TRIKE_PAL: Palette = {
 };
 
 export function buildTrike(model: THREE.Group, p: Palette = TRIKE_PAL): TrikeRig {
-  const mat = skinMat();
+  const mat = skinMat(0.9);
   const K = `trike|${p.key}`;
   const meshes: TrikeRig['meshes'] = { head: [], torso: [], limb: [], tail: [], armor: [] };
   // Leg geometry drives the body height.

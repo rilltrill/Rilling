@@ -125,6 +125,8 @@ export class Carnotaur extends Boss {
   private haloFrenzyMat!: THREE.Material;
   private deadEndShown = false;
   private winding = false;
+  /** True on the first update of a custom state (set by go()). */
+  private entering = true;
 
   // Death.
   private deathFrom = new THREE.Vector3();
@@ -137,7 +139,7 @@ export class Carnotaur extends Boss {
 
   protected override configure(): void {
     this.name = 'carnotaur';
-    this.maxHp = 270;
+    this.maxHp = 400;
     this.speed = 7;
     this.points = 6000;
     this.sfxHit = 'hit_flesh';
@@ -425,7 +427,7 @@ export class Carnotaur extends Boss {
   }
 
   private interruptThreshold() {
-    return [5, 6, 7][this.phase] ?? 7;
+    return [6, 7, 8][this.phase] ?? 8;
   }
 
   private interrupt() {
@@ -455,6 +457,7 @@ export class Carnotaur extends Boss {
     this.telegraph = null;
     this.winding = false;
     this.interruptDmg = 0;
+    this.entering = true;
     this.setState(s);
   }
 
@@ -553,6 +556,8 @@ export class Carnotaur extends Boss {
     const t = this.stateTime;
     const p = this.root.position;
     const st = this.state as CState;
+    const first = this.entering;
+    this.entering = false;
 
     // Phase check (explosions/bombs bypass onDamaged).
     const ph = this.phaseFor();
@@ -618,7 +623,7 @@ export class Carnotaur extends Boss {
         this.jawTarget = t > 0.35 ? 1 : 0.3;
         this.neckTarget = t > 0.35 ? -0.55 : 0.1;
         this.headYaw = Math.sin(t * 9) * 0.18 * (t > 0.4 ? 1 : 0);
-        if (t < dt * 1.5) {
+        if (first) {
           this.roaringFor = this.pendingRoar;
           w.audio.play('rex_roar', { volume: 1, pitch: this.roaringFor >= 2 ? 1.1 : 0.95 });
           if (this.roaringFor === 1) w.hud.prompt('IT CALLED THE PACK!');
@@ -682,7 +687,7 @@ export class Carnotaur extends Boss {
             this.legs[1].ankle.getWorldPosition(_v);
             w.fx.dust(_v, 0.7, 0x8a7a5a);
           }
-          if (t < dt * 1.5) w.audio.play('dino_roar', { volume: 0.7, pitch: 0.75 });
+          if (first) w.audio.play('dino_roar', { volume: 0.7, pitch: 0.75 });
         } else {
           this.steer(0, 4.6, 26, dt);
           this.neckTarget = 0.5;
@@ -715,7 +720,7 @@ export class Carnotaur extends Boss {
         this.neckTarget = -0.5 * k;
         this.jawTarget = 0.25 + 0.75 * k;
         this.headYaw = Math.sin(t * 14) * 0.06 * k;
-        if (t < dt * 1.5) w.audio.play('dino_roar', { volume: 0.8, pitch: 1.25 });
+        if (first) w.audio.play('dino_roar', { volume: 0.8, pitch: 1.25 });
         const done = this.telegraphAttack(dur, () => {
           this.lunge = 1;
           w.hurtPlayer(1, this.title);
@@ -759,7 +764,7 @@ export class Carnotaur extends Boss {
           this.headYaw = -0.2;
         }
         this.neckTarget = 0.1;
-        if (t < dt * 1.5) w.audio.play('dino_roar', { volume: 0.7, pitch: 1.05 });
+        if (first) w.audio.play('dino_roar', { volume: 0.7, pitch: 1.05 });
         const done = this.telegraphAttack(dur, () => {
           w.hurtPlayer(1, this.title);
           w.audio.play('crash', { volume: 1 });
@@ -920,7 +925,8 @@ export class Carnotaur extends Boss {
 
     // Legs.
     const pawing = this.paw > 0 && !dying;
-    this.legs.forEach((leg, i) => {
+    for (let i = 0; i < this.legs.length; i++) {
+      const leg = this.legs[i];
       const ph = i === 0 ? s : -s;
       const kn = i === 0 ? Math.max(0, -c) : Math.max(0, c);
       let hip = ph * 0.62 * run - this.crouch * 0.5;
@@ -933,7 +939,7 @@ export class Carnotaur extends Boss {
       leg.hip.rotation.x = hip;
       leg.knee.rotation.x = knee;
       leg.ankle.rotation.x = -knee * 0.7 - hip * 0.4;
-    });
+    }
     const breathe = Math.sin(this.age * 2.3);
     this.hips.position.y = 2.35 - this.crouch * 0.55 + Math.abs(c) * 0.14 * run;
     this.hips.rotation.x = this.crouch * 0.18 + 0.04 * run + breathe * 0.01;
@@ -949,11 +955,12 @@ export class Carnotaur extends Boss {
     this.jaw.rotation.x = this.jawOpen * 0.95 + Math.max(0, breathe) * 0.03;
     this.mouth.visible = this.jawOpen > 0.32 && !dying;
     // Tail.
-    this.tail.forEach((seg, i) => {
+    for (let i = 0; i < this.tail.length; i++) {
+      const seg = this.tail[i];
       seg.rotation.y = Math.sin(this.gait * 0.5 - i * 0.6) * 0.1 * (0.4 + run) + this.tailSwing * (0.25 + i * 0.08);
       seg.rotation.x = 0.05 + Math.sin(this.age * 1.4 - i * 0.5) * 0.03 - this.crouch * 0.05;
-    });
-    this.arms.forEach((a, i) => (a.rotation.x = Math.sin(this.age * 3 + i) * 0.25 + (this.state === 'roar' ? -0.6 : 0)));
+    }
+    for (let i = 0; i < this.arms.length; i++) this.arms[i].rotation.x = Math.sin(this.age * 3 + i) * 0.25 + (this.state === 'roar' ? -0.6 : 0);
     // Eyes pulse.
     const pulse = 1 + Math.sin(this.age * (this.frenzy ? 12 : 5)) * 0.12;
     for (const h of this.halos) h.scale.set(0.7 * pulse * (this.frenzy ? 1.15 : 1), 0.75 * pulse * (this.frenzy ? 1.15 : 1), 1.1 * pulse);
@@ -1000,7 +1007,7 @@ export class Carnotaur extends Boss {
       p.lerpVectors(this.deathFrom, this.deathTo, k * 0.12);
       this.hips.position.y = 2.35 - k * 0.6;
       this.neck.rotation.x = -0.5 + Math.sin(t * 20) * 0.1;
-      this.legs.forEach((l) => (l.knee.rotation.x = 0.4 + k * 0.8));
+      for (const l of this.legs) l.knee.rotation.x = 0.4 + k * 0.8;
     } else if (t < 2.0) {
       // Topples onto its side and rolls down the bank.
       const k = (t - 0.6) / 1.4;
@@ -1010,11 +1017,11 @@ export class Carnotaur extends Boss {
       this.deathRoll = -Math.PI * 0.55 - k * Math.PI * 0.9;
       this.model.rotation.z = this.deathRoll;
       this.hips.position.y = 1.4;
-      this.tail.forEach((s, i) => (s.rotation.y = Math.sin(t * 12 - i) * 0.35));
-      this.legs.forEach((l, i) => {
-        l.hip.rotation.x = Math.sin(t * 14 + i * 2) * 0.8;
-        l.knee.rotation.x = 0.8;
-      });
+      for (let i = 0; i < this.tail.length; i++) this.tail[i].rotation.y = Math.sin(t * 12 - i) * 0.35;
+      for (let i = 0; i < this.legs.length; i++) {
+        this.legs[i].hip.rotation.x = Math.sin(t * 14 + i * 2) * 0.8;
+        this.legs[i].knee.rotation.x = 0.8;
+      }
       if (Math.floor((t - dt) * 6) !== Math.floor(t * 6)) {
         w.fx.dust(this.worldPos(_v), 1.6, 0x8a7a5a);
         w.audio.play('stomp', { volume: 0.8, vary: 0.3 });
@@ -1040,7 +1047,7 @@ export class Carnotaur extends Boss {
       p.copy(this.deathTo);
       p.y = -k * 3.4;
       this.model.rotation.z = this.deathRoll - k * 0.2;
-      this.legs.forEach((l, i) => (l.hip.rotation.x = Math.sin(t * 6 + i * 2) * 0.5 * (1 - k)));
+      for (let i = 0; i < this.legs.length; i++) this.legs[i].hip.rotation.x = Math.sin(t * 6 + i * 2) * 0.5 * (1 - k);
       this.bubbleT -= dt;
       if (this.bubbleT <= 0) {
         this.bubbleT = 0.18;

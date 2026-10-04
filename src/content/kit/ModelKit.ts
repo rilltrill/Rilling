@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { Textures, type TexName } from './Textures';
+
+export type { TexName } from './Textures';
 
 /**
  * Procedural low-poly model toolkit.
@@ -48,12 +51,75 @@ export interface MatOptions {
   /** Skip fog (for skyboxes / far glows). */
   fog?: boolean;
   vertexColors?: boolean;
+  /**
+   * Retro pixel texture (see content/kit/Textures.ts → TEX_NAMES), multiplied with
+   * the colour. Projected in object space, so no UVs are needed and texel density
+   * stays constant in world units. 'none' disables the default grain.
+   */
+  tex?: TexName | 'none';
+  /** Texture density multiplier (2 = texels twice as small). Default 1. */
+  texScale?: number;
+  /** 0..1 how strongly the texture modulates the colour. Default 1 (grain: 0.6). */
+  texStrength?: number;
+}
+
+/**
+ * Inject object-space planar texture projection into a Lambert material.
+ * The dominant axis of the object-space normal picks the projection plane —
+ * hard switches (no blending) for a crisp, period-accurate look.
+ */
+function applyRetroTexture(m: THREE.MeshLambertMaterial, name: TexName, scale: number, strength: number) {
+  const rt = Textures.get(name);
+  const uniforms = {
+    uRetroMap: { value: rt.texture },
+    uRetroScale: { value: rt.density * scale },
+    uRetroStrength: { value: strength },
+    uRetroGain: { value: rt.gain },
+  };
+  m.userData.retroTex = name;
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRetroPos;\nvarying vec3 vRetroNrm;')
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        vec3 retroScale = vec3(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz), length(modelMatrix[2].xyz));
+        vRetroPos = position * retroScale;
+        vRetroNrm = normal;`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform sampler2D uRetroMap;
+        uniform float uRetroScale;
+        uniform float uRetroStrength;
+        uniform float uRetroGain;
+        varying vec3 vRetroPos;
+        varying vec3 vRetroNrm;`,
+      )
+      .replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+        {
+          vec3 an = abs(vRetroNrm);
+          vec2 ruv = (an.x > an.y && an.x > an.z) ? vRetroPos.zy : ((an.y > an.z) ? vRetroPos.xz : vRetroPos.xy);
+          vec3 rtex = texture2D(uRetroMap, ruv * uRetroScale).rgb * uRetroGain;
+          diffuseColor.rgb *= mix(vec3(1.0), rtex, uRetroStrength);
+        }`,
+      );
+  };
+  m.customProgramCacheKey = () => 'retroTex1';
 }
 
 export const Kit = {
   /** Flat-shaded Lambert material (cached by colour + options). */
   mat(color: number, o: MatOptions = {}): THREE.MeshLambertMaterial {
-    const key = `l|${color}|${o.emissive ?? ''}|${o.emissiveIntensity ?? ''}|${o.smooth ? 1 : 0}|${o.side ?? ''}|${o.transparent ? o.opacity : ''}|${o.fog ?? ''}|${o.vertexColors ? 1 : 0}`;
+    const tex: TexName | null = o.tex === 'none' ? null : o.tex ?? (Kit.retro.grain ? 'grain' : null);
+    const texScale = o.texScale ?? 1;
+    const texStrength = o.texStrength ?? (o.tex ? 1 : 0.6);
+    const key = `l|${color}|${o.emissive ?? ''}|${o.emissiveIntensity ?? ''}|${o.smooth ? 1 : 0}|${o.side ?? ''}|${o.transparent ? o.opacity : ''}|${o.fog ?? ''}|${o.vertexColors ? 1 : 0}|${tex ?? ''}|${texScale}|${texStrength}`;
     return cachedMat(key, () => {
       const m = new THREE.MeshLambertMaterial({
         color,
@@ -68,9 +134,21 @@ export const Kit = {
         m.emissive.setHex(o.emissive);
         m.emissiveIntensity = o.emissiveIntensity ?? 1;
       }
+      if (tex) applyRetroTexture(m, tex, texScale, texStrength);
       return m;
     });
   },
+
+  /** Shorthand: textured flat-shaded material, e.g. Kit.tex('brick', 0x8a3a2a). */
+  tex(name: TexName, color: number, scale = 1, strength = 1): THREE.MeshLambertMaterial {
+    return Kit.mat(color, { tex: name, texScale: scale, texStrength: strength });
+  },
+
+  /**
+   * Global retro switches. `grain` gives every untextured Kit.mat a subtle pixel
+   * grit so even flat colours read as "textured" at arcade resolution.
+   */
+  retro: { grain: false },
 
   /** Physically-based material for shiny/metal things (more expensive — use sparingly). */
   std(color: number, roughness = 0.6, metalness = 0.2, emissive?: number): THREE.MeshStandardMaterial {
@@ -205,6 +283,7 @@ export const Kit = {
     for (const g of geoCache.values()) g.dispose();
     for (const m of matCache.values()) m.dispose();
     for (const t of tracked) t.dispose();
+    Textures.disposeAll();
     geoCache.clear();
     matCache.clear();
     tracked.clear();

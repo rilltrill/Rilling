@@ -72,6 +72,17 @@ export class JungleEnv {
   private flora = new Flora();
   /** Vegetation chunk meshes, hidden when entirely inside the fog. */
   private chunks: THREE.Mesh[] = [];
+  private instanced: THREE.InstancedMesh[] = [];
+  private shaftMat = Kit.track(
+    new THREE.MeshBasicMaterial({
+      color: 0xfff1c0,
+      transparent: true,
+      opacity: 0.06,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
   private backdrop = new THREE.Group();
   private time = 0;
 
@@ -143,6 +154,8 @@ export class JungleEnv {
       update: (dt, w) => this.update(dt, w),
       dispose: () => {
         if (current === this) current = null;
+        for (const m of this.instanced) m.dispose();
+        this.herd.dispose();
       },
     };
   }
@@ -210,7 +223,7 @@ export class JungleEnv {
     if (Math.abs(d - D.TREE) < 3.6 && a < 13 && layer !== 'patch') return false;
     if (Math.hypot(d - D.CAR, lat - D.CAR_SIDE) < 6) return false;
     if (Math.hypot(d - (D.CAR + 2), lat - 12.5) < 5.5 && layer !== 'patch') return false;
-    if (lat < -15 && d > D.CLIFF_FROM && d < D.CLIFF_TO && (layer === 'mid' || layer === 'far' || layer === 'fill')) return false;
+    if (lat < -15 && d > D.CLIFF_FROM && d < D.CLIFF_TO && (layer === 'mid' || layer === 'far' || (layer === 'fill' && d < 438))) return false;
     if (d > D.BOSS_START - 20) {
       // Keep the riverside road open: the boss runs alongside and tumbles into the river.
       if ((layer === 'mid' || layer === 'near' || layer === 'fill') && lat > -12 && lat < 26) return false;
@@ -278,6 +291,7 @@ export class JungleEnv {
     this.smoke = new THREE.InstancedMesh(this.flora.blob(rng), Kit.mat(0xc8c6c0, { fog: false, emissive: 0x707070, emissiveIntensity: 0.6, transparent: true, opacity: 0.75 }), 7);
     this.smoke.frustumCulled = false;
     b.add(this.smoke);
+    this.instanced.push(this.smoke);
   }
 
   private buildRoad() {
@@ -360,17 +374,17 @@ export class JungleEnv {
     this.root.add(rocks);
 
     // Waterfall pouring off the cliff into the pool.
-    const top = this.P(468, -36, 19);
+    const top = this.P(468, -37.5, 21);
     const pool = this.P(472, -28.5, 0);
     this.fallTop.copy(top);
     const toward = _w.subVectors(this.P(430, 0), pool).setY(0).normalize();
     this.fallNormal.copy(toward);
     this.fallRight.set(-toward.z, 0, toward.x);
     const fall = new THREE.Mesh(
-      Kit.plane(6.5, 20),
+      Kit.plane(8, 22),
       Kit.mat(0xcfeef6, { emissive: 0x5a8a9a, emissiveIntensity: 0.7, side: THREE.DoubleSide, transparent: true, opacity: 0.88 }),
     );
-    fall.position.set(top.x, 9.6, top.z).addScaledVector(toward, 0.6);
+    fall.position.set(top.x, 10.6, top.z).addScaledVector(toward, 0.6);
     fall.rotation.y = Math.atan2(toward.x, toward.z);
     fall.rotation.x = -0.08;
     this.root.add(fall);
@@ -379,6 +393,7 @@ export class JungleEnv {
     this.streaks.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < 18; i++) this.streakPhase.push(rng.next());
     this.root.add(this.streaks);
+    this.instanced.push(this.streaks);
     // Mist at the base.
     const mistMat = Kit.mat(0xf2fafc, { transparent: true, opacity: 0.55, emissive: 0x8aa0a8, emissiveIntensity: 0.6 });
     for (let i = 0; i < 3; i++) {
@@ -391,6 +406,7 @@ export class JungleEnv {
     this.foam.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < 40; i++) this.foamU.push(rng.next());
     this.root.add(this.foam);
+    this.instanced.push(this.foam);
   }
 
   private buildVegetation() {
@@ -465,6 +481,28 @@ export class JungleEnv {
           s.rotation.y = fr.heading + Math.PI / 2;
           gr.add(s);
         }
+      }
+      // Sun shafts slanting through the canopy (deep jungle only).
+      const shafts = new THREE.Group();
+      for (let d = c0 + rng.range(4, 14); d < c1; d += rng.range(14, 24)) {
+        if (meadow(d) || d > D.CLIFF_FROM - 10 || d < 0 || Math.abs(d - D.GATE) < 8) continue;
+        const l = (rng.chance(0.5) ? 1 : -1) * rng.range(4.5, 10);
+        const p = this.P(d, l);
+        const sg = new THREE.Group();
+        sg.position.set(p.x, 5, p.z);
+        sg.rotation.set(-0.3, rng.next() * Math.PI, 0.4);
+        const wdt = rng.range(1.4, 2.6);
+        Kit.add(sg, Kit.plane(1, 1), this.shaftMat, 0, 0, 0, 0, 0, 0, wdt, 11, 1);
+        Kit.add(sg, Kit.plane(1, 1), this.shaftMat, 0, 0, 0, 0, Math.PI / 2, 0, wdt, 11, 1);
+        shafts.add(sg);
+      }
+      if (shafts.children.length) {
+        for (const m of EnvKit.mergeStatic(shafts)) {
+          m.renderOrder = 3;
+          m.geometry.computeBoundingSphere();
+          this.chunks.push(m);
+        }
+        this.root.add(shafts);
       }
       for (const g of [gl, gr]) {
         merged(g);
@@ -655,6 +693,8 @@ export class JungleEnv {
     for (let d = D.CLIFF_FROM; d < D.CLIFF_TO; d += 5) {
       for (let k = 0; k < 3; k++) {
         const lat = -rng.range(17, 30) - k * 8;
+        // Leave a gorge open so the waterfall and its pool can be seen from the road.
+        if (d > 438 && lat > -46) continue;
         const p = this.P(d + rng.spread(2), lat);
         if (this.distRiver(p.x, p.z) < RIVER_WIDTH / 2 + 2.5) continue;
         const h = rng.range(9, 15) + k * 4 + Math.max(0, 6 - Math.abs(d - 466) * 0.2);
@@ -669,9 +709,9 @@ export class JungleEnv {
       }
     }
     // Cliff wall behind the waterfall.
-    for (let k = 0; k < 6; k++) {
-      const p = this.P(462 + k * 3.2, -40 - rng.range(0, 4));
-      const h = rng.range(19, 24);
+    for (let k = 0; k < 8; k++) {
+      const p = this.P(457 + k * 3.4, -42 - rng.range(0, 4) - Math.abs(k - 3.5) * 1.2);
+      const h = rng.range(22, 27) - Math.abs(k - 3.5) * 1.5;
       Kit.add(g, this.flora.rockGeo(rng), Kit.mat(rng.pick(rockCols)), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, 5, h * 0.55, 4.5);
       Kit.add(g, this.flora.blob(rng), Kit.mat(COL.canopyA), p.x, h * 0.96, p.z, 0, 0, 0, 5, 1.8, 4.5);
     }
@@ -881,9 +921,9 @@ export class JungleEnv {
     if (this.streaks.visible) {
       for (let i = 0; i < this.streakPhase.length; i++) {
         const ph = (this.streakPhase[i] + t * 0.55) % 1;
-        const x = ((i * 0.37) % 1) * 5.6 - 2.8;
+        const x = ((i * 0.37) % 1) * 7 - 3.5;
         _v.copy(this.fallTop).addScaledVector(this.fallRight, x).addScaledVector(this.fallNormal, 0.75 + ph * 0.6);
-        _v.y = 19 - ph * 19;
+        _v.y = 21 - ph * 21;
         _e.set(-0.08, Math.atan2(this.fallNormal.x, this.fallNormal.z), 0);
         _q.setFromEuler(_e);
         _s.set(1, 0.6 + ph * 0.8, 1);

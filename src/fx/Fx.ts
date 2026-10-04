@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { Rng } from '../core/Rng';
+import { DecalSystem } from './Decals';
+import { GIB_FLAG, GibMesh } from './Gibs';
+import { PFLAG, ParticleSystem, PSpec } from './Particles';
+import { DF, PF, decalAtlasTexture, particleAtlasTexture } from './textures';
 
 export interface BloodOptions {
   color?: number;
@@ -12,364 +16,690 @@ export interface FxScreenHooks {
   splat?(color: number): void;
 }
 
-const MAX_PARTICLES = 1400;
-const MAX_CHUNKS = 160;
+const SOFT_CAP = 1800;
+const GLOW_CAP = 900;
+const DECAL_CAP = 128;
+const MEAT_CAP = 160;
+const SHARD_CAP = 120;
+/** Max decals spawned per frame (bursts of landing droplets). */
+const DECAL_BUDGET = 8;
+/** Ground decals float this far above the ground (above road ribbons/markings). */
+const DECAL_LIFT = 0.035;
 
-const VERT = /* glsl */ `
-  attribute float aSize;
-  attribute float aAlpha;
-  attribute vec3 aColor;
-  varying float vAlpha;
-  varying vec3 vColor;
-  uniform float uScale;
-  void main() {
-    vAlpha = aAlpha;
-    vColor = aColor;
-    vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = aSize * uScale / max(0.1, -mv.z);
-    gl_Position = projectionMatrix * mv;
-  }
-`;
-const FRAG = /* glsl */ `
-  varying float vAlpha;
-  varying vec3 vColor;
-  uniform float uSoft;
-  void main() {
-    vec2 c = gl_PointCoord - 0.5;
-    float d = length(c) * 2.0;
-    if (d > 1.0) discard;
-    float a = vAlpha * mix(1.0, 1.0 - d * d, uSoft);
-    gl_FragColor = vec4(vColor, a);
-  }
-`;
-
-class ParticlePool {
-  readonly points: THREE.Points;
-  private pos: Float32Array;
-  private vel = new Float32Array(MAX_PARTICLES * 3);
-  private col: Float32Array;
-  private size: Float32Array;
-  private alpha: Float32Array;
-  private life = new Float32Array(MAX_PARTICLES);
-  private maxLife = new Float32Array(MAX_PARTICLES);
-  private baseSize = new Float32Array(MAX_PARTICLES);
-  private grav = new Float32Array(MAX_PARTICLES);
-  private drag = new Float32Array(MAX_PARTICLES);
-  private grow = new Float32Array(MAX_PARTICLES);
-  private cursor = 0;
-  private geo: THREE.BufferGeometry;
-  readonly mat: THREE.ShaderMaterial;
-
-  constructor(additive: boolean) {
-    this.pos = new Float32Array(MAX_PARTICLES * 3);
-    this.col = new Float32Array(MAX_PARTICLES * 3);
-    this.size = new Float32Array(MAX_PARTICLES);
-    this.alpha = new Float32Array(MAX_PARTICLES);
-    this.geo = new THREE.BufferGeometry();
-    this.geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
-    this.geo.setAttribute('aColor', new THREE.BufferAttribute(this.col, 3).setUsage(THREE.DynamicDrawUsage));
-    this.geo.setAttribute('aSize', new THREE.BufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage));
-    this.geo.setAttribute('aAlpha', new THREE.BufferAttribute(this.alpha, 1).setUsage(THREE.DynamicDrawUsage));
-    this.geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
-    this.mat = new THREE.ShaderMaterial({
-      vertexShader: VERT,
-      fragmentShader: FRAG,
-      uniforms: { uScale: { value: 300 }, uSoft: { value: additive ? 1 : 0.35 } },
-      transparent: true,
-      depthWrite: false,
-      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
-    });
-    this.points = new THREE.Points(this.geo, this.mat);
-    this.points.frustumCulled = false;
-    this.points.renderOrder = 5;
-  }
-
-  emit(
-    p: THREE.Vector3,
-    v: THREE.Vector3,
-    color: THREE.Color,
-    size: number,
-    life: number,
-    gravity: number,
-    drag: number,
-    grow = 0,
-  ) {
-    const i = this.cursor;
-    this.cursor = (this.cursor + 1) % MAX_PARTICLES;
-    const i3 = i * 3;
-    this.pos[i3] = p.x;
-    this.pos[i3 + 1] = p.y;
-    this.pos[i3 + 2] = p.z;
-    this.vel[i3] = v.x;
-    this.vel[i3 + 1] = v.y;
-    this.vel[i3 + 2] = v.z;
-    this.col[i3] = color.r;
-    this.col[i3 + 1] = color.g;
-    this.col[i3 + 2] = color.b;
-    this.life[i] = life;
-    this.maxLife[i] = life;
-    this.baseSize[i] = size;
-    this.size[i] = size;
-    this.alpha[i] = 1;
-    this.grav[i] = gravity;
-    this.drag[i] = drag;
-    this.grow[i] = grow;
-  }
-
-  update(dt: number) {
-    for (let i = 0; i < MAX_PARTICLES; i++) {
-      if (this.life[i] <= 0) {
-        if (this.size[i] !== 0) {
-          this.size[i] = 0;
-          this.alpha[i] = 0;
-        }
-        continue;
-      }
-      this.life[i] -= dt;
-      const i3 = i * 3;
-      const dr = Math.exp(-this.drag[i] * dt);
-      this.vel[i3] *= dr;
-      this.vel[i3 + 1] = this.vel[i3 + 1] * dr - this.grav[i] * dt;
-      this.vel[i3 + 2] *= dr;
-      this.pos[i3] += this.vel[i3] * dt;
-      this.pos[i3 + 1] += this.vel[i3 + 1] * dt;
-      this.pos[i3 + 2] += this.vel[i3 + 2] * dt;
-      const k = Math.max(0, this.life[i] / this.maxLife[i]);
-      this.alpha[i] = Math.min(1, k * 2.2);
-      this.size[i] = this.baseSize[i] * (1 + this.grow[i] * (1 - k));
-    }
-    for (const name of ['position', 'aColor', 'aSize', 'aAlpha']) {
-      (this.geo.attributes[name] as THREE.BufferAttribute).needsUpdate = true;
-    }
-  }
-
-  clear() {
-    this.life.fill(0);
-    this.size.fill(0);
-    this.alpha.fill(0);
-  }
-
-  dispose() {
-    this.geo.dispose();
-    this.mat.dispose();
-  }
+interface SurfaceFx {
+  dust: number;
+  chip: number;
+  /** Decal frame on the ground, or -1. */
+  decal: number;
+  tint: number;
+  decalSize: number;
+  sparks: number;
+  chips: number;
+  splinters: boolean;
 }
 
-/** Physics chunks (gore bits, debris, shell casings) via a single InstancedMesh. */
-class ChunkPool {
-  readonly mesh: THREE.InstancedMesh;
-  private pos: THREE.Vector3[] = [];
-  private vel: THREE.Vector3[] = [];
-  private rot: THREE.Euler[] = [];
-  private spin: THREE.Vector3[] = [];
-  private life = new Float32Array(MAX_CHUNKS);
-  private scale = new Float32Array(MAX_CHUNKS);
-  private floor = new Float32Array(MAX_CHUNKS);
-  private cursor = 0;
-  private dummy = new THREE.Object3D();
-
-  constructor() {
-    const geo = new THREE.BoxGeometry(1, 1, 1);
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
-    this.mesh = new THREE.InstancedMesh(geo, mat, MAX_CHUNKS);
-    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.mesh.frustumCulled = false;
-    for (let i = 0; i < MAX_CHUNKS; i++) {
-      this.pos.push(new THREE.Vector3());
-      this.vel.push(new THREE.Vector3());
-      this.rot.push(new THREE.Euler());
-      this.spin.push(new THREE.Vector3());
-      this.mesh.setColorAt(i, new THREE.Color(0xffffff));
-      this.dummy.scale.setScalar(0);
-      this.dummy.updateMatrix();
-      this.mesh.setMatrixAt(i, this.dummy.matrix);
-    }
-  }
-
-  emit(p: THREE.Vector3, v: THREE.Vector3, color: THREE.Color, size: number, life: number, floorY: number, rng: Rng) {
-    const i = this.cursor;
-    this.cursor = (this.cursor + 1) % MAX_CHUNKS;
-    this.pos[i].copy(p);
-    this.vel[i].copy(v);
-    this.rot[i].set(rng.next() * 6, rng.next() * 6, rng.next() * 6);
-    this.spin[i].set(rng.spread(12), rng.spread(12), rng.spread(12));
-    this.life[i] = life;
-    this.scale[i] = size;
-    this.floor[i] = floorY;
-    this.mesh.setColorAt(i, color);
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
-  }
-
-  update(dt: number) {
-    for (let i = 0; i < MAX_CHUNKS; i++) {
-      if (this.life[i] <= 0) continue;
-      this.life[i] -= dt;
-      const v = this.vel[i];
-      const p = this.pos[i];
-      v.y -= 14 * dt;
-      p.addScaledVector(v, dt);
-      if (p.y < this.floor[i] + this.scale[i] * 0.5) {
-        p.y = this.floor[i] + this.scale[i] * 0.5;
-        v.y = Math.abs(v.y) * 0.3;
-        v.x *= 0.6;
-        v.z *= 0.6;
-        this.spin[i].multiplyScalar(0.6);
-      }
-      const r = this.rot[i];
-      r.x += this.spin[i].x * dt;
-      r.y += this.spin[i].y * dt;
-      r.z += this.spin[i].z * dt;
-      this.dummy.position.copy(p);
-      this.dummy.rotation.copy(r);
-      const s = this.scale[i] * Math.min(1, this.life[i] * 2);
-      this.dummy.scale.setScalar(Math.max(0, s));
-      this.dummy.updateMatrix();
-      this.mesh.setMatrixAt(i, this.dummy.matrix);
-    }
-    this.mesh.instanceMatrix.needsUpdate = true;
-  }
-
-  clear() {
-    this.life.fill(0);
-    this.dummy.scale.setScalar(0);
-    this.dummy.updateMatrix();
-    for (let i = 0; i < MAX_CHUNKS; i++) this.mesh.setMatrixAt(i, this.dummy.matrix);
-    this.mesh.instanceMatrix.needsUpdate = true;
-  }
-
-  dispose() {
-    this.mesh.geometry.dispose();
-    (this.mesh.material as THREE.Material).dispose();
-    this.mesh.dispose();
-  }
-}
+const SURFACES: Record<string, SurfaceFx> = {
+  concrete: { dust: 0xa8a49a, chip: 0x8e8a82, decal: DF.HOLE, tint: 0x5a5852, decalSize: 0.26, sparks: 2, chips: 5, splinters: false },
+  metal: { dust: 0x7a7c80, chip: 0xa8aeb6, decal: DF.HOLE, tint: 0x3a3a3c, decalSize: 0.2, sparks: 7, chips: 1, splinters: false },
+  dirt: { dust: 0x8a7258, chip: 0x5e4630, decal: DF.DIRT, tint: 0x3a2a1c, decalSize: 0.42, sparks: 0, chips: 8, splinters: false },
+  grass: { dust: 0x7a7050, chip: 0x4e7030, decal: DF.DIRT, tint: 0x2c3018, decalSize: 0.38, sparks: 0, chips: 7, splinters: false },
+  wood: { dust: 0xa88a62, chip: 0x8a6a44, decal: DF.HOLE, tint: 0x4a3420, decalSize: 0.24, sparks: 0, chips: 6, splinters: true },
+  water: { dust: 0xe0f2ff, chip: 0xcfeaff, decal: -1, tint: 0, decalSize: 0, sparks: 0, chips: 0, splinters: false },
+};
 
 const _v = new THREE.Vector3();
-const _p = new THREE.Vector3();
+const _n = new THREE.Vector3();
 const _c = new THREE.Color();
 const _c2 = new THREE.Color();
+const _sp = new PSpec();
+const UP = new THREE.Vector3(0, 1, 0);
+
+/** Classify a colour as blood/goo (saturated red or green) from its sRGB hex. */
+function liquidKind(hex: number): 'blood' | 'goo' | null {
+  const r = ((hex >> 16) & 255) / 255;
+  const g = ((hex >> 8) & 255) / 255;
+  const b = (hex & 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return null;
+  const s = (max - min) / (1 - Math.abs(2 * l - 1));
+  let h: number;
+  if (max === r) h = ((g - b) / (max - min) + 6) % 6;
+  else if (max === g) h = (b - r) / (max - min) + 2;
+  else h = (r - g) / (max - min) + 4;
+  h /= 6;
+  if (s < 0.45) return null;
+  if ((h < 0.045 || h > 0.95) && l < 0.5) return 'blood';
+  if (h > 0.15 && h < 0.42 && l < 0.75) return 'goo';
+  return null;
+}
+
+/** Perceived lightness of an sRGB hex (0..1). */
+function lightness(hex: number): number {
+  const r = ((hex >> 16) & 255) / 255;
+  const g = ((hex >> 8) & 255) / 255;
+  const b = (hex & 255) / 255;
+  return (Math.max(r, g, b) + Math.min(r, g, b)) / 2;
+}
 
 /**
  * World-space visual effects. Everything is pooled — calling these every shot is fine.
+ *
+ * Draws: soft particles (smoke, dust, blood) · glow particles (fire, sparks) ·
+ * ground decals (blood pools, bullet holes, scorch) · two gib meshes — at most
+ * 5 draw calls, plus one shared flash light (explosions / muzzle flashes).
  */
 export class Fx {
   readonly group = new THREE.Group();
-  private normal = new ParticlePool(false);
-  private glow = new ParticlePool(true);
-  private chunks = new ChunkPool();
-  private flashLight = new THREE.PointLight(0xffaa55, 0, 18, 2);
-  private flashT = 0;
-  private rng = new Rng(4242);
   screen: FxScreenHooks = {};
   /** Ground height lookup (set by World). */
   groundAt: (x: number, z: number) => number = () => 0;
 
+  private particleTex = particleAtlasTexture();
+  private decalTex = decalAtlasTexture();
+  private soft = new ParticleSystem(SOFT_CAP, false, this.particleTex);
+  private glow = new ParticleSystem(GLOW_CAP, true, this.particleTex);
+  private decals = new DecalSystem(DECAL_CAP, this.decalTex);
+  private meat = new GibMesh(MEAT_CAP, 'meat');
+  private shards = new GibMesh(SHARD_CAP, 'shard');
+  private flashLight = new THREE.PointLight(0xffaa55, 0, 18, 2);
+  private flashT = 0;
+  private flashDur = 0.4;
+  private flashPeak = 0;
+  private muzzleT = 0;
+  private muzzlePeak = 0;
+  private muzzleColor = new THREE.Color();
+  private explosionColor = new THREE.Color(0xffa04a);
+  private camera: THREE.Camera | null = null;
+  private rng = new Rng(4242);
+  private decalBudget = DECAL_BUDGET;
+  // Approximate scene lighting for the lit (normal-blended) sprites and decals.
+  private lights: THREE.Light[] = [];
+  private lightScanT = 0;
+  private readonly collectLight = (o: THREE.Object3D) => {
+    if ((o as THREE.Light).isLight && o !== this.flashLight) this.lights.push(o as THREE.Light);
+  };
+
   constructor() {
     this.group.name = 'fx';
-    this.group.add(this.normal.points, this.glow.points, this.chunks.mesh, this.flashLight);
+    this.group.add(this.decals.mesh, this.meat.mesh, this.shards.mesh, this.soft.mesh, this.glow.mesh, this.flashLight);
+    this.soft.onLand = (x, y, z, r, g, b, tag) => this.landSplat(x, y, z, r, g, b, tag);
+    this.meat.onLand = this.shards.onLand = (x, y, z, r, g, b, size, flags) => this.gibLanded(x, y, z, r, g, b, size, flags);
+    this.meat.onTrail = this.shards.onTrail = (x, y, z, vx, vy, vz, r, g, b, flags) => this.gibTrail(x, y, z, vx, vy, vz, r, g, b, flags);
+    this.soft.lightUniform.setRGB(0.8, 0.8, 0.8);
+    this.decals.lightUniform.setRGB(0.8, 0.8, 0.8);
   }
 
-  /** Must be called when the viewport height changes (keeps particle size consistent). */
-  setViewportHeight(px: number, pixelRatio: number) {
-    const s = px * pixelRatio * 0.5;
-    this.normal.mat.uniforms.uScale.value = s;
-    this.glow.mat.uniforms.uScale.value = s;
+  /** Give the FX system the player camera (muzzle flashes, distance LOD). */
+  attachCamera(camera: THREE.Camera) {
+    this.camera = camera;
   }
+
+  /** Must be called when the viewport height changes (keeps tiny particles visible). */
+  setViewportHeight(px: number, pixelRatio: number) {
+    const half = px * pixelRatio * 0.5;
+    this.soft.setViewport(half);
+    this.glow.setViewport(half);
+  }
+
+  // ─── Blood & gore ─────────────────────────────────────────────────────────
 
   /** Blood / goo burst in the direction of the shot. */
   blood(point: THREE.Vector3, dir: THREE.Vector3 | null, o: BloodOptions = {}) {
-    const amount = o.amount ?? 1;
-    _c.setHex(o.color ?? 0x8a0a0a);
+    const amount = Math.max(0.1, o.amount ?? 1);
+    const hex = o.color ?? 0x8a0a0a;
     const r = this.rng;
-    const n = Math.round(10 * amount);
-    for (let i = 0; i < n; i++) {
-      _v.set(r.spread(1.6), r.range(0.6, 2.6), r.spread(1.6));
-      if (dir) _v.addScaledVector(dir, r.range(1, 3.5));
-      _c2.copy(_c).multiplyScalar(r.range(0.6, 1.25));
-      this.normal.emit(point, _v, _c2, r.range(0.05, 0.13) * (0.8 + amount * 0.3), r.range(0.4, 0.8), 9, 1.5);
+    const lod = this.lod(point);
+    const floor = this.groundAt(point.x, point.z);
+    const height = point.y - floor;
+    const stains = lightness(hex) < 0.7;
+    const kind = liquidKind(hex);
+    _c.setHex(hex);
+    const dx = dir?.x ?? 0;
+    const dy = dir?.y ?? 0;
+    const dz = dir?.z ?? 0;
+    const sz = 0.85 + amount * 0.3;
+
+    // Impact burst: a dense puff that blooms out of the wound.
+    _sp.reset().pos(point).color(_c, 1.15);
+    _sp.vel(-dx * 0.6, 0.25, -dz * 0.6);
+    _sp.frame = PF.SMOKE;
+    _sp.size(0.14 * sz, 0.6 * sz);
+    _sp.life = 0.22;
+    _sp.alpha = 0.95;
+    _sp.drag = 6;
+    _sp.fadeIn = 0.02;
+    _sp.fadeOut = 0.2;
+    _sp.rot = r.next() * 6.28;
+    this.soft.spawn(_sp);
+
+    // Streaks: fast stretched droplets, mostly out of the exit side plus back-spatter.
+    const nStreak = Math.round((4 + 5 * amount) * lod);
+    for (let i = 0; i < nStreak; i++) {
+      const through = !dir || r.chance(0.55);
+      const k = through ? r.range(2.5, 6.5) : -r.range(1.5, 3.5);
+      _sp.reset().pos(point).color(_c, r.range(0.75, 1.25));
+      _sp.vel(dx * k + r.spread(1.8), dy * k + r.range(0.6, 3.2), dz * k + r.spread(1.8));
+      _sp.frame = PF.DROP;
+      _sp.stretch = 0.05;
+      _sp.size(r.range(0.035, 0.065) * sz, r.range(0.02, 0.04) * sz);
+      _sp.life = r.range(0.45, 0.85);
+      _sp.grav = 11;
+      _sp.drag = 1.2;
+      _sp.fadeIn = 0.01;
+      _sp.fadeOut = 0.75;
+      _sp.flags = PFLAG.DIE_ON_FLOOR;
+      _sp.floor = floor;
+      this.soft.spawn(_sp);
     }
-    // Mist puff.
-    for (let i = 0; i < 3; i++) {
-      _v.set(r.spread(0.4), r.range(0.1, 0.5), r.spread(0.4));
-      this.normal.emit(point, _v, _c, r.range(0.25, 0.4) * amount, 0.35, 0, 3, 1.5);
+
+    // Round droplets, slower, arcing down.
+    const nDrop = Math.round((5 + 7 * amount) * lod);
+    for (let i = 0; i < nDrop; i++) {
+      const k = r.range(0.3, 2.4);
+      _sp.reset().pos(point).color(_c, r.range(0.7, 1.2));
+      _sp.vel(dx * k + r.spread(1.9), r.range(0.4, 3.4), dz * k + r.spread(1.9));
+      _sp.frame = PF.DROP;
+      _sp.size(r.range(0.05, 0.11) * sz, r.range(0.03, 0.06) * sz);
+      _sp.life = r.range(0.55, 1.0);
+      _sp.grav = 10;
+      _sp.drag = 1.1;
+      _sp.fadeIn = 0.01;
+      _sp.fadeOut = 0.8;
+      _sp.flags = PFLAG.DIE_ON_FLOOR;
+      _sp.floor = floor;
+      this.soft.spawn(_sp);
     }
-    if (amount >= 1.2) this.gibs(point, o.color ?? 0x8a0a0a, Math.round(amount * 2));
+
+    // Mist: a translucent cloud that hangs for a moment.
+    const nMist = Math.max(1, Math.round((1.5 + amount * 1.5) * lod));
+    for (let i = 0; i < nMist; i++) {
+      _sp.reset().pos(point).color(_c, kind === 'goo' ? 1 : 1.3);
+      _sp.vel(dx * r.range(0.3, 1.2) + r.spread(0.5), r.range(0.0, 0.5), dz * r.range(0.3, 1.2) + r.spread(0.5));
+      _sp.frame = PF.SMOKE;
+      _sp.size(r.range(0.2, 0.3) * sz, r.range(0.6, 0.95) * sz);
+      _sp.life = r.range(0.4, 0.7);
+      _sp.alpha = 0.45;
+      _sp.drag = 3.5;
+      _sp.grav = 0.4;
+      _sp.fadeIn = 0.05;
+      _sp.fadeOut = 0.25;
+      _sp.rot = r.next() * 6.28;
+      _sp.rotV = r.spread(1.5);
+      this.soft.spawn(_sp);
+    }
+
+    if (stains) {
+      // Heavy drops that leave a splat where they land.
+      const carriers = amount >= 1.4 ? 2 : 1;
+      for (let i = 0; i < carriers; i++) {
+        const k = r.range(0.8, 2.2);
+        _sp.reset().pos(point).color(_c);
+        _sp.vel(dx * k + r.spread(1.2), r.range(0.5, 2.0), dz * k + r.spread(1.2));
+        _sp.frame = PF.DROP;
+        _sp.size(0.07 * sz);
+        _sp.life = 3;
+        _sp.grav = 10;
+        _sp.drag = 0.6;
+        _sp.fadeIn = 0.01;
+        _sp.fadeOut = 0.95;
+        _sp.flags = PFLAG.DIE_ON_FLOOR | PFLAG.LAND_EVENT;
+        _sp.floor = floor;
+        _sp.tag = r.range(0.4, 0.65) * (0.7 + amount * 0.45);
+        this.soft.spawn(_sp);
+      }
+      // Low hits (crawlers, limbs hitting the ground) splat immediately.
+      if (height < 1.0 && amount >= 0.25) {
+        this.splatDecal(point.x + dx * 0.25, floor, point.z + dz * 0.25, _c.r, _c.g, _c.b, r.range(0.45, 0.7) * (0.6 + amount * 0.5));
+      }
+    }
+
+    if (amount >= 1.2) this.gibs(point, hex, Math.round(amount * 2));
   }
 
   /** Physical chunks that bounce on the ground. */
   gibs(point: THREE.Vector3, color: number, count = 4, size = 0.09) {
     const r = this.rng;
     const floor = this.groundAt(point.x, point.z);
-    for (let i = 0; i < count; i++) {
-      _v.set(r.spread(2.5), r.range(2, 5), r.spread(2.5));
-      _c.setHex(color).multiplyScalar(r.range(0.7, 1.1));
-      this.chunks.emit(point, _v, _c, size * r.range(0.6, 1.4), r.range(1.5, 3), floor, r);
+    const kind = liquidKind(color);
+    const bloody = kind !== null;
+    const n = Math.min(24, Math.max(0, Math.round(count)));
+    for (let i = 0; i < n; i++) {
+      const meat = bloody ? r.chance(0.8) : r.chance(0.3);
+      const s = size * r.range(0.6, 1.5);
+      let sx = s * r.range(0.75, 1.3);
+      const sy = s * r.range(0.6, 1.05);
+      let sz = s * r.range(0.75, 1.35);
+      if (!meat) {
+        // Shards/splinters are long and thin.
+        sz *= r.range(1.3, 2.4);
+        sx *= r.range(0.5, 0.8);
+      }
+      _c.setHex(color).multiplyScalar(r.range(0.72, 1.1));
+      (meat ? this.meat : this.shards).spawn(
+        point,
+        r.spread(2.6),
+        r.range(2.2, 5.4),
+        r.spread(2.6),
+        _c,
+        sx,
+        sy,
+        sz,
+        bloody ? r.range(4, 7) : r.range(2.8, 4.5),
+        floor,
+        bloody ? GIB_FLAG.BLOODY : 0,
+        r,
+      );
     }
   }
+
+  // ─── Impacts ──────────────────────────────────────────────────────────────
 
   /** Metal spark spray (armour hits, bullet ricochets). */
   sparks(point: THREE.Vector3, normal: THREE.Vector3 | null, count = 8) {
     const r = this.rng;
-    for (let i = 0; i < count; i++) {
+    const lod = this.lod(point);
+    const floor = this.groundAt(point.x, point.z);
+    // Hot flash at the contact point.
+    _sp.reset().pos(point).rgb0(2.2, 1.8, 1.2).rgb1(1.6, 0.8, 0.3);
+    _sp.frame = PF.GLOW;
+    _sp.size(0.32, 0.5);
+    _sp.life = 0.08;
+    _sp.fadeIn = 0.01;
+    _sp.fadeOut = 0.2;
+    this.glow.spawn(_sp);
+    _sp.frame = PF.STAR;
+    _sp.size(0.3, 0.42);
+    _sp.rot = r.next() * 6.28;
+    _sp.life = 0.06;
+    this.glow.spawn(_sp);
+
+    const n = Math.max(1, Math.round(count * lod));
+    for (let i = 0; i < n; i++) {
+      const ember = i % 4 === 3;
       _v.set(r.spread(3), r.range(0.5, 4), r.spread(3));
-      if (normal) _v.addScaledVector(normal, r.range(1, 4));
-      _c.setHSL(r.range(0.08, 0.14), 1, r.range(0.55, 0.8));
-      this.glow.emit(point, _v, _c, r.range(0.03, 0.06), r.range(0.15, 0.4), 12, 2);
+      if (normal) _v.addScaledVector(normal, r.range(1.5, 5));
+      if (ember) _v.multiplyScalar(0.5);
+      _sp.reset().pos(point).vel(_v.x, _v.y, _v.z);
+      _sp.rgb0(2.4, 1.9, 1.1).rgb1(1.5, 0.4, 0.06);
+      _sp.frame = PF.STREAK;
+      _sp.stretch = ember ? 0.025 : 0.035;
+      _sp.size(r.range(0.022, 0.04));
+      _sp.life = ember ? r.range(0.6, 1.0) : r.range(0.15, 0.42);
+      _sp.grav = 9.8;
+      _sp.drag = ember ? 0.6 : 1.4;
+      _sp.fadeIn = 0.01;
+      _sp.fadeOut = 0.45;
+      _sp.flags = PFLAG.BOUNCE;
+      _sp.floor = floor;
+      this.glow.spawn(_sp);
     }
   }
 
   /** Bullet hitting scenery. */
   impact(point: THREE.Vector3, normal: THREE.Vector3 | null, surface: string = 'concrete') {
+    const S = SURFACES[surface] ?? SURFACES.concrete;
     const r = this.rng;
-    const col = surface === 'grass' ? 0x4a6a2a : surface === 'dirt' ? 0x6b5236 : surface === 'wood' ? 0x7a5a3a : surface === 'water' ? 0xbfe4ff : 0x8a8a84;
-    for (let i = 0; i < 6; i++) {
-      _v.set(r.spread(1.2), r.range(0.8, 2.5), r.spread(1.2));
-      if (normal) _v.addScaledVector(normal, r.range(0.5, 2));
-      _c.setHex(col).multiplyScalar(r.range(0.7, 1.2));
-      this.normal.emit(point, _v, _c, r.range(0.05, 0.12), r.range(0.3, 0.7), 8, 2);
+    const lod = this.lod(point);
+    const nrm = normal ? _n.copy(normal) : _n.copy(UP);
+    if (nrm.lengthSq() < 1e-6) nrm.copy(UP);
+    nrm.normalize();
+    const floor = this.groundAt(point.x, point.z);
+    const onGround = nrm.y > 0.7 && Math.abs(point.y - floor) < 0.3;
+
+    if (surface === 'water') {
+      this.splash(point, lod);
+      return;
     }
-    _c.setHex(col);
-    this.normal.emit(point, _v.set(0, 0.4, 0), _c, 0.35, 0.5, 0, 2, 2);
-    if (surface === 'metal' || surface === 'concrete') this.sparks(point, normal, 3);
+
+    // Dust puff blown out along the normal.
+    _c.setHex(S.dust);
+    const nPuff = surface === 'metal' ? 1 : 2;
+    for (let i = 0; i < nPuff; i++) {
+      const k = r.range(0.4, 1.3);
+      _sp.reset().color(_c, r.range(0.85, 1.1));
+      _sp.x = point.x + nrm.x * 0.05;
+      _sp.y = point.y + nrm.y * 0.05;
+      _sp.z = point.z + nrm.z * 0.05;
+      _sp.vel(nrm.x * k + r.spread(0.3), nrm.y * k + r.range(0.1, 0.5), nrm.z * k + r.spread(0.3));
+      _sp.frame = PF.SMOKE;
+      _sp.size(r.range(0.1, 0.16), r.range(0.45, 0.75));
+      _sp.life = r.range(0.5, 0.95);
+      _sp.alpha = 0.6;
+      _sp.drag = 3.2;
+      _sp.grav = -0.3;
+      _sp.fadeIn = 0.04;
+      _sp.fadeOut = 0.25;
+      _sp.rot = r.next() * 6.28;
+      _sp.rotV = r.spread(2);
+      this.soft.spawn(_sp);
+    }
+
+    // Chips / clods / splinters.
+    _c.setHex(S.chip);
+    const nChip = Math.round(S.chips * lod);
+    for (let i = 0; i < nChip; i++) {
+      _v.set(r.spread(1.4), r.range(0.8, 2.6), r.spread(1.4)).addScaledVector(nrm, r.range(1.2, 3.6));
+      _sp.reset().pos(point).vel(_v.x, _v.y, _v.z).color(_c, r.range(0.7, 1.2));
+      if (S.splinters && r.chance(0.6)) {
+        _sp.frame = PF.STREAK;
+        _sp.stretch = 0.03;
+        _sp.size(r.range(0.025, 0.04));
+      } else {
+        _sp.frame = PF.CHIP;
+        _sp.size(r.range(0.03, 0.06));
+        _sp.rot = r.next() * 6.28;
+        _sp.rotV = r.spread(18);
+      }
+      _sp.life = r.range(0.45, 0.9);
+      _sp.grav = 12;
+      _sp.drag = 1.2;
+      _sp.fadeIn = 0.01;
+      _sp.fadeOut = 0.7;
+      _sp.flags = PFLAG.BOUNCE;
+      _sp.floor = floor;
+      this.soft.spawn(_sp);
+    }
+
+    if (S.sparks > 0 && (surface === 'metal' || r.chance(0.5))) this.sparks(point, nrm, S.sparks);
+
+    if (onGround && S.decal >= 0 && this.decalBudget > 0) {
+      this.decalBudget--;
+      _c.setHex(S.tint);
+      this.decals.add(
+        point.x,
+        floor + DECAL_LIFT,
+        point.z,
+        0,
+        1,
+        0,
+        S.decalSize * r.range(0.8, 1.25),
+        r.next() * 6.28,
+        _c.r,
+        _c.g,
+        _c.b,
+        0.9,
+        r.range(14, 20),
+        S.decal,
+        0.05,
+      );
+    } else if (!onGround && (surface === 'metal' || surface === 'concrete')) {
+      // Wall hit: a brief glowing pock mark (no persistent decal — walls may move).
+      _sp.reset().rgb0(1.6, 0.7, 0.2).rgb1(0.6, 0.12, 0.02);
+      _sp.x = point.x + nrm.x * 0.02;
+      _sp.y = point.y + nrm.y * 0.02;
+      _sp.z = point.z + nrm.z * 0.02;
+      _sp.frame = PF.GLOW;
+      _sp.size(0.14, 0.08);
+      _sp.life = 0.35;
+      _sp.fadeIn = 0.01;
+      _sp.fadeOut = 0.1;
+      this.glow.spawn(_sp);
+    }
   }
 
   /** Puff of dust (spawns, landings, footfalls of big monsters). */
   dust(point: THREE.Vector3, scale = 1, color = 0x8a7f6c) {
     const r = this.rng;
-    const n = Math.round(10 * scale);
+    const lod = this.lod(point);
+    const s = Math.max(0.05, scale);
+    const n = Math.min(26, Math.round((4 + 8 * s) * lod));
+    _c.setHex(color);
+    const lifeK = Math.min(1.6, 0.8 + s * 0.3);
     for (let i = 0; i < n; i++) {
       const a = r.next() * Math.PI * 2;
-      _v.set(Math.cos(a) * r.range(0.8, 2.2) * scale, r.range(0.2, 0.9), Math.sin(a) * r.range(0.8, 2.2) * scale);
-      _p.copy(point);
-      _p.y += 0.1;
-      _c.setHex(color).multiplyScalar(r.range(0.8, 1.15));
-      this.normal.emit(_p, _v, _c, r.range(0.3, 0.6) * scale, r.range(0.6, 1.1), -0.3, 2.5, 2);
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      const sp = r.range(0.7, 2.3) * Math.sqrt(s);
+      _sp.reset().color(_c, r.range(0.82, 1.12));
+      _sp.x = point.x + ca * 0.25 * s;
+      _sp.y = point.y + 0.12 + r.range(0, 0.2) * s;
+      _sp.z = point.z + sa * 0.25 * s;
+      _sp.vel(ca * sp, r.range(0.15, 0.9), sa * sp);
+      _sp.frame = PF.SMOKE;
+      _sp.size(r.range(0.3, 0.5) * s, r.range(0.9, 1.5) * s);
+      _sp.life = r.range(0.7, 1.3) * lifeK;
+      _sp.alpha = 0.5;
+      _sp.drag = 2.6;
+      _sp.grav = -0.15;
+      _sp.fadeIn = 0.1;
+      _sp.fadeOut = 0.3;
+      _sp.rot = r.next() * 6.28;
+      _sp.rotV = r.spread(1.2);
+      this.soft.spawn(_sp);
+    }
+    if (s >= 0.8) {
+      const floor = this.groundAt(point.x, point.z);
+      const nc = Math.round(3 * s * lod);
+      _c2.copy(_c).multiplyScalar(0.7);
+      for (let i = 0; i < nc; i++) {
+        _sp.reset().pos(point).vel(r.spread(2.2) * s, r.range(1.5, 3.5), r.spread(2.2) * s).color(_c2, r.range(0.8, 1.1));
+        _sp.y += 0.1;
+        _sp.frame = PF.CHIP;
+        _sp.size(r.range(0.04, 0.08));
+        _sp.rot = r.next() * 6.28;
+        _sp.rotV = r.spread(14);
+        _sp.life = r.range(0.6, 1.0);
+        _sp.grav = 12;
+        _sp.fadeIn = 0.01;
+        _sp.fadeOut = 0.7;
+        _sp.flags = PFLAG.BOUNCE;
+        _sp.floor = floor;
+        this.soft.spawn(_sp);
+      }
     }
   }
 
-  /** Fireball + smoke + debris + light flash. */
+  // ─── Explosions ───────────────────────────────────────────────────────────
+
+  /** Fireball + shockwave + smoke column + debris + scorch + light flash. */
   explosion(point: THREE.Vector3, scale = 1) {
     const r = this.rng;
-    for (let i = 0; i < 26 * scale; i++) {
-      _v.set(r.spread(5), r.range(0, 5), r.spread(5)).multiplyScalar(scale);
-      _c.setHSL(r.range(0.02, 0.12), 1, r.range(0.5, 0.7));
-      this.glow.emit(point, _v, _c, r.range(0.5, 1.1) * scale, r.range(0.25, 0.55), -1, 3, 1.2);
-    }
-    for (let i = 0; i < 14 * scale; i++) {
-      _v.set(r.spread(2.5), r.range(1, 3.5), r.spread(2.5)).multiplyScalar(scale);
-      _c.setScalar(r.range(0.08, 0.2));
-      this.normal.emit(point, _v, _c, r.range(0.8, 1.4) * scale, r.range(0.9, 1.6), -0.6, 1.8, 2.5);
-    }
-    this.gibs(point, 0x2b2622, Math.round(6 * scale), 0.14 * scale);
-    this.sparks(point, null, Math.round(14 * scale));
+    const s = Math.max(0.2, scale);
+    const sq = Math.sqrt(s);
+    const floor = this.groundAt(point.x, point.z);
+    const height = point.y - floor;
+
+    // Light flash.
     this.flashLight.position.copy(point);
     this.flashLight.position.y += 1;
-    this.flashT = 0.35;
+    this.flashLight.distance = 14 + 10 * s;
+    this.flashLight.decay = 1.6;
+    this.flashDur = 0.35 + 0.15 * s;
+    this.flashT = this.flashDur;
+    this.flashPeak = 40 + 40 * s;
+    this.muzzleT = 0;
+
+    // Blinding core.
+    _sp.reset().pos(point).rgb0(3.2, 2.9, 2.4).rgb1(2.4, 1.4, 0.6);
+    _sp.frame = PF.GLOW;
+    _sp.size(1.4 * s, 4.2 * s);
+    _sp.life = 0.16;
+    _sp.fadeIn = 0.01;
+    _sp.fadeOut = 0.15;
+    this.glow.spawn(_sp);
+
+    // Fireball: ragged flame blobs expanding and cooling (white-yellow → orange → deep red).
+    const nFire = Math.round(9 + 7 * s);
+    for (let i = 0; i < nFire; i++) {
+      _v.set(r.spread(1), r.range(-0.2, 1), r.spread(1)).normalize();
+      const k = r.range(1.8, 5.5) * sq;
+      _sp.reset();
+      _sp.x = point.x + _v.x * 0.35 * s;
+      _sp.y = point.y + _v.y * 0.35 * s + 0.1 * s;
+      _sp.z = point.z + _v.z * 0.35 * s;
+      _sp.vel(_v.x * k, _v.y * k + r.range(0.5, 2) * sq, _v.z * k);
+      _sp.rgb0(2.7, 2.1, 1.2).rgb1(1.1, 0.18, 0.03);
+      _sp.frame = PF.FLAME;
+      _sp.size(r.range(0.5, 0.8) * s, r.range(1.5, 2.4) * s);
+      _sp.life = r.range(0.4, 0.8);
+      _sp.delay = i < nFire - 4 ? 0 : r.range(0.04, 0.14);
+      _sp.drag = 4.5;
+      _sp.grav = -2.5;
+      _sp.fadeIn = 0.04;
+      _sp.fadeOut = 0.4;
+      _sp.rot = r.next() * 6.28;
+      _sp.rotV = r.spread(2.5);
+      this.glow.spawn(_sp);
+    }
+
+    // Shockwave: a flat ring racing across the ground + a quick air ring.
+    if (height < 3) {
+      _sp.reset().rgb0(1.8, 1.3, 0.8).rgb1(1.0, 0.5, 0.2);
+      _sp.x = point.x;
+      _sp.y = floor + 0.08;
+      _sp.z = point.z;
+      _sp.frame = PF.RING;
+      _sp.flags = PFLAG.FLAT;
+      _sp.size(0.6 * s, 9 * s);
+      _sp.life = 0.42;
+      _sp.alpha = 0.85;
+      _sp.fadeIn = 0.01;
+      _sp.fadeOut = 0.15;
+      this.glow.spawn(_sp);
+      // Dust skirt kicked out along the ground.
+      const nSkirt = Math.round(8 + 6 * s);
+      _c.setRGB(0.42, 0.38, 0.33);
+      for (let i = 0; i < nSkirt; i++) {
+        const a = (i / nSkirt) * Math.PI * 2 + r.spread(0.3);
+        const sp = r.range(4, 7.5) * sq;
+        _sp.reset().color(_c, r.range(0.8, 1.15));
+        _sp.x = point.x + Math.cos(a) * 0.5 * s;
+        _sp.y = floor + 0.3 * s;
+        _sp.z = point.z + Math.sin(a) * 0.5 * s;
+        _sp.vel(Math.cos(a) * sp, r.range(0.3, 1.2), Math.sin(a) * sp);
+        _sp.frame = PF.SMOKE;
+        _sp.size(0.6 * s, r.range(1.6, 2.4) * s);
+        _sp.life = r.range(1.0, 1.7);
+        _sp.alpha = 0.55;
+        _sp.drag = 2.8;
+        _sp.grav = -0.2;
+        _sp.fadeIn = 0.05;
+        _sp.fadeOut = 0.3;
+        _sp.rot = r.next() * 6.28;
+        _sp.rotV = r.spread(0.8);
+        this.soft.spawn(_sp);
+      }
+    }
+    _sp.reset().pos(point).rgb0(1.4, 1.2, 1.0).rgb1(0.8, 0.5, 0.3);
+    _sp.frame = PF.RING;
+    _sp.size(0.5 * s, 6 * s);
+    _sp.life = 0.24;
+    _sp.alpha = 0.45;
+    _sp.fadeIn = 0.01;
+    _sp.fadeOut = 0.1;
+    this.glow.spawn(_sp);
+
+    // Smoke column: dark, fire-lit at first, rising and spreading as the fire dies.
+    const nSmoke = Math.round(6 + 6 * s);
+    for (let i = 0; i < nSmoke; i++) {
+      const g = r.range(0.1, 0.17);
+      _sp.reset();
+      _sp.x = point.x + r.spread(0.6) * s;
+      _sp.y = point.y + r.range(0, 0.8) * s;
+      _sp.z = point.z + r.spread(0.6) * s;
+      _sp.vel(r.spread(1.2) * sq, r.range(1.4, 3.6) * sq, r.spread(1.2) * sq);
+      _sp.rgb0(g * 3.2, g * 1.9, g * 1.2).rgb1(g * 1.6, g * 1.55, g * 1.5);
+      _sp.frame = PF.SMOKE;
+      _sp.size(r.range(0.8, 1.2) * s, r.range(2.6, 3.8) * s);
+      _sp.life = r.range(2.2, 3.8) * Math.min(1.4, sq);
+      _sp.delay = r.range(0.05, 0.3);
+      _sp.alpha = r.range(0.6, 0.8);
+      _sp.drag = 1.0;
+      _sp.grav = -0.5;
+      _sp.fadeIn = 0.08;
+      _sp.fadeOut = 0.35;
+      _sp.rot = r.next() * 6.28;
+      _sp.rotV = r.spread(0.6);
+      this.soft.spawn(_sp);
+    }
+
+    // Embers flung out on arcs, bouncing on the ground.
+    const nEmber = Math.round(8 + 8 * s);
+    for (let i = 0; i < nEmber; i++) {
+      _sp.reset().pos(point).vel(r.spread(6) * sq, r.range(3, 9) * sq, r.spread(6) * sq);
+      _sp.rgb0(2.6, 1.6, 0.5).rgb1(1.2, 0.25, 0.02);
+      _sp.frame = PF.STREAK;
+      _sp.stretch = 0.03;
+      _sp.size(r.range(0.035, 0.065));
+      _sp.life = r.range(0.7, 1.5);
+      _sp.grav = 9.8;
+      _sp.drag = 0.7;
+      _sp.fadeIn = 0.01;
+      _sp.fadeOut = 0.55;
+      _sp.flags = PFLAG.BOUNCE;
+      _sp.floor = floor;
+      this.glow.spawn(_sp);
+    }
+
+    // Flying debris chunks (some still glowing hot → ember trails).
+    const nDebris = Math.round(4 + 4 * s);
+    for (let i = 0; i < nDebris; i++) {
+      const hot = i % 2 === 0;
+      const sz = 0.13 * s * r.range(0.6, 1.4);
+      _c.setHex(hot ? 0x3a2a20 : 0x2b2622).multiplyScalar(r.range(0.7, 1.2));
+      this.shards.spawn(
+        point,
+        r.spread(5) * sq,
+        r.range(3.5, 8) * sq,
+        r.spread(5) * sq,
+        _c,
+        sz * r.range(0.6, 1),
+        sz * r.range(0.5, 0.9),
+        sz * r.range(1.2, 2.2),
+        r.range(3, 5),
+        floor,
+        hot ? GIB_FLAG.HOT : 0,
+        r,
+      );
+    }
+
+    // Scorch mark.
+    if (height < 2.5) {
+      this.decals.add(point.x, floor + DECAL_LIFT + 0.002, point.z, 0, 1, 0, r.range(2.8, 3.6) * s, r.next() * 6.28, 0.045, 0.04, 0.035, 0.92, r.range(24, 30), DF.SCORCH, 0.12);
+    }
   }
 
   /** Destroyed object fragments. */
   debris(point: THREE.Vector3, color: number) {
-    this.gibs(point, color, 6, 0.12);
+    const r = this.rng;
+    const floor = this.groundAt(point.x, point.z);
+    for (let i = 0; i < 6; i++) {
+      const meat = r.chance(0.3);
+      const s = 0.12 * r.range(0.6, 1.4);
+      _c.setHex(color).multiplyScalar(r.range(0.7, 1.15));
+      (meat ? this.meat : this.shards).spawn(
+        point,
+        r.spread(3),
+        r.range(2.2, 5),
+        r.spread(3),
+        _c,
+        s * r.range(0.6, 1.1),
+        s * r.range(0.5, 0.9),
+        s * (meat ? r.range(0.8, 1.2) : r.range(1.3, 2.4)),
+        r.range(2.8, 4.5),
+        floor,
+        0,
+        r,
+      );
+    }
+    _c.setHex(color);
+    for (let i = 0; i < 8; i++) {
+      _sp.reset().pos(point).vel(r.spread(3), r.range(1.5, 4.5), r.spread(3)).color(_c, r.range(0.7, 1.15));
+      _sp.frame = PF.CHIP;
+      _sp.size(r.range(0.04, 0.08));
+      _sp.rot = r.next() * 6.28;
+      _sp.rotV = r.spread(16);
+      _sp.life = r.range(0.6, 1.1);
+      _sp.grav = 12;
+      _sp.drag = 0.8;
+      _sp.fadeIn = 0.01;
+      _sp.fadeOut = 0.7;
+      _sp.flags = PFLAG.BOUNCE;
+      _sp.floor = floor;
+      this.soft.spawn(_sp);
+    }
     this.dust(point, 0.6, color);
   }
 
@@ -377,12 +707,68 @@ export class Fx {
   sparkle(point: THREE.Vector3, color: number) {
     const r = this.rng;
     _c.setHex(color);
-    for (let i = 0; i < 24; i++) {
+    _sp.reset().pos(point).color(_c, 2.2);
+    _sp.frame = PF.GLOW;
+    _sp.size(0.3, 1.1);
+    _sp.life = 0.25;
+    _sp.fadeIn = 0.01;
+    _sp.fadeOut = 0.2;
+    this.glow.spawn(_sp);
+    _sp.frame = PF.RING;
+    _sp.size(0.2, 1.6);
+    _sp.life = 0.32;
+    _sp.alpha = 0.8;
+    this.glow.spawn(_sp);
+    for (let i = 0; i < 18; i++) {
       const a = r.next() * Math.PI * 2;
       const b = r.spread(1.4);
       _v.set(Math.cos(a) * Math.cos(b), Math.sin(b), Math.sin(a) * Math.cos(b)).multiplyScalar(r.range(1.5, 3.5));
-      this.glow.emit(point, _v, _c, r.range(0.08, 0.16), r.range(0.4, 0.8), 1, 2.5);
+      _sp.reset().pos(point).vel(_v.x, _v.y, _v.z);
+      _sp.r0 = _c.r * 2.4 + 0.4;
+      _sp.g0 = _c.g * 2.4 + 0.4;
+      _sp.b0 = _c.b * 2.4 + 0.4;
+      _sp.r1 = _c.r * 1.4;
+      _sp.g1 = _c.g * 1.4;
+      _sp.b1 = _c.b * 1.4;
+      _sp.frame = i % 3 === 0 ? PF.STAR : PF.GLOW;
+      _sp.size(i % 3 === 0 ? r.range(0.16, 0.26) : r.range(0.08, 0.14), 0.03);
+      _sp.rot = r.next() * 6.28;
+      _sp.rotV = r.spread(5);
+      _sp.life = r.range(0.45, 0.85);
+      _sp.grav = 1;
+      _sp.drag = 2.5;
+      _sp.fadeIn = 0.02;
+      _sp.fadeOut = 0.5;
+      this.glow.spawn(_sp);
     }
+    for (let i = 0; i < 6; i++) {
+      _sp.reset().vel(r.spread(0.3), r.range(0.6, 1.4), r.spread(0.3)).color(_c, 1.8);
+      _sp.x = point.x + r.spread(0.3);
+      _sp.y = point.y + r.spread(0.2);
+      _sp.z = point.z + r.spread(0.3);
+      _sp.frame = PF.GLOW;
+      _sp.size(0.07, 0.03);
+      _sp.life = r.range(0.8, 1.2);
+      _sp.drag = 0.5;
+      _sp.fadeOut = 0.4;
+      this.glow.spawn(_sp);
+    }
+  }
+
+  /**
+   * Short warm light burst near the camera when the player fires (lights up
+   * nearby ground and enemies, very visible at night). Needs `attachCamera`.
+   * `strength` ≈ 1 for a pistol, 1.6 shotgun/magnum, 0.7 SMG/turret.
+   */
+  muzzleFlash(strength = 1, color = 0xffb35a) {
+    if (!this.camera || this.flashT > 0.08) return;
+    this.muzzleT = 0.07;
+    this.muzzlePeak = 14 * Math.max(0, strength);
+    this.muzzleColor.setHex(color);
+    this.flashLight.color.copy(this.muzzleColor);
+    this.flashLight.distance = 12;
+    this.flashLight.decay = 1.7;
+    this.placeMuzzleLight();
   }
 
   /** Liquid splat on the "camera lens" (handled by HUD). */
@@ -391,26 +777,257 @@ export class Fx {
   }
 
   update(dt: number) {
-    this.normal.update(dt);
+    this.decalBudget = DECAL_BUDGET;
+    this.updateLighting(dt);
+    // Gibs first (they spawn trail particles/decals), then particles (landing → decals), then decals.
+    this.meat.update(dt);
+    this.shards.update(dt);
+    this.soft.update(dt);
     this.glow.update(dt);
-    this.chunks.update(dt);
+    this.decals.update(dt);
+
     if (this.flashT > 0) {
       this.flashT = Math.max(0, this.flashT - dt);
-      this.flashLight.intensity = (this.flashT / 0.35) * 60;
+      const k = this.flashT / this.flashDur;
+      this.flashLight.color.copy(this.explosionColor);
+      this.flashLight.intensity = this.flashPeak * k * k;
+    } else if (this.muzzleT > 0) {
+      this.muzzleT = Math.max(0, this.muzzleT - dt);
+      const k = this.muzzleT / 0.07;
+      this.placeMuzzleLight();
+      this.flashLight.intensity = this.muzzlePeak * k;
     } else this.flashLight.intensity = 0;
   }
 
   clear() {
-    this.normal.clear();
+    this.soft.clear();
     this.glow.clear();
-    this.chunks.clear();
+    this.decals.clear();
+    this.meat.clear();
+    this.shards.clear();
     this.flashT = 0;
+    this.muzzleT = 0;
     this.flashLight.intensity = 0;
   }
 
   dispose() {
-    this.normal.dispose();
+    this.soft.dispose();
     this.glow.dispose();
-    this.chunks.dispose();
+    this.decals.dispose();
+    this.meat.dispose();
+    this.shards.dispose();
+    this.particleTex.dispose();
+    this.decalTex.dispose();
+    this.lights.length = 0;
+    this.camera = null;
+  }
+
+  // ─── Internals ────────────────────────────────────────────────────────────
+
+  /** 1 near the camera → 0.45 far away (fewer particles where nobody can see them). */
+  private lod(p: THREE.Vector3): number {
+    if (!this.camera) return 1;
+    const d = this.camera.position.distanceTo(p);
+    return Math.min(1, Math.max(0.45, 1.25 - d / 45));
+  }
+
+  private placeMuzzleLight() {
+    const cam = this.camera;
+    if (!cam) return;
+    // Slightly right of and below the eye, a metre ahead (where the gun would be).
+    this.flashLight.position.set(0.3, -0.25, -1.1).applyMatrix4(cam.matrixWorld);
+  }
+
+  private splash(point: THREE.Vector3, lod: number) {
+    const r = this.rng;
+    _c.setHex(SURFACES.water.chip);
+    const n = Math.round(9 * lod);
+    for (let i = 0; i < n; i++) {
+      _sp.reset().pos(point).vel(r.spread(0.9), r.range(2, 4.6), r.spread(0.9)).color(_c, r.range(0.9, 1.15));
+      _sp.frame = PF.DROP;
+      _sp.stretch = 0.04;
+      _sp.size(r.range(0.03, 0.06));
+      _sp.life = r.range(0.5, 0.9);
+      _sp.grav = 11;
+      _sp.drag = 0.6;
+      _sp.fadeIn = 0.01;
+      _sp.fadeOut = 0.8;
+      _sp.flags = PFLAG.DIE_ON_FLOOR;
+      _sp.floor = point.y - 0.02;
+      this.soft.spawn(_sp);
+    }
+    _sp.reset().color(_c, 1.2);
+    _sp.x = point.x;
+    _sp.y = point.y + 0.02;
+    _sp.z = point.z;
+    _sp.frame = PF.RING;
+    _sp.flags = PFLAG.FLAT;
+    _sp.size(0.12, 1.1);
+    _sp.life = 0.7;
+    _sp.alpha = 0.7;
+    _sp.fadeIn = 0.02;
+    _sp.fadeOut = 0.2;
+    this.soft.spawn(_sp);
+    _sp.reset().pos(point).color(_c, 1.1);
+    _sp.frame = PF.SMOKE;
+    _sp.size(0.15, 0.6);
+    _sp.life = 0.5;
+    _sp.alpha = 0.5;
+    _sp.drag = 3;
+    _sp.vy = 0.8;
+    _sp.fadeOut = 0.3;
+    this.soft.spawn(_sp);
+  }
+
+  /** A blood drop landed (LAND_EVENT particle): leave a splat. */
+  private landSplat(x: number, floor: number, z: number, r: number, g: number, b: number, size: number) {
+    this.splatDecal(x, floor, z, r, g, b, size);
+  }
+
+  private splatDecal(x: number, floor: number, z: number, r: number, g: number, b: number, size: number) {
+    if (this.decalBudget <= 0) return;
+    this.decalBudget--;
+    const rng = this.rng;
+    this.decals.add(x, floor + DECAL_LIFT, z, 0, 1, 0, size, rng.next() * 6.28, r, g, b, 0.94, rng.range(17, 23), rng.int(DF.SPLAT0, DF.SPLAT3), 0.28);
+  }
+
+  private gibLanded(x: number, floor: number, z: number, r: number, g: number, b: number, size: number, flags: number) {
+    if (flags & GIB_FLAG.BLOODY) {
+      if (this.decalBudget <= 0) return;
+      this.decalBudget--;
+      const rng = this.rng;
+      const big = size > 0.07;
+      this.decals.add(
+        x,
+        floor + DECAL_LIFT,
+        z,
+        0,
+        1,
+        0,
+        Math.min(0.75, Math.max(0.22, size * (big ? 5 : 4))),
+        rng.next() * 6.28,
+        r,
+        g,
+        b,
+        0.92,
+        rng.range(16, 22),
+        big ? rng.int(DF.SPLAT0, DF.SPLAT3) : DF.DRIPS,
+        0.18,
+      );
+    } else if (flags & GIB_FLAG.HOT) {
+      // Hot debris thuds down with a little puff of smoke.
+      _sp.reset().vel(0, 0.4, 0).rgb0(0.25, 0.23, 0.21).rgb1(0.3, 0.3, 0.3);
+      _sp.x = x;
+      _sp.y = floor + 0.1;
+      _sp.z = z;
+      _sp.frame = PF.SMOKE;
+      _sp.size(0.2, 0.7);
+      _sp.life = 0.9;
+      _sp.alpha = 0.5;
+      _sp.drag = 2;
+      _sp.grav = -0.2;
+      _sp.fadeOut = 0.3;
+      this.soft.spawn(_sp);
+    }
+  }
+
+  private gibTrail(x: number, y: number, z: number, vx: number, vy: number, vz: number, r: number, g: number, b: number, flags: number) {
+    const rng = this.rng;
+    if (flags & GIB_FLAG.BLOODY) {
+      _sp.reset().vel(vx * 0.15 + rng.spread(0.3), vy * 0.15, vz * 0.15 + rng.spread(0.3)).rgb0(r, g, b).rgb1(r, g, b);
+      _sp.x = x;
+      _sp.y = y;
+      _sp.z = z;
+      _sp.frame = PF.DROP;
+      _sp.size(rng.range(0.035, 0.055), 0.025);
+      _sp.life = rng.range(0.4, 0.65);
+      _sp.grav = 9;
+      _sp.fadeIn = 0.01;
+      _sp.fadeOut = 0.7;
+      _sp.flags = PFLAG.DIE_ON_FLOOR;
+      _sp.floor = y - 3;
+      this.soft.spawn(_sp);
+    } else if (flags & GIB_FLAG.HOT) {
+      _sp.reset().vel(rng.spread(0.2), 0.3, rng.spread(0.2)).rgb0(2.0, 1.0, 0.3).rgb1(0.8, 0.15, 0.02);
+      _sp.x = x;
+      _sp.y = y;
+      _sp.z = z;
+      _sp.frame = PF.GLOW;
+      _sp.size(0.12, 0.05);
+      _sp.life = 0.3;
+      _sp.fadeIn = 0.01;
+      _sp.fadeOut = 0.3;
+      this.glow.spawn(_sp);
+      if (rng.chance(0.5)) {
+        _sp.reset().vel(rng.spread(0.2), 0.5, rng.spread(0.2)).rgb0(0.18, 0.17, 0.16).rgb1(0.28, 0.28, 0.28);
+        _sp.x = x;
+        _sp.y = y;
+        _sp.z = z;
+        _sp.frame = PF.SMOKE;
+        _sp.size(0.12, 0.45);
+        _sp.life = 0.8;
+        _sp.alpha = 0.45;
+        _sp.drag = 1.5;
+        _sp.grav = -0.3;
+        _sp.rot = rng.next() * 6.28;
+        _sp.fadeOut = 0.3;
+        this.soft.spawn(_sp);
+      }
+    }
+  }
+
+  /** Estimate how lit a sprite would be from the scene's ambient/hemisphere/sun lights. */
+  private updateLighting(dt: number) {
+    this.lightScanT -= dt;
+    if (this.lightScanT <= 0) {
+      this.lightScanT = 1.5;
+      let root: THREE.Object3D = this.group;
+      while (root.parent) root = root.parent;
+      this.lights.length = 0;
+      if (root !== this.group) root.traverse(this.collectLight);
+    }
+    const ls = this.lights;
+    if (ls.length === 0) return;
+    let sr = 0,
+      sg = 0,
+      sb = 0,
+      ur = 0,
+      ug = 0,
+      ub = 0;
+    for (let i = 0; i < ls.length; i++) {
+      const l = ls[i];
+      if (!l.visible) continue;
+      const I = l.intensity;
+      const c = l.color;
+      if ((l as THREE.HemisphereLight).isHemisphereLight) {
+        const gc = (l as THREE.HemisphereLight).groundColor;
+        sr += (c.r * 0.7 + gc.r * 0.3) * I;
+        sg += (c.g * 0.7 + gc.g * 0.3) * I;
+        sb += (c.b * 0.7 + gc.b * 0.3) * I;
+        ur += c.r * I;
+        ug += c.g * I;
+        ub += c.b * I;
+      } else if ((l as THREE.AmbientLight).isAmbientLight) {
+        sr += c.r * I;
+        sg += c.g * I;
+        sb += c.b * I;
+        ur += c.r * I;
+        ug += c.g * I;
+        ub += c.b * I;
+      } else if ((l as THREE.DirectionalLight).isDirectionalLight) {
+        sr += c.r * I * 0.55;
+        sg += c.g * I * 0.55;
+        sb += c.b * I * 0.55;
+        ur += c.r * I * 0.7;
+        ug += c.g * I * 0.7;
+        ub += c.b * I * 0.7;
+      }
+    }
+    // Fire light spills onto the smoke for a moment.
+    const f = this.flashT > 0 ? (this.flashT / this.flashDur) * Math.min(2, this.flashPeak / 40) : 0;
+    const k = 1 / Math.PI;
+    const clampL = (x: number) => Math.min(1.6, Math.max(0.06, x));
+    this.soft.lightUniform.setRGB(clampL(sr * k + f * 0.9), clampL(sg * k + f * 0.55), clampL(sb * k + f * 0.25));
+    this.decals.lightUniform.setRGB(clampL(ur * k), clampL(ug * k), clampL(ub * k));
   }
 }

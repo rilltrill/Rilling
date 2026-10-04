@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import type { QualityLevel } from './types';
+import type { QualityLevel, RetroMode } from './types';
+import { RetroPass } from './RetroPass';
 
 const QUALITY_PRESETS: Record<QualityLevel, { maxDpr: number; minDpr: number; antialias: boolean }> = {
   low: { maxDpr: 1, minDpr: 0.6, antialias: false },
@@ -29,6 +30,9 @@ export class Engine {
   private rafId = 0;
   private width = 1;
   private height = 1;
+  /** Arcade-monitor post effect (off until configured). */
+  readonly retro: RetroPass;
+  private lastDt = 0;
 
   constructor(container: HTMLElement, quality: QualityLevel) {
     this.quality = quality;
@@ -49,6 +53,7 @@ export class Engine {
     container.appendChild(this.canvas);
 
     this.camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.05, 400);
+    this.retro = new RetroPass(this.renderer);
     this.dpr = Math.min(window.devicePixelRatio || 1, preset.maxDpr);
     this.resize();
     window.addEventListener('resize', () => this.resize());
@@ -67,6 +72,17 @@ export class Engine {
   setQuality(q: QualityLevel) {
     this.quality = q;
     this.dpr = Math.min(window.devicePixelRatio || 1, QUALITY_PRESETS[q].maxDpr);
+    this.retro.configure(this.retro.mode, q);
+    this.resize();
+  }
+
+  /** Switch the arcade-monitor look ('crt' | 'pixel' | 'off'). */
+  setRetro(mode: RetroMode) {
+    this.retro.configure(mode, this.quality);
+    this.retro.scale = 1;
+    // The 3D scene renders at low resolution in retro modes; the output only needs
+    // enough pixels for crisp scanlines.
+    this.dpr = Math.min(window.devicePixelRatio || 1, mode === 'off' ? QUALITY_PRESETS[this.quality].maxDpr : 2);
     this.resize();
   }
 
@@ -102,6 +118,7 @@ export class Engine {
       const raw = (now - this.last) / 1000;
       this.last = now;
       const dt = Math.min(Math.max(raw, 0), 1 / 20);
+      this.lastDt = dt;
       this.trackPerf(raw);
       this.onFrame(dt);
     };
@@ -114,7 +131,8 @@ export class Engine {
   }
 
   render(scene: THREE.Scene) {
-    this.renderer.render(scene, this.camera);
+    if (this.retro.enabled) this.retro.render(scene, this.camera, this.lastDt);
+    else this.renderer.render(scene, this.camera);
   }
 
   /** Dynamic resolution: drop pixel ratio when frames are slow, recover when fast. */
@@ -127,6 +145,20 @@ export class Engine {
     this.fps = Math.round(1 / avg);
     const preset = QUALITY_PRESETS[this.quality];
     const deviceMax = Math.min(window.devicePixelRatio || 1, preset.maxDpr);
+    if (this.retro.enabled) {
+      // In retro modes the scene cost is the low-res target: scale its line count instead.
+      if (avg > 1 / 45 && this.retro.scale > 0.7) this.retro.scale = +(this.retro.scale - 0.1).toFixed(2);
+      else if (avg < 1 / 57 && this.retro.scale < 1) {
+        this.perfGoodTime += this.perfAccum;
+        if (this.perfGoodTime > 6) {
+          this.retro.scale = Math.min(1, +(this.retro.scale + 0.1).toFixed(2));
+          this.perfGoodTime = 0;
+        }
+      }
+      this.perfAccum = 0;
+      this.perfFrames = 0;
+      return;
+    }
     if (avg > 1 / 45 && this.dpr > preset.minDpr) {
       this.dpr = Math.max(preset.minDpr, +(this.dpr - 0.15).toFixed(2));
       this.perfGoodTime = 0;

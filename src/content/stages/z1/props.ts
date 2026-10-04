@@ -551,6 +551,20 @@ export function schoolBus(): THREE.Group {
   box(g, 0.3, 0.2, 0.06, Kit.mat(0x8a2a10), -0.8, 2.75, 4.3);
   // Rear frame around the emergency door (the door itself is a separate animated prop).
   box(g, 2.5, 0.2, 0.1, black, 0, 2.75, -5.42);
+  // Underbody: chassis rails, axles, fuel tank, exhaust (it ends up facing the street).
+  const chassis = Kit.mat(0x1a1a1c);
+  box(g, 2.3, 0.08, 10.6, chassis, 0, 0.68, -0.2);
+  for (const x of [-0.6, 0.6]) box(g, 0.2, 0.25, 10.4, Kit.mat(0x2a2a2c), x, 0.55, -0.2);
+  for (const z of [3.6, -3.4]) cyl(g, 0.1, 0.1, 2.3, 6, M.metal, 0, 0.5, z, 0, 0, Math.PI / 2);
+  box(g, 0.7, 0.4, 1.4, Kit.mat(0x3a3a3e), 0.7, 0.45, 0.6);
+  cyl(g, 0.07, 0.07, 6, 6, M.metalLight, -0.85, 0.45, -1.5, Math.PI / 2, 0, 0);
+  // SCHOOL BUS lettering on the roof edges front and back.
+  for (const z of [4.22, -5.42]) {
+    const t = paintedText('SCHOOL BUS', 0x111111, 0.28);
+    t.position.set(0, 2.62, z + (z > 0 ? 0.06 : -0.06));
+    if (z < 0) t.rotation.y = Math.PI;
+    g.add(t);
+  }
   return g;
 }
 

@@ -67,7 +67,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   void moon;
   // A soft shoulder-mounted flashlight that follows the camera: enemies in the
   // centre of the frame always pop, without lighting the whole street.
-  const spot = new THREE.SpotLight(0xfff0d8, 26, 34, 0.5, 0.75, 1.15);
+  const spot = new THREE.SpotLight(0xfff0d8, 32, 36, 0.5, 0.75, 1.15);
   spot.name = 'flashlight';
   root.add(spot, spot.target);
   // Fire light (follows the nearest burning thing) + accent (neon / police / bulbs).

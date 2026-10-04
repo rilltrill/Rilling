@@ -10,7 +10,7 @@ import { addText } from './font';
 import { FirePlume, LightBeams, LightPools } from './vfx';
 import { BurstDoors, BusWreck, GasStation, mergedGroup } from './setpieces';
 import {
-  ALLEY_N, ALLEY_S, BUS_POS, BUS_YAW, CROSS_Z0, CROSS_Z1, GAS_Z0, GAS_Z1, MAIN_FACADE, SECOND_E, SECOND_W, SECOND_X, SQ_X0, SQ_X1, SQ_Z0, SQ_Z1,
+  ROOF_PADS, ALLEY_N, ALLEY_S, BUS_POS, BUS_YAW, CROSS_Z0, CROSS_Z1, GAS_Z0, GAS_Z1, MAIN_FACADE, SECOND_E, SECOND_W, SECOND_X, SQ_X0, SQ_X1, SQ_Z0, SQ_Z1,
 } from './layout';
 
 /** Direction a facade faces. E = +X, W = -X, S = +Z, N = -Z. */
@@ -813,7 +813,16 @@ export function buildTown(): Town {
     anim.fires.push({ plume: engineFire, pos: fp.clone().setY(1.5), light: 22 });
     pools.add(fp.x, fp.z, 4, 0xff7a2a, 0.55);
     // Debris + skid marks.
-    for (let i = 0; i < 8; i++) boxAt(0.5, 0.01, rng.range(2, 4), Kit.mat(0x0d0e10), SECOND_X - 1 + i * 0.25, 0.022, -232 - i * 1.8, -0.4);
+    // Skid marks: two faint tyre tracks curving into the wreck.
+    const skid = Kit.mat(0x121318);
+    for (const off of [-0.9, 0.9]) {
+      for (let i = 0; i < 9; i++) {
+        const t = i / 8;
+        const x = SECOND_X - 2.5 + t * 6 + off * 0.3;
+        const z = -226 - t * 18 + off;
+        boxAt(0.22, 0.008, 2.2, skid, x, 0.022, z, -0.32 - t * 0.25);
+      }
+    }
     for (let i = 0; i < 12; i++) boxAt(rng.range(0.15, 0.5), rng.range(0.05, 0.2), rng.range(0.15, 0.5), i % 3 ? M.carGlass : Kit.mat(0xd29a16), BUS_POS[0] + rng.spread(6), 0.08, BUS_POS[2] + rng.range(1.5, 4.5), rng.next() * 3);
     // Bullets stop on the bus body (enemies only climb out of it toward the camera).
     const bocc = new THREE.Mesh(Kit.box(11.4, 2.4, 2.8), Kit.mat(0x000000));
@@ -844,12 +853,39 @@ export function buildTown(): Town {
         g.add(s);
       }
       Kit.add(g, Kit.box(2.4, 0.1, 0.9), M.metal, 0, h - 0.6, 0.45);
-      put(g, SQ_X0, -274, ROT.E, 0, 'E');
-      // Rooftop clutter (behind where the spitter stands).
-      boxAt(1.4, 0.9, 1.1, M.metalLight, -75, h + 0.45, -270, 0, 'E');
-      boxAt(0.7, 1.5, 0.7, Kit.mat(0x3b2a24), -78, h + 0.75, -279, 0, 'E');
+      // Juts 1.5 m into the square so the rooftop spitters stay within range on the roof.
+      put(g, SQ_X0 + 1.5, -274, ROT.E, 0, 'E');
+      // Rooftop clutter (behind where the spitters stand).
+      boxAt(1.4, 0.9, 1.1, M.metalLight, -74, h + 0.45, -268, 0, 'E');
+      boxAt(0.7, 1.5, 0.7, Kit.mat(0x3b2a24), -77, h + 0.75, -280, 0, 'E');
     }
     bld({ w: 0, d: 16, floors: 3, color: col(3), shop: { interior: 0, awning: 0x2a4a3a } }, -284, SQ_Z1, SQ_X0, 'E');
+    // Two newsstand kiosks (flat roofs at 3 m: the rooftop spitters' perches).
+    for (const pad of ROOF_PADS) {
+      const g = new THREE.Group();
+      const w = pad.x1 - pad.x0;
+      const d = pad.z1 - pad.z0;
+      const green = pad.x0 < -58;
+      const body = Kit.mat(green ? 0x2a4a3a : 0x5a2a2a);
+      Kit.add(g, Kit.box(w - 0.3, 2.6, d - 0.3), body, 0, 1.3, 0);
+      Kit.add(g, Kit.box(w + 0.2, 0.25, d + 0.2), M.trimDark, 0, pad.y - 0.12, 0);
+      // Serving hatch facing the rail, lit, with magazines / cups.
+      const facing = green ? 1 : -1;
+      Kit.add(g, Kit.box(0.06, 1.0, d - 0.9), Kit.glow(green ? 0xfff0c0 : 0xffd8a0, 0.55), facing * (w / 2 - 0.13), 1.5, 0);
+      Kit.add(g, Kit.box(0.5, 0.06, d - 0.6), M.wood, facing * (w / 2 + 0.05), 1.0, 0);
+      for (let i = 0; i < 4; i++) Kit.add(g, Kit.box(0.04, 0.3, 0.22), Kit.mat([0xc83a3a, 0x3a8ac8, 0xe8d83a, 0xe8e8e8][i]), facing * (w / 2 - 0.05), 1.25, -0.6 + i * 0.4);
+      const sign = boardSign(green ? 'NEWS' : 'COFFEE', green ? C.neonYellow : C.neonOrange, 0.36, { pad: 0.3 });
+      sign.rotation.y = facing * Math.PI / 2;
+      sign.position.set(facing * (w / 2 + 0.02), 2.35, 0);
+      g.add(sign);
+      // Front sign toward the camera approach (+Z).
+      const sign2 = boardSign(green ? 'NEWS' : 'COFFEE', green ? C.neonYellow : C.neonOrange, 0.3, { pad: 0.3 });
+      sign2.position.set(0, 2.3, d / 2 - 0.1);
+      g.add(sign2);
+      put(g, (pad.x0 + pad.x1) / 2, (pad.z0 + pad.z1) / 2, 0, 0, 'E');
+      pools.add((pad.x0 + pad.x1) / 2 + facing * 2, (pad.z0 + pad.z1) / 2, 3, green ? 0xfff0c0 : 0xffb070, 0.4);
+    }
+
     // North: hotel, butcher, bank.
     bld({ w: 0, d: 16, floors: 4, color: col(0), trim: M.trimLight, shop: { interior: 0xffd09a, interiorIntensity: 0.4, awning: 0x3a1a1a, board: { text: 'GRAND HOTEL', color: C.neonYellow, size: 0.5 } } }, -90, -66, SQ_Z1, 'S');
     {
@@ -1020,7 +1056,7 @@ export function buildTown(): Town {
     put(bench(), -63.5, -280, Math.PI / 2, 0, 'E');
     put(car({ color: CAR_COLORS[5], open: ['fl'], headlights: true }), -40, -302, 1.3, 0, 'E');
     put(car({ color: CAR_COLORS[0], wrecked: true }), -63, -296, -0.5, 0, 'E');
-    for (let i = 0; i < 6; i++) put(trafficCone(), -52 + rng.spread(8), -270 + rng.spread(6), rng.next(), 0, 'E');
+    for (let i = 0; i < 6; i++) put(trafficCone(), -49 + rng.range(0, 3) + (i % 2) * 2, -266 - rng.range(0, 6), rng.next(), 0, 'E');
     occ(SQ_X0 - 24, SQ_X0 - 16, -284, SQ_Z1); // west 3-storey back
     occ(-90, -66, SQ_Z1 - 16, SQ_Z1);
     occ(-50, -10, SQ_Z1 - 16, SQ_Z1);

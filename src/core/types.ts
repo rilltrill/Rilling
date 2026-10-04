@@ -45,6 +45,9 @@ export type RigMode = 'walk' | 'drive';
 
 export type QualityLevel = 'low' | 'medium' | 'high';
 
+/** Screen look: 'crt' = low-res + dithering + scanlines/curvature, 'pixel' = low-res + dithering, 'off' = clean. */
+export type RetroMode = 'crt' | 'pixel' | 'off';
+
 export interface Settings {
   sfxVolume: number; // 0..1
   musicVolume: number; // 0..1
@@ -54,6 +57,8 @@ export interface Settings {
   /** Put the reload / weapon buttons on the left side of the screen. */
   leftHanded: boolean;
   quality: QualityLevel;
+  /** Arcade-monitor post effect. */
+  retro: RetroMode;
   showFps: boolean;
 }
 
@@ -65,6 +70,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoReload: true,
   leftHanded: false,
   quality: 'medium',
+  retro: 'crt',
   showFps: false,
 };
 
