@@ -186,8 +186,9 @@ pixel-art sprite, the way 90s arcade shooters used pre-rendered sprites.
 
 - **Live impostors.** `SpriteArt.beginFrame()` (called by `Game.renderWorld`
   around `engine.render`) re-renders each visible sprite source about 12×/s of
-  game time (`SPRITE_FPS`, round-robin, ≤ 6 bakes per frame; never-drawn ones
-  first) — so animation is choppy like sprite frames while positions stay smooth.
+  game time (`SPRITE_FPS`, round-robin, ≤ 6 bakes and ≤ ~90 bake draw calls per
+  frame; never-drawn ones first) — so animation is choppy like sprite frames
+  while positions stay smooth.
 - **Bake.** The bake camera is the main camera with its projection *cropped* to the
   source's on-screen bounds (no perspective mismatch), rendered at ~1.5 retro
   pixels per texel (`pxPerTexel`) but never finer than 2.5 cm of model per texel
@@ -214,9 +215,11 @@ pixel-art sprite, the way 90s arcade shooters used pre-rendered sprites.
   (see `SpriteLook`). A/B captures of the same frozen instant:
   `node scripts/snap-art.mjs --shots "z1:4,d3:16:6000" --modes "3d,sprites"`;
   deterministic draw-call / bake numbers: `node scripts/bench-art.mjs`.
-- Cost: a bake is the source's own draw calls + 1; with ~4 bakes per frame the
-  sprite path draws far fewer calls than 3D (characters are drawn ~12×/s instead
-  of 60×/s). Memory: 3 MB scratch + a few KB–1 MB per sprite (≈ 3–5 MB total).
+- Cost: a bake is the source's own draw calls + 1 (plus 2 render-target
+  switches); characters are drawn ~12×/s instead of 60×/s, so average draw calls
+  drop a lot in crowds, while a frame that bakes a 100-mesh boss costs about what
+  3D did (the bake budget keeps such frames from stacking). Memory: 3 MB scratch
+  + a few KB–1 MB per sprite (≈ 3–5 MB total).
 
 ## Audio
 
