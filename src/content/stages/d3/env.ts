@@ -152,6 +152,8 @@ export class ParkEnv {
   private logVel = 0;
   // Mud.
   mud = false;
+  /** World position (feet) on the stuck truck's flatbed, where the worker waits to be rescued. */
+  readonly mudPerch = new THREE.Vector3();
   private mudT = 0;
   private revT = 0;
   // Bridge.
@@ -631,6 +633,8 @@ export class ParkEnv {
     if (d > D.GAP_FROM - 4 && d < D.GAP_TO + 6 && lat > 3 && lat < 19) return false;
     if (d > D.GAP_FROM + 2 && d < D.GAP_TO + 10 && lat < -3 && lat > -16) return false;
     if (d > D.ROADBLOCK - 4 && d < D.ROADBLOCK + 4 && a < 7) return false;
+    // Clear verge right of the roadblock: the stranded ranger stands there in plain view.
+    if (d > D.ROADBLOCK - 10 && d < D.ROADBLOCK - 3 && lat > 3 && lat < 10.5) return false;
     return true;
   }
 
@@ -994,6 +998,9 @@ export class ParkEnv {
     t.root.position.y = -0.35;
     t.root.rotation.z = -0.1;
     t.root.rotation.x = 0.06;
+    // Rear of the flatbed, beside the crane arm (the prop chunk group sits at the origin).
+    t.root.updateMatrix();
+    this.mudPerch.set(-0.55, 1.76, -2.2).applyMatrix4(t.root.matrix);
     for (const h of t.hazards) this.blinkers.push({ obj: h, period: 0.8, duty: 0.5, phase: h.position.x > 0 ? 0.4 : 0 });
     g.add(t.root);
     // Muddy pools.

@@ -37,3 +37,13 @@ export function onTap(e: HTMLElement, fn: (ev: PointerEvent) => void) {
 export function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 }
+
+/**
+ * Comfort / photosensitivity settings that CSS needs to know about: with
+ * `reduce-flash` on <html>, blinking HUD and menu elements hold steady or
+ * blink slowly (see styles.css "Reduced flashing").
+ */
+export function applyComfort(s: { reduceFlashes?: boolean }) {
+  const root = document.documentElement;
+  if (root.classList.contains('reduce-flash') !== !!s.reduceFlashes) root.classList.toggle('reduce-flash', !!s.reduceFlashes);
+}

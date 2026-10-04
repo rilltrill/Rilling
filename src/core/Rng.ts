@@ -4,6 +4,13 @@ export class Rng {
   constructor(seed = 1234567) {
     this.s = seed >>> 0 || 1;
   }
+  /** Internal state: save it and assign it back to replay the same sequence. */
+  get state(): number {
+    return this.s;
+  }
+  set state(v: number) {
+    this.s = v;
+  }
   /** Uniform float in [0, 1). */
   next(): number {
     let t = (this.s += 0x6d2b79f5);

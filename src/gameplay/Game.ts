@@ -20,6 +20,7 @@ import { Enemy } from './Enemy';
 import type { Entity } from './Entity';
 import { Projectile } from './Projectile';
 import { prewarmFxAtlases } from '../fx/Fx';
+import { buildWarmupSet } from './Warmup';
 
 export interface DebugFlags {
   stage?: string;
@@ -58,7 +59,29 @@ const DEMO_FF_MAX = 45;
 const _hurtV = new THREE.Vector3();
 const _hurtBest = new THREE.Vector3();
 
-type State = 'menu' | 'intro' | 'playing' | 'paused' | 'continue' | 'results' | 'gameover' | 'demo';
+type State = 'menu' | 'loading' | 'intro' | 'playing' | 'paused' | 'continue' | 'results' | 'gameover' | 'demo';
+
+/** States that show a frozen world frame (redrawn only when the canvas is resized/cleared). */
+const FROZEN: ReadonlySet<State> = new Set<State>(['loading', 'intro', 'results', 'continue', 'paused', 'gameover']);
+/** Frames the loading card / pressed button gets to paint before the (blocking) stage build. */
+const LOAD_PAINT_FRAMES = 2;
+/** Pause-screen note while the GPU has dropped the WebGL context. */
+const GFX_NOTE = 'GRAPHICS RESET - PLEASE WAIT';
+/** CONTINUE? countdown length (s), and the least it reopens with after the app was backgrounded. */
+const CONTINUE_SECS = 9;
+const CONTINUE_MIN_RESUME = 3;
+
+/** A stage being prepared behind the intro card (or the screen that started it). */
+interface Loading {
+  stage: StageDef;
+  showIntro: boolean;
+  /** Frames since the load was requested. */
+  frames: number;
+  /** The world is built (next: shader warm-up + first render). */
+  built: boolean;
+  /** The intro card already finished (play as soon as the load completes). */
+  introDone: boolean;
+}
 
 interface Run {
   mode: 'arcade' | 'single';
@@ -111,6 +134,12 @@ export class Game implements MenuActions {
   shooter: Shooter | null = null;
   autoplay: AutoPlayer | null = null;
   private run: Run | null = null;
+  /** Stage being built across the next frames (see startStage). */
+  private loading: Loading | null = null;
+  /** CONTINUE? countdown: when it (re)opened, with how many seconds, and when the app was hidden. */
+  private continueAt = 0;
+  private continueSecs = CONTINUE_SECS;
+  private continueHiddenAt = 0;
   private clearTimer = -1;
   private holdStart = new Map<number, number>();
   /** Animated attract scene behind the menus (built lazily, kept across stages — it doesn't use the Kit cache). */
@@ -147,7 +176,10 @@ export class Game implements MenuActions {
     readonly flags: DebugFlags = {},
   ) {
     const s = this.save.settings;
-    this.engine = new Engine(root.querySelector('#stage') as HTMLElement, s.quality);
+    const bootRetro: RetroMode = RETRO_SETTING_ENABLED ? (flags.retro ?? s.retro) : 'off';
+    this.engine = new Engine(root.querySelector('#stage') as HTMLElement, s.quality, bootRetro);
+    this.engine.onContextLost = () => this.onGraphicsLost();
+    this.engine.onContextRestored = () => this.onGraphicsRestored();
     this.appliedQuality = s.quality;
     const surface = root.querySelector('#play-surface') as HTMLElement;
     this.input = new Input(surface);
@@ -175,9 +207,14 @@ export class Game implements MenuActions {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
         if (this.state === 'playing') this.pause();
+        // Hidden-page timers keep running on Android/desktop: don't let CONTINUE? run out unseen.
+        if (this.state === 'continue') this.continueHiddenAt = performance.now();
         this.audio.suspend();
       } else {
         this.audio.resume();
+        if (this.state === 'continue' && this.continueHiddenAt > 0) this.reopenContinue();
+        this.continueHiddenAt = 0;
+        this.redrawUntil = performance.now() + 300;
       }
     });
     // Unlock audio on the very first interaction anywhere.
@@ -277,7 +314,63 @@ export class Game implements MenuActions {
 
   // ─── Stage lifecycle ──────────────────────────────────────────────────────
 
+  /**
+   * Start a stage. Building one blocks the main thread for 0.4–1 s (procedural
+   * scenery, shader compiles, buffer uploads), so the UI goes first: the intro
+   * card (or the pressed RETRY button) paints, then the world is built on a
+   * following frame, shaders are compiled behind the card, and play begins when
+   * both the card and the build are done. The attract demo builds right away.
+   */
   private startStage(stage: StageDef, skipIntro = false) {
+    const demo = !!this.demo;
+    const showIntro = !(skipIntro || this.flags.autoplay || demo);
+    this.loading = { stage, showIntro, frames: 0, built: false, introDone: !showIntro };
+    this.input.reset();
+    this.holdStart.clear();
+    if (demo) {
+      // Attract mode: nobody is waiting on a tap — build now.
+      this.buildWorld(stage, false);
+      this.finishLoading();
+      return;
+    }
+    // The current music fades out instead of starving while the build blocks.
+    this.music(null);
+    this.state = showIntro ? 'intro' : 'loading';
+    if (showIntro) this.menus.showStageIntro(stage, this.campaignOf(stage), () => this.introFinished());
+  }
+
+  private campaignOf(stage: StageDef): CampaignDef {
+    return this.run?.campaign ?? this.findStage(stage.id)?.campaign ?? this.campaigns[0];
+  }
+
+  /** The intro card is done (timer or tap): play now, or as soon as the stage is ready. */
+  private introFinished() {
+    if (this.loading) this.loading.introDone = true;
+    else if (this.state === 'intro') this.beginPlay();
+  }
+
+  /** Advance a pending stage load by one frame. */
+  private loadingTick() {
+    const l = this.loading;
+    if (!l) return;
+    l.frames++;
+    if (!l.built) {
+      if (l.frames > LOAD_PAINT_FRAMES) {
+        this.buildWorld(l.stage, l.showIntro);
+        l.built = true;
+      }
+      return;
+    }
+    this.finishLoading();
+  }
+
+  /** Stop a pending load (the player left before it finished). */
+  private cancelLoading() {
+    this.loading = null;
+  }
+
+  /** Tear down the old stage and build the new one (environment, runner, HUD wiring). */
+  private buildWorld(stage: StageDef, showIntro: boolean) {
     this.teardownWorld();
     const demo = !!this.demo;
     // The demo plays itself: no vibration on the player's phone while it idles.
@@ -295,7 +388,6 @@ export class Game implements MenuActions {
     this.world = w;
     this.shooter = new Shooter(w);
     this.runner = new StageRunner(w, stage);
-    const showIntro = !(skipIntro || this.flags.autoplay || demo);
     // HUD wiring first: the opening beat (usually a banner, or a boss when
     // debugging with ?beat=) talks to the HUD from inside runner.start().
     this.hud.reset();
@@ -326,9 +418,18 @@ export class Game implements MenuActions {
     w.events.on('player-dead', () => this.onPlayerDead());
     w.events.on('stage-clear', () => (this.clearTimer = 1.8));
     w.events.on('boss-dead', () => this.music(null));
-    const campaign = this.run?.campaign ?? this.findStage(stage.id)!.campaign;
-    this.music(stage.music ?? (campaign.id === 'zombie' ? 'zombie' : 'dino'));
-    if (demo) {
+  }
+
+  /** Shader warm-up + first render of the freshly built stage, then play (or wait for the intro card). */
+  private finishLoading() {
+    const l = this.loading;
+    this.loading = null;
+    const w = this.world;
+    if (!l || !w || !this.runner) return;
+    const stage = l.stage;
+    this.warmUp(w, stage);
+    this.music(stage.music ?? (this.campaignOf(stage).id === 'zombie' ? 'zombie' : 'dino'));
+    if (this.demo) {
       // Starts on a black cut that fast-forwards to the first enemies (see demoTick).
       this.state = 'demo';
       this.menus.hide();
@@ -338,13 +439,29 @@ export class Game implements MenuActions {
       this.input.enabled = true;
       return;
     }
-    // Render one frame so the intro card has the scene behind it.
+    // Render one frame so the intro card has the scene behind it (also uploads the buffers).
     this.renderWorld(w);
-    if (!showIntro) {
-      this.beginPlay();
-    } else {
-      this.state = 'intro';
-      this.menus.showStageIntro(stage, campaign, () => this.beginPlay());
+    if (l.introDone) this.beginPlay();
+    else this.state = 'intro';
+  }
+
+  /**
+   * Compile every shader program the stage will need — its scenery and FX plus
+   * throwaway copies of each enemy type, pickup and civilian it spawns — while
+   * the intro card is up, so first contact and the boss entrance don't hitch.
+   */
+  private warmUp(w: World, stage: StageDef) {
+    if (this.engine.contextLost) return;
+    try {
+      const before = this.engine.renderer.info.programs?.length ?? 0;
+      const set = buildWarmupSet(w, stage);
+      w.scene.add(set.group);
+      w.scene.updateMatrixWorld();
+      this.engine.precompile(w.scene, w.scene);
+      set.dispose();
+      if (this.flags.debug) console.info(`[game] warm-up: ${set.count} prototypes, programs ${before} → ${this.engine.renderer.info.programs?.length ?? 0}`);
+    } catch (err) {
+      console.warn('[game] shader warm-up failed', err);
     }
   }
 
@@ -354,6 +471,9 @@ export class Game implements MenuActions {
     this.hud.show(true);
     this.input.enabled = true;
     if (!this.save.data.seenTutorial && !this.flags.autoplay && !this.flags.stage && !this.demo) this.openTutorial();
+    // The intro ran out while the app was in the background: don't start blind.
+    else if (typeof document !== 'undefined' && document.hidden) this.pause();
+    else if (this.engine.contextLost) this.pause(GFX_NOTE);
   }
 
   /** First stage ever: show the illustrated briefing; the stage waits underneath. */
@@ -515,6 +635,7 @@ export class Game implements MenuActions {
   private endDemo(toMain: boolean) {
     if (!this.demo) return;
     this.demo = null;
+    this.cancelLoading();
     this.teardownWorld();
     this.applyVolumes();
     this.run = null;
@@ -555,6 +676,7 @@ export class Game implements MenuActions {
   }
 
   private enterInitials(campaign: CampaignDef, score: number, stage: string, continues: number) {
+    this.cancelLoading();
     this.teardownWorld();
     this.run = null;
     this.state = 'menu';
@@ -584,7 +706,18 @@ export class Game implements MenuActions {
     this.audio.play('game_over');
     this.music('gameover');
     // Classic 9 → 0 countdown (10 s to decide).
-    this.menus.showContinue(9);
+    this.continueAt = performance.now();
+    this.continueSecs = CONTINUE_SECS;
+    this.menus.showContinue(CONTINUE_SECS);
+  }
+
+  /** Back from the background on CONTINUE?: reopen the countdown where it was (at least a few seconds). */
+  private reopenContinue() {
+    const seen = Math.max(0, (this.continueHiddenAt - this.continueAt) / 1000);
+    const left = Math.max(CONTINUE_MIN_RESUME, Math.min(CONTINUE_SECS, Math.round(this.continueSecs - seen)));
+    this.continueAt = performance.now();
+    this.continueSecs = left;
+    this.menus.showContinue(left);
   }
 
   private stageCleared() {
@@ -600,7 +733,8 @@ export class Game implements MenuActions {
     if (this.run) {
       this.run.total += result.total;
       this.run.banked = result.total;
-      this.run.bombs = w.player.bombs;
+      // Arcade runs carry bombs into the next stage; Stage Select always starts fresh.
+      if (this.run.mode === 'arcade') this.run.bombs = w.player.bombs;
     }
     this.state = 'results';
     this.input.reset();
@@ -631,20 +765,42 @@ export class Game implements MenuActions {
     if (this.world) Object.assign(this.world.settings, s);
   }
 
-  pause() {
+  /** `note` replaces the stage name on the pause screen (e.g. the graphics-reset notice). */
+  pause(note?: string) {
     if (this.state !== 'playing') return;
     this.state = 'paused';
     this.input.reset();
+    this.holdStart.clear();
     this.audio.play('ui_click');
     this.audio.setPaused(true);
-    this.menus.showPause({
-      stage: this.runner?.stage.name ?? '',
+    this.menus.showPause(this.pauseInfo(note));
+  }
+
+  private pauseInfo(note?: string) {
+    return {
+      stage: note ?? this.runner?.stage.name ?? '',
       campaign: this.run?.campaign.name,
       score: this.world?.score.score ?? 0,
-    });
+    };
+  }
+
+  /** The GPU dropped the WebGL context: stop the action (nothing can be drawn). */
+  private onGraphicsLost() {
+    console.warn('[game] WebGL context lost');
+    if (this.state === 'playing') this.pause(GFX_NOTE);
+    else if (this.state === 'paused' && !this.tutorialOpen) this.menus.showPause(this.pauseInfo(GFX_NOTE));
+  }
+
+  /** Context back: redraw the frozen frame; the pause menu stays so the player resumes deliberately. */
+  private onGraphicsRestored() {
+    console.info('[game] WebGL context restored');
+    this.gridW = -1;
+    this.redrawUntil = performance.now() + 1000;
+    if (this.state === 'paused' && !this.tutorialOpen) this.menus.showPause(this.pauseInfo());
   }
 
   resume() {
+    if (this.engine.contextLost) return; // keep the pause screen until the GPU is back
     if (this.tutorialOpen) return this.closeTutorial();
     if (this.state !== 'paused') return;
     this.menus.hide();
@@ -662,13 +818,14 @@ export class Game implements MenuActions {
       // it again with the bombs carried into it.
       run.total -= run.banked;
       run.banked = 0;
-      run.bombs = run.stageBombs;
       // RETRY after GAME OVER keeps the credit going: that's a continue.
       if (this.state === 'gameover') {
         run.continues++;
         run.ended = false;
       }
     }
+    // Start again with the bombs carried into the stage (Stage Select: always the default 1).
+    if (run) run.bombs = run.stageBombs;
     this.startStage(stage, true);
   }
 
@@ -679,6 +836,7 @@ export class Game implements MenuActions {
       if (!run.campaign.stages[this.runner.stage.index + 1]) return this.nextStage();
     }
     const nameEntry = this.abandonCredit();
+    this.cancelLoading();
     this.teardownWorld();
     this.run = null;
     this.state = 'menu';
@@ -700,6 +858,7 @@ export class Game implements MenuActions {
       } else {
         const isBest = this.save.recordCampaign(run.campaign.id, run.total);
         const nameEntry = this.finishCredit(run, run.total, 'ALL');
+        this.cancelLoading();
         this.teardownWorld();
         this.state = 'menu';
         this.music('results');
@@ -707,6 +866,7 @@ export class Game implements MenuActions {
         this.backdropTheme = run.campaign.id === 'zombie' ? 'city' : 'jungle';
       }
     } else {
+      this.cancelLoading();
       this.teardownWorld();
       this.state = 'menu';
       this.music('menu');
@@ -741,6 +901,8 @@ export class Game implements MenuActions {
 
   continueNo() {
     if (this.state !== 'continue') return;
+    // The countdown timer can run out while the app is in the background: that's no answer.
+    if (typeof document !== 'undefined' && document.hidden) return;
     this.state = 'gameover';
     const score = (this.run?.total ?? 0) + (this.world?.score.score ?? 0);
     const run = this.run;
@@ -794,12 +956,15 @@ export class Game implements MenuActions {
   private frame(dt: number) {
     this.stats.frames++;
     this.audio.update(dt);
+    if (this.loading && !this.demo) this.loadingTick();
     const w = this.world;
     if (w) {
       w.viewport.width = this.engine.size.width;
       w.viewport.height = this.engine.size.height;
     }
     this.syncOverlayGrid();
+    // Nothing can be drawn without the context: never let the action run on blind.
+    if (this.engine.contextLost && this.state === 'playing') this.pause(GFX_NOTE);
     if ((this.state === 'playing' || this.state === 'demo') && w && this.runner) {
       const demo = this.demo;
       if (demo && this.demoTick(demo, w, this.runner)) return;
@@ -821,13 +986,10 @@ export class Game implements MenuActions {
       if (this.flags.debug) this.hud.setDebug(`${this.runner.label}  d=${w.rig.d.toFixed(1)}/${w.rig.length.toFixed(0)}  hostiles=${w.hostileCount()}  ents=${w.entities.length}`);
       this.renderWorld(w);
       this.hud.drawOverlay(w, dt);
-    } else if (w && (this.state === 'intro' || this.state === 'results' || this.state === 'continue')) {
-      // Keep the world visible (but frozen) behind menus.
-      this.renderWorld(w);
-      this.hud.drawOverlay(null, dt);
-    } else if (w && (this.state === 'paused' || this.state === 'gameover')) {
-      // Pause / tutorial / game over: the canvas keeps the last frame, but a resize
-      // (dynamic resolution, rotation, a settings change) clears it — redraw then.
+    } else if (w && FROZEN.has(this.state)) {
+      // Menus over a frozen world (intro, loading, pause, results, continue, game
+      // over): the canvas keeps the last frame, so only redraw when a resize
+      // (dynamic resolution, rotation, a settings change) or a lost context cleared it.
       const { width, height } = this.engine.size;
       if (
         width !== this.renderedW ||
@@ -838,6 +1000,7 @@ export class Game implements MenuActions {
         this.renderWorld(w);
         if (this.state === 'paused') this.hud.drawOverlay(w, 0);
       }
+      if (this.state !== 'paused' && this.state !== 'gameover') this.hud.drawOverlay(null, dt);
     } else if (!w) {
       this.renderBackdrop(dt);
     }

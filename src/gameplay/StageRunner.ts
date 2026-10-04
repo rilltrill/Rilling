@@ -10,6 +10,9 @@ import { Pickup } from './Pickup';
 import { Civilian } from './Civilian';
 import { Projectile } from './Projectile';
 
+/** Seconds a pickup left on the field survives after its beat ends (incl. the blink). */
+export const LEFTOVER_PICKUP_TTL = 6;
+
 interface WaveRun {
   def: WaveDef;
   started: boolean;
@@ -94,7 +97,9 @@ export class StageRunner {
     if (!b) return;
     b.onEnd?.(this.world);
     for (const c of this.civilians) if (!c.removed) c.rescue();
-    for (const p of this.pickups) if (!p.removed && p.ttl === Infinity) p.ttl = p.age + 2.5;
+    // Leftovers stay up a while after the fight (players go back for them) and
+    // blink only for their last PICKUP_BLINK seconds.
+    for (const p of this.pickups) if (!p.removed && p.ttl === Infinity) p.ttl = p.age + LEFTOVER_PICKUP_TTL;
     this.civilians = [];
     this.pickups = [];
     this.spawns = [];

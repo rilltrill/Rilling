@@ -6,6 +6,7 @@ import type { WeaponDef } from './Weapons';
 
 const raycaster = new THREE.Raycaster();
 raycaster.far = 160;
+const RAY_FAR = 160;
 const _ndc = new THREE.Vector2();
 const _dir = new THREE.Vector3();
 const _plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -13,10 +14,17 @@ const _hitPoint = new THREE.Vector3();
 const _tmp = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _up = new THREE.Vector3();
+// Reused per-shot scratch (no allocations for the raycast lists themselves).
+const _targets: THREE.Object3D[] = [];
+const _tHits: THREE.Intersection[] = [];
+const _oHits: THREE.Intersection[] = [];
+const _ring: Candidate[] = [];
 
 /** Aim-assist probe ring radii in CSS pixels. */
 const ASSIST_RINGS = [14, 26, 38];
 const ASSIST_SAMPLES = 8;
+/** Pellets of a multi-pellet weapon that draw wall/ground impacts (FX budget + raycast cost). */
+const IMPACT_PELLETS = 4;
 
 interface Candidate {
   intersection: THREE.Intersection;
@@ -63,7 +71,7 @@ export class Shooter {
     let anyCounted = false;
     let anyResolved = false;
     for (let p = 0; p < def.pellets; p++) {
-      const outcome = this.firePellet(x, y, def, p === 0 && def.pellets === 1);
+      const outcome = this.firePellet(x, y, def, p === 0 && def.pellets === 1, p < IMPACT_PELLETS);
       if (outcome) {
         anyResolved = true;
         if (outcome.counts) anyCounted = true;
@@ -111,39 +119,57 @@ export class Shooter {
     }
   }
 
-  /** Ordered hits along the current ray: shootables and occluders. */
-  private cast(): { list: Candidate[]; blocker: THREE.Intersection | null } {
+  /**
+   * Ordered hits along the current ray: live shootables in front of the first
+   * occluder, and that occluder (the blocker). `withImpact` = the caller needs
+   * the blocker for impact FX even when no shootable is on the ray; otherwise
+   * the (expensive, recursive) occluder raycast is skipped for clean misses.
+   */
+  private cast(targets: THREE.Object3D[], withImpact = true): { list: Candidate[]; blocker: THREE.Intersection | null } {
     const w = this.world;
-    const targets = w.shootables.active();
     const occluders = w.env?.occluders ?? [];
-    // Shootables are individual meshes; occluders may be whole groups (walls, vehicles).
-    const hits = raycaster.intersectObjects(targets, false);
-    if (occluders.length) {
-      for (const h of raycaster.intersectObjects(occluders, true)) if (!h.object.userData.shot) hits.push(h);
-      hits.sort((a, b) => a.distance - b.distance);
+    _tHits.length = 0;
+    raycaster.intersectObjects(targets, false, _tHits);
+    // Drop hitboxes unregistered since `targets` was collected (killed by an earlier pellet).
+    let n = 0;
+    for (const h of _tHits) {
+      const tag = h.object.userData.shot as ShotTag | undefined;
+      if (tag && !tag.owner.removed) _tHits[n++] = h;
     }
+    _tHits.length = n;
     const list: Candidate[] = [];
     let blocker: THREE.Intersection | null = null;
-    for (const h of hits) {
-      const tag = h.object.userData.shot as ShotTag | undefined;
-      if (tag) {
-        if (!tag.owner.removed) list.push({ intersection: h, tag });
-      } else {
-        blocker = h;
-        break; // everything beyond a wall is hidden
+    if (occluders.length && (n > 0 || withImpact)) {
+      // Shootables are individual meshes; occluders may be whole groups (walls, vehicles).
+      // Only walls in front of the farthest candidate matter.
+      raycaster.far = withImpact ? RAY_FAR : _tHits[n - 1].distance;
+      _oHits.length = 0;
+      raycaster.intersectObjects(occluders, true, _oHits);
+      raycaster.far = RAY_FAR;
+      for (const h of _oHits) {
+        if (!h.object.userData.shot) {
+          blocker = h;
+          break;
+        }
       }
+    }
+    for (const h of _tHits) {
+      if (blocker && h.distance > blocker.distance) break; // everything beyond a wall is hidden
+      list.push({ intersection: h, tag: h.object.userData.shot as ShotTag });
     }
     return { list, blocker };
   }
 
-  private firePellet(x: number, y: number, def: WeaponDef, allowAssist: boolean): ShotOutcome | null {
+  private firePellet(x: number, y: number, def: WeaponDef, allowAssist: boolean, withImpact = true): ShotOutcome | null {
     const w = this.world;
     this.setRay(x, y, def.spread);
-    let { list, blocker } = this.cast();
+    const targets = w.shootables.active(_targets);
+    const assist = allowAssist && w.settings.aimAssist;
+    let { list, blocker } = this.cast(targets, withImpact || assist);
     let assisted = false;
 
-    if (list.length === 0 && allowAssist && w.settings.aimAssist) {
-      const found = this.assist(x, y);
+    if (list.length === 0 && assist) {
+      const found = this.assist(x, y, targets);
       if (found) {
         list = [found];
         blocker = null;
@@ -152,7 +178,7 @@ export class Shooter {
     }
 
     if (list.length === 0) {
-      this.impactWorld(blocker);
+      if (withImpact) this.impactWorld(blocker);
       return null;
     }
 
@@ -186,28 +212,55 @@ export class Shooter {
     return outcome;
   }
 
-  /** Probe rings of rays around the tap for a nearby hostile/pickup (never civilians). */
-  private assist(x: number, y: number): Candidate | null {
+  /**
+   * Probe rings of rays around the tap for a nearby hostile/pickup (never
+   * civilians). Probes test only the shootable meshes (cheap); walls are checked
+   * with one occluder ray per candidate, nearest first — so detailed occluder
+   * meshes cost one raycast instead of one per probe.
+   */
+  private assist(x: number, y: number, targets: THREE.Object3D[]): Candidate | null {
+    const occluders = this.world.env?.occluders ?? [];
+    const cam = this.world.camera.position;
     for (const r of ASSIST_RINGS) {
-      let best: Candidate | null = null;
+      _ring.length = 0;
       for (let i = 0; i < ASSIST_SAMPLES; i++) {
         const a = (i / ASSIST_SAMPLES) * Math.PI * 2 + (r % 2) * 0.4;
         this.setRay(x + Math.cos(a) * r, y + Math.sin(a) * r, 0);
-        const { list } = this.cast();
-        const first = list[0];
-        if (!first) continue;
-        if (!first.tag.owner.assistable) continue;
-        if (!best || first.intersection.distance < best.intersection.distance) best = first;
+        _tHits.length = 0;
+        raycaster.intersectObjects(targets, false, _tHits);
+        // The first live shootable on the probe decides it (a civilian in front blocks assist).
+        for (const h of _tHits) {
+          const tag = h.object.userData.shot as ShotTag | undefined;
+          if (!tag || tag.owner.removed) continue;
+          if (tag.owner.assistable) _ring.push({ intersection: h, tag });
+          break;
+        }
       }
-      if (best) {
-        // Re-aim the ray at the found point so FX/knockback directions are right.
-        raycaster.ray.direction.copy(best.intersection.point).sub(this.world.camera.position).normalize();
-        return best;
+      if (_ring.length === 0) continue;
+      _ring.sort((a, b) => a.intersection.distance - b.intersection.distance);
+      for (const c of _ring) {
+        // Re-aim the ray at the found point (FX/knockback directions, occlusion test).
+        raycaster.ray.origin.copy(cam);
+        raycaster.ray.direction.copy(c.intersection.point).sub(cam).normalize();
+        if (occluders.length && this.blocked(occluders, c.intersection.distance)) continue;
+        _ring.length = 0;
+        return c;
       }
     }
+    _ring.length = 0;
     // Restore the centre ray for world impacts.
     this.setRay(x, y, 0);
     return null;
+  }
+
+  /** Is there scenery on the current ray closer than `dist`? */
+  private blocked(occluders: THREE.Object3D[], dist: number): boolean {
+    raycaster.far = Math.max(0, dist - 0.02);
+    _oHits.length = 0;
+    raycaster.intersectObjects(occluders, true, _oHits);
+    raycaster.far = RAY_FAR;
+    for (const h of _oHits) if (!h.object.userData.shot) return true;
+    return false;
   }
 
   private impactWorld(blocker: THREE.Intersection | null) {

@@ -114,6 +114,15 @@ function lightness(hex: number): number {
 export class Fx {
   readonly group = new THREE.Group();
   screen: FxScreenHooks = {};
+  /**
+   * Photosensitivity (Settings.reduceFlashes, kept in sync by World): explosion
+   * light flashes are dimmer and can't re-fire faster than ~2.5×/s, the blinding
+   * core sprite is toned down and muzzle flashes barely light the scene.
+   */
+  reduceFlashes = false;
+  /** Fx clock (s) and when the last explosion light flash started (rate limit). */
+  private clock = 0;
+  private lastFlashAt = -Infinity;
   /** Ground height lookup (set by World). */
   groundAt: (x: number, z: number) => number = () => 0;
 
@@ -554,18 +563,24 @@ export class Fx {
     const floor = this.groundAt(point.x, point.z);
     const height = point.y - floor;
 
-    // Light flash.
-    this.flashLight.position.copy(point);
-    this.flashLight.position.y += 1;
-    this.flashLight.distance = 14 + 10 * s;
-    this.flashLight.decay = 1.6;
-    this.flashDur = 0.35 + 0.15 * s;
-    this.flashT = this.flashDur;
-    this.flashPeak = 40 + 40 * s;
-    this.muzzleT = 0;
+    // Light flash (reduced flashing: dimmer, slower decay, and a chain of blasts
+    // keeps one decaying flash instead of re-strobing the scene every 0.3 s).
+    const calm = this.reduceFlashes;
+    if (!calm || this.clock - this.lastFlashAt >= 0.4 || this.flashT <= 0) {
+      this.lastFlashAt = this.clock;
+      this.flashLight.position.copy(point);
+      this.flashLight.position.y += 1;
+      this.flashLight.distance = 14 + 10 * s;
+      this.flashLight.decay = 1.6;
+      this.flashDur = (0.35 + 0.15 * s) * (calm ? 1.6 : 1);
+      this.flashT = this.flashDur;
+      this.flashPeak = (40 + 40 * s) * (calm ? 0.3 : 1);
+      this.muzzleT = 0;
+    }
 
     // Blinding core.
-    _sp.reset().pos(point).rgb0(2.0, 1.7, 1.2).rgb1(1.3, 0.6, 0.2);
+    const core = calm ? 0.55 : 1;
+    _sp.reset().pos(point).rgb0(2.0 * core, 1.7 * core, 1.2 * core).rgb1(1.3 * core, 0.6 * core, 0.2 * core);
     _sp.frame = PF.GLOW;
     _sp.size(1.2 * s, 3.6 * s);
     _sp.life = 0.14;
@@ -827,7 +842,7 @@ export class Fx {
   muzzleFlash(strength = 1, color = 0xffb35a, ahead = 1.6) {
     if (!this.camera || this.flashT > 0.08) return;
     this.muzzleT = 0.07;
-    this.muzzlePeak = 16 * Math.max(0, strength);
+    this.muzzlePeak = 16 * Math.max(0, strength) * (this.reduceFlashes ? 0.35 : 1);
     this.muzzleAhead = Math.max(0.5, ahead);
     this.muzzleColor.setHex(color);
     this.flashLight.color.copy(this.muzzleColor);
@@ -842,6 +857,7 @@ export class Fx {
   }
 
   update(dt: number) {
+    this.clock += dt;
     if (this.particleTexPending || this.decalTexPending) this.pumpAtlases();
     if (!this.camera) this.camera = this.soft.lastCamera ?? this.glow.lastCamera;
     this.decalBudget = DECAL_BUDGET;

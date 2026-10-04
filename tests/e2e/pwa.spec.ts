@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { requireWebGL, seedSave, shot, snapshot, trackErrors, waitForBoot } from './helpers';
+import { requireWebGL, seedSave, shot, skipNotice, snapshot, trackErrors, waitForBoot } from './helpers';
 
 test.describe('installable web app', () => {
   test('manifest, icons and iOS launch images are served', async ({ request }) => {
@@ -68,6 +68,7 @@ test.describe('installable web app', () => {
   test('iOS install hint: never with debug flags, forced with ?installhint=1, dismissal persists', async ({ page }, info) => {
     // Debug/test sessions (?stage / ?autoplay) never create it — deterministic in
     // both projects, unlike the navigator.webdriver guard.
+    await skipNotice(page); // the title must be what sits under the hint
     await page.goto('/?stage=z1&god=1&mute=1');
     await waitForBoot(page);
     await page.waitForTimeout(2000); // past the 1.6 s reveal delay

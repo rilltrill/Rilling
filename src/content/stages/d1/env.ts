@@ -790,6 +790,11 @@ export class JungleEnv {
     }
   }
 
+  /** The fallen tree has been blown off the road (the drums went up, or the beat ended). */
+  get treeBlasted(): boolean {
+    return this.treeT >= 0;
+  }
+
   /** Detonate the drums (if still there) and blow the fallen tree off the road. */
   blastTree(w: World) {
     if (this.treeT >= 0) return;

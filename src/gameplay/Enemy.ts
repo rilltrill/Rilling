@@ -21,11 +21,18 @@ export type EnemyState = 'entry' | 'advance' | 'windup' | 'recover' | 'stagger' 
 
 const FLASH_MAT = new THREE.MeshBasicMaterial({ color: 0xffffff });
 const RED_FLASH_MAT = new THREE.MeshBasicMaterial({ color: 0xff3020 });
+
+/** The hit-flash materials (shader warm-up compiles them up front). */
+export function flashMaterials(): THREE.Material[] {
+  return [FLASH_MAT, RED_FLASH_MAT];
+}
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const _p = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const GROUND_STATES = new Set<string>(['advance', 'windup', 'recover', 'stagger']);
+/** Minimum seconds between hit flashes with Settings.reduceFlashes (≤ 3 flashes/s). */
+export const REDUCED_FLASH_COOLDOWN = 0.34;
 
 /**
  * NDC play-area test shared by enemies and tools: inside |x|,|y| < margin, in
@@ -145,6 +152,17 @@ export abstract class Enemy extends Entity {
     this.playerPos(_p);
     this.root.rotation.y = Math.atan2(_p.x - this.root.position.x, _p.z - this.root.position.z);
     this.beginEntry(this.spawn.entry);
+  }
+
+  /**
+   * Build the model WITHOUT joining the world — configure() + build() only, no
+   * entry, AI, events or sounds; hitboxes are unregistered again. Used to warm
+   * up shader programs (see gameplay/Warmup.ts); the instance is never updated.
+   */
+  buildDetached(): void {
+    this.configure();
+    this.build();
+    this.world.shootables.removeOwner(this);
   }
 
   // ─── Helpers for subclasses ────────────────────────────────────────────────
@@ -660,7 +678,9 @@ export abstract class Enemy extends Entity {
 
   /** Briefly flash the model white (or red for critical hits). Rate-limited (photosensitivity). */
   flash(critical = false) {
-    if (this.age - this.lastFlashAge < this.flashCooldown) return;
+    // Reduced flashing: at most ~3 flashes/s even for small enemies under autofire.
+    const cd = this.world.settings.reduceFlashes ? Math.max(this.flashCooldown, REDUCED_FLASH_COOLDOWN) : this.flashCooldown;
+    if (this.age - this.lastFlashAge < cd) return;
     this.lastFlashAge = this.age;
     this.collectMeshes();
     const mat = critical ? RED_FLASH_MAT : FLASH_MAT;

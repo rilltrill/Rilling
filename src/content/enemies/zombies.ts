@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { Enemy, type EnemyState } from '../../gameplay/Enemy';
+import { Enemy, ndcInPlayArea, type EnemyState } from '../../gameplay/Enemy';
 import type { ShotHit } from '../../gameplay/Entity';
 import type { EntryKind } from '../../core/types';
 import { Projectile } from '../../gameplay/Projectile';
-import { clamp, lerp, smoothstep } from '../../core/math';
+import { angleDelta, clamp, lerp, smoothstep } from '../../core/math';
 import { registerEnemy } from '../registry';
 import { Kit } from '../kit/ModelKit';
 import type { HumanoidRig, Limb } from '../kit/humanoid';
@@ -1162,7 +1162,8 @@ export class Runner extends Zombie {
   protected override advanceUpdate(dt: number) {
     if (this.flank(dt)) return;
     const d = this.distToPlayer;
-    if (!this.lunged && d > this.attackRange + 1.6 && d < this.attackRange + 5.5 && this.world.rng.chance(dt * 2.2) && this.onScreen()) {
+    // (The lunge only closes distance — but a leap the player can't see is a cheap scare, so it must be framed too.)
+    if (!this.lunged && d > this.attackRange + 1.6 && d < this.attackRange + 5.5 && this.world.rng.chance(dt * 2.2) && this.inPlayArea(this.anchor, 0.9)) {
       this.startLunge();
       return;
     }
@@ -1178,8 +1179,8 @@ export class Runner extends Zombie {
     if (remaining <= 0.1) {
       this.playerPos(_p);
       this.faceToward(_p, dt);
-      // Never start an attack from off-screen (look-back chases pitch the camera).
-      if (this.inView(this.anchor, 0.9, 0.85) && this.grabSlot()) this.setState('windup');
+      // Never start an attack from off-screen or under a HUD panel (look-back chases pitch the camera).
+      if (this.inPlayArea(this.anchor, 0.86) && this.grabSlot()) this.setState('windup');
     }
   }
 
@@ -1370,6 +1371,29 @@ const CRAWL_SPLAY = 0.3;
 const _hl = new THREE.Vector3();
 const _hr = new THREE.Vector3();
 
+/*
+ * Fair pounces. The ring is drawn on the crawler's HEAD, which sits low in the
+ * frame, so a pounce may only START from a spot where the player can see — and
+ * shoot — it for the whole coil:
+ *  - at least `attackRange − POUNCE_SLACK` out (closer, the head is under the
+ *    bottom edge), roughly facing the player (turning during the coil swings
+ *    the head ~0.5 m toward the camera),
+ *  - head inside the play area with POUNCE_FRAME headroom (clear of the HUD
+ *    corner panels; from a vehicle also above the hood).
+ * Otherwise it crawls to such a spot first: in front but too close it scrabbles
+ * BACKWARDS still facing you; passed or alongside it crawls round to the front.
+ * A coil whose ring stays outside the play area for COIL_LOST s (the rig walked
+ * up to it, the camera turned away) is called off.
+ */
+const POUNCE_FRAME = 0.86;
+const POUNCE_SLACK = 0.4;
+const POUNCE_FACING = 0.45;
+const COIL_LOST = 0.2;
+/** Re-pounce lockout after a called-off coil (no ring flicker). */
+const COIL_RETRY = 0.45;
+/** Hood clearance from a vehicle: the head must project above this (and below its mirror). */
+const VEHICLE_HEAD_Y = 0.6;
+
 /** Phase → cycle position 0..1. */
 function cycle(ph: number) {
   const u = ph / TAU;
@@ -1431,6 +1455,14 @@ export class Crawler extends Zombie {
   private static readonly BACK = 0.45;
   /** Flight time of the current pounce (longer from the vehicle stand-off). */
   private fly = Crawler.FLY;
+  /** Scrabbling backwards (reverse crawl cycle) to open up room to pounce. */
+  private backing = false;
+  /** Seconds the coil's ring has been outside the play area. */
+  private lostT = 0;
+  /** Lockout after a called-off coil. */
+  private pounceCd = 0;
+  /** Extra stand-off earned while the camera's pitch kept the head under the frame at `attackRange`. */
+  private standoff = 0;
 
   protected override configure() {
     this.name = 'crawler';
@@ -1506,15 +1538,20 @@ export class Crawler extends Zombie {
 
   // ── Pounce state (replaces the default windup) ──
 
+  protected override keepsSlot(s: EnemyState): boolean {
+    return s === 'pounce';
+  }
+
   override setState(s: EnemyState) {
     if (this.state === 'pounce' && s !== 'pounce') this.telegraph = null;
     if (s === 'windup') s = 'pounce';
-    const had = this.holdsSlot;
+    // Every way into an attack (advance, recover → windup, stage subclasses) gets the same fairness check.
+    if (s === 'pounce' && this.state !== 'pounce' && !this.pounceReady()) s = 'advance';
     super.setState(s);
     if (s === 'pounce') {
-      // Base setState releases slots for custom states — keep ours.
-      if (had) this.grabSlot();
       this.launched = false;
+      this.lostT = 0;
+      this.backing = false;
       this.fly = clamp(Crawler.FLY + (this.distToPlayer - 3.3) * 0.06, Crawler.FLY, 0.5);
       this.windup = Crawler.COIL + this.fly;
       this.telegraph = { progress: 0, anchor: this.r.head, radius: this.telegraphRadius };
@@ -1522,24 +1559,81 @@ export class Crawler extends Zombie {
     }
   }
 
+  /** Projects the head (the ring anchor) into `_w` (NDC). */
+  private headNdc(): THREE.Vector3 {
+    this.r.head.getWorldPosition(_w);
+    return _w.project(this.world.camera);
+  }
+
+  /** Head inside the play area with `margin`; from a vehicle also clear of the hood. Leaves the NDC in `_w`. */
+  private headFramed(margin: number): boolean {
+    const n = this.headNdc();
+    if (!ndcInPlayArea(n.x, n.y, n.z, margin)) return false;
+    return !this.inVehicle || Math.abs(n.y) < VEHICLE_HEAD_Y;
+  }
+
+  /** May a pounce start right now? (See POUNCE_* above.) */
+  private pounceReady(): boolean {
+    if (this.state === 'dying' || this.distToPlayer < this.attackRange - POUNCE_SLACK) return false;
+    this.playerPos(_p);
+    const yaw = Math.atan2(_p.x - this.root.position.x, _p.z - this.root.position.z);
+    if (Math.abs(angleDelta(this.root.rotation.y, yaw)) > POUNCE_FACING) return false;
+    return this.headFramed(POUNCE_FRAME);
+  }
+
+  /**
+   * Crawl to a fair pouncing spot and pounce from there. The spot is on the
+   * stand-off circle (`attackRange` + earned stand-off) at the crawler's
+   * bearing, clamped toward the middle of the view so the head stays clear of
+   * the HUD's bottom corner panels. Further out it crawls in; too close it
+   * scrabbles BACKWARDS to the spot, still facing the player; passed or
+   * alongside, it crawls round the flank (sideways out first, then forward).
+   */
   protected override advanceUpdate(dt: number) {
+    this.backing = false;
+    if (this.pounceCd > 0) this.pounceCd -= dt;
     this.playerPos(_p);
     // Surges with each arm pull; averages out at `speed`.
     const surge = 0.36 + this.pull;
-    const remaining = this.moveToward(_p, this.speed * surge, dt, this.attackRange);
-    this.separate(dt);
-    if (remaining <= 0.05) {
-      this.faceToward(_p, dt);
-      // On foot its low head may sit at the screen's bottom edge; from a vehicle it must clear the hood.
-      if (!this.inView(this.r.head, 0.85, this.inVehicle ? 0.6 : 1.15)) {
-        this.world.camera.getWorldDirection(_v).setY(0).normalize();
-        _v.multiplyScalar(this.attackRange).add(this.world.rig.space.position);
-        if (this.frame === 'rig') this.world.rig.space.worldToLocal(_v);
-        this.moveToward(_v, this.speed * 0.8, dt);
-        return;
-      }
-      if (this.grabSlot()) this.setState('pounce');
+    const local = this.toView(this.root.position, _v);
+    const R = this.attackRange + this.standoff;
+    if (-local.z < 0.8) {
+      // Alongside or behind: out to the flank, then forward up it until it is in front.
+      const sgn = local.x >= 0 ? 1 : -1;
+      const ax = Math.abs(local.x);
+      _w.set(sgn * Math.max(ax, 1.2), 0, ax < 1.1 ? Math.min(local.z, 0) : -1.6);
+      this.fromView(_w);
+      this.moveToward(_w, this.speed * surge, dt);
+      this.separate(dt);
+      return;
     }
+    const cam = this.world.camera;
+    const maxAng = Math.atan(0.38 * Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5) * cam.aspect);
+    const ang = clamp(Math.atan2(local.x, -local.z), -maxAng, maxAng);
+    _w.set(Math.sin(ang) * R, 0, -Math.cos(ang) * R);
+    this.fromView(_w);
+    let remaining: number;
+    if (this.distToPlayer < R - 0.1) {
+      // Too close to pounce fairly: back off, still facing the player.
+      remaining = this.slideToward(_w, this.speed * 0.75 * surge, dt);
+      this.faceToward(_p, dt);
+      this.backing = this.moveSpeed > 0.05;
+    } else remaining = this.moveToward(_w, this.speed * surge, dt);
+    this.separate(dt);
+    if (remaining > 0.05) return;
+    this.faceToward(_p, dt);
+    // At the spot with the head still under the frame (camera pitched up): earn more room; give it back once framed.
+    const n = this.headNdc();
+    if (n.z < 1 && n.y < (this.inVehicle ? -VEHICLE_HEAD_Y : -POUNCE_FRAME)) this.standoff = Math.min(3, this.standoff + dt * 1.5);
+    else if (this.standoff > 0 && n.y > -0.45) this.standoff = Math.max(0, this.standoff - dt * 0.5);
+    if (this.pounceCd > 0) return;
+    if (this.pounceReady() && this.grabSlot()) this.setState('pounce');
+  }
+
+  /** Call off a coil the player can no longer see. */
+  private cancelPounce() {
+    this.pounceCd = COIL_RETRY;
+    this.setState('advance');
   }
 
   protected override customUpdate(dt: number) {
@@ -1551,6 +1645,10 @@ export class Crawler extends Zombie {
     if (this.telegraph) this.telegraph.progress = clamp(t / (C + F), 0, 1);
     if (t < C) {
       this.faceToward(_p, dt, 8);
+      // The ring rides on the head: if it stays out of the play area, the coil is called off.
+      const n = this.headNdc();
+      this.lostT = ndcInPlayArea(n.x, n.y, n.z, 1) ? 0 : this.lostT + dt;
+      if (this.lostT > COIL_LOST) this.cancelPounce();
       return;
     }
     if (!this.launched) {
@@ -1572,7 +1670,7 @@ export class Crawler extends Zombie {
     if (this.telegraph) {
       // Impact.
       this.telegraph = null;
-      this.world.hurtPlayer(this.damage, this.name);
+      this.world.hurtPlayer(this.damage, this.name, this);
       this.play('bite', 1);
       this.pounceFrom.copy(this.root.position);
       _v.subVectors(this.root.position, _p).setY(0).normalize();
@@ -1643,13 +1741,14 @@ export class Crawler extends Zombie {
    * Hands are placed with 2-bone IK so they stay planted on the ground (the
    * heave is what keeps the elbows clear of it). `rate` adds to the stroke speed.
    */
-  private crawlPose(dt: number, rate: number, moving: boolean) {
+  private crawlPose(dt: number, rate: number, moving: boolean, dir = 1) {
     const r = this.r;
     restPose(r, this.hipsY);
     // Cadence from the nominal crawl speed (plus any rig speed) — not the
-    // surging per-frame speed, which would feed back into the stroke.
+    // surging per-frame speed, which would feed back into the stroke. Run
+    // backwards (dir −1) the planted hands push the body away instead.
     const gs = moving ? Math.max(this.speed + this.groundSpeed - this.moveSpeed, 0.6) : this.groundSpeed;
-    this.phase += dt * (1.6 + rate * 2 + Math.min(gs, 6) * 3.2);
+    this.phase += dir * dt * (1.6 + rate * 2 + Math.min(gs, 6) * 3.2);
     const ph = this.phase;
     const uL = cycle(ph);
     const uR = cycle(ph - 0.7);
@@ -1729,7 +1828,9 @@ export class Crawler extends Zombie {
     const r = this.r;
     const st = this.state;
     const t = this.stateTime;
-    this.crawlPose(dt, st === 'advance' ? 0.6 : 0, st === 'advance');
+    // (Waiting for an attack slot it only paws restlessly — no crawling on the spot.)
+    const moving = st === 'advance' && this.moveSpeed > 0.05;
+    this.crawlPose(dt, moving ? 0.6 : 0, moving, this.backing ? -1 : 1);
     if (st === 'pounce') {
       const C = Crawler.COIL;
       const F = this.fly;

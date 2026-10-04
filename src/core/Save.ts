@@ -104,10 +104,35 @@ function cleanTable(v: unknown): HiScoreEntry[] | null {
   return rows.slice(0, HISCORE_SLOTS);
 }
 
-function fresh(): SaveData {
+/** The OS-level "reduce motion" accessibility preference (false where unavailable, e.g. node). */
+export function prefersReducedMotion(): boolean {
+  try {
+    return !!globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Comfort defaults for settings the player hasn't chosen yet: when the OS asks
+ * for reduced motion, start with reduced flashing and half-strength screen shake.
+ */
+export function comfortDefaults(reducedMotion: boolean): Partial<Settings> {
+  return reducedMotion ? { reduceFlashes: true, screenShake: 0.5 } : {};
+}
+
+/** Repair comfort fields from older / hand-edited saves. */
+function cleanSettings(s: Settings): Settings {
+  const shake = Number(s.screenShake);
+  s.screenShake = Number.isFinite(shake) ? Math.min(1, Math.max(0, shake)) : DEFAULT_SETTINGS.screenShake;
+  s.reduceFlashes = !!s.reduceFlashes;
+  return s;
+}
+
+function fresh(reducedMotion = false): SaveData {
   return {
     version: 1,
-    settings: { ...DEFAULT_SETTINGS },
+    settings: { ...DEFAULT_SETTINGS, ...comfortDefaults(reducedMotion) },
     unlocked: [],
     best: {},
     campaignBest: {},
@@ -121,7 +146,14 @@ function fresh(): SaveData {
 export class Save {
   data: SaveData;
 
-  constructor(private storage: Storage | null = Save.tryStorage()) {
+  /**
+   * `reducedMotion`: the OS accessibility preference (detected via matchMedia by
+   * default); it picks the defaults for comfort settings the save doesn't have yet.
+   */
+  constructor(
+    private storage: Storage | null = Save.tryStorage(),
+    private reducedMotion = prefersReducedMotion(),
+  ) {
     this.data = this.load();
   }
 
@@ -138,7 +170,7 @@ export class Save {
   }
 
   private load(): SaveData {
-    const base = fresh();
+    const base = fresh(this.reducedMotion);
     if (!this.storage) return base;
     try {
       const raw = this.storage.getItem(KEY);
@@ -154,7 +186,7 @@ export class Save {
       return {
         ...base,
         ...parsed,
-        settings: { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) },
+        settings: cleanSettings({ ...DEFAULT_SETTINGS, ...comfortDefaults(this.reducedMotion), ...(parsed.settings ?? {}) }),
         unlocked: Array.isArray(parsed.unlocked) ? parsed.unlocked : [],
         best: parsed.best ?? {},
         campaignBest: parsed.campaignBest ?? {},

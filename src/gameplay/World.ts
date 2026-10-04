@@ -54,6 +54,9 @@ const _v = new THREE.Vector3();
 export const MAX_ATTACKERS = 3;
 /** Max non-boss death animations rendering at once (newest kept). */
 export const MAX_CORPSES = 7;
+/** Bomb reach (m) and the minimum game time between two bombs (double-tap guard). */
+export const BOMB_REACH = 45;
+export const BOMB_COOLDOWN = 0.75;
 
 /**
  * One play-through of one stage: the scene graph, every live entity and all
@@ -87,6 +90,10 @@ export class World {
   private timers: { at: number; fn: () => void }[] = [];
   private lastHurtFrom: Entity | null = null;
   private lowHpBeat = 0;
+  /** The boss had a telegraph (attack ring) up last frame — a new one vents the turret. */
+  private bossTeleUp = false;
+  /** Game time of the last bomb (double-tap guard). */
+  private lastBombAt = -Infinity;
 
   constructor(
     readonly camera: THREE.PerspectiveCamera,
@@ -265,12 +272,39 @@ export class World {
     this.timers.push({ at: this.time + delay, fn });
   }
 
-  /** Screen-clearing bomb. Returns false if none left. */
+  /** Seconds until another bomb may go off (> 0 right after one: the HUD can grey the button). */
+  bombCooldown(): number {
+    return Math.max(0, BOMB_COOLDOWN - (this.time - this.lastBombAt));
+  }
+
+  /** Hostiles a bomb would hit right now (enemies within its reach, incoming projectiles). */
+  bombTargets(): number {
+    let n = 0;
+    for (const e of this.entities) {
+      if (e.removed || !e.hostile) continue;
+      if (e instanceof Enemy ? e.state !== 'dying' && e.distToPlayer <= BOMB_REACH : e instanceof Projectile) n++;
+    }
+    return n;
+  }
+
+  /**
+   * Screen-clearing bomb. Returns false (and spends nothing) when none are left,
+   * during the short cooldown after the previous bomb (a panicked double tap),
+   * or when there is nothing in reach to hit.
+   */
   useBomb(): boolean {
     if (this.player.bombs <= 0) return false;
+    if (this.time - this.lastBombAt < BOMB_COOLDOWN) return false;
+    if (this.bombTargets() === 0) {
+      this.audio.play('empty', { volume: 0.7 });
+      this.hud.popup('NO TARGETS', this.viewport.width / 2, this.viewport.height * 0.42, 'warning');
+      this.lastBombAt = this.time - BOMB_COOLDOWN + 0.25; // brief guard so a double tap doesn't stack popups
+      return false;
+    }
+    this.lastBombAt = this.time;
     this.player.bombs--;
     this.audio.play('bomb');
-    this.hud.flash('#fff6d0', 0.5);
+    this.hud.flash(this.settings.reduceFlashes ? 'rgba(255,246,208,0.4)' : '#fff6d0', 0.5);
     this.rig.shake(1);
     this.haptic(250);
     this.camera.getWorldDirection(_v).multiplyScalar(8).add(this.camera.position);
@@ -278,7 +312,7 @@ export class World {
     for (const e of [...this.entities]) {
       if (e.removed || !e.hostile) continue;
       if (e instanceof Enemy) {
-        if (e.distToPlayer > 45) continue;
+        if (e.distToPlayer > BOMB_REACH) continue;
         if (e.isBoss) {
           e.hp -= e.maxHp * 0.08;
           e.flash(true);
@@ -313,6 +347,10 @@ export class World {
     const dt = realDt * scale;
     this.time += dt;
     this.score.time += dt;
+    // Comfort settings are live (the settings screen edits them mid-stage).
+    const shake = this.settings.screenShake;
+    this.rig.shakeScale = typeof shake === 'number' && shake >= 0 ? Math.min(1, shake) : 1;
+    this.fx.reduceFlashes = !!this.settings.reduceFlashes;
 
     this.player.update(dt);
     this.weapons.update(dt);
@@ -349,6 +387,7 @@ export class World {
     this.attackSlots = Math.max(0, MAX_ATTACKERS - inUse);
 
     this.fx.update(dt);
+    this.checkBossWindup();
 
     if (this.timers.length) {
       const due = this.timers.filter((t) => t.at <= this.time);
@@ -367,6 +406,25 @@ export class World {
       }
     }
     return dt;
+  }
+
+  /**
+   * A boss attack telegraph just appeared: vent an overheated (or nearly
+   * overheated) mounted gun so the player can always answer the windup. Holding
+   * the trigger is what the turret sections teach, and a 1.1 s lockout landing on
+   * a 1.2–1.9 s windup used to be a guaranteed hit.
+   */
+  private checkBossWindup() {
+    const b = this.boss;
+    const up = !!b && !b.removed && b.state !== 'dying' && b.telegraph !== null;
+    if (up && !this.bossTeleUp) {
+      const locked = this.weapons.overheated;
+      if (this.weapons.vent()) {
+        this.audio.play('reload_done', { volume: 0.55, pitch: 0.8 });
+        if (locked) this.hud.prompt(null);
+      }
+    }
+    this.bossTeleUp = up;
   }
 
   dispose() {

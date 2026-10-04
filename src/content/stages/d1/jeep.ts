@@ -37,6 +37,9 @@ export class JeepViewModel {
   private recoil = 0;
   private shots = 0;
   private steamT = 0;
+  /** Steam puffs left from an emergency vent (a boss windup cools the gun). */
+  private ventPuffs = 0;
+  private prevHeat = 0;
   private bump = 0;
   private time = 0;
   private pitch = 0;
@@ -203,10 +206,21 @@ export class JeepViewModel {
     const level = w.weapons.overheated ? 3 : heat > 0.8 ? 2 : heat > 0.55 ? 1 : heat > 0.3 ? 0 : -1;
     const mat = level < 0 ? this.coolMat : this.heatMats[level];
     for (const p of this.heatParts) if (p.material !== mat) p.material = mat;
-    if (w.weapons.overheated) {
+    // Emergency vent (heat dropped in one frame — a boss winding up resets the gun):
+    // a quick hiss and a burst of steam off the barrel, so the sudden cool-down reads.
+    if (heat > 0 || this.prevHeat > 0) {
+      if (this.prevHeat - heat > 0.2 && w.weapons.active === 'turret') {
+        this.ventPuffs = 5;
+        this.steamT = 0;
+        w.audio.play('whoosh', { volume: 0.4, pitch: 1.7 });
+      }
+      this.prevHeat = heat;
+    }
+    if (w.weapons.overheated || this.ventPuffs > 0) {
       this.steamT -= dt;
       if (this.steamT <= 0) {
-        this.steamT = 0.12;
+        this.steamT = this.ventPuffs > 0 ? 0.06 : 0.12;
+        if (this.ventPuffs > 0) this.ventPuffs--;
         this.flash.getWorldPosition(_v);
         w.fx.dust(_v, 0.25, 0xe8e8e8);
       }

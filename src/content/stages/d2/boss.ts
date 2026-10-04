@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { Boss } from '../../../gameplay/Boss';
-import type { EnemySpawn } from '../../../gameplay/Enemy';
+import { Pickup } from '../../../gameplay/Pickup';
+import type { Projectile } from '../../../gameplay/Projectile';
+import { ndcInPlayArea, type EnemySpawn } from '../../../gameplay/Enemy';
 import type { ShotHit } from '../../../gameplay/Entity';
 import type { World } from '../../../gameplay/World';
 import { createEnemy, registerEnemy } from '../../registry';
@@ -19,12 +21,15 @@ import { labs } from './env';
  *                 (head crest, neck, flanks, tail base) — they keep glowing
  *                 even when it fades into the dark.
  *   armour      : dorsal quills (spark, no damage).
- *   attacks     : POUNCE       crouch + wiggle, leaps at the camera     (ring on the head)
- *                 TAIL WHIP    sidles up, turns, whips the tail          (ring on the tail tip)
+ *   attacks     : POUNCE       crouch + wiggle, leaps at the camera     (ring on the chest)
+ *                 TAIL WHIP    sidles up, turns, whips the tail          (ring on the tail base)
  *                 QUILL VOLLEY rattles the quills, fires shootable darts (projectiles)
  *                 FADE         (phase 2+) cloaks, slips behind a pillar, ambushes with a
- *                              short-fuse pounce from close range         (ring on the head)
- *   Enough damage during a wind-up (or mid-leap) knocks it down: free hits.
+ *                              short-fuse pounce from close range         (ring on the chest)
+ *   Enough HITS during a wind-up (or mid-leap) knock it down: free hits
+ *   (3–4 stop a pounce, 2–3 a tail whip; glowing weak points count double).
+ *   Fairness: attacks only start framed in the play area, never on top of two
+ *   other live warnings, the pack arrives in waves; last-heart grace.
  *   phase 2 : roar, summons a raptor pack.  phase 3 : enraged — faster
  *   pounces, double pounces, compys.  death: staggers back and crashes
  *   through the specimen tank glass.
@@ -121,13 +126,15 @@ export class SpecimenX extends Boss {
   private bodyMeshes: THREE.Mesh[] = [];
   private quillPivots: THREE.Group[] = [];
   private weakMeshes: THREE.Mesh[] = [];
-  private tailTip!: THREE.Object3D;
+  /** Tail-whip ring anchor: on the glowing stripes at the tail base. */
+  private tailRing!: THREE.Object3D;
   private focus = new THREE.Object3D();
   private skinMatRef!: THREE.Material;
   private cloakMat!: THREE.MeshLambertMaterial;
   private stripeMat!: THREE.MeshBasicMaterial;
   private eyeMat!: THREE.MeshBasicMaterial;
   private haloMat!: THREE.MeshBasicMaterial;
+  private dartHaloMat!: THREE.MeshBasicMaterial;
   private flashMat!: THREE.Material;
   private flashes: Flash[] = [];
 
@@ -175,6 +182,8 @@ export class SpecimenX extends Boss {
   private minionsCalled = 0;
   private volley = 0;
   private volleyT = 0;
+  /** Darts of the current volley (the beast holds still until they resolve, so the view does too). */
+  private darts: Projectile[] = [];
   private windTime = 1.4;
   private leapTime = 0.5;
   private pFrom = new THREE.Vector3();
@@ -184,6 +193,10 @@ export class SpecimenX extends Boss {
   private hissT = 0;
   private shortFuse = false;
   private breathT = 0;
+  /** Seconds spent holding an attack back while minion warnings are live. */
+  private holdOff = 0;
+  /** Staggered reinforcements (the pack arrives in waves, not all at once). */
+  private reinforcements: { t: number; type: string; n: number; variant?: string }[] = [];
 
   // Death.
   private deathFrom = new THREE.Vector3();
@@ -208,7 +221,7 @@ export class SpecimenX extends Boss {
   protected override configure(): void {
     this.name = 'specimen_x';
     // `opts.hp` lets a stage (or a quick test) tune the fight length.
-    this.maxHp = typeof this.spawn.opts.hp === 'number' ? this.spawn.opts.hp : 170;
+    this.maxHp = typeof this.spawn.opts.hp === 'number' ? this.spawn.opts.hp : 160;
     this.speed = 9;
     this.points = 25000;
     this.sfxHit = 'hit_flesh';
@@ -229,6 +242,7 @@ export class SpecimenX extends Boss {
     this.eyeMat = Kit.track(new THREE.MeshBasicMaterial({ color: EYE.clone().multiplyScalar(1.6), toneMapped: false, fog: false }));
     this.haloMat = Kit.track(new THREE.MeshBasicMaterial({ color: 0x40c8ff, transparent: true, opacity: 0.32, depthWrite: false, toneMapped: false, fog: false }));
     this.flashMat = Kit.glow(0xffffff, 1.2);
+    this.dartHaloMat = Kit.track(new THREE.MeshBasicMaterial({ color: 0x60d8ff, transparent: true, opacity: 0.4, depthWrite: false, toneMapped: false, fog: false }));
     this.skinMatRef = r.torso.material as THREE.Material;
     // Cloak: a private copy of the shared skin material (same shader hook, so the
     // pixel scales, painted stripes and rim light survive) whose colour fades
@@ -358,7 +372,9 @@ export class SpecimenX extends Boss {
       const m = o as THREE.Mesh;
       if (m.isMesh && !m.userData.baseMat) m.userData.baseMat = m.material;
     });
-    this.tailTip = Kit.pivot(r.tail[r.tail.length - 1], 0, 0, -SPEC.tail.lens[SPEC.tail.lens.length - 1]);
+    // The tail-whip ring sits on the glowing tail-base stripes (weak, count double),
+    // not the thin, whipping tip: a big target that stays framed while it coils.
+    this.tailRing = Kit.pivot(r.tail[0], 0, 0, -SPEC.tail.lens[0] * 0.55);
     this.anchor = r.chest;
     this.headAnchor = r.headMesh;
   }
@@ -410,6 +426,8 @@ export class SpecimenX extends Boss {
   }
 
   private flashMesh(mesh: THREE.Mesh, t: number) {
+    // Photosensitivity setting: no white hit-flashes on the body parts.
+    if (this.world.settings.reduceFlashes) return;
     const e = this.flashes.find((f) => f.mesh === mesh);
     if (e) {
       e.t = Math.max(e.t, t);
@@ -439,25 +457,49 @@ export class SpecimenX extends Boss {
     const d = hit.dir.x * e[0] + hit.dir.y * e[1] + hit.dir.z * e[2];
     this.flinchSide = d >= 0 ? 1 : -1;
     this.flinch = Math.min(1.2, this.flinch + 0.25 + amount * 0.08);
+    // Stagger meter: counts HITS, not damage, so the pistol at a human ~3 taps/s
+    // can always break an attack by shooting the ring; the glowing weak points
+    // count double. (Every pellet / SMG round is a hit, so pickups stagger fast.)
+    const weight = hit.part === 'weak' ? 2 : 1;
     if (this.winding) {
-      // Every solid hit counts: shooting the ring (even on the tail) can stop the
-      // attack; glowing weak points count extra.
-      this.interruptDmg += hit.part === 'weak' ? amount * 1.5 : Math.max(amount, 1);
+      this.interruptDmg += weight;
       if (this.interruptDmg >= this.interruptThreshold()) this.interrupt();
+      else if (this.interruptDmg >= this.interruptThreshold() * 0.5) this.flinch = Math.min(1.4, this.flinch + 0.3);
     }
     // Being shot while faded gives away its position.
     if (this.cloaked && (this.state === 'hide' || this.state === 'fade')) {
-      this.interruptDmg += amount;
-      if (this.interruptDmg >= this.interruptThreshold()) {
+      this.interruptDmg += weight;
+      if (this.interruptDmg >= 2) {
         this.world.audio.play('raptor_screech', { volume: 0.9, pitch: 0.6 });
         this.go('ambush');
       }
     }
   }
 
+  /**
+   * Hits (weak = 2) that break a wind-up, sized for a ~3 taps/s pistol player
+   * who starts shooting ~0.3 s into the ring:
+   *   pounce  1.5/1.35/1.25 s wind + 0.5 s leap → 3 / 4 / 4 hits
+   *   tail    1.4/1.3/1.2 s, ring on the glowing tail base → 2 / 3 / 3 hits
+   */
   private interruptThreshold() {
-    if (this.state === 'tailWind') return [3.5, 4, 4.5][this.phase] ?? 4.5;
-    return [4, 5, 5][this.phase] ?? 5;
+    if (this.state === 'tailWind') return [2, 3, 3][this.phase] ?? 3;
+    return [3, 4, 4][this.phase] ?? 4;
+  }
+
+  /** Last-heart grace: a little more wind-up time when the player is on 1 heart. */
+  private grace() {
+    return this.world.player.hp <= 1 ? 0.2 : 0;
+  }
+
+  /**
+   * Tempo between attacks. A healthy player (4+ hearts) gets pressed harder —
+   * shorter breathers, never shorter wind-ups — so the fight stays tense for
+   * good shots and eases off for someone hanging on.
+   */
+  private breather(base: number[]) {
+    const b = base[this.phase] ?? base[base.length - 1];
+    return this.world.player.hp >= 4 ? b * 0.7 : b;
   }
 
   private interrupt() {
@@ -593,6 +635,39 @@ export class SpecimenX extends Boss {
     return n;
   }
 
+  /** A ring attack may only START when its anchor is framed in the playable screen area. */
+  private framed(obj: THREE.Object3D) {
+    return this.inPlayArea(obj, 0.85);
+  }
+
+  /** Other live warnings (minion wind-ups, darts in flight). */
+  private otherThreats() {
+    let n = 0;
+    for (const e of this.world.entities) if (e !== this && !e.removed && e.telegraph) n++;
+    return n;
+  }
+
+  /** Pounce if the chest is framed; otherwise slip back into the middle of the view first. */
+  private tryPounce() {
+    if (this.framed(this.r.chest)) {
+      this.go('pounceWind');
+      return;
+    }
+    this.cooldown = 0.25;
+    this.planPath(this.ring(9, 0, _v));
+    this.go('stalk');
+  }
+
+  private dartsInFlight() {
+    for (const d of this.darts) if (!d.removed) return true;
+    return false;
+  }
+
+  /** Queue `n` more minions in `t` seconds (only arrives while the boss lives). */
+  private reinforce(t: number, type: string, n: number, variant?: string) {
+    this.reinforcements.push({ t, type, n, variant });
+  }
+
   /**
    * Call minions out of the specimen tank through its broken panes (straight
    * down the hall between the pillars, so they arrive in the middle of the
@@ -638,12 +713,18 @@ export class SpecimenX extends Boss {
     return pick;
   }
 
+  /**
+   * A bone quill with a glowing bioluminescent tip. It flies at the lens tip
+   * first, so the soft halo around the tip is what reads on the 288-line CRT —
+   * and what makes it a fair, shootable target from its first frame.
+   */
   private quillDart(): THREE.Object3D {
     const g = new THREE.Group();
-    const spike = Kit.add(g, Kit.cone(0.07, 0.9, 5), Kit.mat(0xe8e2d4), 0, 0, 0, Math.PI / 2, 0, 0);
+    const spike = Kit.add(g, Kit.cone(0.08, 0.9, 5), Kit.mat(0xe8e2d4), 0, 0, 0, Math.PI / 2, 0, 0);
     spike.userData.noFlash = true;
-    Kit.add(g, Kit.sphere(0.09, 6, 4), Kit.glow(0x60e8ff, 1.6), 0, 0, 0.42);
-    Kit.add(g, Kit.cone(0.1, 0.2, 4), Kit.mat(0x7a746c), 0, 0, -0.42, -Math.PI / 2, 0, 0);
+    Kit.add(g, Kit.sphere(0.12, 6, 4), Kit.glow(0x60e8ff, 1.6), 0, 0, 0.42);
+    const halo = Kit.add(g, Kit.sphere(0.27, 8, 6), this.dartHaloMat, 0, 0, 0.3);
+    halo.renderOrder = 3;
     return g;
   }
 
@@ -685,6 +766,14 @@ export class SpecimenX extends Boss {
     this.playerPos(_p);
     const toPlayer = this.yawToPlayer();
 
+    for (let i = this.reinforcements.length - 1; i >= 0; i--) {
+      const rf = this.reinforcements[i];
+      rf.t -= dt;
+      if (rf.t <= 0) {
+        this.reinforcements.splice(i, 1);
+        this.summon(rf.type, rf.n, rf.variant);
+      }
+    }
     // Phase 2+: keep a couple of raptors in play.
     if (this.phase >= 1 && st !== 'intro' && st !== 'roar') {
       this.minionT -= dt;
@@ -768,10 +857,22 @@ export class SpecimenX extends Boss {
         T.tail = 0.25;
         if (first) {
           this.hissT = 0;
+          this.holdOff = 0;
           if (w.rng.chance(0.5)) w.audio.play('raptor_bark', { volume: 0.7, pitch: 0.55 });
         }
         this.cooldown -= dt;
-        if (this.cooldown <= 0) this.go(this.chooseAttack());
+        if (this.cooldown <= 0) {
+          // Fair play: never stack an attack on two other live warnings (minion
+          // wind-ups, darts) — give the player up to ~2 s to deal with them first.
+          if (this.otherThreats() >= 2 && this.holdOff < 2) {
+            this.holdOff += dt;
+            break;
+          }
+          this.holdOff = 0;
+          const pick = this.chooseAttack();
+          if (pick === 'pounceWind') this.tryPounce();
+          else this.go(pick);
+        }
         break;
       }
       case 'ambush': {
@@ -784,15 +885,25 @@ export class SpecimenX extends Boss {
         this.cloakTarget = 0.55;
         T.dip = 0.35;
         if (this.followPath(this.dashSpeed() * 1.15, dt) || t > 1.4) {
-          this.shortFuse = true;
-          this.go('pounceWind');
+          if (this.framed(this.r.chest)) {
+            this.shortFuse = true;
+            this.go('pounceWind');
+          } else if (t > 2.6) {
+            // Never pounce from the edge of the screen: give up the ambush.
+            this.cooldown = 0.4;
+            this.planPath(this.ring(8.5, 0, _v));
+            this.go('stalk');
+          } else {
+            this.ring(7, this.sideSign * 0.12, _w);
+            this.steer(_w.x, _w.z, this.dashSpeed() * 0.6, dt);
+          }
         }
         break;
       }
       case 'pounceWind': {
         if (first) {
-          const base = this.shortFuse ? [1.25, 1.1, 1.0] : [1.5, 1.3, 1.1];
-          this.windTime = base[this.phase] ?? 1.05;
+          const base = this.shortFuse ? [1.3, 1.2, 1.1] : [1.5, 1.35, 1.25];
+          this.windTime = (base[this.phase] ?? 1.1) + this.grace();
           this.shortFuse = false;
           w.audio.play('raptor_screech', { volume: 0.8, pitch: 0.75 });
         }
@@ -847,7 +958,8 @@ export class SpecimenX extends Boss {
           w.audio.play('bite', { volume: 1, pitch: 0.7 });
           w.rig.shake(0.8);
           w.hitStop(0.06);
-          if (this.phase >= 2 && this.chain === 0 && w.rng.chance(0.35)) {
+          // Enraged double pounce — never onto a player down to their last two hearts.
+          if (this.phase >= 2 && this.chain === 0 && w.player.hp >= 3 && w.rng.chance(w.player.hp >= 4 ? 0.5 : 0.35)) {
             this.chain = 1;
           } else this.chain = 0;
           this.pFrom.copy(p);
@@ -872,12 +984,12 @@ export class SpecimenX extends Boss {
         if (k >= 1) {
           this.lift = 0;
           w.fx.dust(this.worldPos(_v), 1.2, 0x8a8a8a);
-          if (this.chain === 1) {
+          if (this.chain === 1 && this.framed(this.r.chest)) {
             this.chain = 2;
             this.go('pounceWind');
           } else {
             this.chain = 0;
-            this.cooldown = [1.2, 0.9, 0.6][this.phase] ?? 0.6;
+            this.cooldown = this.breather([1.2, 0.9, 0.6]);
             this.planPath(this.ring(w.rng.range(8, 11), w.rng.range(-0.75, 0.75), _v));
             this.go('stalk');
           }
@@ -891,12 +1003,20 @@ export class SpecimenX extends Boss {
           this.planPath(this.ring(6.4, this.sideSign * 0.6, _v));
         }
         T.dip = 0.3;
-        if (this.followPath(this.dashSpeed() * 0.85, dt) || t > 2.6) this.go('tailWind');
+        if (this.followPath(this.dashSpeed() * 0.85, dt) || t > 2.6) {
+          if (this.framed(this.tailRing)) this.go('tailWind');
+          else if (t > 3.4) {
+            this.cooldown = 0.3;
+            this.planPath(this.ring(9, 0, _v));
+            this.go('stalk');
+          }
+        }
         break;
       }
       case 'tailWind': {
-        // Turn side-on, coil the tail away, ring on the tail tip.
-        const dur = [1.4, 1.2, 1.0][this.phase] ?? 1.0;
+        // Turn side-on, coil the tail away, ring on the glowing tail base.
+        if (first) this.windTime = ([1.4, 1.3, 1.2][this.phase] ?? 1.2) + this.grace();
+        const dur = this.windTime;
         this.winding = true;
         const side = this.sideSign;
         this.faceYaw(toPlayer + side * 1.45, dt, 5);
@@ -915,7 +1035,7 @@ export class SpecimenX extends Boss {
             w.rig.shake(0.7);
             w.hitStop(0.05);
           },
-          this.tailTip,
+          this.tailRing,
         );
         if (done) this.go('tailWhip');
         break;
@@ -926,7 +1046,7 @@ export class SpecimenX extends Boss {
         T.whip = 1.2 * Math.max(0, 1 - t * 2);
         T.crouch = 0.2;
         if (t > 0.7) {
-          this.cooldown = [1.0, 0.8, 0.5][this.phase] ?? 0.5;
+          this.cooldown = this.breather([1.0, 0.8, 0.5]);
           this.planPath(this.ring(w.rng.range(8.5, 11), w.rng.range(-0.7, 0.7), _v));
           this.go('stalk');
         }
@@ -944,6 +1064,7 @@ export class SpecimenX extends Boss {
           w.audio.play('dilo_hiss', { volume: 0.9, pitch: 0.75 });
           this.volley = [2, 3, 4][this.phase] ?? 4;
           this.volleyT = 0;
+          this.darts.length = 0;
         }
         if (t > 0.75) this.go('quillFire');
         break;
@@ -955,29 +1076,44 @@ export class SpecimenX extends Boss {
         this.volleyT -= dt;
         if (this.volley > 0 && this.volleyT <= 0) {
           this.volley--;
-          this.volleyT = 0.32;
-          const piv = this.quillPivots[1 + (this.volley % 2)];
-          piv.getWorldPosition(_v);
-          _v.y += 0.6;
-          this.throwProjectile(_v.clone(), {
-            mesh: this.quillDart(),
-            flightTime: 1.55,
-            arc: 1.4,
-            damage: 1,
-            hp: 1,
-            points: 120,
-            color: 0xe8e2d4,
-            size: 0.3,
-            spin: 0,
-            source: this.title,
-            sfxDestroy: 'hit_projectile',
-            burst: 'debris',
-          });
-          w.audio.play('whoosh', { volume: 0.7, pitch: 1.3 });
+          this.volleyT = 0.4;
+          // Flicked off the crest past the head, alternating sides: the dart starts
+          // in front of the beast (never hidden behind its own body), so it can be
+          // shot from its first frame — and only if that spot is in the play area.
+          const side = this.volley % 2 ? 1 : -1;
+          this.r.headMesh.getWorldPosition(_v);
+          this.playerEye(_u);
+          _w.subVectors(_u, _v).setY(0).normalize();
+          _v.addScaledVector(_w, 1.0);
+          _v.x -= _w.z * side * 0.8;
+          _v.z += _w.x * side * 0.8;
+          _v.y += 0.35;
+          _u.copy(_v).project(w.camera);
+          if (ndcInPlayArea(_u.x, _u.y, _u.z, 0.85)) {
+            w.fx.sparkle(_v, 0x80e8ff);
+            const dart = this.throwProjectile(_v.clone(), {
+              mesh: this.quillDart(),
+              flightTime: 1.6,
+              arc: 0.85,
+              damage: 1,
+              hp: 1,
+              points: 120,
+              color: 0xe8e2d4,
+              size: 0.32,
+              spin: 0,
+              source: this.title,
+              sfxDestroy: 'hit_projectile',
+              burst: 'debris',
+            });
+            this.darts.push(dart);
+            w.audio.play('whoosh', { volume: 0.7, pitch: 1.3 });
+          }
           this.recoil = 0.6;
         }
-        if (this.volley <= 0 && this.volleyT <= -0.3) {
-          this.cooldown = [1.2, 0.9, 0.6][this.phase] ?? 0.6;
+        // Hold the pose (and so the camera) until the darts have landed or been shot down.
+        if (this.volley <= 0 && this.volleyT <= -0.3 && (!this.dartsInFlight() || this.volleyT <= -1.8)) {
+          this.darts.length = 0;
+          this.cooldown = this.breather([1.2, 0.9, 0.6]);
           this.planPath(this.ring(w.rng.range(9.5, 12), w.rng.range(-0.8, 0.8), _v));
           this.go('stalk');
         }
@@ -1033,6 +1169,11 @@ export class SpecimenX extends Boss {
           if (this.roaringFor >= 2) {
             w.hud.prompt('SPECIMEN X IS ENRAGED!');
             this.enraged = true;
+            // A first-aid kit shaken loose from the wall cabinet: one more heart for the last phase.
+            w.later(1.2, () => {
+              if (this.state === 'dying' || this.removed) return;
+              w.add(new Pickup(w, 'health', new THREE.Vector3(12.6, 1.3, -341.2), 'world', 16));
+            });
             w.later(0.9, () => {
               this.breakPane(1);
               this.breakPane(2);
@@ -1048,11 +1189,15 @@ export class SpecimenX extends Boss {
         if (t >= dur) {
           const which = this.roaringFor;
           this.roarsDone.add(which);
-          if (which === 1) this.summon('raptor', 3, 'blue');
+          // The pack arrives in waves (fair on a phone): two now, the rest later.
+          if (which === 1) {
+            this.summon('raptor', 2, 'blue');
+            this.reinforce(6, 'raptor', 1, 'blue');
+          }
           if (which >= 2) {
             this.roarsDone.add(1);
             this.summon('raptor', 2, 'red');
-            this.summon('compy', 4);
+            this.reinforce(6.5, 'compy', 3);
           }
           this.pendingRoar = -1;
           w.later(2.5, () => w.hud.prompt(null));

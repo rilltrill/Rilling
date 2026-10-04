@@ -59,6 +59,12 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
   },
 };
 
+/** Heat level an overheated gun must cool to before it fires again (also the vent level). */
+export const VENT_LEVEL = 0.35;
+/** Pause in firing (s) after which heat starts to dissipate, and the rate (heat/s) it does so. */
+const FEATHER_DELAY = 0.12;
+const FEATHER_COOL = 1.0;
+
 export interface AmmoState {
   inMag: number;
   /** Rounds in reserve (Infinity for the pistol). */
@@ -87,6 +93,8 @@ export class WeaponSystem {
   private cooldown = 0;
   /** Seconds since the last successful shot (heat only dissipates when not firing). */
   private sinceShot = 0;
+  /** Seconds since the last emergency vent (see `vent`). */
+  private sinceVent = Infinity;
   /** Called when the weapon automatically changes (ran out of ammo). */
   onChange: (id: WeaponId) => void = () => {};
   onReloadDone: () => void = () => {};
@@ -177,6 +185,27 @@ export class WeaponSystem {
     return { ok: true, def };
   }
 
+  /**
+   * Emergency vent for heat weapons: drop the heat to the 35% re-arm level and
+   * clear an overheat lockout. Called by the World when a boss starts winding
+   * up an attack, so holding the trigger never leaves you locked out for the
+   * whole telegraph (the ~1.1 s lockout would otherwise eat most of a boss
+   * windup). Returns true when it actually changed something (feedback cue).
+   */
+  vent(): boolean {
+    if (this.def.heatPerShot === undefined) return false;
+    const was = this.overheated || this.heat > VENT_LEVEL + 0.15;
+    this.heat = Math.min(this.heat, VENT_LEVEL);
+    this.overheated = false;
+    if (was) this.sinceVent = 0;
+    return was;
+  }
+
+  /** True for a moment after `vent()` released pressure (HUD/stage view-models can puff steam). */
+  get venting(): boolean {
+    return this.sinceVent < 0.6;
+  }
+
   /** Begin reloading. Returns false when nothing to do. */
   reload(): boolean {
     const def = this.def;
@@ -208,14 +237,18 @@ export class WeaponSystem {
         this.onReloadDone();
       }
     }
-    // Heat only dissipates after a short pause in firing (so sustained fire really
-    // does overheat, ~3 s); once overheated you must cool to 35% before firing again.
+    // Heat only dissipates during a pause in firing (so sustained fire really does
+    // overheat, ~3 s); once overheated you must cool to 35% before firing again.
+    // Feathering pays: any short pause (> FEATHER_DELAY: releasing between targets,
+    // bursts, taps) bleeds heat quickly, so controlled fire never locks you out;
+    // only holding the trigger flat out does.
     this.sinceShot += dt;
+    this.sinceVent += dt;
     const def = this.def;
     if (def.heatPerShot !== undefined || this.heat > 0) {
-      const cooling = this.overheated || this.sinceShot > 0.25;
-      if (cooling) this.heat = Math.max(0, this.heat - (this.overheated ? 0.6 : 0.5) * dt);
-      if (this.overheated && this.heat <= 0.35) this.overheated = false;
+      const cooling = this.overheated || this.sinceShot > FEATHER_DELAY;
+      if (cooling) this.heat = Math.max(0, this.heat - (this.overheated ? 0.6 : FEATHER_COOL) * dt);
+      if (this.overheated && this.heat <= VENT_LEVEL) this.overheated = false;
     }
     // Out of a pickup gun entirely → back to pistol.
     if (!this.override && this.current !== 'pistol') {

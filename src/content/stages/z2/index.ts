@@ -4,7 +4,7 @@ import type { World } from '../../../gameplay/World';
 import { B, POOL, RAIL, RAIL_LENGTH, dAt } from './layout';
 import { D, buildEnv } from './env';
 import { z2Scene } from './scene';
-import { burstWall, crashAmbulance, ensureAmbulanceCrashed, spawnProps, wallThuds } from './setpieces';
+import { burstWall, crashAmbulance, ensureAmbulanceCrashed, spawnProps, ventRattle, wallThuds } from './setpieces';
 import { CORR_C_VENT, drawerFront } from './zonesLower';
 import './boss';
 
@@ -66,10 +66,17 @@ const DOOR = {
 const HOLD = {
   bay: dAt(0, 0.5),
   corrA: dAt(20.5, -44),
-  corrAEnd: dAt(50.5, -44),
+  /** Stop short of the corridor-A vent (x 41.5) so its crawler lands ~7 m ahead. */
+  corrVent: dAt(34, -44),
   ward: dAt(54, -44),
   morgue: dAt(79, -76.6),
+  /** Mouth of the service corridor: its vent (z −100.6) is ~5 m ahead. */
+  corrB: dAt(79, -95.4),
 };
+
+/** Vents crawlers drop out of (x, z) — must match the vents built in zonesUpper/zonesLower. */
+const VENT_A: [number, number] = [41.5, -43.4];
+const VENT_B: [number, number] = [79.6, -100.6];
 
 const dr = (side: 'e' | 'w', col: number, row: number): [number, number, number] => drawerFront(side, col, row);
 const dE1 = dr('e', 1, 1);
@@ -168,10 +175,12 @@ const beats: Beat[] = [
       { spawns: [W(-3.2, -45, 'nurse', { t: 0.3 }), W(2.2, -47.2, 'patient', { t: 1.3 })] },
       {
         start: { remaining: 1 },
+        // A pack vaults the desk one after another.
         spawns: [
           S('runner', -5.2, -37.3, { entry: 'leap' }),
-          S('runner', -7.2, -37.6, { entry: 'leap', t: 1.2 }),
-          S('crawler', 2.4, -39.5, { y: 3.85, entry: 'drop', t: 2.2 }),
+          S('runner', -3.9, -37.0, { entry: 'leap', t: 0.5 }),
+          S('runner', -7.2, -37.6, { entry: 'leap', t: 1.0 }),
+          S('crawler', 2.4, -39.5, { y: 3.85, entry: 'drop', t: 2.4 }),
         ],
       },
       {
@@ -222,33 +231,45 @@ const beats: Beat[] = [
   {
     kind: 'move',
     label: 'down the corridor',
-    to: HOLD.corrAEnd,
+    to: HOLD.corrVent,
     speed: 3.0,
-    waitClear: true,
+    // A doctor bursts out of the ward door ahead as you walk.
     waves: [
       {
-        start: { atD: dAt(32.5, -44) },
-        spawns: [S('walker', ...behindDoor(DOOR.a38, [34, -44], 1.6), { frame: 'world', entry: 'burst', opts: { variant: 'doctor' } })],
-      },
-      {
-        // (Early enough that the vent crawler drops in front of you, not behind.)
-        start: { atD: dAt(36, -44) },
-        spawns: [
-          S('crawler', 41.5, -43.4, { y: 2.85, entry: 'drop', frame: 'world', t: 0.4 }),
-          S('runner', ...behindDoor(DOOR.a44, [40.5, -44], 1.4), { frame: 'world', t: 0.8 }),
-        ],
+        start: { atD: dAt(29, -44) },
+        spawns: [S('walker', ...behindDoor(DOOR.a38, [33, -44], 1.6), { frame: 'world', entry: 'burst', opts: { variant: 'doctor' } })],
       },
     ],
   },
+  {
+    // Something scrabbles in the vent ahead: stop, it drops ~7 m in front of you
+    // (never onto the rail under a walking camera).
+    kind: 'hold',
+    label: 'corridor vent',
+    look: L(41, 0.9, -44, 1.1),
+    onStart: (w) => ventRattle(w, VENT_A[0], VENT_A[1], [0.15, 0.45, 0.7]),
+    waves: [
+      { spawns: [S('crawler', VENT_A[0], VENT_A[1], { y: 2.85, entry: 'drop', t: 0.95 })] },
+      // Then a runner crashes out of the door ahead on the right (~11 m out).
+      { start: { remaining: 0, after: 4.5 }, spawns: [S('runner', ...behindDoor(DOOR.a44, [40.5, -44], 1.4), { t: 0.3 })] },
+    ],
+  },
   // ── 4. Ward 3: something behind every curtain ───────────────────────────
-  { kind: 'move', label: 'into the ward', to: HOLD.ward, speed: 2.8 },
+  {
+    kind: 'move',
+    label: 'into the ward',
+    to: HOLD.ward,
+    speed: 3.3,
+    // A curtain twitches ahead as you walk in: the first patient is already up.
+    waves: [{ start: { atD: dAt(45, -44) }, spawns: [W(59.8, -39.6, 'patient', { frame: 'world' })] }],
+  },
   {
     kind: 'hold',
     label: 'ward',
     look: L(63, 1.2, -44),
     pickups: [P('health', 66, 1.4, -41.6, 3), P('bomb', 60.6, 1.5, -46.6, 5)],
     waves: [
-      { spawns: [W(59.8, -39.6, 'patient', { t: 0.5 }), W(64, -48.4, 'patient', { t: 1.8 })] },
+      { spawns: [W(64, -48.4, 'patient', { t: 0.9 })] },
       {
         start: { remaining: 1 },
         spawns: [
@@ -293,10 +314,12 @@ const beats: Beat[] = [
       },
       {
         start: { remaining: 1 },
+        // Pincer: runners crash in through the north AND south doors together.
         spawns: [
           S('spitter', 84.6, -42.2, { opts: { variant: 'patient' } }),
           S('runner', 83.5, -37.2, { t: 1.0 }),
-          W(79.3, -51.6, 'doctor', { t: 1.8 }),
+          S('runner', 79.3, -51.8, { t: 1.15 }),
+          W(79.3, -51.6, 'doctor', { t: 2.2 }),
         ],
       },
       {
@@ -373,14 +396,16 @@ const beats: Beat[] = [
     ],
   },
   // ── 8. Service corridor → surgery ───────────────────────────────────────
+  { kind: 'move', label: 'to the service corridor', to: HOLD.corrB, speed: 3.4 },
   {
-    kind: 'move',
+    // The vent rattles; the crawler drops ~5 m ahead of the stopped camera.
+    kind: 'hold',
     label: 'service corridor',
-    to: D.orHold,
-    speed: 3.3,
-    waitClear: true,
-    waves: [{ start: { atD: dAt(79, -96.5) }, spawns: [S('crawler', 79.6, -100.6, { y: B + 2.85, entry: 'drop', frame: 'world' })] }],
+    look: L(79.4, B + 0.9, -102.5, 1.0),
+    onStart: (w) => ventRattle(w, VENT_B[0], VENT_B[1], [0.1, 0.4, 0.62]),
+    waves: [{ spawns: [S('crawler', VENT_B[0], VENT_B[1], { y: B + 2.85, entry: 'drop', t: 0.85 })] }],
   },
+  { kind: 'move', label: 'into surgery', to: D.orHold, speed: 3.3 },
   {
     kind: 'hold',
     label: 'operating theatre',
@@ -414,19 +439,14 @@ const beats: Beat[] = [
     ],
   },
   // ── 9. Basement corridor: the brute comes through the wall ──────────────
+  { kind: 'move', label: 'towards the atrium', to: D.corrCHold, speed: 3.8 },
   {
-    kind: 'move',
-    label: 'towards the atrium',
-    to: D.corrCHold,
-    speed: 3.8,
-    waitClear: true,
-    // A crawler drops out of the corridor vent ahead.
-    waves: [
-      {
-        start: { atD: dAt(76.4, -119) },
-        spawns: [S('crawler', CORR_C_VENT[0], CORR_C_VENT[1], { y: B + 3.05, entry: 'drop', frame: 'world', t: 0.2 })],
-      },
-    ],
+    // A crawler drops out of the corridor vent ~5 m ahead once you've stopped.
+    kind: 'hold',
+    label: 'corridor C',
+    look: L(60.5, B + 1.0, -120.6, 1.0),
+    onStart: (w) => ventRattle(w, CORR_C_VENT[0], CORR_C_VENT[1], [0.1, 0.38, 0.6]),
+    waves: [{ spawns: [S('crawler', CORR_C_VENT[0], CORR_C_VENT[1], { y: B + 3.05, entry: 'drop', t: 0.8 })] }],
   },
   {
     kind: 'action',
@@ -448,9 +468,11 @@ const beats: Beat[] = [
     waves: [
       {
         spawns: [
-          S('brute', 58.9, -124.3, { entry: 'burst' }),
-          W(52.6, -120.2, 'patient', { t: 2.4 }),
-          W(52.8, -121.9, 'nurse', { t: 3.4 }),
+          // (Tougher and faster than stock: it comes for you through the dust, and
+          // its long super-armoured windup has to be out-shot.)
+          S('brute', 58.9, -124.3, { entry: 'burst', hp: 1.6, speed: 1.4 }),
+          W(52.6, -120.2, 'patient', { t: 1.8 }),
+          W(52.8, -121.9, 'nurse', { t: 2.6 }),
         ],
       },
       {
@@ -460,7 +482,7 @@ const beats: Beat[] = [
     ],
   },
   // ── Boss: PATIENT ZERO ──────────────────────────────────────────────────
-  { kind: 'move', label: 'into the atrium', to: RAIL_LENGTH, speed: 2.9, look: L(POOL[0], B + 2.2, POOL[2], 1.6) },
+  { kind: 'move', label: 'into the atrium', to: RAIL_LENGTH, speed: 4.0, look: L(POOL[0], B + 2.2, POOL[2], 1.3) },
   {
     kind: 'action',
     label: 'it wakes',
@@ -477,32 +499,34 @@ const beats: Beat[] = [
       });
     },
   },
-  { kind: 'wait', label: 'the cocoon splits', duration: 1.8 },
+  { kind: 'wait', label: 'the cocoon splits', duration: 1.2 },
   {
     kind: 'boss',
     label: 'PATIENT ZERO',
     boss: 'patient_zero',
     pos: [POOL[0], B, POOL[2]],
     world: true,
-    look: L(POOL[0] + 1.5, B + 2.6, POOL[2], 1.5),
+    // (Nearly level: keeps the pool crawlers' heads and rings well above the bottom HUD.)
+    look: L(POOL[0] + 1.5, B + 2.25, POOL[2], 1.5),
+    // (Timed for a ~60–80 s fight.)
     pickups: [
-      P('shotgun', 42.6, B + 1.8, -118.4, 10),
-      P('health', 42.8, B + 1.8, -123.6, 28),
-      P('bomb', 42.2, B + 2.3, -121.2, 44),
-      P('health', 42.6, B + 1.8, -118.6, 62),
-      P('magnum', 42.8, B + 1.8, -123.4, 78),
+      P('shotgun', 42.6, B + 1.8, -118.4, 8),
+      P('health', 42.8, B + 1.8, -123.6, 24),
+      P('bomb', 42.2, B + 2.3, -121.2, 38),
+      P('health', 42.6, B + 1.8, -118.6, 52),
+      P('magnum', 42.8, B + 1.8, -123.4, 64),
     ],
     waves: [
       {
-        start: { after: 24 },
-        spawns: [W(40.5, -110.1, 'patient', { y: 0.6, entry: 'drop' }), W(40.5, -131.9, 'nurse', { y: 0.6, entry: 'drop', t: 1.2 })],
+        start: { after: 21 },
+        // Over the balcony rails, ~11 m ahead: they drop in at the edges of the view.
+        spawns: [W(35.5, -110.1, 'patient', { y: 0.6, entry: 'drop' }), W(36.2, -131.9, 'nurse', { y: 0.6, entry: 'drop', t: 1.2 })],
       },
       {
-        start: { after: 52 },
+        start: { after: 44 },
         spawns: [
-          W(33.5, -110.1, 'doctor', { y: 0.6, entry: 'drop' }),
-          W(44.5, -131.9, 'patient', { y: 0.6, entry: 'drop', t: 0.8 }),
-          S('runner', 40, -136.4, { t: 1.6 }),
+          W(32.5, -110.1, 'doctor', { y: 0.6, entry: 'drop' }),
+          W(33.5, -131.9, 'patient', { y: 0.6, entry: 'drop', t: 0.8 }),
         ],
       },
     ],

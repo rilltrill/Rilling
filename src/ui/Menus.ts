@@ -4,7 +4,7 @@ import type { AudioSystem } from '../audio/Audio';
 import type { SfxName } from '../audio/names';
 import type { CampaignId, Grade, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
 import { haptic } from '../core/Haptics';
-import { el, escapeHtml, onTap } from './dom';
+import { applyComfort, el, escapeHtml, onTap } from './dom';
 import { cityCardArt, jungleCardArt, LOCK_ICON, SKULL_ICON, TUTORIAL_ART } from './art';
 import { arrowSvg, bombSvg, installPixelSprites } from './pixel';
 import { pixelateInto } from './pixelate';
@@ -77,7 +77,19 @@ const CONTINUE_ARM_MS = 700;
 const ATTRACT_TITLE_MS = 15000;
 const ATTRACT_TABLE_MS = 6000;
 const NAME_ENTRY_SECS = 30;
+/** localStorage key: the first-launch photosensitivity notice has been acknowledged. */
+export const NOTICE_KEY = 'overrun.notice.v1';
+/** The notice ignores taps this long (the tap that skipped the boot screen must not dismiss it). */
+const NOTICE_ARM_MS = 500;
 const RIGHT = arrowSvg('right', 'btn-cursor');
+/** SCREEN SHAKE choices (Settings.screenShake). */
+const SHAKE_OPTS: [number, string][] = [
+  [0, 'OFF'],
+  [0.5, 'LOW'],
+  [1, 'FULL'],
+];
+type ToggleKey = 'haptics' | 'aimAssist' | 'autoReload' | 'leftHanded' | 'showFps' | 'reduceFlashes';
+type SegKey = 'quality' | 'retro' | 'screenShake';
 
 /**
  * Show the DISPLAY (CRT / PIXEL / OFF) setting and apply Settings.retro to the
@@ -101,6 +113,10 @@ export class Menus {
   private timers: number[] = [];
   private raf = 0;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  /** Grades of the current arcade run, by stage id (the campaign-clear screen shows these). */
+  private runGrades = new Map<string, Grade>();
+  /** The photosensitivity notice was acknowledged during this page load. */
+  private noticeDone = false;
 
   constructor(
     parent: HTMLElement,
@@ -113,6 +129,7 @@ export class Menus {
     this.root = el('div', 'menus', parent);
     this.root.id = 'menus';
     window.addEventListener('keydown', (e) => this.keyHandler?.(e));
+    applyComfort(save.settings);
   }
 
   get visible() {
@@ -275,6 +292,10 @@ export class Menus {
   }
 
   showTitle(onStart: () => void) {
+    if (this.needsNotice()) {
+      this.showNotice(() => this.showTitle(onStart));
+      return;
+    }
     const s = this.screen('title');
     el('div', 'scanlines', s);
     this.cabinetTop(s);
@@ -313,6 +334,94 @@ export class Menus {
     const row = el('div', 'menu-pair', col);
     this.button(row, 'HOW TO PLAY', () => this.showHowTo(() => this.showMain()), 'small');
     this.button(row, 'SETTINGS', () => this.showSettings(() => this.showMain()), 'small');
+  }
+
+  // ─── Photosensitivity notice ──────────────────────────────────────────────
+
+  /**
+   * First launch only (remembered in localStorage). Never in test / debug
+   * sessions (?stage, ?autoplay) or automated captures (navigator.webdriver),
+   * unless forced with ?notice=1.
+   */
+  private needsNotice(): boolean {
+    if (this.noticeDone) return false;
+    let q: URLSearchParams;
+    try {
+      q = new URLSearchParams(location.search);
+    } catch {
+      q = new URLSearchParams();
+    }
+    if (q.get('notice') === '1') return true;
+    if (q.get('notice') === '0' || q.has('stage') || (q.has('autoplay') && q.get('autoplay') !== '0')) return false;
+    if (typeof navigator !== 'undefined' && navigator.webdriver) return false;
+    try {
+      return localStorage.getItem(NOTICE_KEY) !== '1';
+    } catch {
+      return true; // no storage: once per page load
+    }
+  }
+
+  /** Arcade-style WARNING card with the comfort options; any tap outside them continues. */
+  showNotice(onDone: () => void) {
+    const s = this.screen('notice');
+    const st: Settings = { ...this.save.settings };
+    const commit = () => {
+      this.save.updateSettings(st);
+      this.actions.settingsChanged(this.save.settings);
+      applyComfort(this.save.settings);
+    };
+    // The device asks for reduced motion: start with flashing reduced and shake low.
+    let prefers = false;
+    try {
+      prefers = !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      /* fine */
+    }
+    if (prefers && !st.reduceFlashes) {
+      st.reduceFlashes = true;
+      st.screenShake = Math.min(st.screenShake, 0.5);
+      commit();
+    }
+    const box = el('div', 'nt-box', s);
+    el('div', 'nt-stripes', box);
+    el('div', 'nt-head', box, 'WARNING');
+    el('div', 'nt-title', box, 'PHOTOSENSITIVITY');
+    el(
+      'p',
+      'nt-text',
+      box,
+      'This game has flashing lights, explosions and screen shake. A small number of people may have seizures triggered by flashing images. If you feel dizzy or unwell, stop playing at once.',
+    );
+    const opts = el('div', 'nt-opts', box);
+    // Taps on the options (labels included) change settings; they never dismiss the card.
+    opts.addEventListener('pointerdown', (e) => e.stopPropagation());
+    this.toggleRow(opts, 'REDUCE FLASHING', 'reduceFlashes', st, commit);
+    this.segRow(opts, 'SHAKE', 'screenShake', SHAKE_OPTS, st, commit);
+    if (prefers) el('div', 'nt-note', box, 'REDUCED MOTION IS ON FOR THIS DEVICE');
+    el('div', 'nt-stripes', box);
+    el('div', 'nt-foot', s, 'TAP TO CONTINUE');
+    const shownAt = performance.now();
+    let done = false;
+    const finish = () => {
+      if (done || performance.now() - shownAt < NOTICE_ARM_MS) return;
+      done = true;
+      this.noticeDone = true;
+      try {
+        localStorage.setItem(NOTICE_KEY, '1');
+      } catch {
+        /* storage unavailable: shown once per page load */
+      }
+      this.feedback('ui_click');
+      onDone();
+    };
+    // Option rows stop their own taps (dom.onTap); anything else continues.
+    s.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      finish();
+    });
+    this.onKeys((e) => {
+      if (e.code === 'Enter' || e.code === 'Space' || e.code === 'Escape') finish();
+    });
   }
 
   // ─── Hi-scores / name entry ───────────────────────────────────────────────
@@ -538,6 +647,7 @@ export class Menus {
       onTap(card, () => {
         this.feedback('ui_start');
         card.classList.add('chosen');
+        this.clearRunGrades(c);
         this.actions.playCampaign(c.id);
       });
     }
@@ -591,7 +701,7 @@ export class Menus {
     const grid = el('div', 'howto-grid', s);
     const tips: [string, string, string][] = [
       [TUTORIAL_ART.tap, 'TAP TO SHOOT', 'Tap to fire. Hold for auto-fire.'],
-      [TUTORIAL_ART.ring, 'RED RING = ATTACK', 'Shoot it before the ring closes!'],
+      [TUTORIAL_ART.ring, 'RING + ! = ATTACK', 'It shrinks, then strikes. Shoot before it closes!'],
       [TUTORIAL_ART.reload, 'RELOAD', 'Tap RELOAD or swipe down.'],
       [TUTORIAL_ART.crate, 'SHOOT CRATES', 'Guns, bombs and health inside.'],
       [TUTORIAL_ART.civ, "DON'T SHOOT CIVILIANS", 'Hitting a survivor costs a life.'],
@@ -620,6 +730,7 @@ export class Menus {
     const commit = () => {
       this.save.updateSettings(st);
       this.actions.settingsChanged(this.save.settings);
+      applyComfort(this.save.settings);
     };
 
     const slider = (parent: HTMLElement, label: string, key: 'sfxVolume' | 'musicVolume') => {
@@ -692,89 +803,153 @@ export class Menus {
       set(st[key]);
     };
 
-    // The whole row is the touch target (label included), not just the small switch.
-    const toggleRow = (parent: HTMLElement, label: string, key: 'haptics' | 'aimAssist' | 'autoReload' | 'leftHanded' | 'showFps') => {
-      const row = el('div', 'set-row toggle-row', parent);
-      el('span', 'set-label', row, label);
-      const b = el('button', 'set-toggle', row, '<span class="sw-knob"></span><span class="sw-txt"></span>');
-      b.setAttribute('role', 'switch');
-      b.setAttribute('aria-label', label);
-      const paint = () => {
-        b.classList.toggle('on', st[key]);
-        b.setAttribute('aria-checked', String(st[key]));
-        (b.lastElementChild as HTMLElement).textContent = st[key] ? 'ON' : 'OFF';
-      };
-      paint();
-      onTap(row, () => {
-        st[key] = !st[key];
-        paint();
-        commit();
-        this.feedback('ui_click');
-      });
-    };
-
-    const segRow = <K extends 'quality' | 'retro'>(parent: HTMLElement, label: string, key: K, opts: [Settings[K], string][]) => {
-      const row = el('div', 'set-row seg-row', parent);
-      el('span', 'set-label', row, label);
-      const wrap = el('div', 'set-seg', row);
-      for (const [value, text] of opts) {
-        const b = el('button', `seg ${st[key] === value ? 'on' : ''}`, wrap, text);
-        onTap(b, () => {
-          st[key] = value;
-          wrap.querySelectorAll('.seg').forEach((x) => x.classList.remove('on'));
-          b.classList.add('on');
-          this.feedback('ui_click');
-          commit();
-        });
-      }
-    };
-
     slider(colA, 'SOUND FX', 'sfxVolume');
     slider(colA, 'MUSIC', 'musicVolume');
-    segRow(colA, 'GRAPHICS', 'quality', [
+    this.segRow(colA, 'GRAPHICS', 'quality', [
       ['low', 'LOW'],
       ['medium', 'MED'],
       ['high', 'HIGH'],
-    ] as [QualityLevel, string][]);
+    ] as [QualityLevel, string][], st, commit);
     if (RETRO_SETTING_ENABLED) {
-      segRow(colA, 'DISPLAY', 'retro', [
+      this.segRow(colA, 'DISPLAY', 'retro', [
         ['crt', 'CRT'],
         ['pixel', 'PIXEL'],
         ['off', 'OFF'],
-      ] as [RetroMode, string][]);
+      ] as [RetroMode, string][], st, commit);
     }
-    toggleRow(colA, 'SHOW FPS', 'showFps');
-    toggleRow(colB, 'AIM ASSIST', 'aimAssist');
-    toggleRow(colB, 'AUTO RELOAD', 'autoReload');
-    toggleRow(colB, 'VIBRATION', 'haptics');
-    toggleRow(colB, 'LEFT-HANDED HUD', 'leftHanded');
+    this.segRow(colA, 'SCREEN SHAKE', 'screenShake', SHAKE_OPTS, st, commit);
+    this.toggleRow(colA, 'SHOW FPS', 'showFps', st, commit);
+    this.toggleRow(colB, 'AIM ASSIST', 'aimAssist', st, commit);
+    this.toggleRow(colB, 'AUTO RELOAD', 'autoReload', st, commit);
+    this.toggleRow(colB, 'VIBRATION', 'haptics', st, commit);
+    this.toggleRow(colB, 'LEFT-HANDED HUD', 'leftHanded', st, commit);
+    this.toggleRow(colB, 'REDUCE FLASHING', 'reduceFlashes', st, commit);
     const rrow = el('div', 'set-row', colB);
     el('span', 'set-label', rrow, 'PROGRESS');
     const reset = el('button', 'set-btn danger', rrow, 'RESET');
-    let armed = false;
     onTap(reset, () => {
-      if (reset.classList.contains('done')) return;
-      if (!armed) {
-        armed = true;
-        reset.textContent = 'SURE?';
-        reset.classList.add('armed');
-        this.feedback('empty', 0.8);
-        this.later(3000, () => {
-          if (!reset.classList.contains('done')) {
-            armed = false;
-            reset.textContent = 'RESET';
-            reset.classList.remove('armed');
-          }
-        });
-        return;
-      }
-      this.save.reset();
-      reset.textContent = 'DONE';
-      reset.classList.remove('armed');
-      reset.classList.add('done');
-      this.feedback('ui_back');
+      if (reset.classList.contains('done') || s.querySelector('.confirm-veil:not(.leaving)')) return;
+      this.feedback('empty', 0.8);
+      // A real confirmation (not a second tap on the same spot): KEEP / ERASE sit
+      // elsewhere and ERASE ignores taps for a moment, so a double tap can't wipe the save.
+      this.confirm(
+        s,
+        'ERASE ALL PROGRESS?',
+        'Unlocked stages, best scores and both HI-SCORE tables will be wiped. This cannot be undone.',
+        'ERASE',
+        () => {
+          this.save.reset();
+          this.runGrades.clear();
+          reset.textContent = 'DONE';
+          reset.classList.add('done');
+          this.feedback('ui_back');
+        },
+      );
     });
     this.backButton(s, back);
+  }
+
+  /** Modal choice over `screen`: KEEP (default, left) / `yes` (right, armed after ARM_MS). */
+  private confirm(screen: HTMLElement, title: string, text: string, yes: string, onYes: () => void) {
+    const veil = el('div', 'confirm-veil', screen);
+    const box = el('div', 'confirm-box', veil);
+    box.setAttribute('role', 'alertdialog');
+    box.setAttribute('aria-label', title);
+    el('div', 'confirm-title', box, title);
+    el('div', 'confirm-text', box, text);
+    const row = el('div', 'confirm-row', box);
+    const prevKeys = this.keyHandler;
+    const openedAt = performance.now();
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      this.keyHandler = prevKeys;
+      veil.classList.add('leaving');
+      window.setTimeout(() => veil.remove(), 160);
+    };
+    this.button(row, 'KEEP', close, 'primary');
+    this.button(
+      row,
+      yes,
+      () => {
+        if (closed) return;
+        close();
+        onYes();
+      },
+      'erase',
+      undefined,
+      ARM_MS,
+    );
+    // Tapping outside the box cancels.
+    veil.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // (The second tap of a double tap on RESET lands here: it neither cancels nor confirms.)
+      if (e.target === veil && !closed && performance.now() - openedAt > ARM_MS) {
+        this.feedback('ui_back');
+        close();
+      }
+    });
+    this.keyHandler = (e) => {
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        close();
+      }
+    };
+  }
+
+  // The whole row is the touch target (label included), not just the small switch.
+  private toggleRow(parent: HTMLElement, label: string, key: ToggleKey, st: Settings, commit: () => void) {
+    const row = el('div', 'set-row toggle-row', parent);
+    el('span', 'set-label', row, label);
+    const b = el('button', 'set-toggle', row, '<span class="sw-knob"></span><span class="sw-txt"></span>');
+    b.setAttribute('role', 'switch');
+    b.setAttribute('aria-label', label);
+    const paint = () => {
+      b.classList.toggle('on', st[key]);
+      b.setAttribute('aria-checked', String(st[key]));
+      (b.lastElementChild as HTMLElement).textContent = st[key] ? 'ON' : 'OFF';
+    };
+    paint();
+    onTap(row, () => {
+      st[key] = !st[key];
+      paint();
+      commit();
+      this.feedback('ui_click');
+    });
+    return row;
+  }
+
+  private segRow<K extends SegKey>(parent: HTMLElement, label: string, key: K, opts: [Settings[K], string][], st: Settings, commit: () => void) {
+    const row = el('div', 'set-row seg-row', parent);
+    el('span', 'set-label', row, label);
+    const wrap = el('div', 'set-seg', row);
+    // Numeric settings light the nearest choice (a stored 0.8 shows as FULL).
+    const cur = st[key];
+    let pick = opts.findIndex(([v]) => v === cur);
+    if (pick < 0 && typeof cur === 'number') {
+      let best = Infinity;
+      opts.forEach(([v], i) => {
+        const d = Math.abs((v as number) - cur);
+        if (d < best) {
+          best = d;
+          pick = i;
+        }
+      });
+    }
+    opts.forEach(([value, text], i) => {
+      const b = el('button', `seg ${i === pick ? 'on' : ''}`, wrap, text);
+      b.setAttribute('aria-label', `${label} ${text}`);
+      onTap(b, () => {
+        st[key] = value;
+        wrap.querySelectorAll('.seg').forEach((x) => x.classList.remove('on'));
+        b.classList.add('on');
+        this.feedback('ui_click');
+        commit();
+      });
+    });
+    return row;
   }
 
   // ─── In-game ──────────────────────────────────────────────────────────────
@@ -834,7 +1009,7 @@ export class Menus {
     const grid = el('div', 'tut-grid', s);
     const cards: [string, string, string][] = [
       [TUTORIAL_ART.tap, 'TAP TO SHOOT', 'Tap to fire. Hold for auto.'],
-      [TUTORIAL_ART.ring, 'RED RING!', 'It is about to hit you. Shoot it first!'],
+      [TUTORIAL_ART.ring, 'ATTACK RING!', 'Hits you when it closes. Shoot first!'],
       [TUTORIAL_ART.reload, 'RELOAD', 'Tap RELOAD or swipe down.'],
       [TUTORIAL_ART.crate, 'SHOOT CRATES', 'Guns, bombs and health inside.'],
       [TUTORIAL_ART.civ, 'SPARE CIVILIANS', 'Hitting one costs a life.'],
@@ -852,6 +1027,13 @@ export class Menus {
   showResults(r: StageResult, isBest: boolean, nextLabel: string) {
     const s = this.screen('results');
     const stage = this.campaigns.flatMap((c) => c.stages).find((x) => x.id === r.stageId);
+    // This run's grades for the campaign-clear screen. A run always starts at stage 1,
+    // so clearing it starts a fresh record; RETRY simply overwrites the stage's grade.
+    if (stage) {
+      const camp = this.campaigns.find((c) => c.stages.includes(stage));
+      if (camp && stage.index === 0) this.clearRunGrades(camp);
+      this.runGrades.set(r.stageId, r.grade);
+    }
     const head = el('div', 'results-head', s);
     el('h2', 'screen-title', head, 'STAGE CLEAR!');
     if (stage) el('div', 'results-stage', head, escapeHtml(stage.name));
@@ -1020,7 +1202,16 @@ export class Menus {
     s.addEventListener('pointerdown', () => skip());
   }
 
-  showCampaignClear(campaign: CampaignDef, total: number, isBest: boolean, nameEntry?: () => void) {
+  private clearRunGrades(c: CampaignDef) {
+    for (const st of c.stages) this.runGrades.delete(st.id);
+  }
+
+  /**
+   * `grades` (by stage id) = this run's results; when omitted, the grades of the
+   * results screens shown since stage 1 of this campaign are used. The lifetime
+   * best is shown as a small BEST tag when it is higher.
+   */
+  showCampaignClear(campaign: CampaignDef, total: number, isBest: boolean, nameEntry?: () => void, grades?: Partial<Record<string, Grade>>) {
     this.lastScore = total;
     const s = this.screen('campaign-clear');
     s.style.setProperty('--accent', campaign.accent);
@@ -1036,13 +1227,16 @@ export class Menus {
     }
     el('div', 'clear-kicker', s, `${escapeHtml(campaign.name)} COMPLETE`);
     el('h2', 'screen-title big clear-title', s, 'YOU SURVIVED!');
-    const grades = el('div', 'clear-grades', s);
+    const gradesEl = el('div', 'clear-grades', s);
     campaign.stages.forEach((st, i) => {
-      const best = this.save.data.best[st.id];
-      const g = el('div', 'clear-stage', grades);
+      const run = grades?.[st.id] ?? this.runGrades.get(st.id);
+      const best = this.save.data.best[st.id]?.grade;
+      const g = el('div', 'clear-stage', gradesEl);
       g.style.setProperty('--i', String(i));
-      el('span', `grade-badge grade-${best?.grade ?? 'D'}`, g, best?.grade ?? '-');
-      el('span', 'clear-stage-name', g, escapeHtml(st.name));
+      el('span', `grade-badge grade-${run ?? 'D'}`, g, run ?? '-');
+      const txt = el('span', 'clear-stage-text', g);
+      el('span', 'clear-stage-name', txt, escapeHtml(st.name));
+      if (best && (!run || GRADE_ORDER.indexOf(best) > GRADE_ORDER.indexOf(run))) el('span', `clear-stage-best grade-${best}`, txt, `BEST ${best}`);
     });
     const sc = el('div', 'gameover-score final', s, '<span>FINAL SCORE</span> ');
     const v = el('b', '', sc, pad7(0));

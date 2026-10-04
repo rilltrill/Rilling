@@ -52,6 +52,11 @@ export abstract class Entity {
   hostile = false;
   /** Aim assist may snap near-miss shots onto this (never true for civilians). */
   assistable = false;
+  /**
+   * Hitboxes stay shootable while the model is hidden (e.g. a pickup blinking
+   * before it expires — a well-aimed shot on a flashing item must not miss).
+   */
+  shootableWhenHidden = false;
   /** Frame the root lives in (see core/types Frame). */
   frame: Frame = 'world';
   /** Non-null while the entity is about to hurt the player (drawn as a shrinking ring). */

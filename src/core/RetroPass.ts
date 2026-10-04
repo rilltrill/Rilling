@@ -3,6 +3,11 @@ import type { QualityLevel, RetroMode } from './types';
 
 /** Vertical resolution of the arcade "board" per quality level (Sega Model 2 ran at 384 lines). */
 const LINES: Record<QualityLevel, number> = { low: 224, medium: 288, high: 360 };
+/** Lowest line-count multiplier dynamic resolution may use. */
+export const RETRO_MIN_SCALE = 0.7;
+
+const _css = new THREE.Vector2();
+const _out = new THREE.Vector2();
 
 const VERT = /* glsl */ `
   varying vec2 vUv;
@@ -153,10 +158,13 @@ export class RetroPass {
     return { width: Math.max(64, Math.round(w * ratio)), height: Math.max(64, Math.round(h * ratio)) };
   }
 
-  render(scene: THREE.Scene, camera: THREE.Camera, dt: number) {
-    const r = this.renderer;
-    const out = r.getDrawingBufferSize(new THREE.Vector2());
-    const css = r.getSize(new THREE.Vector2());
+  /**
+   * The low-res scene target for the renderer's current size (created or
+   * resized as needed). Also bound by Engine.precompile so shader programs are
+   * built for the state they are drawn in.
+   */
+  ensureTarget(): THREE.WebGLRenderTarget {
+    const css = this.renderer.getSize(_css);
     const { width, height } = this.targetSize(css.x, css.y);
     if (!this.rt || this.rt.width !== width || this.rt.height !== height) {
       this.rt?.dispose();
@@ -170,14 +178,21 @@ export class RetroPass {
       });
       this.rt.texture.colorSpace = THREE.LinearSRGBColorSpace;
     }
+    return this.rt;
+  }
+
+  render(scene: THREE.Scene, camera: THREE.Camera, dt: number) {
+    const r = this.renderer;
+    const out = r.getDrawingBufferSize(_out);
+    const rt = this.ensureTarget();
     this.time += dt;
     const u = this.mat.uniforms;
-    u.tScene.value = this.rt.texture;
-    u.uRes.value.set(width, height);
+    u.tScene.value = rt.texture;
+    u.uRes.value.set(rt.width, rt.height);
     u.uOut.value.copy(out);
     u.uTime.value = this.time;
     u.uExposure.value = r.toneMappingExposure;
-    r.setRenderTarget(this.rt);
+    r.setRenderTarget(rt);
     r.clear();
     r.render(scene, camera);
     r.setRenderTarget(null);

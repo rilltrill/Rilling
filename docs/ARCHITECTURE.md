@@ -15,13 +15,15 @@ via Capacitor.
 src/
   main.ts                  entry: flags, Game boot
   core/                    engine-level, no gameplay knowledge
-    Engine.ts              renderer, camera, frame loop, dynamic resolution
+    Engine.ts              renderer, camera, frame loop, output-DPR policy, precompile, context loss
+    Resolution.ts          dynamic-resolution governor (steps must prove they help: 30 Hz caps)
     Input.ts               pointer/touch/keyboard (tap = shoot, swipe-down = reload)
     Save.ts                localStorage: settings, unlocks, best scores
     types.ts               shared types (V3, WeaponId, HitPart, Settings…)
     EventBus.ts Rng.ts math.ts Haptics.ts
   gameplay/                the rail-shooter framework
-    Game.ts                top-level state machine (menus ↔ stage ↔ results)
+    Game.ts                top-level state machine (menus ↔ loading ↔ stage ↔ results)
+    Warmup.ts              shader warm-up: detached prototypes of everything a stage spawns
     World.ts               one stage session: scene, entities, systems, events
     StageRunner.ts         plays a StageDef's beats (move/hold/boss/banner/…)
     StageTypes.ts          ★ the stage scripting contract
@@ -106,6 +108,11 @@ Subclass `Enemy`:
    custom string states set via `setState('leap')`), `entryUpdate`,
    `advanceUpdate`, `damageMultiplier`.
 
+`build()` must not touch anything outside `this.model` / `this.root` that
+`dispose()` wouldn't undo: stage loading builds a detached copy of every enemy
+type (`Enemy.buildDetached()`, no `onAdded`) to compile its shaders up front.
+Do world wiring (camera focus, scene helpers, sounds) in `onAdded()`.
+
 Default AI: entry → advance to `attackRange` → **windup** (a shrinking red
 ring on screen; the player must kill/stagger it in `windup` seconds) → strike
 (1 heart) → recover → repeat. Any hit during windup staggers (unless
@@ -127,7 +134,10 @@ unobstructed weak parts in registration order); register
 `customUpdate` with custom states. Helpers: `telegraphAttack(duration, onLand)`,
 `throwProjectile(fromWorldPos, opts)`, `phaseFor()`, `onPhase()`. Bosses must
 be **killable by the autoplayer in < 120 s** (the simulator checks) and every
-attack must be telegraphed (ring) and avoidable by shooting. Register the boss
+attack must be telegraphed (ring) and avoidable by shooting. When a boss's
+`telegraph` appears (null → set), `World` vents an overheated mounted gun
+(`WeaponSystem.vent()`: heat ≤ 35 %, lockout cleared) so a turret player can
+always answer the windup. Register the boss
 id from the stage folder (e.g. `registerEnemy('butcher', …)`).
 
 ## Model kit rules (see `content/kit/ModelKit.ts`)
@@ -184,6 +194,59 @@ trails, ground decals (blood, scorch, bullet marks) that fade, explosions with
 fireball/shockwave/smoke, `muzzleFlash()` (wired in `Shooter.fire`). Occluders may
 set `userData.surface = 'metal' | 'wood' | 'concrete' | 'dirt' | 'grass' | 'water'`
 to pick impact effects per object.
+
+## Weapons, pickups, bombs
+
+- Turret heat: +3 % per shot; a pause of > 0.12 s bleeds heat at 1/s (feathering
+  never locks you out); holding flat out overheats in ~2.8 s and locks the gun
+  until it cools to 35 % (~1.1 s) — unless a boss windup vents it (see Bosses).
+- Pickups blink for their last 2 s by hiding the model only: `Entity.shootableWhenHidden`
+  keeps the hitboxes in `Shootables.active()`, so a shot on a flashing item still
+  collects it. Pickups left when a beat ends live 6 s more (`LEFTOVER_PICKUP_TTL`).
+  Pickup halo/gem geometry is shared (`userData.shared`).
+- `World.useBomb()` ignores a second bomb within 0.75 s (`bombCooldown()` for the
+  HUD) and spends nothing when no hostile is in reach (`bombTargets()`; it pops
+  NO TARGETS).
+- Aim assist probes only the shootable meshes (25 rays) and checks walls with one
+  occluder ray per candidate; the occluder raycast is skipped for clean misses of
+  extra shotgun pellets. Still: keep occluders low-poly proxies (12-triangle boxes
+  with `userData.surface`) — never pass detailed baked shells.
+
+## Comfort & accessibility settings
+
+`world.settings` is the live Settings object (the settings screen edits it mid-stage).
+- `reduceFlashes`: Fx explosion light flashes are dimmer (30 %) and can't re-fire
+  within 0.4 s, the blast core sprite and muzzle-flash light are toned down, enemy
+  hit flashes are capped at ~3/s, pickups blink slower. **Stage code with its own
+  flashes (lightning, strobing alarms, flickering lights) must check
+  `world.settings.reduceFlashes`** and tone them down (no full-screen brightening).
+- `screenShake` 0..1: scales `RailRig.shake()` (and walk-bob / vehicle rumble by half).
+- First run: when the OS asks for reduced motion (`prefers-reduced-motion`),
+  `Save` defaults to `reduceFlashes: true, screenShake: 0.5`.
+
+## Stage loading
+
+`Game.startStage` shows the intro card (or keeps the pressed RETRY/RESTART
+screen) first and builds the stage two frames later, so the UI paints before the
+0.4–1 s build. Then `Warmup.buildWarmupSet` builds throwaway copies of every
+enemy type in the beats (plus the campaign roster), each pickup kind and civilian
+variant, and `Engine.precompile` compiles their programs (and the scenery's) with
+the retro target bound; play starts when both the card and the load are done.
+State `'loading'` covers loads without a card. Stage set pieces that add **lights**
+or new material types mid-stage still compile then: add such lights at build time
+(intensity 0) and keep set-piece meshes in the scene (hidden) from the start.
+
+## Renderer policy
+
+- Output DPR: one rule (`Engine.outputDpr`): CRT/PIXEL LOW 1.5 / MEDIUM 2 / HIGH 2,
+  clean mode = the quality preset's max; always capped by the device. MSAA only
+  in clean mode HIGH (decided at boot).
+- Dynamic resolution (`core/Resolution.ts`): slow windows start a probe that steps
+  down (retro: scene lines 1 → 0.7, then output DPR → 1); if 3 steps don't make
+  frames faster it's a refresh cap (Low Power Mode), so it reverts and holds.
+- WebGL context loss: the game pauses ("GRAPHICS RESET"), RESUME is refused until
+  the context is restored; frozen frames (pause/results/continue/intro) are only
+  re-rendered when the canvas was resized or cleared.
 
 ## Performance & feel checklist
 

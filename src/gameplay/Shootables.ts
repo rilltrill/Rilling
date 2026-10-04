@@ -32,18 +32,23 @@ export class Shootables {
     }
   }
 
-  /** Objects currently eligible for raycasting (visible + owner alive). */
-  active(): THREE.Object3D[] {
-    return this.objects.filter((o) => {
+  /**
+   * Objects currently eligible for raycasting (visible + owner alive). Pass
+   * `out` to reuse an array (it is cleared first).
+   */
+  active(out: THREE.Object3D[] = []): THREE.Object3D[] {
+    out.length = 0;
+    for (const o of this.objects) {
       const tag = o.userData.shot as ShotTag | undefined;
-      if (!tag || tag.owner.removed) return false;
-      let n: THREE.Object3D | null = o;
-      while (n) {
-        if (!n.visible) return false;
-        n = n.parent;
+      if (!tag || tag.owner.removed) continue;
+      if (!tag.owner.shootableWhenHidden) {
+        let n: THREE.Object3D | null = o;
+        while (n && n.visible) n = n.parent;
+        if (n) continue;
       }
-      return true;
-    });
+      out.push(o);
+    }
+    return out;
   }
 
   clear() {

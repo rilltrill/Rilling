@@ -32,12 +32,14 @@ const beats: Beat[] = [
     look: { at: [0, 3.2, 30] },
     run: (w) => jungle()?.openGate(w),
   },
-  { kind: 'wait', label: 'gate swings', duration: 1.1 },
+  { kind: 'wait', label: 'gate swings', duration: 0.7 },
   {
     kind: 'move',
     label: 'through the gate',
     to: D.COMPY_HOLD,
-    speed: 8,
+    speed: 11,
+    // A bonus gem hanging past the gate: a harmless first target while the park rolls by.
+    pickups: [{ kind: 'points', pos: [2.2, 2.5, 42], t: 0.4 }],
   },
   // ── 1. Compy ambush: a sparse first wave to learn the mounted gun. ──
   {
@@ -133,7 +135,10 @@ const beats: Beat[] = [
     onStart: (w) => {
       jungle()?.armHeatTip(false);
       jungle()?.spawnDrums(w);
-      w.later(5, () => w.hud.prompt('SHOOT THE FUEL DRUMS!'));
+      // Only if they're still there (stray fire often sets them off first).
+      w.later(5, () => {
+        if (!jungle()?.treeBlasted) w.hud.prompt('SHOOT THE FUEL DRUMS!');
+      });
     },
     civilians: [{ pos: [-4.6, 0, 5.4], variant: 'ranger' }],
     pickups: [{ kind: 'health', pos: [-2.2, 2.4, 13.6] }],
@@ -168,26 +173,46 @@ const beats: Beat[] = [
     label: 'blast the tree',
     run: (w) => jungle()?.blastTree(w),
   },
-  { kind: 'wait', label: 'debris settles', duration: 1.5 },
-  // ── 5. Stampede across the meadow (harmless spectacle / breather). ──
+  { kind: 'wait', label: 'debris settles', duration: 0.9 },
+  // ── 5. Stampede across the meadow (the herd is harmless spectacle; a few
+  //       compys bolt ahead of it — light action between the big encounters). ──
   {
     kind: 'move',
     label: 'to the meadow',
     to: D.STAMPEDE_WAIT,
-    speed: 11,
+    speed: 12,
+    waves: [
+      {
+        // Land ahead-left of the stop: they skitter in as the jeep pulls up.
+        start: { atD: D.STAMPEDE_WAIT - 26 },
+        spawns: [
+          { type: 'compy', pos: [-6, 0, 25], entry: 'leap' },
+          { type: 'compy', pos: [-8.5, 0, 28], entry: 'leap', t: 0.5 },
+        ],
+      },
+    ],
   },
   {
-    kind: 'wait',
+    kind: 'hold',
     label: 'stampede',
-    duration: 6.2,
+    minTime: 4.4,
     look: { at: [-3, 3, 25], blend: 1.0 },
     onStart: (w) => jungle()?.startStampede(w),
+    waves: [
+      {
+        start: { after: 1.6 },
+        spawns: [
+          { type: 'compy', pos: [-7, 0, 12], entry: 'leap' },
+          { type: 'compy', pos: [-9, 0, 15.5], entry: 'leap', t: 0.45 },
+        ],
+      },
+    ],
   },
   {
     kind: 'move',
     label: 'into the meadow',
     to: D.TRIKE_HOLD,
-    speed: 7,
+    speed: 9,
   },
   // ── 6. Trike charge out of the wrecked tour vehicle. ──
   {

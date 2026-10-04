@@ -48,6 +48,11 @@ export class RailRig {
   readonly offset = new THREE.Vector3();
   /** Externally controllable yaw wobble in radians (vehicle swerves). */
   swerve = 0;
+  /**
+   * Comfort setting (Settings.screenShake, 0..1, kept in sync by World): scales
+   * screen shake, and walk-bob / vehicle rumble by half as much.
+   */
+  shakeScale = 1;
 
   constructor(readonly camera: THREE.PerspectiveCamera) {
     this.camera.rotation.order = 'YXZ';
@@ -130,7 +135,7 @@ export class RailRig {
 
   /** Add screen shake. 0.15 = light gunshot, 0.4 = hit, 1 = huge impact. */
   shake(amount: number) {
-    this.trauma = clamp(this.trauma + amount, 0, 1);
+    this.trauma = clamp(this.trauma + amount * this.shakeScale, 0, 1);
   }
 
   /** Rail heading (yaw) at distance d — camera looks along -Z rotated by this. */
@@ -250,6 +255,11 @@ export class RailRig {
       bx = Math.sin(this.time * 23.1) * rumble * 0.5;
       br = Math.sin(this.time * 1.3) * 0.012 * moving + this.swerve * 0.3;
     }
+
+    const motion = 0.5 + 0.5 * this.shakeScale;
+    bx *= motion;
+    by *= motion;
+    br *= motion;
 
     // Trauma-based shake.
     this.trauma = Math.max(0, this.trauma - dt * 1.6);

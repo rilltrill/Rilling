@@ -1,8 +1,8 @@
 import type { HitMarkerKind, HudApi, PopupStyle, World } from '../gameplay/World';
 import { WEAPONS } from '../gameplay/Weapons';
 import type { WeaponId } from '../core/types';
-import { Overlay2D } from './Overlay2D';
-import { el, onTap, setStyle, setText, toggle } from './dom';
+import { MAX_AVOID, Overlay2D } from './Overlay2D';
+import { applyComfort, el, onTap, setStyle, setText, toggle } from './dom';
 import { SKULL_ICON, weaponIcon } from './art';
 import { bombSvg, heartSvg, infinitySvg, installPixelSprites, swapSvg } from './pixel';
 
@@ -16,6 +16,12 @@ export interface HudCallbacks {
 const CYCLE: WeaponId[] = ['pistol', 'shotgun', 'smg', 'magnum'];
 const BOSS_INTRO = 2.4;
 const COMBO_CLASS = ['hud-combo', 'hud-combo live', 'hud-combo hot', 'hud-combo hot fire', 'hud-combo hot fire max'];
+/** A double tap on BOMB must not spend two bombs. */
+const BOMB_DEBOUNCE_MS = 750;
+/** Re-measure the HUD panel rects for the overlay this often (s), plus on resize / layout changes. */
+const LAYOUT_EVERY = 0.5;
+/** A panel stays faded this long after the telegraph behind it is gone (s): no flicker. */
+const VEIL_HOLD = 0.35;
 const HEART_FULL = heartSvg(true);
 const HEART_EMPTY = heartSvg(false);
 const INF = infinitySvg();
@@ -97,6 +103,20 @@ export class Hud implements HudApi {
   /** A banner with exactly this text is swallowed once (see suppressBanner). */
   private bannerSuppress: string | null = null;
   private lastBombs = -1;
+  /** performance.now() of the last accepted BOMB tap. */
+  private bombAt = -1e9;
+  private safeProbe: HTMLDivElement;
+  /** HUD panels the overlay keeps threat beacons away from (index = Overlay2D avoid slot). */
+  private avoidEls: HTMLElement[] = [];
+  private veilT = new Float32Array(MAX_AVOID);
+  private layoutT = 0;
+  private lastTopBar = '';
+  /** Combo meter's bottom-left (CSS px) for the "xN COMBO" popup. */
+  private comboAnchorX = 14;
+  private comboAnchorY = 72;
+  /** Photosensitivity / comfort (mirrors world.settings). */
+  private reduceFlashes = false;
+  private shakeK = 1;
 
   constructor(parent: HTMLElement, private cb: HudCallbacks) {
     installPixelSprites();
@@ -109,6 +129,8 @@ export class Hud implements HudApi {
     for (let i = 0; i < 3; i++) this.dmgDirs.push(el('div', 'hud-dmg-dir', r));
     this.flashEl = el('div', 'hud-flash', r);
     this.splats = el('div', 'hud-splats', r);
+    // Invisible box inset by the safe-area insets (measured for the overlay's beacons).
+    this.safeProbe = el('div', 'hud-safe', r);
 
     const tl = el('div', 'hud-tl', r);
     const sl = el('div', 'hud-score-line', tl);
@@ -153,7 +175,14 @@ export class Hud implements HudApi {
     this.bombBtn = el('button', 'hud-btn hud-bomb', bl, `<span class="hud-bomb-icon">${bombSvg()}</span>`);
     this.bombBtn.setAttribute('aria-label', 'Bomb');
     this.bombCount = el('span', 'hud-bomb-count', this.bombBtn, 'x1');
-    onTap(this.bombBtn, () => this.cb.bomb());
+    onTap(this.bombBtn, () => {
+      // Debounce: a panic double tap (or a two-finger touch) spends one bomb, not two.
+      const now = performance.now();
+      if (now - this.bombAt < BOMB_DEBOUNCE_MS) return;
+      this.bombAt = now;
+      toggle(this.bombBtn, 'cooling', true);
+      this.cb.bomb();
+    });
 
     const br = el('div', 'hud-br', r);
     this.weaponBox = el('div', 'hud-weapon', br);
@@ -188,6 +217,35 @@ export class Hud implements HudApi {
     // Demo scene cut: black (with a rolling sync bar) over everything but the DEMO PLAY banner.
     el('div', 'hud-demo-cut', r, '<i></i>');
     this.demoEl = el('div', 'hud-demo hidden', r, '<div class="hud-demo-title">DEMO PLAY</div><div class="hud-demo-press">PRESS START</div>');
+
+    // Overlay avoid slots: corner panels, then the top-centre bar (boss bar or progress rail).
+    this.avoidEls = [tl, tr, bl, br, this.bossWrap];
+    window.addEventListener('resize', () => (this.layoutT = 0));
+  }
+
+  /**
+   * Measure the HUD panels (CSS px) for the overlay: threat beacons stay clear of
+   * them and a panel with a telegraph behind it fades. Cheap: runs every
+   * LAYOUT_EVERY seconds or when the layout changes, never per frame.
+   */
+  private measureLayout() {
+    const o = this.overlay;
+    const sr = this.safeProbe.getBoundingClientRect();
+    if (sr.width > 0 && sr.height > 0) o.setSafeArea(sr.left, sr.top, sr.right, sr.bottom);
+    else o.setSafeArea(0, 0, 0, 0);
+    const bossShown = !this.bossWrap.classList.contains('hidden');
+    this.avoidEls[4] = bossShown ? this.bossWrap : this.progress;
+    for (let i = 0; i < MAX_AVOID; i++) {
+      const e = this.avoidEls[i];
+      const hidden = !e || e.classList.contains('hidden');
+      const b = hidden ? null : e.getBoundingClientRect();
+      if (!b || b.width <= 0 || b.height <= 0) o.setAvoid(i, 0, 0, 0, 0);
+      else o.setAvoid(i, b.left, b.top, b.right, b.bottom);
+      if (i === 0 && b && b.width > 0) {
+        this.comboAnchorX = b.left;
+        this.comboAnchorY = b.bottom + 6;
+      }
+    }
   }
 
   /** Attract-mode demo: no buttons, a blinking DEMO PLAY / PRESS START banner. */
@@ -200,11 +258,14 @@ export class Hud implements HudApi {
   /** Demo cut to black while the stage fast-forwards to the next fight. */
   demoCut(on: boolean) {
     toggle(this.root, 'demo-cut', on);
+    // The overlay draws above the HUD: keep rings / beacons off the black cut.
+    this.overlay.canvas.style.visibility = on ? 'hidden' : '';
   }
 
   show(on: boolean) {
     toggle(this.root, 'hidden', !on);
     this.overlay.canvas.style.display = on ? 'block' : 'none';
+    if (on) this.layoutT = 0;
   }
 
   setLeftHanded(on: boolean) {
@@ -248,19 +309,39 @@ export class Hud implements HudApi {
     this.popupPool = [];
     this.overlay.clear();
     setStyle(this.vignette, 'opacity', '0');
+    this.bombAt = -1e9;
+    toggle(this.bombBtn, 'cooling', false);
+    this.veilT.fill(0);
+    for (const e of [...this.avoidEls, this.progress]) e?.classList.remove('hud-veil');
+    this.layoutT = 0;
+    this.lastTopBar = '';
   }
 
   // ─── HudApi ───────────────────────────────────────────────────────────────
 
   popup(text: string, x: number, y: number, style: PopupStyle) {
     const p = this.popupPool.pop() ?? el('div', '');
-    p.className = `hud-popup pop-${style}`;
     p.textContent = text;
+    if (style === 'combo') {
+      // Multiplier steps come out of the combo meter (top-left), never over the
+      // middle of the screen where boss weak points sit.
+      p.className = 'hud-popup pop-combo anchored';
+      p.style.left = `${Math.round(this.comboAnchorX)}px`;
+      p.style.top = `${Math.round(this.comboAnchorY)}px`;
+      this.popups.appendChild(p);
+      this.retirePopup(p);
+      return;
+    }
+    p.className = `hud-popup pop-${style}`;
     // Press Start 2P is monospace: half the text width keeps it on screen when centred.
-    const margin = Math.min(window.innerWidth / 2, 10 + text.length * (style === 'combo' ? 9 : 6.5));
+    const margin = Math.min(window.innerWidth / 2, 10 + text.length * 6.5);
     p.style.left = `${Math.max(margin, Math.min(window.innerWidth - margin, x))}px`;
     p.style.top = `${Math.max(40, Math.min(window.innerHeight - 40, y))}px`;
     this.popups.appendChild(p);
+    this.retirePopup(p);
+  }
+
+  private retirePopup(p: HTMLDivElement) {
     const done = () => {
       p.remove();
       if (this.popupPool.length < 30) this.popupPool.push(p);
@@ -292,13 +373,15 @@ export class Hud implements HudApi {
   }
 
   damage() {
-    this.flash('rgba(255,0,0,0.22)', 0.3);
+    // Reduced flashing: the red frame alone says "hit" (no full-screen red flash).
+    if (!this.reduceFlashes) this.flash('rgba(255,0,0,0.22)', 0.3);
     this.dmgEdge.classList.remove('hit');
     void this.dmgEdge.offsetWidth;
     this.dmgEdge.classList.add('hit');
-    this.root.classList.remove('shake');
+    this.root.classList.remove('shake', 'shake-low');
+    if (this.shakeK <= 0) return;
     void this.root.offsetWidth;
-    this.root.classList.add('shake');
+    this.root.classList.add(this.shakeK < 0.75 ? 'shake-low' : 'shake');
   }
 
   /**
@@ -334,6 +417,8 @@ export class Hud implements HudApi {
   }
 
   splat(color: number) {
+    // Reduced flashing: at most one (dimmer) splat on screen at a time.
+    if (this.reduceFlashes && this.splats.childElementCount > 0) return;
     const s = el('div', 'hud-splat', this.splats);
     const hex = `#${color.toString(16).padStart(6, '0')}`;
     s.style.setProperty('--c', hex);
@@ -344,11 +429,14 @@ export class Hud implements HudApi {
   }
 
   flash(color = 'rgba(255,255,255,0.8)', duration = 0.25) {
+    // Reduced flashing: bright / saturated full-screen flashes become a soft, slow
+    // tint (fades to black — scene cuts — are not flashes and stay as they are).
+    const soft = this.reduceFlashes && !isDark(color);
     this.flashEl.style.background = color;
     this.flashEl.style.transition = 'none';
-    this.flashEl.style.opacity = '1';
+    this.flashEl.style.opacity = soft ? '0.22' : '1';
     void this.flashEl.offsetWidth;
-    this.flashEl.style.transition = `opacity ${duration}s ease-out`;
+    this.flashEl.style.transition = `opacity ${soft ? Math.max(0.6, duration * 2) : duration}s ease-out`;
     this.flashEl.style.opacity = '0';
   }
 
@@ -377,6 +465,19 @@ export class Hud implements HudApi {
 
   sync(world: World, dt: number, progress: number, fps: number) {
     const w = world;
+    // Comfort settings live on world.settings (Game keeps it in sync with SETTINGS).
+    const cs = w.settings;
+    const rf = !!cs.reduceFlashes;
+    const shake = Number.isFinite(cs.screenShake) ? Math.max(0, Math.min(1, cs.screenShake)) : 1;
+    if (rf !== this.reduceFlashes || shake !== this.shakeK) {
+      this.reduceFlashes = rf;
+      this.shakeK = shake;
+      this.overlay.reduceFlashes = rf;
+      applyComfort(cs);
+    }
+    // BOMB greys out right after a bomb: the tap debounce here, plus World's own cooldown when it has one.
+    const worldCooldown = (w as { bombCooldown?: () => number }).bombCooldown?.() ?? 0;
+    toggle(this.bombBtn, 'cooling', worldCooldown > 0 || performance.now() - this.bombAt < BOMB_DEBOUNCE_MS);
     // Score rolls up toward the real value.
     const target = w.score.score;
     if (this.shownScore !== target) {
@@ -511,6 +612,29 @@ export class Hud implements HudApi {
       this.bossLagFrac = 1;
     }
 
+    // HUD layout for the overlay (beacons avoid the panels) + fade panels with a threat behind them.
+    const topBar = this.bossWrap.classList.contains('hidden') ? (this.progress.classList.contains('hidden') ? '' : 'p') : 'b';
+    if (topBar !== this.lastTopBar) {
+      this.lastTopBar = topBar;
+      this.layoutT = 0;
+      // The bar being replaced must not stay faded.
+      this.veilT[4] = 0;
+      this.bossWrap.classList.remove('hud-veil');
+      this.progress.classList.remove('hud-veil');
+    }
+    this.layoutT -= dt;
+    if (this.layoutT <= 0) {
+      this.layoutT = LAYOUT_EVERY;
+      this.measureLayout();
+    }
+    const veiled = this.overlay.veiled;
+    for (let i = 0; i < this.avoidEls.length; i++) {
+      if (veiled[i]) this.veilT[i] = VEIL_HOLD;
+      else if (this.veilT[i] > 0) this.veilT[i] -= dt;
+      const e = this.avoidEls[i];
+      if (e) toggle(e, 'hud-veil', this.veilT[i] > 0);
+    }
+
     const pct = `${(Math.max(0, Math.min(1, progress)) * 100).toFixed(1)}%`;
     setStyle(this.progressFill, 'width', pct);
     setStyle(this.progressDot, 'left', pct);
@@ -535,4 +659,27 @@ export class Hud implements HudApi {
   weaponLabel(id: WeaponId) {
     return WEAPONS[id].name;
   }
+}
+
+/** True for near-black colours (a fade to black is a cut, not a flash). */
+function isDark(color: string): boolean {
+  const c = color.trim().toLowerCase();
+  let r = 255;
+  let g = 255;
+  let b = 255;
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(c);
+  if (hex) {
+    const h = hex[1].length === 3 ? hex[1].replace(/./g, (x) => x + x) : hex[1];
+    r = parseInt(h.slice(0, 2), 16);
+    g = parseInt(h.slice(2, 4), 16);
+    b = parseInt(h.slice(4, 6), 16);
+  } else {
+    const m = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/.exec(c);
+    if (m) {
+      r = +m[1];
+      g = +m[2];
+      b = +m[3];
+    } else if (c === 'black') return true;
+  }
+  return Math.max(r, g, b) < 48;
 }

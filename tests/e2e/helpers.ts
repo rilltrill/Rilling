@@ -5,6 +5,8 @@ import path from 'node:path';
 export const SAVE_KEY = 'overrun.save.v1';
 /** src/platform/installHint.ts — set so the iPhone install pill never overlays menus in the WebKit/iPhone project. */
 export const INSTALL_HINT_KEY = 'overrun.installHint.dismissed';
+/** src/ui/Menus.ts — first-launch photosensitivity notice already acknowledged (it would sit in front of the title). */
+export const NOTICE_KEY = 'overrun.notice.v1';
 
 /** Console errors / uncaught exceptions collected for a page. */
 export function trackErrors(page: Page): string[] {
@@ -26,22 +28,34 @@ export function trackErrors(page: Page): string[] {
 
 /**
  * Seeds the save before the page's scripts run (first load only — a later
- * reload keeps whatever the game persisted): tutorial already seen, iPhone
- * install hint already dismissed (the webkit-iphone project has an iPhone UA,
+ * reload keeps whatever the game persisted): tutorial and photosensitivity
+ * notice already seen, iPhone install hint already dismissed (the webkit-iphone project has an iPhone UA,
  * and hiding the hint must not depend on navigator.webdriver).
  */
 export async function seedSave(page: Page, extra: Record<string, unknown> = {}) {
   await page.addInitScript(
-    ([key, hintKey, data]) => {
+    ([key, hintKey, noticeKey, data]) => {
       try {
         if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({ version: 1, seenTutorial: true, ...data }));
         localStorage.setItem(hintKey, '1');
+        localStorage.setItem(noticeKey, '1');
       } catch {
         /* storage unavailable */
       }
     },
-    [SAVE_KEY, INSTALL_HINT_KEY, extra] as const,
+    [SAVE_KEY, INSTALL_HINT_KEY, NOTICE_KEY, extra] as const,
   );
+}
+
+/** Only the photosensitivity notice is marked as seen (the game skips it under automation anyway). */
+export async function skipNotice(page: Page) {
+  await page.addInitScript((noticeKey) => {
+    try {
+      localStorage.setItem(noticeKey, '1');
+    } catch {
+      /* storage unavailable */
+    }
+  }, NOTICE_KEY);
 }
 
 export interface GameSnapshot {

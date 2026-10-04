@@ -5,6 +5,7 @@ import type { V3 } from '../../../core/types';
 import { D, RAIL, rel, worldAt } from './layout';
 import { buildPark, park } from './env';
 import { JeepViewModel, buildJeepBody } from './jeep';
+import { perch, type PerchedCivilian } from './civilian';
 import './boss';
 
 /**
@@ -28,6 +29,17 @@ const HELI_LOOK = v3(worldAt(D.HELI, 0, 2.6));
 const PAD_LOOK = v3(worldAt(D.PAD - 9, -1, 0));
 const DOOR = rel(D.HOLD_VISITOR, D.VISITOR, D.VISITOR_SIDE + 2.5);
 
+// Civilians stand OUT of the attack lanes: at the edge of the frame (|NDC x| ≈ 0.75,
+// beyond where dinos may line up an attack), farther away than the dinos'
+// striking ring, or perched above them — and every leap / approach in their
+// hold comes from the other side, so shots at an attacker never pass through
+// them. Attackers enter through the middle of the view, clear of the HUD corners.
+const SCIENTIST = rel(D.HOLD_VISITOR, 180, 0);
+const RANGER = rel(D.HOLD_ROADBLOCK, 246.5, 7.3);
+
+/** The mud hold's worker, perched on his truck (spawned by hand: the runner grounds its civilians). */
+let worker: PerchedCivilian | null = null;
+
 const beats: Beat[] = [
   {
     kind: 'banner',
@@ -42,9 +54,20 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'paddock road',
     to: D.HOLD_FENCE,
-    speed: 7,
+    speed: 8,
     look: { at: rel(0, 60, D.FENCE_SIDE - 2, 2), blend: 1.2 },
     onStart: (w) => w.audio.play('engine_rev', { volume: 0.7 }),
+    pickups: [{ kind: 'points', pos: [-2.2, 2.5, 30], t: 0.3 }],
+    waves: [
+      {
+        // A couple of scouts dart out of the ferns: first targets while the fence comes into view.
+        start: { atD: 8 },
+        spawns: [
+          { type: 'compy', pos: [-4, 0, 17], entry: 'leap' },
+          { type: 'compy', pos: [-2.5, 0, 19.5], entry: 'leap', t: 0.4 },
+        ],
+      },
+    ],
   },
   // ── 1. The paddock fence is down: compys pour through the gap. ──
   {
@@ -71,11 +94,13 @@ const beats: Beat[] = [
         ],
       },
       {
+        // The pack comes through together: three raptors from the gap and the road.
         start: { remaining: 1 },
         spawns: [
-          { type: 'raptor', pos: rel(D.HOLD_FENCE, 57, D.FENCE_SIDE + 1.5), entry: 'leap', opts: { variant: 'green' } },
-          { type: 'raptor', pos: [-9, 0, 18], entry: 'leap', t: 0.8, opts: { variant: 'tan' } },
-          { type: 'compy', pos: rel(D.HOLD_FENCE, 62, D.FENCE_SIDE), entry: 'leap', t: 1.4, count: 2, every: 0.4 },
+          { type: 'raptor', pos: rel(D.HOLD_FENCE, 57, D.FENCE_SIDE + 1.5), entry: 'leap', hp: 1.3, opts: { variant: 'green' } },
+          { type: 'raptor', pos: [-7, 0, 19], entry: 'leap', t: 0.5, hp: 1.3, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: rel(D.HOLD_FENCE, 64, D.FENCE_SIDE + 1), entry: 'leap', t: 1, hp: 1.3, opts: { variant: 'tan' } },
+          { type: 'compy', pos: rel(D.HOLD_FENCE, 62, D.FENCE_SIDE), entry: 'leap', t: 1.6, count: 2, every: 0.4 },
         ],
       },
     ],
@@ -90,28 +115,34 @@ const beats: Beat[] = [
     pickups: [{ kind: 'points', pos: [-2.6, 2.4, 66] }],
     waves: [
       {
-        start: { atD: 60 },
+        // A flanking pair, one on each side of the jeep.
+        start: { atD: 58 },
         spawns: [
-          { type: 'raptor', pos: [7, 0, 9], entry: 'leap', opts: { variant: 'tan' } },
-          { type: 'raptor', pos: [-7.5, 0, 12], entry: 'leap', t: 0.7, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: [7, 0, 11], entry: 'leap', hp: 1.3, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: [-7.5, 0, 12], entry: 'leap', t: 0.3, hp: 1.3, opts: { variant: 'tan' } },
         ],
       },
       {
-        start: { atD: 94 },
-        spawns: [{ type: 'compy', pos: [-2.5, 0, 18], count: 4, every: 0.25, offset: [1.4, 0, 0.5] }],
+        start: { atD: 90 },
+        spawns: [
+          { type: 'compy', pos: [-2.5, 0, 18], count: 4, every: 0.25, offset: [1.4, 0, 0.5] },
+          { type: 'ptero', pos: [6, 10, 26], entry: 'fly', t: 0.6 },
+        ],
       },
       {
         start: { atD: 116 },
         spawns: [
-          { type: 'ptero', pos: [-6, 10, 24], entry: 'fly' },
-          { type: 'raptor', pos: [7.5, 0, 10], entry: 'leap', t: 0.6, opts: { variant: 'blue' } },
+          { type: 'raptor', pos: [7.5, 0, 10], entry: 'leap', hp: 1.3, opts: { variant: 'blue' } },
+          { type: 'raptor', pos: [-7, 0, 13], entry: 'leap', t: 0.4, hp: 1.3, opts: { variant: 'green' } },
         ],
       },
       {
-        start: { atD: 138 },
+        // The alpha leads the last rush.
+        start: { atD: 136 },
         spawns: [
-          { type: 'raptor', pos: [-7.5, 0, 9], entry: 'leap', opts: { variant: 'red' } },
-          { type: 'raptor', pos: [7.5, 0, 13], entry: 'leap', t: 0.5, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: [-7.5, 0, 9], entry: 'leap', hp: 1.3, opts: { variant: 'red' } },
+          { type: 'raptor', pos: [7.5, 0, 12], entry: 'leap', t: 0.3, hp: 1.3, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: [0.5, 0, 22], entry: 'leap', t: 0.7, hp: 1.3, opts: { variant: 'blue' } },
         ],
       },
     ],
@@ -121,21 +152,23 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'visitor centre',
     look: { at: rel(D.HOLD_VISITOR, 180, -11, 2.2), blend: 0.9 },
-    civilians: [{ pos: rel(D.HOLD_VISITOR, 175, -6.2), variant: 'scientist' }],
+    // Out on the road at the right edge of the frame; the pack comes across the plaza on the left.
+    civilians: [{ pos: SCIENTIST, variant: 'scientist' }],
     pickups: [{ kind: 'health', pos: rel(D.HOLD_VISITOR, 174, -2.6, 2.4), t: 2 }],
     onStart: (w) => w.later(0.5, () => park()?.strike(w)),
     waves: [
       {
         spawns: [
-          { type: 'compy', pos: rel(D.HOLD_VISITOR, 181, -6.5), entry: 'leap', count: 5, every: 0.35, offset: [0.8, 0, -0.5] },
+          { type: 'compy', pos: rel(D.HOLD_VISITOR, 181, -6.5), entry: 'leap', count: 5, every: 0.35, offset: [-0.8, 0, -0.5] },
           { type: 'dilo', pos: rel(D.HOLD_VISITOR, 191, -15), t: 1.2 },
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'raptor', pos: rel(D.HOLD_VISITOR, 160, -14), entry: 'leap', opts: { variant: 'green' } },
-          { type: 'compy', pos: rel(D.HOLD_VISITOR, 179, 4.5), entry: 'leap', t: 0.6, count: 3, every: 0.35, offset: [0.4, 0, 0.8] },
+          { type: 'raptor', pos: rel(D.HOLD_VISITOR, 194, -9), entry: 'leap', hp: 1.3, opts: { variant: 'green' } },
+          { type: 'compy', pos: rel(D.HOLD_VISITOR, 186, -10), entry: 'leap', t: 0.6, count: 3, every: 0.35, offset: [-0.8, 0, 0.6] },
+          { type: 'raptor', pos: rel(D.HOLD_VISITOR, 196, -16), entry: 'leap', t: 1.1, hp: 1.3, opts: { variant: 'tan' } },
         ],
       },
     ],
@@ -156,17 +189,19 @@ const beats: Beat[] = [
     look: { at: [DOOR[0] * 0.6, 1.8, DOOR[2] * 0.8], blend: 0.8 },
     waves: [
       {
+        // Three at once out of the doors.
         spawns: [
-          { type: 'raptor', pos: DOOR, entry: 'burst', t: 0.15, opts: { variant: 'red' } },
-          { type: 'raptor', pos: [DOOR[0] + 0.8, 0, DOOR[2] - 1.2], entry: 'burst', t: 0.7, opts: { variant: 'tan' } },
-          { type: 'raptor', pos: [DOOR[0] - 0.6, 0, DOOR[2] + 1], entry: 'burst', t: 1.5, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: DOOR, entry: 'burst', t: 0.15, hp: 1.3, opts: { variant: 'red' } },
+          { type: 'raptor', pos: [DOOR[0] + 0.8, 0, DOOR[2] - 1.2], entry: 'burst', t: 0.5, hp: 1.3, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: [DOOR[0] - 0.6, 0, DOOR[2] + 1], entry: 'burst', t: 0.85, hp: 1.3, opts: { variant: 'tan' } },
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'dilo', pos: rel(D.HOLD_VISITOR, 179, 10) },
-          { type: 'compy', pos: rel(D.HOLD_VISITOR, 184, -6), entry: 'leap', t: 0.5, count: 4, every: 0.3, offset: [0.6, 0, -0.6] },
+          { type: 'dilo', pos: rel(D.HOLD_VISITOR, 190, -22) },
+          { type: 'compy', pos: rel(D.HOLD_VISITOR, 186, -12), entry: 'leap', t: 0.5, count: 4, every: 0.3, offset: [-0.6, 0, -0.6] },
+          { type: 'raptor', pos: rel(D.HOLD_VISITOR, 196, -16), entry: 'leap', t: 1.4, hp: 1.3, opts: { variant: 'blue' } },
         ],
       },
     ],
@@ -193,12 +228,18 @@ const beats: Beat[] = [
         ],
       },
       {
-        start: { atD: 204 },
-        spawns: [{ type: 'compy', pos: [2, 0, 18], count: 4, every: 0.25, offset: [-1.2, 0, 0.4] }],
+        start: { atD: 202 },
+        spawns: [
+          { type: 'compy', pos: [2, 0, 18], count: 4, every: 0.25, offset: [-1.2, 0, 0.4] },
+          { type: 'raptor', pos: [-7.5, 0, 12], entry: 'leap', t: 0.5, hp: 1.3, opts: { variant: 'green' } },
+        ],
       },
       {
-        start: { atD: 220 },
-        spawns: [{ type: 'raptor', pos: [8, 0, 10], entry: 'leap', opts: { variant: 'blue' } }],
+        start: { atD: 218 },
+        spawns: [
+          { type: 'raptor', pos: [8, 0, 10], entry: 'leap', hp: 1.3, opts: { variant: 'blue' } },
+          { type: 'raptor', pos: [-7.5, 0, 13], entry: 'leap', t: 0.35, hp: 1.3, opts: { variant: 'tan' } },
+        ],
       },
     ],
   },
@@ -213,29 +254,31 @@ const beats: Beat[] = [
         if (!park()?.roadblockBlasted) w.hud.prompt('SHOOT THE FUEL DRUMS!');
       });
     },
-    civilians: [{ pos: rel(D.HOLD_ROADBLOCK, 244, -5.4), variant: 'ranger' }],
-    pickups: [{ kind: 'bomb', pos: rel(D.HOLD_ROADBLOCK, 246, 3.2, 2.3), t: 2 }],
+    // On the cleared right verge, at the edge of the frame; everything comes in from the left and ahead.
+    civilians: [{ pos: RANGER, variant: 'ranger' }],
+    pickups: [{ kind: 'bomb', pos: rel(D.HOLD_ROADBLOCK, 246, -2.2, 2.3), t: 2 }],
     waves: [
       {
         spawns: [
           { type: 'dilo', pos: rel(D.HOLD_ROADBLOCK, 250.5, -5), t: 0.3 },
-          { type: 'dilo', pos: rel(D.HOLD_ROADBLOCK, 251.5, 5.8), t: 1.1 },
+          { type: 'dilo', pos: rel(D.HOLD_ROADBLOCK, 256, -1.5), t: 1.1 },
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'raptor', pos: [12, 0, 9], entry: 'leap', opts: { variant: 'blue' } },
-          { type: 'raptor', pos: [-11, 0, 11], entry: 'leap', t: 0.7, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: [-10, 0, 14], entry: 'leap', hp: 1.3, opts: { variant: 'blue' } },
+          { type: 'raptor', pos: [-2, 0, 22], entry: 'leap', t: 0.4, hp: 1.3, opts: { variant: 'tan' } },
         ],
       },
       {
         // Last push only once the road is clear (keeps the peak under the mobile draw-call budget).
         start: { remaining: 0 },
         spawns: [
-          { type: 'compy', pos: rel(D.HOLD_ROADBLOCK, 257, -1.5), entry: 'leap', t: 1.2, count: 3, every: 0.35, offset: [1.2, 0, 0] },
-          { type: 'dilo', pos: rel(D.HOLD_ROADBLOCK, 254, 1), t: 1.8 },
-          { type: 'raptor', pos: rel(D.HOLD_ROADBLOCK, 259, 5), entry: 'leap', t: 3.8, opts: { variant: 'red' } },
+          { type: 'compy', pos: rel(D.HOLD_ROADBLOCK, 257, -3), entry: 'leap', t: 0.6, count: 3, every: 0.35, offset: [1, 0, 0] },
+          { type: 'dilo', pos: rel(D.HOLD_ROADBLOCK, 254, -1), t: 1.2 },
+          { type: 'raptor', pos: rel(D.HOLD_ROADBLOCK, 259, -4), entry: 'leap', t: 2.2, hp: 1.3, opts: { variant: 'red' } },
+          { type: 'raptor', pos: [-10, 0, 13], entry: 'leap', t: 2.6, hp: 1.3, opts: { variant: 'green' } },
         ],
       },
     ],
@@ -245,7 +288,7 @@ const beats: Beat[] = [
     label: 'blast the roadblock',
     run: (w) => park()?.blastRoadblock(w),
   },
-  { kind: 'wait', label: 'debris settles', duration: 1.4 },
+  { kind: 'wait', label: 'debris settles', duration: 1.2 },
   // ── 6. Jungle road. ──
   {
     kind: 'move',
@@ -263,18 +306,22 @@ const beats: Beat[] = [
       {
         start: { atD: 256 },
         spawns: [
-          { type: 'raptor', pos: [-7, 0, 9], entry: 'leap', opts: { variant: 'tan' } },
-          { type: 'raptor', pos: [7, 0, 11], entry: 'leap', t: 0.5, opts: { variant: 'green' } },
+          { type: 'raptor', pos: [-7, 0, 9], entry: 'leap', hp: 1.3, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: [7, 0, 11], entry: 'leap', t: 0.3, hp: 1.3, opts: { variant: 'green' } },
         ],
       },
       {
-        start: { atD: 272 },
-        spawns: [{ type: 'compy', pos: [1, 0, 18], count: 3, every: 0.3, offset: [1, 0, 0] }],
+        start: { atD: 270 },
+        spawns: [
+          { type: 'compy', pos: [1, 0, 18], count: 3, every: 0.3, offset: [1, 0, 0] },
+          { type: 'ptero', pos: [-6, 10, 24], entry: 'fly', t: 0.3 },
+        ],
       },
       {
-        start: { atD: 285 },
+        start: { atD: 284 },
         spawns: [
-          { type: 'raptor', pos: [-8, 0, 12], entry: 'leap', opts: { variant: 'red' } },
+          { type: 'raptor', pos: [-8, 0, 12], entry: 'leap', hp: 1.3, opts: { variant: 'red' } },
+          { type: 'raptor', pos: [8, 0, 13], entry: 'leap', t: 0.4, hp: 1.3, opts: { variant: 'blue' } },
           { type: 'ptero', pos: [5, 10, 22], entry: 'fly', t: 0.6 },
         ],
       },
@@ -288,41 +335,47 @@ const beats: Beat[] = [
     minTime: 13,
     onStart: (w) => {
       const env = park();
-      if (env) env.mud = true;
+      if (env) {
+        env.mud = true;
+        // The truck driver waits it out on his flatbed (left edge of the frame, above the fray).
+        worker = perch(w, env.mudPerch, 'worker');
+      }
       w.audio.play('engine_rev', { volume: 1, pitch: 0.8 });
       w.hud.prompt("WE'RE STUCK! HOLD THEM OFF!");
     },
     onEnd: (w) => {
       const env = park();
       if (env) env.mud = false;
+      if (worker && !worker.removed) worker.rescue();
+      worker = null;
       w.audio.play('engine_rev', { volume: 1, pitch: 1.1 });
       w.hud.prompt('WE\'RE FREE!');
     },
-    civilians: [{ pos: rel(D.HOLD_MUD, 312, -4.4), variant: 'worker' }],
-    pickups: [{ kind: 'health', pos: [-3.5, 2.3, 10], t: 3 }],
+    pickups: [{ kind: 'health', pos: [1.5, 2.3, 10], t: 3 }],
     waves: [
       {
         spawns: [
-          { type: 'raptor', pos: [-9, 0, 12], entry: 'leap', opts: { variant: 'tan' } },
-          { type: 'raptor', pos: [9, 0, 13], entry: 'leap', t: 0.6, opts: { variant: 'tan' } },
-          { type: 'compy', pos: [-1, 0, 17], t: 1.2, count: 3, every: 0.3, offset: [1, 0, 0] },
+          { type: 'raptor', pos: [-3, 0, 19], entry: 'leap', hp: 1.3, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: [9, 0, 13], entry: 'leap', t: 0.4, hp: 1.3, opts: { variant: 'tan' } },
+          { type: 'compy', pos: [0, 0, 17], t: 1.2, count: 3, every: 0.3, offset: [1, 0, 0] },
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'ptero', pos: [-6, 10, 22], entry: 'fly' },
+          { type: 'ptero', pos: [4, 10, 22], entry: 'fly' },
           { type: 'dilo', pos: [6.5, 0, 15], t: 0.5 },
-          { type: 'compy', pos: [-3, 0, 11], entry: 'leap', t: 1, count: 3, every: 0.3, offset: [1.2, 0, 0.6] },
+          { type: 'compy', pos: [2, 0, 13], entry: 'leap', t: 1, count: 3, every: 0.3, offset: [1.2, 0, 0.6] },
         ],
       },
       {
         // The pack's final rush once the road is clear (keeps the draw-call peak in budget).
         start: { remaining: 0 },
         spawns: [
-          { type: 'raptor', pos: [-10, 0, 8], entry: 'leap', t: 0.8, opts: { variant: 'blue' } },
-          { type: 'raptor', pos: [10, 0, 9], entry: 'leap', t: 1.3, opts: { variant: 'red' } },
-          { type: 'raptor', pos: [0, 0, 19], entry: 'leap', t: 1.9, opts: { variant: 'green' } },
+          { type: 'raptor', pos: [9, 0, 10], entry: 'leap', t: 0.5, hp: 1.3, opts: { variant: 'blue' } },
+          { type: 'raptor', pos: [-2, 0, 20], entry: 'leap', t: 0.8, hp: 1.3, opts: { variant: 'red' } },
+          { type: 'raptor', pos: [4, 0, 19], entry: 'leap', t: 1.1, hp: 1.3, opts: { variant: 'green' } },
+          { type: 'ptero', pos: [-3, 10, 24], entry: 'fly', t: 1.6 },
         ],
       },
     ],
@@ -338,17 +391,18 @@ const beats: Beat[] = [
     pickups: [{ kind: 'bomb', pos: [-2.4, 2.4, 52] }],
     waves: [
       {
-        start: { atD: 324 },
+        start: { atD: 318 },
         spawns: [
           { type: 'ptero', pos: [-8, 9, 24], entry: 'fly' },
           { type: 'ptero', pos: [7, 10, 28], entry: 'fly', t: 0.6 },
         ],
       },
       {
-        start: { atD: 350 },
+        start: { atD: 352 },
         spawns: [
           { type: 'ptero', pos: [-5, 7, 18], entry: 'fly' },
-          { type: 'ptero', pos: [6, 8, 22], entry: 'fly', t: 0.5 },
+          { type: 'ptero', pos: [6, 8, 22], entry: 'fly', t: 0.4 },
+          { type: 'ptero', pos: [0, 10, 28], entry: 'fly', t: 0.9 },
         ],
       },
     ],
@@ -360,7 +414,7 @@ const beats: Beat[] = [
     look: { yaw: 180, pitch: -7, blend: 0.8 },
     run: (w) => w.later(1.0, () => park()?.collapseBridge(w)),
   },
-  { kind: 'wait', label: 'watch it fall', duration: 3.6 },
+  { kind: 'wait', label: 'watch it fall', duration: 3.2 },
   // ── BOSS: THE TYRANT bursts out of the trees behind the jeep. ──
   {
     kind: 'boss',
@@ -390,8 +444,8 @@ const beats: Beat[] = [
       w.hud.prompt('GET TO THE CHOPPER!');
     },
   },
-  { kind: 'wait', label: 'rotors', duration: 2.2, look: { at: HELI_LOOK, world: true, blend: 0.6 } },
-  { kind: 'move', label: 'board', to: D.BOARD, speed: 5, look: { at: HELI_LOOK, world: true, blend: 1 } },
+  { kind: 'wait', label: 'rotors', duration: 1.8, look: { at: HELI_LOOK, world: true, blend: 0.6 } },
+  { kind: 'move', label: 'board', to: D.BOARD, speed: 6, look: { at: HELI_LOOK, world: true, blend: 1 } },
   {
     kind: 'action',
     label: 'lift-off',
@@ -401,11 +455,11 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'escape',
     to: D.END,
-    speed: 5.5,
+    speed: 7,
     look: { at: PAD_LOOK, world: true, blend: 1.2 },
     onStart: (w) => {
       w.audio.play('helicopter', { volume: 1 });
-      w.later(1.6, () => w.hud.banner('ESCAPED!', 'PRIMAL ISLAND CLEARED', 3.6));
+      w.later(1.2, () => w.hud.banner('ESCAPED!', 'PRIMAL ISLAND CLEARED', 3.6));
     },
   },
   { kind: 'wait', label: 'fly away', duration: 1.8 },
@@ -442,6 +496,7 @@ export const stage: StageDef = {
   buildEnvironment: (world) => buildPark(world),
   setup(world) {
     viewModel?.dispose();
+    worker = null;
     const env = park();
     if (!env) return;
     const vm = new JeepViewModel(world, env.baker);

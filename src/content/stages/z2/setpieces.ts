@@ -108,6 +108,42 @@ export function snapAmbulanceCrashed(ar: NonNullable<ReturnType<typeof z2Scene>>
   for (const f of ar.flames) f.obj.visible = true;
 }
 
+/**
+ * Something scrabbles inside the ceiling vent nearest (x, z): clanks, dust and
+ * the grate jumps — the warning before a crawler drops out of it.
+ */
+export function ventRattle(world: World, x: number, z: number, times: number[] = [0, 0.3, 0.55]) {
+  const sc = z2Scene(world);
+  if (!sc) return;
+  let vent: (typeof sc.vents)[number] | null = null;
+  let best = 3;
+  for (const v of sc.vents) {
+    if (v.dropped) continue;
+    const d = Math.hypot(v.pos.x - x, v.pos.z - z);
+    if (d < best) {
+      best = d;
+      vent = v;
+    }
+  }
+  if (!vent) return;
+  const v = vent;
+  const y0 = v.grate.position.y;
+  times.forEach((t, i) => {
+    world.later(t, () => {
+      if (v.dropped) return;
+      world.audio.play('metal_clang', { volume: 0.45, vary: 0.25, pitch: 1.45 + i * 0.12 });
+      v.grate.position.y = y0 - 0.04;
+      v.grate.rotation.z = (i % 2 ? -1 : 1) * 0.08;
+      world.fx.dust(_v.copy(v.pos).setY(v.pos.y - 0.15), 0.3, 0x8a8a80);
+      world.later(0.1, () => {
+        if (v.dropped) return;
+        v.grate.position.y = y0;
+        v.grate.rotation.z = 0;
+      });
+    });
+  });
+}
+
 /** Something big pounds on the boiler-room wall. */
 export function wallThuds(world: World, times: number[]) {
   const sc = z2Scene(world);

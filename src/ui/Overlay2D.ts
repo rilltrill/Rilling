@@ -47,13 +47,24 @@ const DIAG: readonly (readonly [number, number])[] = [
   [-1, 1],
   [-1, -1],
 ];
-/** Edge-arrow outline (dart pointing +x), CSS px. */
-const ARROW: readonly (readonly [number, number])[] = [
-  [18, 0],
-  [-10, -13],
-  [-4, 0],
-  [-10, 13],
+/**
+ * Off-screen threat beacon (CSS px, pointing +x from the beacon centre): a dark
+ * disc with a "!", a dart poking out of it toward the threat, and a closing ring
+ * around it (the same "ring closes → it hits" language as the on-screen telegraph).
+ */
+const BEACON_DISC = 13;
+const BEACON_RING0 = 31;
+const BEACON_ARROW: readonly (readonly [number, number])[] = [
+  [34, 0],
+  [BEACON_DISC - 3, -13],
+  [BEACON_DISC - 3, 13],
 ];
+/** Beacon centre distance from the safe-area edges and from HUD panels. */
+const BEACON_INSET = 36;
+/** Rings smaller than this (CSS px) keep their lock-on ticks outside the target. */
+const SMALL_RING = 32;
+/** HUD rectangles the overlay knows about (corner panels + boss/progress bar). */
+export const MAX_AVOID = 6;
 /** Arcade palette for the wind-up ring: yellow → orange → red. */
 const RING_STEPS = ['#ffe000', '#ff8a00', '#ff2020'];
 
@@ -86,6 +97,18 @@ export class Overlay2D {
   private polyX = [0, 0, 0, 0];
   private polyY = [0, 0, 0, 0];
   private xs: number[] = [0, 0, 0, 0, 0, 0, 0, 0];
+  /** Safe area (CSS px; x0 = y0 = x1 = y1 = 0 → the whole window). */
+  private safe = new Float32Array(4);
+  /** HUD panel rects (x0, y0, x1, y1 in CSS px; empty when x1 <= x0). */
+  private avoid = new Float32Array(MAX_AVOID * 4);
+  /** Per HUD rect: an attack telegraph sat behind it in the last drawn frame (Hud fades that panel). */
+  readonly veiled = new Uint8Array(MAX_AVOID);
+  /** Photosensitivity: no strobing (rings and beacons stay lit instead of blinking). */
+  reduceFlashes = false;
+  /** Scratch beacon pose (see beaconPose). */
+  private bx = 0;
+  private by = 0;
+  private pop = 1;
 
   constructor(parent: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -133,6 +156,27 @@ export class Overlay2D {
     this.g.imageSmoothingEnabled = false;
   }
 
+  /** Safe-area rectangle in CSS px (notches / home indicator); beacons stay inside it. */
+  setSafeArea(x0: number, y0: number, x1: number, y1: number) {
+    this.safe[0] = x0;
+    this.safe[1] = y0;
+    this.safe[2] = x1;
+    this.safe[3] = y1;
+  }
+
+  /**
+   * HUD panel `i` (CSS px). Off-screen threat beacons are kept clear of these,
+   * and `veiled[i]` reports a telegraph behind the panel. Pass x1 <= x0 to clear.
+   */
+  setAvoid(i: number, x0: number, y0: number, x1: number, y1: number) {
+    if (i < 0 || i >= MAX_AVOID) return;
+    const o = i * 4;
+    this.avoid[o] = x0;
+    this.avoid[o + 1] = y0;
+    this.avoid[o + 2] = x1;
+    this.avoid[o + 3] = y1;
+  }
+
   hitMarker(x: number, y: number, kind: HitMarkerKind) {
     const m = this.markers.length >= 30 ? this.markers.shift()! : ({} as Marker);
     m.x = x;
@@ -161,6 +205,7 @@ export class Overlay2D {
   }
 
   clear() {
+    this.veiled.fill(0);
     this.markers.length = 0;
     this.bursts.length = 0;
     this.g.setTransform(1, 0, 0, 1, 0, 0);
@@ -176,6 +221,7 @@ export class Overlay2D {
     if (!this.pixelated) g.setTransform(this.kx, 0, 0, this.ky, 0, 0);
     g.globalAlpha = 1;
     if (world) this.drawTelegraphs(world);
+    else this.veiled.fill(0);
     this.drawBursts(dt);
     this.drawMarkers(dt);
     this.drawAim(dt);
@@ -189,12 +235,26 @@ export class Overlay2D {
     const focal = this.h / 2 / Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
     cam.getWorldDirection(_c);
     const ents = world.entities;
+    this.veiled.fill(0);
     for (let i = 0; i < ents.length; i++) {
       const e = ents[i];
       if (!e.telegraph || e.removed) continue;
       this.project(e, world, focal);
-      if (this.pixelated) this.pixelTelegraph(this.tele);
-      else this.smoothTelegraph(this.tele);
+      const t = this.tele;
+      if (t.onScreen) this.markVeiled(t);
+      if (this.pixelated) this.pixelTelegraph(t);
+      else this.smoothTelegraph(t);
+    }
+  }
+
+  /** Flag the HUD panels an on-screen telegraph sits behind (they fade so the threat shows). */
+  private markVeiled(t: Tele) {
+    const rad = Math.min(t.base, 30);
+    const a = this.avoid;
+    for (let i = 0; i < MAX_AVOID; i++) {
+      const o = i * 4;
+      if (a[o + 2] <= a[o]) continue;
+      if (t.x + rad > a[o] && t.x - rad < a[o + 2] && t.y + rad > a[o + 1] && t.y - rad < a[o + 3]) this.veiled[i] = 1;
     }
   }
 
@@ -216,64 +276,110 @@ export class Overlay2D {
       t.r = t.base * (2.4 - 1.4 * t.p);
       return;
     }
-    // Edge arrow pointing toward the off-screen threat.
+    // Beacon on the screen edge, pointing toward the off-screen threat.
     let dx = _v.x;
     let dy = _v.y;
     if (ahead <= 0) {
       dx = -dx;
       dy = -dy;
     }
-    const ang = Math.atan2(-dy, dx);
-    const m = 34;
+    if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) dy = 1;
+    t.ang = Math.atan2(-dy, dx);
+    this.edgePoint(t);
+  }
+
+  /**
+   * Where a ray from the screen centre at `t.ang` meets the usable edge: the safe
+   * area inset by the beacon's size, then pulled in along the ray until it clears
+   * every HUD panel (score, pause, lives, weapon, boss bar) — a beacon must never
+   * hide behind the HUD.
+   */
+  private edgePoint(t: Tele) {
+    const s = this.safe;
+    const hasSafe = s[2] > s[0] && s[3] > s[1];
+    const bx0 = (hasSafe ? s[0] : 0) + BEACON_INSET;
+    const by0 = (hasSafe ? s[1] : 0) + BEACON_INSET;
+    const bx1 = (hasSafe ? s[2] : this.w) - BEACON_INSET;
+    const by1 = (hasSafe ? s[3] : this.h) - BEACON_INSET;
     const cx = this.w / 2;
     const cy = this.h / 2;
-    const sx = Math.cos(ang);
-    const sy = Math.sin(ang);
-    const tx = sx !== 0 ? (cx - m) / Math.abs(sx) : Infinity;
-    const ty = sy !== 0 ? (cy - m) / Math.abs(sy) : Infinity;
-    const k = Math.min(tx, ty);
+    const sx = Math.cos(t.ang);
+    const sy = Math.sin(t.ang);
+    let k = Infinity;
+    if (sx > 1e-6) k = Math.min(k, (bx1 - cx) / sx);
+    else if (sx < -1e-6) k = Math.min(k, (bx0 - cx) / sx);
+    if (sy > 1e-6) k = Math.min(k, (by1 - cy) / sy);
+    else if (sy < -1e-6) k = Math.min(k, (by0 - cy) / sy);
+    if (!Number.isFinite(k) || k < 0) k = 0;
+    const kMin = Math.min(k, 48);
+    const a = this.avoid;
+    for (let pass = 0; pass < 3; pass++) {
+      let moved = false;
+      for (let i = 0; i < MAX_AVOID; i++) {
+        const o = i * 4;
+        if (a[o + 2] <= a[o]) continue;
+        const x0 = a[o] - BEACON_INSET;
+        const y0 = a[o + 1] - BEACON_INSET;
+        const x1 = a[o + 2] + BEACON_INSET;
+        const y1 = a[o + 3] + BEACON_INSET;
+        const px = cx + sx * k;
+        const py = cy + sy * k;
+        if (px <= x0 || px >= x1 || py <= y0 || py >= y1) continue;
+        // Where the ray enters the inflated panel (slab method): stop just short of it.
+        let kin = -Infinity;
+        if (sx > 1e-6) kin = Math.max(kin, (x0 - cx) / sx);
+        else if (sx < -1e-6) kin = Math.max(kin, (x1 - cx) / sx);
+        if (sy > 1e-6) kin = Math.max(kin, (y0 - cy) / sy);
+        else if (sy < -1e-6) kin = Math.max(kin, (y1 - cy) / sy);
+        const nk = Math.max(kMin, kin - 1);
+        if (nk < k) {
+          k = nk;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
     t.x = cx + sx * k;
     t.y = cy + sy * k;
-    t.ang = ang;
+  }
+
+  /** Wind-up colour step 0 (yellow) → 1 (orange) → 2 (red), and whether it is lit this frame. */
+  private ringColor(p: number): string {
+    const step = p < 0.4 ? 0 : p < 0.7 ? 1 : 2;
+    // Arcade blink instead of an alpha pulse once it's about to land (steady when flashing is reduced).
+    const lit = step < 2 || this.reduceFlashes || ((this.time * 14) | 0) % 2 === 0;
+    return lit ? RING_STEPS[step] : '#ffffff';
   }
 
   private smoothTelegraph(t: Tele) {
     const g = this.g;
     const p = t.p;
     const danger = p > 0.7;
-    const pulse = danger ? 0.6 + 0.4 * Math.sin(this.time * 40) : 1;
+    const pulse = danger && !this.reduceFlashes ? 0.6 + 0.4 * Math.sin(this.time * 40) : 1;
     const col = `rgba(255, ${Math.round(220 * (1 - p))}, ${Math.round(40 * (1 - p))}, ${pulse})`;
     if (!t.onScreen) {
-      g.save();
-      g.translate(t.x, t.y);
-      g.rotate(t.ang);
-      g.fillStyle = col;
-      g.beginPath();
-      for (let i = 0; i < ARROW.length; i++) {
-        if (i === 0) g.moveTo(ARROW[i][0], ARROW[i][1]);
-        else g.lineTo(ARROW[i][0], ARROW[i][1]);
-      }
-      g.closePath();
-      g.fill();
-      g.restore();
+      this.smoothBeacon(t, col);
       return;
     }
     const { x, y, base, r } = t;
+    const small = base < SMALL_RING;
     g.lineWidth = 3 + p * 3;
     g.strokeStyle = col;
     g.beginPath();
     g.arc(x, y, r, 0, Math.PI * 2);
     g.stroke();
-    // Inner lock-on ticks.
+    // Lock-on ticks: inside big rings, outside small targets (never across a small body).
+    const t0 = small ? base + 3 : base * 0.55;
+    const t1 = small ? base + 9 : base * 0.95;
     g.lineWidth = 2;
     for (let i = 0; i < 4; i++) {
       const a = i * (Math.PI / 2) + this.time * 2;
       g.beginPath();
-      g.moveTo(x + Math.cos(a) * base * 0.55, y + Math.sin(a) * base * 0.55);
-      g.lineTo(x + Math.cos(a) * base * 0.95, y + Math.sin(a) * base * 0.95);
+      g.moveTo(x + Math.cos(a) * t0, y + Math.sin(a) * t0);
+      g.lineTo(x + Math.cos(a) * t1, y + Math.sin(a) * t1);
       g.stroke();
     }
-    if (danger) {
+    if (danger && !small) {
       g.fillStyle = `rgba(255,40,40,${0.12 * pulse})`;
       g.beginPath();
       g.arc(x, y, base, 0, Math.PI * 2);
@@ -294,16 +400,69 @@ export class Overlay2D {
     }
   }
 
+  /** Beacon pose for this frame: bobs toward the threat (CSS px) and pops in as a wind-up starts. */
+  private beaconPose(t: Tele) {
+    const bob = (Math.sin(this.time * 9) * 0.5 + 0.5) * 4;
+    this.bx = t.x + Math.cos(t.ang) * bob;
+    this.by = t.y + Math.sin(t.ang) * bob;
+    this.pop = Math.min(1, 0.5 + t.p * 10);
+  }
+
+  private smoothBeacon(t: Tele, col: string) {
+    const g = this.g;
+    this.beaconPose(t);
+    const { bx, by, pop } = this;
+    g.save();
+    g.translate(bx, by);
+    g.scale(pop, pop);
+    // Closing ring.
+    const rr = BEACON_DISC + 4 + (BEACON_RING0 - BEACON_DISC - 4) * (1 - t.p);
+    g.lineWidth = 5;
+    g.strokeStyle = 'rgba(0,0,0,0.85)';
+    g.beginPath();
+    g.arc(0, 0, rr, 0, Math.PI * 2);
+    g.stroke();
+    g.lineWidth = 2.5;
+    g.strokeStyle = col;
+    g.stroke();
+    // Dart toward the threat.
+    g.rotate(t.ang);
+    g.beginPath();
+    for (let i = 0; i < BEACON_ARROW.length; i++) {
+      if (i === 0) g.moveTo(BEACON_ARROW[i][0], BEACON_ARROW[i][1]);
+      else g.lineTo(BEACON_ARROW[i][0], BEACON_ARROW[i][1]);
+    }
+    g.closePath();
+    g.lineWidth = 4;
+    g.strokeStyle = '#000';
+    g.stroke();
+    g.fillStyle = col;
+    g.fill();
+    g.rotate(-t.ang);
+    // Disc with the "!".
+    g.beginPath();
+    g.arc(0, 0, BEACON_DISC, 0, Math.PI * 2);
+    g.fillStyle = 'rgba(0,0,0,0.82)';
+    g.fill();
+    g.lineWidth = 3;
+    g.strokeStyle = col;
+    g.stroke();
+    g.font = `14px 'Press Start 2P', 'Black Ops One', Impact, monospace`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = col;
+    g.fillText('!', 1, 1);
+    g.restore();
+  }
+
   private pixelTelegraph(t: Tele) {
     const g = this.g;
     const p = t.p;
     const step = p < 0.4 ? 0 : p < 0.7 ? 1 : 2;
-    // Arcade blink instead of an alpha pulse once it's about to land.
-    const lit = step < 2 || ((this.time * 14) | 0) % 2 === 0;
-    const col = lit ? RING_STEPS[step] : '#ffffff';
+    const col = this.ringColor(p);
+    const lit = col !== '#ffffff';
     if (!t.onScreen) {
-      this.pxPoly(t.x, t.y, t.ang, '#000', 1);
-      this.pxPoly(t.x, t.y, t.ang, col, 0);
+      this.pixelBeacon(t, col);
       return;
     }
     const cx = Math.round(t.x * this.kx);
@@ -311,8 +470,9 @@ export class Overlay2D {
     const k = this.kx;
     const r = Math.max(4, Math.round(t.r * k));
     const base = Math.max(3, Math.round(t.base * k));
+    const small = t.base < SMALL_RING;
     const thick = 2 + step; // thickens as the strike gets closer
-    if (step === 2 && lit) {
+    if (step === 2 && lit && !small) {
       g.globalAlpha = 0.28;
       this.pxDisc(cx, cy, base, '#ff2020');
       g.globalAlpha = 1;
@@ -320,14 +480,16 @@ export class Overlay2D {
     // Black keyline under the coloured ring keeps it readable on any background.
     this.pxRing(cx, cy, r + 1, thick + 2, '#000');
     this.pxRing(cx, cy, r, thick, col);
-    // Lock-on ticks (rotating).
+    // Lock-on ticks (rotating): inside big rings, outside small targets.
+    const t0 = small ? base + Math.max(2, Math.round(3 * k)) : base * 0.55;
+    const t1 = small ? base + Math.max(5, Math.round(9 * k)) : base * 0.95;
     g.fillStyle = col;
     g.beginPath();
     for (let i = 0; i < 4; i++) {
       const a = i * (Math.PI / 2) + this.time * 2;
       const c = Math.cos(a);
       const s = Math.sin(a);
-      this.pxLine(cx + c * base * 0.55, cy + s * base * 0.55, cx + c * base * 0.95, cy + s * base * 0.95, 2);
+      this.pxLine(cx + c * t0, cy + s * t0, cx + c * t1, cy + s * t1, 2);
     }
     g.fill();
     if (p > 0.55) {
@@ -335,6 +497,31 @@ export class Overlay2D {
       const u = Math.max(2, Math.round(base / 9));
       this.pxBang(cx, Math.max(6 * u + 3, cy - r - 3), u, col);
     }
+  }
+
+  private pixelBeacon(t: Tele, col: string) {
+    const g = this.g;
+    this.beaconPose(t);
+    const { bx, by, pop } = this;
+    const k = this.kx * pop;
+    const cx = Math.round(bx * this.kx);
+    const cy = Math.round(by * this.ky);
+    // Closing ring.
+    const rr = Math.max(4, Math.round((BEACON_DISC + 4 + (BEACON_RING0 - BEACON_DISC - 4) * (1 - t.p)) * k));
+    this.pxRing(cx, cy, rr + 1, 4, '#000');
+    this.pxRing(cx, cy, rr, 2, col);
+    // Dart toward the threat (black keyline, then colour).
+    this.pxPoly(bx, by, t.ang, BEACON_ARROW, pop * 1.14, '#000');
+    this.pxPoly(bx, by, t.ang, BEACON_ARROW, pop, col);
+    // Dark disc, coloured rim, "!".
+    const disc = Math.max(4, Math.round(BEACON_DISC * k));
+    g.globalAlpha = 0.85;
+    this.pxDisc(cx, cy, disc + 1, '#000');
+    g.globalAlpha = 1;
+    this.pxRing(cx, cy, disc + 1, 1, '#000');
+    this.pxRing(cx, cy, disc, 2, col);
+    const u = Math.max(1, Math.round(disc / 6));
+    this.pxBang(cx, cy + 3 * u, u, col);
   }
 
   // ─── Bursts / markers / reticle ───────────────────────────────────────────
@@ -532,17 +719,18 @@ export class Overlay2D {
     }
   }
 
-  /** Scanline-filled edge arrow at (x, y) CSS px, rotated by `ang`; `grow` px fatter (keyline). */
-  private pxPoly(x: number, y: number, ang: number, color: string, grow: number) {
+  /** Scanline-filled polygon `shape` (CSS px, ≤ 4 points) at (x, y) CSS px, rotated by `ang`, scaled by `scale`. */
+  private pxPoly(x: number, y: number, ang: number, shape: readonly (readonly [number, number])[], scale: number, color: string) {
     const g = this.g;
     const c = Math.cos(ang);
     const s = Math.sin(ang);
-    const sc = this.kx * (1 + grow * 0.14);
+    const sc = this.kx * scale;
     let minY = Infinity;
     let maxY = -Infinity;
-    for (let i = 0; i < ARROW.length; i++) {
-      const ax = ARROW[i][0];
-      const ay = ARROW[i][1];
+    const n = shape.length;
+    for (let i = 0; i < n; i++) {
+      const ax = shape[i][0];
+      const ay = shape[i][1];
       this.polyX[i] = x * this.kx + (ax * c - ay * s) * sc;
       this.polyY[i] = y * this.ky + (ax * s + ay * c) * sc;
       minY = Math.min(minY, this.polyY[i]);
@@ -550,7 +738,6 @@ export class Overlay2D {
     }
     g.fillStyle = color;
     g.beginPath();
-    const n = ARROW.length;
     for (let py = Math.floor(minY); py <= Math.ceil(maxY); py++) {
       const yc = py + 0.5;
       let cnt = 0;

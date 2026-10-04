@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Kit } from '../kit/ModelKit';
 import { Textures, type TexName } from '../kit/Textures';
-import { Enemy, type EnemyState } from '../../gameplay/Enemy';
+import { Enemy, ndcInPlayArea, type EnemyState } from '../../gameplay/Enemy';
 import type { ShotHit } from '../../gameplay/Entity';
 import type { SfxName } from '../../audio/names';
 import { angleDelta, clamp, damp, lerp, TAU } from '../../core/math';
@@ -1384,6 +1384,7 @@ export function buildTrike(model: THREE.Group, p: Palette = TRIKE_PAL): TrikeRig
 const GRAVITY = 22;
 const _v = new THREE.Vector3();
 const _p = new THREE.Vector3();
+const _ndc = new THREE.Vector3();
 
 /**
  * Shared dinosaur behaviour on top of `Enemy`:
@@ -1394,6 +1395,10 @@ const _p = new THREE.Vector3();
  *  - momentum deaths: the body keeps its (world) velocity, tumbles if it died
  *    in the air, slides, topples onto its side and sinks.
  *  - attack-slot helpers for custom attack states.
+ *  - attack FRAMING: custom attacks (pounces, dives, spits, charges) may only
+ *    start where the player can see them (`spotNdc`, `staysFramed` predicts the
+ *    camera's turn), and a telegraph that leaves the play area — off screen or
+ *    under a HUD panel — is called off (`framingLost`) instead of landing blind.
  */
 export abstract class Dino extends Enemy {
   /** Model height above root.y (metres). */
@@ -1422,6 +1427,18 @@ export abstract class Dino extends Enemy {
   /** Pitched idle vocalisation. */
   protected idleCall: { name: SfxName; pitch: number; vol: number; min: number; max: number } | null = null;
   private idleT = 2;
+  /**
+   * Smoothed yaw rate of the camera relative to this dino's frame (rad/s, + = the
+   * view swinging LEFT, so things on screen slide right). Shake-free.
+   */
+  protected camYawRate = 0;
+  private prevCamYaw = 0;
+  /** Last projected anchor position (NDC) from `spotNdc()`. */
+  protected sx = 0;
+  protected sy = 0;
+  /** Attack-framing watchdog: seconds out of the play area (in a row / in total). */
+  private outRun = 0;
+  private outSum = 0;
 
   // Death.
   protected readonly deathVel = new THREE.Vector3();
@@ -1452,12 +1469,66 @@ export abstract class Dino extends Enemy {
     this.prevPos.copy(this.root.position);
     this.prevYaw = this.root.rotation.y;
     this.idleT = this.world.rng.range(1, 4);
+    this.prevCamYaw = this.camYaw();
   }
 
   override setState(s: EnemyState) {
     super.setState(s);
     // Custom attack states re-create their own telegraph right after.
     if (s !== 'windup') this.telegraph = null;
+    else this.watchStart();
+  }
+
+  // ── Attack framing ──
+
+  /** Shake-free camera yaw, relative to the rig for rig-frame dinos (they ride with it). */
+  private camYaw(): number {
+    const rig = this.world.rig;
+    return rig.viewModelHolder.rotation.y - (this.frame === 'rig' ? rig.space.rotation.y : 0);
+  }
+
+  /** Project the anchor to NDC into `sx`/`sy`. Returns false when it is behind the camera. */
+  protected spotNdc(obj: THREE.Object3D = this.anchor): boolean {
+    obj.getWorldPosition(_ndc).project(this.world.camera);
+    this.sx = _ndc.x;
+    this.sy = _ndc.y;
+    return _ndc.z < 1;
+  }
+
+  /**
+   * Will something at NDC x stay inside |x| < `limit` for another `t` seconds of
+   * the camera's current turn? Attacks don't start while the view is swinging
+   * away from them (boss framing, look-backs, a vehicle racing past).
+   */
+  protected staysFramed(x: number, t: number, limit = 0.9): boolean {
+    const cam = this.world.camera;
+    const tanH = Math.tan((cam.fov * Math.PI) / 360) * cam.aspect;
+    const a = Math.atan(x * tanH) + this.camYawRate * t;
+    return Math.abs(a) < 1.45 && Math.abs(Math.tan(a)) < limit * tanH;
+  }
+
+  /** Arm the framing watchdog for a fresh telegraph. */
+  protected watchStart() {
+    this.outRun = 0;
+    this.outSum = 0;
+  }
+
+  /**
+   * Fairness watchdog for attacks: call every frame while the telegraph is up.
+   * True when the attack must be called off because the player can't see it:
+   * its anchor has been outside the play area (off screen, or under a HUD
+   * panel) for more than `maxRun` seconds in a row, or for more than `maxShare`
+   * of the attack's whole telegraph (`total` seconds).
+   */
+  protected framingLost(dt: number, total: number, maxRun = 0.2, maxShare = 0.25): boolean {
+    const a = this.telegraph?.anchor ?? this.anchor;
+    a.getWorldPosition(_ndc).project(this.world.camera);
+    if (ndcInPlayArea(_ndc.x, _ndc.y, _ndc.z, 0.98)) this.outRun = 0;
+    else {
+      this.outRun += dt;
+      this.outSum += dt;
+    }
+    return this.outRun > maxRun || this.outSum > total * maxShare;
   }
 
   /** Grab one of the world's attack slots (fair cap on simultaneous attackers). */
@@ -1529,6 +1600,10 @@ export abstract class Dino extends Enemy {
       if (this.vel.lengthSq() > 900) this.vel.setLength(30);
       this.liftVel = (this.lift - this.prevLift) / dt;
       this.yawRate = this.yawRate * 0.6 + (angleDelta(this.prevYaw, this.root.rotation.y) / dt) * 0.4;
+      const cy = this.camYaw();
+      const turn = clamp(angleDelta(this.prevCamYaw, cy) / dt, -6, 6);
+      this.camYawRate += (turn - this.camYawRate) * Math.min(1, dt * 8);
+      this.prevCamYaw = cy;
     }
     this.prevPos.copy(this.root.position);
     this.prevLift = this.lift;

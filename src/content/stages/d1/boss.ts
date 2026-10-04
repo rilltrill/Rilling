@@ -7,6 +7,8 @@ import { mergedMeshes } from './props';
 import { tm } from './retro';
 import { angleDelta, clamp, damp, easeInOutSine } from '../../../core/math';
 import { Projectile } from '../../../gameplay/Projectile';
+import { ndcInPlayArea } from '../../../gameplay/Enemy';
+import type { HitPart } from '../../../core/types';
 import { D, RIVER_WIDTH, riverLatAt } from './layout';
 
 /**
@@ -20,8 +22,15 @@ import { D, RIVER_WIDTH, riverLatAt } from './layout';
  *                 BITE (rears up, jaws wide)           — ring on the head, throat exposed
  *                 TAIL SWEEP (phase 2+, from the side) — ring on the tail
  *                 ROCK FLING (phase 2+, shootable rocks)
- *   Every windup is interrupted by dealing enough damage before the ring closes
- *   (the beast stumbles, jaws open → free hits on the throat).
+ *   Every windup is interrupted by landing enough hits before the ring closes
+ *   (the beast stumbles, jaws open → free hits on the throat). The stagger meter
+ *   counts raw gun damage weighted by where it lands — eyes/throat ×2, head ×1,
+ *   body ×0.3 — so ~3 eye hits (a 3 taps/s player can do it) stop a ram or bite;
+ *   during the tail sweep the ring sits on the tail and tail hits count in full.
+ *   Fairness with the mounted gun: every windup/throw starts only when its ring is
+ *   inside the play area (not under the HUD or the boss bar) and vents the turret,
+ *   so an overheat lockout can never eat a telegraph. Rocks are lobbed low enough
+ *   that their whole flight stays on screen (see Boulder).
  *   phase 2 : roars and calls the raptor pack.  phase 3 : frenzy (faster, chains).
  *   death   : tumbles off the road into the river.
  */
@@ -44,6 +53,49 @@ type CState =
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const _u = new THREE.Vector3();
+const _a = new THREE.Vector3();
+
+/** Highest NDC y a thrown boulder may reach: well under the boss bar (0.8) and the score/pause row (0.72). */
+const ROCK_MAX_NDC_Y = 0.5;
+/** Highest NDC y a boulder may be launched from (it's lowered toward the chest if the head sits higher). */
+const ROCK_LAUNCH_NDC_Y = 0.42;
+/** Turret heat a boss windup starts from at most (the gun can then fire through any single windup). */
+const VENT_HEAT = 0.3;
+
+/**
+ * A boulder lobbed at the jeep. The lob is flattened at launch (sampled against
+ * the current camera) so the whole flight stays inside the play area — never
+ * above the top of the screen or behind the boss bar — and it can be shot down
+ * all the way in.
+ */
+class Boulder extends Projectile {
+  override onAdded(): void {
+    super.onAdded();
+    this.opts.arc = this.fitArc(this.opts.arc);
+  }
+
+  private fitArc(want: number): number {
+    const w = this.world;
+    const space = w.rig.space;
+    space.updateMatrixWorld();
+    w.camera.updateMatrixWorld();
+    let arc = want;
+    for (let iter = 0; iter < 10; iter++) {
+      let ok = true;
+      for (let i = 1; i <= 12 && ok; i++) {
+        const k = i / 13;
+        _a.lerpVectors(this.from, this.to, k);
+        _a.y += Math.sin(k * Math.PI) * arc;
+        space.localToWorld(_a);
+        _a.project(w.camera);
+        if (_a.z < 1 && _a.y > ROCK_MAX_NDC_Y) ok = false;
+      }
+      if (ok) return arc;
+      arc *= 0.72;
+    }
+    return Math.min(arc, 0.1);
+  }
+}
 
 const SKIN = 0x8e3a20;
 const SKIN_DARK = 0x5a2014;
@@ -83,6 +135,8 @@ export class Carnotaur extends Boss {
   private tailMid!: THREE.Object3D;
   /** 0..1: how far the camera framing leans toward the tail (tail sweep). */
   private tailBias = 0;
+  /** 0..1: how far the framing tilts up to the head while it rears up (bite / roar). */
+  private rearBias = 0;
   private legs: Leg[] = [];
   private arms: THREE.Group[] = [];
   private focus = new THREE.Object3D();
@@ -120,6 +174,9 @@ export class Carnotaur extends Boss {
   private raptorsCalled = 0;
   private frenzy = false;
   private chain = 0;
+  /** Attack picked when the cooldown ran out, waiting for its ring to be framed in the play area. */
+  private nextAttack: CState | null = null;
+  private attackWait = 0;
   private sfxT = 0;
   private stepT = 0;
   private flashes: FlashEntry[] = [];
@@ -429,21 +486,79 @@ export class Carnotaur extends Boss {
     this.flinchVel = Math.min(4, this.flinchVel + clamp(amount * (hit.part === 'weak' ? 0.9 : 0.35), 0, 1.6));
     if (hit.part === 'weak') this.world.fx.sparks(hit.point, hit.normal, 3);
     if (this.winding) {
-      this.interruptDmg += amount;
+      this.interruptDmg += hit.damage * this.interruptWeight(hit.part);
       if (this.interruptDmg >= this.interruptThreshold()) this.interrupt();
     }
   }
 
+  /**
+   * Stagger meter per hit, in raw gun damage (turret 0.8/shot): shooting the
+   * glowing eyes/throat stops an attack fastest, the head (skull, jaw, neck) in
+   * full, the bulk of the body barely. During the tail sweep the ring sits on
+   * the tail, so tail/body hits count in full there.
+   */
+  private interruptWeight(part: HitPart): number {
+    const tail = this.state === 'tailWind';
+    switch (part) {
+      case 'weak':
+        return 2;
+      case 'torso':
+        return 1;
+      case 'tail':
+        return tail ? 1.1 : 0.3;
+      case 'body':
+        return tail ? 1 : 0.3;
+      case 'limb':
+        return tail ? 0.8 : 0.3;
+      default:
+        return 0;
+    }
+  }
+
+  /** Turret: ram/bite ≈ 2–3 eye hits + a head hit (or 5–6 head hits); tail sweep ≈ 3–4 tail hits. */
   private interruptThreshold() {
-    return [6, 7, 8][this.phase] ?? 8;
+    if (this.state === 'tailWind') return this.frenzy ? 3.0 : 2.6;
+    return [3.6, 4, 4.4][this.phase] ?? 4.4;
+  }
+
+  /**
+   * Fairness with the heat-limited turret: a windup never starts with the gun
+   * locked out or about to be (the overheat lockout would otherwise eat most of
+   * the ring). From VENT_HEAT the turret can fire through any single windup.
+   */
+  private ventGun(windup: boolean) {
+    const wp = this.world.weapons as typeof this.world.weapons & { vent?: () => boolean };
+    if (wp.active !== 'turret') return;
+    const locked = wp.overheated;
+    if (typeof wp.vent === 'function') {
+      // The core vents (with its own cue) whenever a boss ring appears; thrown rocks
+      // aren't the boss's ring, so those vent here.
+      if (windup) return;
+      wp.vent();
+    } else {
+      if (wp.heat > VENT_HEAT) wp.heat = VENT_HEAT;
+      wp.overheated = false;
+    }
+    // The gun works again: drop a stale 'OVERHEAT!' prompt (the jeep puffs steam).
+    if (locked) this.world.hud.prompt(null);
+  }
+
+  /** Can this attack's telegraph start now (its ring framed inside the play area)? */
+  private canStart(pick: CState): boolean {
+    if (pick === 'flank') return true; // the tail windup checks its own ring
+    return this.inPlayArea(this.head, 0.85);
   }
 
   private interrupt() {
+    // Pop the feedback where the ring was (the tail during a sweep, else the head).
+    const tailSweep = this.state === 'tailWind';
+    const sp = this.screenPos(tailSweep ? this.tailMid : this.head);
     this.telegraph = null;
     this.winding = false;
     this.world.audio.play('dino_roar', { volume: 0.9, pitch: 0.8 });
     this.world.rig.shake(0.3);
-    const sp = this.screenPos(this.head);
+    // The shot-up tail jerks out of its coil.
+    if (tailSweep) this.tailSwing += 0.5;
     if (sp) this.world.hud.popup('STAGGERED!', sp.x, sp.y - 40, 'combo');
     this.world.score.add(250);
     this.go('stumble');
@@ -498,7 +613,7 @@ export class Carnotaur extends Boss {
     // Frame the head and chest, biased slightly toward the jeep so the boss sits centre-high.
     this.head.getWorldPosition(_w);
     this.chest.getWorldPosition(_u);
-    out.lerpVectors(_u, _w, 0.55);
+    out.lerpVectors(_u, _w, 0.55 + 0.3 * this.rearBias);
     // Tail sweep: lean the framing toward the tail so the coiling tail and its ring stay on screen.
     if (this.tailBias > 0.01) {
       this.tail[2].getWorldPosition(_w);
@@ -506,7 +621,8 @@ export class Carnotaur extends Boss {
     }
     this.world.rig.space.updateMatrixWorld();
     this.world.rig.space.worldToLocal(out);
-    out.y = clamp(out.y * 0.8 + 0.2, 1.8, 3.4);
+    // Rearing up close (bite): tilt up so the eyes and open throat stay clear of the boss bar.
+    out.y = clamp(out.y * 0.8 + 0.2, 1.8, 3.4 + 1.0 * this.rearBias);
     return out;
   }
 
@@ -553,7 +669,47 @@ export class Carnotaur extends Boss {
   }
 
   private windupTime(base: number) {
-    return base * (this.frenzy ? 0.78 : this.phase === 1 ? 0.9 : 1);
+    return base * (this.frenzy ? 0.85 : this.phase === 1 ? 0.92 : 1);
+  }
+
+  /**
+   * Flick a boulder at the jeep from a framed spot: the snout, lowered toward
+   * the chest if the head sits high on screen. Skipped (no unfair hit) if even
+   * that isn't inside the play area. The Boulder flattens its own lob.
+   */
+  private flingRock() {
+    const w = this.world;
+    this.headWorld(_v);
+    _v.y += 0.2;
+    w.camera.updateMatrixWorld();
+    for (let i = 0; i < 8; i++) {
+      _a.copy(_v).project(w.camera);
+      if (_a.y <= ROCK_LAUNCH_NDC_Y || _v.y < 1.4) break;
+      _v.y -= 0.3;
+    }
+    _a.copy(_v).project(w.camera);
+    if (!ndcInPlayArea(_a.x, _a.y, _a.z, 0.82)) return;
+    this.ventGun(false);
+    w.fx.dust(_v, 0.8, 0x8a7a5a);
+    this.world.add(
+      new Boulder(w, {
+        from: _v.clone(),
+        flightTime: this.frenzy ? 1.45 : 1.6,
+        arc: 1.0,
+        hp: 1.6,
+        size: 0.5,
+        damage: 1,
+        points: 150,
+        mesh: this.thrownRock(),
+        color: 0x8a7d6a,
+        spin: 5,
+        burst: 'debris',
+        source: this.title,
+        sfxDestroy: 'hit_projectile',
+      }),
+    );
+    w.audio.play('stomp', { volume: 0.8, pitch: 0.8 });
+    w.audio.play('whoosh', { volume: 0.6, pitch: 0.7 });
   }
 
   private thrownRock() {
@@ -674,7 +830,21 @@ export class Carnotaur extends Boss {
         this.neckTarget = 0.05 + Math.sin(this.age * 1.3) * 0.05;
         this.jawTarget = 0.12 + Math.max(0, Math.sin(this.age * 0.8)) * 0.2;
         this.cooldown -= dt;
-        if (this.cooldown <= 0) this.go(this.chooseAttack());
+        if (this.cooldown <= 0) {
+          // Only start a telegraph the player can see and shoot; re-pick if it stays unframed.
+          const pick = (this.nextAttack ??= this.chooseAttack());
+          if (this.canStart(pick)) {
+            this.nextAttack = null;
+            this.attackWait = 0;
+            this.go(pick);
+            break;
+          }
+          this.attackWait += dt;
+          if (this.attackWait > 2) {
+            this.nextAttack = null;
+            this.attackWait = 0;
+          }
+        }
         // Phase 2+: keep a couple of raptors around.
         if (this.phase >= 1) {
           this.raptorTimer -= dt;
@@ -690,6 +860,7 @@ export class Carnotaur extends Boss {
         const dur = this.windupTime(1.9);
         const chargeAt = dur - 0.45;
         this.winding = true;
+        if (first) this.ventGun(true);
         this.faceYaw(this.yawToJeep(), dt, 6);
         if (t < chargeAt) {
           this.steer(0, 12.5, 4, dt);
@@ -728,10 +899,11 @@ export class Carnotaur extends Boss {
       case 'biteWind': {
         const dur = this.windupTime(1.45);
         this.winding = true;
-        this.steer(0.8, 6.6, 9, dt);
+        if (first) this.ventGun(true);
+        this.steer(0.8, 7.3, 9, dt);
         this.faceYaw(this.yawToJeep(), dt, 6);
         const k = clamp(t / dur, 0, 1);
-        this.neckTarget = -0.5 * k;
+        this.neckTarget = -0.42 * k;
         this.jawTarget = 0.25 + 0.75 * k;
         this.headYaw = Math.sin(t * 14) * 0.06 * k;
         if (first) w.audio.play('dino_roar', { volume: 0.8, pitch: 1.25 });
@@ -758,13 +930,21 @@ export class Carnotaur extends Boss {
         this.steer(-7.4, 1.2, 9, dt);
         this.faceYaw(Math.PI, dt, 3.5);
         this.neckTarget = 0.1;
-        if ((Math.abs(p.x + 7.4) < 0.6 && Math.abs(p.z - 1.2) < 0.7) || t > 2.6) this.go('tailWind');
+        if ((Math.abs(p.x + 7.4) < 0.6 && Math.abs(p.z - 1.2) < 0.7) || t > 2.6) {
+          // The sweep's ring sits on the tail: only coil once it's framed in the play area.
+          if (this.inPlayArea(this.tailMid, 0.85)) this.go('tailWind');
+          else if (t > 4) {
+            this.cooldown = 0.6;
+            this.go('chase');
+          }
+        }
         break;
       }
       case 'tailWind': {
         // Coil the tail away from the jeep, then whip it across.
-        const dur = this.windupTime(1.5);
+        const dur = this.windupTime(1.6);
         this.winding = true;
+        if (first) this.ventGun(true);
         this.steer(-7.4, 1.2, 5, dt);
         const whipAt = dur - 0.3;
         if (t < whipAt) {
@@ -808,29 +988,10 @@ export class Carnotaur extends Boss {
         this.neckTarget = t < 0.7 ? 0.6 : -0.4;
         this.jawTarget = t < 0.7 ? 0.3 : 0.5;
         for (let i = 0; i < throws; i++) {
-          const at = 0.75 + i * 0.75;
-          if (t >= at && t - dt < at) {
-            this.headWorld(_v);
-            _v.y += 0.6;
-            w.fx.dust(_v, 0.8, 0x8a7a5a);
-            this.throwProjectile(_v.clone(), {
-              flightTime: this.frenzy ? 1.35 : 1.6,
-              arc: 2.6,
-              hp: 2,
-              size: 0.5,
-              damage: 1,
-              points: 150,
-              mesh: this.thrownRock(),
-              color: 0x8a7d6a,
-              spin: 5,
-              burst: 'debris',
-              source: this.title,
-              sfxDestroy: 'hit_projectile',
-            });
-            w.audio.play('stomp', { volume: 0.8, pitch: 0.8 });
-          }
+          const at = 0.75 + i * (this.frenzy ? 0.65 : 0.75);
+          if (t >= at && t - dt < at) this.flingRock();
         }
-        if (t > 0.9 + throws * 0.75) this.afterAttack();
+        if (t > 0.9 + throws * 0.7) this.afterAttack();
         break;
       }
       case 'stumble': {
@@ -875,6 +1036,9 @@ export class Carnotaur extends Boss {
     // Camera framing.
     const wantTail = st === 'flank' || st === 'tailWind' || st === 'tailRecover' ? 0.4 : 0;
     this.tailBias = damp(this.tailBias, wantTail, 3, dt);
+    // (Starts tilting as soon as a bite is queued, so the camera has caught up by the time it rears.)
+    const wantRear = st === 'biteWind' || (st === 'chase' && this.nextAttack === 'biteWind') ? 1 : st === 'roar' || st === 'biteRecover' ? 0.5 : 0;
+    this.rearBias = damp(this.rearBias, wantRear, 6, dt);
     this.updateFocusTarget(_v);
     this.focus.position.lerp(_v, 1 - Math.exp(-4 * dt));
   }
@@ -905,8 +1069,12 @@ export class Carnotaur extends Boss {
 
   private afterAttack() {
     if (this.frenzy && this.chain < 1 && this.world.rng.chance(0.45)) {
+      // Chained follow-up: straight back in, but through the same framing gate as any attack.
       this.chain++;
-      this.go(this.chooseAttack());
+      this.nextAttack = this.chooseAttack();
+      this.attackWait = 0;
+      this.cooldown = 0;
+      this.go('chase');
       return;
     }
     this.chain = 0;

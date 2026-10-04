@@ -26,6 +26,13 @@ import { z2Scene } from './scene';
  *  Phase 3 (< 33 %):   frenzy — faster wind-ups, double slams, bile volleys.
  *
  * Bursting an eye during a wind-up always interrupts the attack.
+ *
+ * Fairness/pacing (tuned with tests/unit/humanbot.test.ts, target 45–90 s for a
+ * ~3 taps/s phone player): eyes and armed tentacle tips carry invisible hit
+ * spheres ~1.5× their visible size (fat-finger friendly), burst eyes reopen
+ * after ~5 s, attacks only start when their ring anchor is in the playable
+ * screen area, and the pool crawlers emerge in the lower-centre of the view and
+ * hold a 4.8 m stand-off so their pounce ring is drawn above the HUD panels.
  */
 
 const FLESH = 0x8a4038;
@@ -41,6 +48,28 @@ const pusMat = () => M(0x8e2e1e, 'skin', 2.4, 0.55);
 
 /** The body is modelled at full size and scaled to fit the atrium framing. */
 const BODY_SCALE = 0.86;
+
+/** Invisible hit-sphere radius relative to the visible eye / tip pustule. */
+const EYE_HIT = 1.5;
+const TIP_HIT = 1.55;
+
+/**
+ * Crawler emergence points on the pool rim, BOSS-LOCAL (x, z): +z toward the
+ * camera, +x = screen right. All ~7.3–9 m from the camera and inside the
+ * central band, so crawlers rise in plain view and close in on the lower centre
+ * of the screen (clear of the lives/weapon panels).
+ */
+const CRAWL_PTS: [number, number][] = [
+  [-2.3, 4.2],
+  [-0.8, 4.7],
+  [0.7, 4.6],
+  [1.9, 4.3],
+  [-3.2, 3.6],
+];
+/** Pool crawlers stop (and pounce from) further out than usual: head + ring well above the HUD. */
+const CRAWL_RANGE = 4.8;
+/** At most this many pool crawlers alive at once. */
+const CRAWL_MAX = 3;
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -167,6 +196,8 @@ interface Tentacle {
   base: THREE.Vector3;
   tip: THREE.Group;
   pustule: THREE.Mesh;
+  /** Invisible, larger hit sphere on the pustule (registered only while the tip is armed). */
+  hit: THREE.Mesh;
   mode: TentMode;
   /** Current control points P1..P3 (smoothed). */
   cur: THREE.Vector3[];
@@ -178,6 +209,8 @@ interface Tentacle {
 
 interface Eye {
   mesh: THREE.Mesh;
+  /** Invisible, larger hit sphere (child of `mesh`, so it hides with it). */
+  hit: THREE.Mesh;
   pupil: THREE.Object3D;
   lid: THREE.Mesh;
   hp: number;
@@ -256,6 +289,12 @@ export class PatientZero extends Boss {
   private roarPhase = 0;
   private burstSrc: THREE.Object3D[] = [];
   private ribRattle = 0;
+  /** Never-drawn material for the generous weak-point hit spheres. */
+  private hitMat!: THREE.Material;
+  /** Indices into spawnPts chosen for the current crawler spawn (boil there, emerge there). */
+  private spawnSel: number[] = [];
+  /** Seconds the next attack has been held back for a minion's telegraph. */
+  private heldFor = 0;
 
   constructor(world: World, spawn: EnemySpawn) {
     super(world, spawn);
@@ -264,7 +303,7 @@ export class PatientZero extends Boss {
   protected override configure() {
     this.name = 'patient_zero';
     this.title = 'PATIENT ZERO';
-    this.maxHp = 230;
+    this.maxHp = 185;
     this.speed = 0;
     this.attackRange = 99;
     this.points = 30000;
@@ -289,6 +328,7 @@ export class PatientZero extends Boss {
     const skin = M(SKIN, 'skin', 1.1, 0.7);
     const bone = M(BONE, 'hide', 2.6, 0.45);
     const vein = Kit.glow(0xff4a24, 1.2);
+    this.hitMat = Kit.track(new THREE.MeshBasicMaterial({ visible: false }));
     const jit = (r: number, amt: number, seed: number) => Kit.jitter(Kit.ico(r, 1), amt, seed);
 
     this.model.add(this.body);
@@ -463,8 +503,12 @@ export class PatientZero extends Boss {
       rim.position.z = -r * 0.45;
       holder.add(rim);
       this.fleshMeshes.push(rim);
+      // Generous hit sphere: a near miss on a weak point still counts (phones).
+      const hit = new THREE.Mesh(Kit.sphere(r * EYE_HIT, 8, 6), this.hitMat);
+      hit.userData.flashAs = m;
+      m.add(hit);
       const hp = big ? 7 : 4;
-      this.eyes.push({ mesh: m, pupil: pp, lid, hp, maxHp: hp, closedT: 0, big });
+      this.eyes.push({ mesh: m, hit, pupil: pp, lid, hp, maxHp: hp, closedT: 0, big });
     };
     eye(this.head, 0, 1.0, 0.98, 0.33, true);
     eye(this.head, -0.5, 0.76, 0.88, 0.2);
@@ -501,6 +545,9 @@ export class PatientZero extends Boss {
       const pustule = new THREE.Mesh(Kit.ico(0.24, 1), pusMat());
       pustule.position.y = -0.05;
       tip.add(pustule);
+      const hit = new THREE.Mesh(Kit.sphere(0.24 * TIP_HIT, 8, 6), this.hitMat);
+      hit.userData.flashAs = pustule;
+      pustule.add(hit);
       const t: Tentacle = {
         tube,
         side,
@@ -508,6 +555,7 @@ export class PatientZero extends Boss {
         base: baseP,
         tip,
         pustule,
+        hit,
         mode: 'rest',
         cur: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()],
         tgt: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()],
@@ -525,7 +573,7 @@ export class PatientZero extends Boss {
     // ── Hit zones (order matters: the autoplayer prefers the first 'weak') ──
     for (const t of this.tents) this.hitbox(t.pustule, 'tail');
     this.hitbox(this.heart, 'armor');
-    for (const e of this.eyes) this.hitbox(e.mesh, 'weak');
+    for (const e of this.eyes) this.hitbox(e.hit, 'weak');
     for (const m of this.fleshMeshes) this.hitbox(m, 'torso');
     for (const t of this.tents) this.hitbox(t.tube.mesh, 'tail');
     for (const r of this.ribs) this.hitbox(r, 'armor');
@@ -595,10 +643,8 @@ export class PatientZero extends Boss {
       bag.add(liquid);
       this.iv.push({ line, from: new THREE.Vector3(...attach[i]), to, bag });
     });
-    // Crawler spawn points around the pool rim, toward the player.
-    for (const [x, z] of [[-3.4, 4.0], [3.6, 3.7], [0.4, 5.4], [-4.8, 1.8], [4.9, 1.6]] as [number, number][]) {
-      this.spawnPts.push(this.root.localToWorld(new THREE.Vector3(x, 0, z)));
-    }
+    // Crawler emergence points on the pool rim, in front of the camera.
+    for (const [x, z] of CRAWL_PTS) this.spawnPts.push(this.root.localToWorld(new THREE.Vector3(x, 0, z)));
   }
 
   // ─── Emergence (entry) ───────────────────────────────────────────────────
@@ -671,6 +717,15 @@ export class PatientZero extends Boss {
       default:
         this.setState(ST.idle);
     }
+    // One threat at a time: while our ring is up, no minion may START a windup
+    // (the boss updates before the minions it spawns; World recounts slots each frame).
+    if (this.telegraph) this.world.attackSlots = 0;
+  }
+
+  /** A minion (pool crawler, balcony walker…) is telegraphing an attack right now. */
+  private minionThreat(): boolean {
+    for (const e of this.world.enemies()) if (!e.isBoss && e.telegraph && e.state !== 'dying' && !e.removed) return true;
+    return false;
   }
 
   private updateIdle(dt: number) {
@@ -685,9 +740,15 @@ export class PatientZero extends Boss {
       this.world.audio.play('zombie_groan', { volume: 0.8, pitch: 0.45, vary: 0.1 });
     }
     if (this.nextAttack > 0) return;
+    // Don't open a ring on the same beat as a minion's: let its pounce/swipe get a head start.
+    if (this.heldFor < 0.6 && this.minionThreat()) {
+      this.heldFor += dt;
+      return;
+    }
+    this.heldFor = 0;
     const rng = this.world.rng;
     this.minions = this.minions.filter((m) => !m.removed && m.state !== 'dying');
-    const canSpawn = this.phase >= 1 && this.minions.length < 3 && this.lastAttack !== ST.spawn;
+    const canSpawn = this.phase >= 1 && this.minions.length < CRAWL_MAX - 1 && this.lastAttack !== ST.spawn;
     const r = rng.next();
     let pick: string;
     if (this.phase === 0) pick = r < 0.58 ? ST.slam : ST.spit;
@@ -700,6 +761,12 @@ export class PatientZero extends Boss {
         this.repeat = 0;
       }
     } else this.repeat = 0;
+    // Fair framing: never start a telegraph whose ring would sit off-screen or under the HUD.
+    if (pick === ST.spit && !this.inPlayArea(this.mouth, 0.85)) pick = ST.slam;
+    if (pick === ST.slam && !this.slamCandidate()) {
+      this.nextAttack = 0.25;
+      return;
+    }
     this.lastAttack = pick;
     if (pick === ST.slam) {
       this.comboLeft = this.phase >= 2 ? 1 : 0;
@@ -710,6 +777,13 @@ export class PatientZero extends Boss {
       this.setState(ST.spit);
       this.world.audio.play('bloater_gurgle', { volume: 1, pitch: 0.55 });
     } else {
+      // Pick distinct emergence points now, so the pool boils where they'll climb out.
+      const n = Math.min(this.phase >= 2 ? 3 : 2, CRAWL_MAX - this.minions.length);
+      this.spawnSel.length = 0;
+      for (let guard = 0; this.spawnSel.length < n && guard < 40; guard++) {
+        const i = rng.int(0, this.spawnPts.length - 1);
+        if (!this.spawnSel.includes(i)) this.spawnSel.push(i);
+      }
       this.setState(ST.spawn);
       this.world.audio.play('boss_roar', { volume: 0.6, pitch: 1.35 });
     }
@@ -726,12 +800,23 @@ export class PatientZero extends Boss {
     return [4, 5, 6][this.phase] ?? 6;
   }
 
+  /** A resting tentacle whose tip (the ring anchor) is inside the playable screen area. */
+  private slamCandidate(side?: 1 | -1, upper?: boolean): Tentacle | null {
+    let any: Tentacle | null = null;
+    for (const x of this.tents) {
+      if (x.mode !== 'rest' || !this.inPlayArea(x.tip, 0.85)) continue;
+      if ((side === undefined || x.side === side) && (upper === undefined || x.upper === upper)) return x;
+      any ??= x;
+    }
+    return any;
+  }
+
   private beginSlam() {
     // Alternate sides; upper tentacles are the most readable.
     const side = (this.lastSlamSide * -1) as 1 | -1;
     this.lastSlamSide = side;
     const upper = this.world.rng.chance(0.7);
-    const t = this.tents.find((x) => x.side === side && x.upper === upper && x.mode === 'rest') ?? this.tents.find((x) => x.mode === 'rest') ?? this.tents[0];
+    const t = this.slamCandidate(side, upper) ?? this.tents.find((x) => x.mode === 'rest') ?? this.tents[0];
     this.slamTent = t;
     t.dmg = 0;
     this.setState(ST.slam);
@@ -746,7 +831,11 @@ export class PatientZero extends Boss {
     if (this.flashObj === t.pustule) this.flashMat = mat;
     else t.pustule.material = mat;
     // (Never re-register hit zones once the boss is dead.)
-    if (this.hostile) this.world.shootables.add(t.pustule, this, on ? 'weak' : 'tail');
+    if (this.hostile) {
+      this.world.shootables.add(t.pustule, this, on ? 'weak' : 'tail');
+      if (on) this.world.shootables.add(t.hit, this, 'weak');
+      else this.world.shootables.remove(t.hit);
+    }
     if (!on && t.mode !== 'limp') t.mode = 'rest';
   }
 
@@ -891,23 +980,29 @@ export class PatientZero extends Boss {
     // Pool boils at the spawn points, then crawlers haul themselves out.
     if (!this.fired && st < 1.1) {
       if (Math.floor((st - _dt) * 8) !== Math.floor(st * 8)) {
-        for (let i = 0; i < 2; i++) {
-          const p = this.spawnPts[(this.minions.length + i) % this.spawnPts.length];
+        for (const i of this.spawnSel) {
+          const p = this.spawnPts[i];
           this.world.fx.blood(_v.copy(p).setY(p.y + 0.3), UP, { color: 0x6a0808, amount: 0.9 });
         }
       }
     }
     if (!this.fired && st >= 1.1) {
       this.fired = true;
-      const count = this.phase >= 2 ? 3 : 2;
-      for (let i = 0; i < count && this.minions.length < 4; i++) {
-        const p = this.spawnPts[rng.int(0, this.spawnPts.length - 1)];
-        const pos = p.clone();
-        pos.x += rng.spread(0.6);
-        pos.z += rng.spread(0.6);
+      for (const i of this.spawnSel) {
+        if (this.minions.length >= CRAWL_MAX) break;
+        const pos = this.spawnPts[i].clone();
+        pos.x += rng.spread(0.35);
+        pos.z += rng.spread(0.35);
         pos.y = this.world.groundAt(pos.x, pos.z);
         try {
-          const e = createEnemy('crawler', this.world, { pos, frame: 'world', entry: 'rise', hpMul: 1, speedMul: 1.1, opts: { variant: 'patient' } });
+          const e = createEnemy('crawler', this.world, {
+            pos,
+            frame: 'world',
+            entry: 'rise',
+            hpMul: 1,
+            speedMul: 1.1,
+            opts: { variant: 'patient', attackRange: CRAWL_RANGE },
+          });
           this.world.add(e);
           this.minions.push(e);
         } catch {
@@ -970,7 +1065,7 @@ export class PatientZero extends Boss {
   protected override damageMultiplier(hit: ShotHit): number {
     if (hit.part === 'weak') {
       if (hit.object === this.heart) return 1.5;
-      for (const t of this.tents) if (hit.object === t.pustule) return 0.75;
+      for (const t of this.tents) if (hit.object === t.pustule || hit.object === t.hit) return 0.75;
       return 1;
     }
     if (hit.part === 'tail') return 0.5;
@@ -983,11 +1078,11 @@ export class PatientZero extends Boss {
     if (hit.part === 'weak' || hit.part === 'head') this.dmgInState += amount;
     else this.dmgInState += amount * 0.4;
     for (const t of this.tents) {
-      if (hit.object === t.pustule && t === this.slamTent) t.dmg += amount;
+      if ((hit.object === t.pustule || hit.object === t.hit) && t === this.slamTent) t.dmg += amount;
     }
     // Eyes burst.
     for (const e of this.eyes) {
-      if (hit.object !== e.mesh || e.closedT > 0) continue;
+      if (hit.object !== e.hit || e.closedT > 0) continue;
       e.hp -= amount;
       if (e.hp <= 0) this.burstEye(e);
     }
@@ -999,7 +1094,8 @@ export class PatientZero extends Boss {
   }
 
   private burstEye(e: Eye) {
-    e.closedT = 7 + this.world.rng.next() * 2;
+    // Shut for ~5 s (long enough to force a target switch, short enough to keep the fight moving).
+    e.closedT = 4.6 + this.world.rng.next() * 1.4;
     e.mesh.visible = false;
     e.lid.visible = true;
     e.pupil.visible = false;
@@ -1022,7 +1118,9 @@ export class PatientZero extends Boss {
     // At most ~3 flashes a second, however fast the SMG hits.
     if (this.age - this.lastFlash < 0.34) return;
     this.lastFlash = this.age;
-    const obj = this.lastHit?.object as THREE.Mesh | undefined;
+    const raw = this.lastHit?.object as THREE.Mesh | undefined;
+    // Hit spheres flash the eye / pustule they stand in for.
+    const obj = (raw?.userData.flashAs as THREE.Mesh | undefined) ?? raw;
     const target = obj && obj.isMesh && obj.userData.noFlash !== true ? obj : this.headMesh;
     if (this.flashObj && this.flashMat) this.flashObj.material = this.flashMat;
     this.flashObj = target;

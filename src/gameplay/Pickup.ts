@@ -14,9 +14,22 @@ const COLORS: Record<PickupKind, number> = {
   points: 0xffd84a,
 };
 
+/** Seconds of blinking before a pickup with a ttl expires. */
+export const PICKUP_BLINK = 2;
+
+// Geometry shared by every pickup (never disposed: a stage spawns 5–15 pickups,
+// and per-pickup geometries used to leak their GPU buffers).
+let haloGeo: THREE.TorusGeometry | null = null;
+let gemGeo: THREE.OctahedronGeometry | null = null;
+function shared<T extends THREE.BufferGeometry>(g: T): T {
+  g.userData.shared = true;
+  return g;
+}
+
 /** Shoot-to-collect item: first aid, weapon crates, bombs, bonus points. */
 export class Pickup extends Entity {
   private model = new THREE.Group();
+  private halo: THREE.Mesh | null = null;
   private baseY = 0;
   ttl: number;
 
@@ -24,6 +37,8 @@ export class Pickup extends Entity {
     super(world);
     this.frame = frame;
     this.assistable = true;
+    // Blinking before expiry hides the model, never the hitboxes.
+    this.shootableWhenHidden = true;
     this.ttl = ttl;
     this.root.position.copy(pos);
     this.baseY = pos.y;
@@ -44,7 +59,8 @@ export class Pickup extends Entity {
       pin.position.y = 0.22;
       m.add(pin);
     } else if (this.kind === 'points') {
-      const gem = Kit.mesh(new THREE.OctahedronGeometry(0.25, 0), Kit.glow(c, 1.5));
+      gemGeo ??= shared(new THREE.OctahedronGeometry(0.25, 0));
+      const gem = Kit.mesh(gemGeo, Kit.glow(c, 1.5));
       gem.scale.y = 1.4;
       m.add(gem);
     } else {
@@ -56,10 +72,13 @@ export class Pickup extends Entity {
       m.add(barrel);
     }
     // Soft halo ring so it reads as interactive.
-    const ring = Kit.mesh(new THREE.TorusGeometry(0.42, 0.03, 6, 24), Kit.glow(c, 2));
+    haloGeo ??= shared(new THREE.TorusGeometry(0.42, 0.03, 6, 24));
+    const ring = Kit.mesh(haloGeo, Kit.glow(c, 2));
     ring.userData.noFlash = true;
     ring.name = 'halo';
+    ring.rotation.x = Math.PI / 2;
     m.add(ring);
+    this.halo = ring;
   }
 
   override onAdded(): void {
@@ -72,15 +91,12 @@ export class Pickup extends Entity {
     this.age += dt;
     this.model.rotation.y += dt * 1.6;
     this.root.position.y = this.baseY + Math.sin(this.age * 2.6) * 0.08;
-    const halo = this.model.getObjectByName('halo');
-    if (halo) {
-      halo.rotation.x = Math.PI / 2;
-      const s = 1 + Math.sin(this.age * 6) * 0.08;
-      halo.scale.set(s, s, s);
-    }
+    if (this.halo) this.halo.scale.setScalar(1 + Math.sin(this.age * 6) * 0.08);
     if (this.age > this.ttl) this.removed = true;
-    // Blink before expiring.
-    if (this.ttl - this.age < 2) this.root.visible = Math.floor(this.age * 10) % 2 === 0;
+    // Blink before expiring (the model only: hitboxes stay shootable, see Shootables.active).
+    // Reduced flashing: a slower blink.
+    const rate = this.world.settings.reduceFlashes ? 4 : 8;
+    this.model.visible = this.ttl - this.age >= PICKUP_BLINK || Math.floor(this.age * rate) % 2 === 0;
   }
 
   override onShot(hit: ShotHit): ShotOutcome {

@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { registerEnemy } from '../registry';
 import { Kit } from '../kit/ModelKit';
 import { Projectile } from '../../gameplay/Projectile';
+import { ndcInPlayArea } from '../../gameplay/Enemy';
+import { Civilian } from '../../gameplay/Civilian';
 import type { ShotHit } from '../../gameplay/Entity';
 import { angleDelta, clamp, damp, lerp, TAU } from '../../core/math';
 import {
@@ -107,6 +109,21 @@ abstract class Theropod extends Dino {
   protected minStrikeFrac = 0.7;
   /** |NDC x| beyond which a prowling dino turns back toward the middle of the view. */
   protected prowlEdge = 0.55;
+  /**
+   * Attack spot (NDC): an attack may only START with the anchor inside |x| < spotX
+   * and above y = spotLow, clear of the HUD corner panels — so the whole ring is
+   * on screen and readable on a phone.
+   */
+  protected spotX = 0.68;
+  protected spotLow = -0.58;
+  /**
+   * Extra stand-off (m) learned while stuck too low on screen at striking range
+   * (high jeep camera, view tilted up at a big boss): hang back so it rises into view.
+   */
+  protected standOff = 0;
+  protected maxStandOff = 2.5;
+  /** Screen side (+1 right / -1 left) of a civilian this dino overlaps on screen (0 = none). */
+  protected civSide = 0;
 
   protected abstract makeSpec(): TheroSpec;
 
@@ -136,6 +153,56 @@ abstract class Theropod extends Dino {
     return 1;
   }
 
+  /** Striking range including any learned stand-off. */
+  protected get range(): number {
+    return this.attackRange + this.standOff;
+  }
+
+  /**
+   * Where the anchor sits on screen right now (also fills `sx`/`sy`):
+   * 0 = a good attack spot, 1 = visible but badly framed (screen edge, too low,
+   * near a HUD panel), 2 = out of view.
+   */
+  protected framing(): number {
+    this.civSide = 0;
+    if (!this.spotNdc() || Math.abs(this.sx) > 0.97 || Math.abs(this.sy) > 0.97) return 2;
+    const x = this.sx;
+    const y = this.sy;
+    if (!ndcInPlayArea(x, y, 0, 0.9) || Math.abs(x) > this.spotX || y < this.spotLow || y > 0.68) return 1;
+    // Keep the ring clear of the bottom corner panels (lives/bomb, weapon/heat).
+    if (y < -0.38 && (x > 0.34 || x < -0.44)) return 1;
+    // Never line an attack up over a civilian: shots at the ring would hit them.
+    this.civSide = this.civilianClash();
+    return this.civSide !== 0 ? 1 : 0;
+  }
+
+  /**
+   * Does the anchor (at `sx`/`sy`) sit over a civilian's on-screen silhouette (plus
+   * a margin for aim error)? Returns the side of the civilian the dino is on
+   * (+1 right, -1 left), or 0.
+   */
+  protected civilianClash(): number {
+    const ents = this.world.entities;
+    const cam = this.world.camera;
+    for (let i = 0; i < ents.length; i++) {
+      const c = ents[i];
+      if (!(c instanceof Civilian) || c.removed || c.shot || c.rescued) continue;
+      c.root.getWorldPosition(_w).project(cam);
+      if (_w.z >= 1) continue;
+      const fx = _w.x;
+      const fy = _w.y;
+      c.root.getWorldPosition(_w);
+      _w.y += 1.8;
+      _w.project(cam);
+      const h = _w.y - fy;
+      // Isotropic units (NDC y): a ~0.8 m wide body plus ~25 px of aim slop.
+      const dx = (this.sx - fx) * cam.aspect;
+      const pad = 0.13;
+      if (Math.abs(dx) < h * 0.25 + pad && this.sy > fy - pad && this.sy < _w.y + pad) return dx >= 0 ? 1 : -1;
+    }
+    return 0;
+  }
+
   protected override advanceUpdate(dt: number) {
     this.playerPos(_p);
     const pos = this.root.position;
@@ -143,29 +210,50 @@ abstract class Theropod extends Dino {
     const dist = _d.length();
     if (dist > 1e-3) _d.divideScalar(dist);
     else _d.set(0, 0, 1);
-    if (dist > this.attackRange + 0.25) {
+    const range = this.range;
+    if (dist > range + 0.25) {
       // Approach with a flanking weave that fades out near striking range.
-      const w = this.weaveAmp * Math.sin(this.age * this.weaveFreq + this.seed) * clamp((dist - this.attackRange) / 5, 0, 1);
+      const w = this.weaveAmp * Math.sin(this.age * this.weaveFreq + this.seed) * clamp((dist - range) / 5, 0, 1);
       _v.set(_p.x - _d.z * w, 0, _p.z + _d.x * w);
-      this.moveToward(_v, this.speed * this.speedFactor(), dt, this.attackRange);
+      this.moveToward(_v, this.speed * this.speedFactor(), dt, range);
       this.separate(dt);
       return;
     }
     this.faceToward(_p, dt);
-    if (!this.onScreen()) {
-      // Off to the side — step toward the centre of the view so attacks are always visible.
+    const f = this.framing();
+    if (f === 2 || (f === 1 && (Math.abs(this.sx) > this.spotX + 0.04 || this.sy < -0.78))) {
+      // Out of view, out at the side, or deep in a corner / under the hood — run
+      // for the middle of the view (briskly: lingering at the edges drags it across
+      // the HUD and bystanders) so the attack can be seen and shot from its first frame.
       this.world.camera.getWorldDirection(_v).setY(0).normalize();
-      _v.multiplyScalar(this.attackRange).add(this.world.rig.space.position);
+      _v.multiplyScalar(range).add(this.world.rig.space.position);
       if (this.frame === 'rig') this.world.rig.space.worldToLocal(_v);
       this.moveToward(_v, this.speed * 0.8, dt);
+      this.separate(dt);
       return;
     }
-    // Too close (e.g. just shot out of a pounce, or a leap entry landed short): back off first.
-    if (this.cooldown <= 0 && dist >= this.attackRange * this.minStrikeFrac && this.takeSlot()) {
+    // Too low on screen at this range: learn to hang back further.
+    if (this.sy < this.spotLow + 0.04 && Math.abs(this.sx) < 0.9) this.standOff = Math.min(this.maxStandOff, this.standOff + dt * 2.5);
+    else if (this.sy > this.spotLow + 0.3) this.standOff = Math.max(0, this.standOff - dt * 0.4);
+    // Strike only from a framed spot, never while the view is swinging away from it,
+    // and not from too close (just shot out of a pounce, a leap entry landed short).
+    if (
+      f === 0 &&
+      this.cooldown <= 0 &&
+      dist >= range * this.minStrikeFrac &&
+      this.staysFramed(this.sx, this.windup, 0.85) &&
+      this.takeSlot()
+    ) {
       this.setState('windup');
       return;
     }
     this.prowl(dt, dist);
+  }
+
+  /** The player can no longer see this attack: abandon it and regroup. */
+  protected callOff() {
+    this.setState('advance');
+    this.cooldown = Math.max(this.cooldown, this.world.rng.range(0.8, 1.5));
   }
 
   /**
@@ -180,11 +268,23 @@ abstract class Theropod extends Dino {
       this.prowlDir = this.world.rng.chance(0.65) ? -this.prowlDir : this.prowlDir;
     }
     const bearing = Math.atan2(_d.x, _d.z);
+    if (this.civSide !== 0) {
+      // Standing over a civilian on screen: sidestep away from them (screen-wise).
+      _w.setFromMatrixColumn(this.world.camera.matrixWorld, 0);
+      if (this.frame === 'rig') _w.applyQuaternion(_q.copy(this.world.rig.space.quaternion).invert());
+      const rightDir = Math.cos(bearing) * _w.x - Math.sin(bearing) * _w.z >= 0 ? 1 : -1;
+      this.prowlDir = this.civSide * rightDir;
+      this.prowlT = Math.max(this.prowlT, 0.8);
+      this.civSide = 0;
+    }
     this.anchor.getWorldPosition(_w).project(this.world.camera);
     const sx = _w.x;
     const sy = _w.z < 1 ? _w.y : 0;
-    if (_w.z > 1 || Math.abs(sx) > this.prowlEdge) {
-      // Drifting toward a screen edge: circle back toward the middle of the view.
+    // Low on screen the bottom HUD panels (lives/bomb left, weapon/heat right) come
+    // into play: turn back sooner there.
+    const lowCorner = sy < -0.3 && (sx > 0.3 || sx < -0.4);
+    if (_w.z > 1 || Math.abs(sx) > this.prowlEdge || lowCorner) {
+      // Drifting toward a screen edge / HUD corner: circle back toward the middle of the view.
       this.world.camera.getWorldDirection(_w).setY(0).normalize();
       _w.multiplyScalar(Math.max(2, dist)).add(this.world.rig.space.position);
       if (this.frame === 'rig') this.world.rig.space.worldToLocal(_w);
@@ -196,19 +296,28 @@ abstract class Theropod extends Dino {
     }
     // Inside the minimum strike distance: give ground decisively (mostly backwards, not
     // sideways) before the next attack.
-    const tooClose = dist < this.attackRange * this.minStrikeFrac + 0.6;
+    const range = this.range;
+    const tooClose = dist < range * this.minStrikeFrac + 0.6;
     const a = bearing + this.prowlDir * (tooClose ? 0.2 : 0.6);
-    let rr = tooClose ? this.attackRange : lerp(dist, this.attackRange, 0.5);
-    // Low on screen (small dinos up close sit over the bottom HUD): give ground.
-    if (sy < -0.5) rr = Math.max(rr, Math.min(dist + 0.8, this.attackRange + 0.2));
+    let rr = tooClose ? range : lerp(dist, range, 0.5);
+    // Low on screen (small dinos up close sit over the bottom HUD / jeep hood): give
+    // ground briskly, so it's soon back in a spot it can attack from.
+    const low = sy < this.spotLow + 0.08 || lowCorner;
+    if (low) rr = Math.max(rr, Math.min(dist + 0.8, range + 0.2));
     _v.set(_p.x + Math.sin(a) * rr, 0, _p.z + Math.cos(a) * rr);
-    this.moveToward(_v, this.speed * (tooClose ? 0.55 : 0.3), dt);
+    this.moveToward(_v, this.speed * (tooClose || low ? 0.55 : 0.3), dt);
     this.separate(dt);
     // Body angled along the pacing direction, head (via look-at) on the player.
     this.faceTowardOffset(_p, dt, -this.prowlDir * this.stalkAngle, 8);
   }
 
   protected override windupUpdate(dt: number) {
+    // The view swung away (boss framing, vehicle turn) or the ring slid under the HUD:
+    // a crouch the player can't see must not turn into a hit.
+    if (this.framingLost(dt, this.windup + this.pounceDur)) {
+      this.callOff();
+      return;
+    }
     this.playerPos(_p);
     // Stalking crouch: body angled off-axis (readable 3/4 silhouette), head locked on the camera.
     this.faceTowardOffset(_p, dt, this.stalkAngle * this.prowlDir, 8);
@@ -245,6 +354,13 @@ abstract class Theropod extends Dino {
 
   protected pounceUpdate(dt: number) {
     const k = clamp(this.stateTime / this.pounceDur, 0, 1);
+    if (k < 0.85 && this.framingLost(dt, this.windup + this.pounceDur)) {
+      // Leapt out of the frame (the view swung away mid-leap): no blind hit — bail
+      // out of the lunge, bound back and regroup.
+      this.telegraph = null;
+      this.startRetreat();
+      return;
+    }
     this.playerPos(_p);
     const tx = _p.x + this.pDir.x * this.reach;
     const tz = _p.z + this.pDir.z * this.reach;
@@ -577,6 +693,11 @@ export class Compy extends Theropod {
     this.landShake = 0;
     this.toppleDur = 0.3;
     this.toppleDelay = 0.05;
+    // Tiny bodies: pick attack spots in the middle of the view, well above the
+    // bottom HUD panels and the jeep hood.
+    this.spotX = 0.6;
+    this.spotLow = -0.5;
+    this.maxStandOff = 3;
   }
 
   protected makeSpec(): TheroSpec {
@@ -865,6 +986,9 @@ export class Dilo extends Theropod {
     this.lieHeight = 0.17;
     this.landDust = 0.7;
     this.modelScale = 0.9;
+    this.spotX = 0.7;
+    this.spotLow = -0.6;
+    this.maxStandOff = 2;
   }
 
   protected makeSpec(): TheroSpec {
@@ -954,7 +1078,7 @@ export class Dilo extends Theropod {
   }
 
   protected override advanceUpdate(dt: number) {
-    if (this.cooldown > 0 && this.distToPlayer <= this.attackRange + 1.5) {
+    if (this.cooldown > 0 && this.distToPlayer <= this.range + 1.5) {
       // Between spits: side-step around at range, watching the player.
       this.playerPos(_p);
       _d.set(this.root.position.x - _p.x, 0, this.root.position.z - _p.z).normalize();
@@ -967,7 +1091,7 @@ export class Dilo extends Theropod {
   protected override prowl(dt: number, dist: number) {
     super.prowl(dt, dist);
     // Dilos keep their distance: back off if the player got close.
-    if (dist < this.attackRange - 1) {
+    if (dist < this.range - 1) {
       _v.set(this.root.position.x + _d.x, 0, this.root.position.z + _d.z);
       this.moveToward(_v, this.speed * 0.5, dt);
       this.faceToward(_p, dt, 8);
@@ -979,6 +1103,11 @@ export class Dilo extends Theropod {
   }
 
   protected override windupUpdate(dt: number) {
+    if (this.framingLost(dt, this.windup)) {
+      // Can't spit at what it (and the player) can't see: fold the frill, regroup.
+      this.callOff();
+      return;
+    }
     this.playerPos(_p);
     this.faceToward(_p, dt, 8);
     if (this.telegraph) this.telegraph.progress = clamp(this.stateTime / this.windup, 0, 1);
@@ -1236,15 +1365,19 @@ export class Ptero extends Dino {
     const tz = c.z + this.right.z * Math.cos(a) * this.circleR + this.fwd.z * Math.sin(a) * this.circleDepth;
     this.steer(tx, this.cruiseAlt(tx, tz, this.alt + Math.sin(a * 2) * 0.9), tz, this.speed, dt);
     this.circleTime += dt;
-    if (this.circleTime > this.nextDive && this.cooldown <= 0 && this.onScreen(0.8)) {
+    // Dive only from a framed spot: well inside the view, clear of the HUD, and not
+    // while the camera is swinging away (it would leave the frame mid-swoop).
+    if (this.circleTime > this.nextDive && this.cooldown <= 0 && this.inPlayArea(this.anchor, 0.8)) {
       _v.set(this.root.position.x, 0, this.root.position.z).sub(this.playerPos(_p));
-      if (_v.dot(this.fwd) > 8) this.startDive();
+      // (Below the boss bar / progress rail too, so the ring starts in clear sky.)
+      if (_v.dot(this.fwd) > 8 && this.spotNdc() && this.sy < 0.6 && this.staysFramed(this.sx, this.windup * 0.7, 0.8)) this.startDive();
     }
   }
 
   private startDive() {
     if (!this.enterAttack('dive')) return;
     this.telegraph = { progress: 0, anchor: this.anchor, radius: this.telegraphRadius };
+    this.watchStart();
     this.d0.set(this.root.position.x, this.lift, this.root.position.z);
     this.diveSide = -this.diveSide;
     this.sfx('raptor_screech', 1, 1.55);
@@ -1254,6 +1387,12 @@ export class Ptero extends Dino {
     const T = this.windup;
     const flare = 0.32;
     const t = this.stateTime;
+    if (t < T - 0.25 && this.framingLost(dt, T)) {
+      // The view swung away (or it slid under the HUD): no blind hit — peel off and circle again.
+      this.telegraph = null;
+      this.startClimb();
+      return;
+    }
     if (this.telegraph) this.telegraph.progress = clamp(t / T, 0, 1);
     this.computeBasis();
     this.playerPos(_p);
@@ -1601,14 +1740,15 @@ export class Trike extends Dino {
       this.backing = true;
       return;
     }
-    if (!this.onScreen()) {
+    if (!this.inPlayArea(this.anchor, 0.8)) {
+      // Off screen or near the edge / HUD: lumber round into the middle of the view first.
       this.world.camera.getWorldDirection(_v).setY(0).normalize();
       _v.multiplyScalar(Math.max(this.minCharge + 2, dist)).add(this.world.rig.space.position);
       if (this.frame === 'rig') this.world.rig.space.worldToLocal(_v);
       this.moveToward(_v, this.speed * 1.5, dt);
       return;
     }
-    if (this.cooldown <= 0 && this.takeSlot()) {
+    if (this.cooldown <= 0 && this.spotNdc() && this.staysFramed(this.sx, this.windup, 0.8) && this.takeSlot()) {
       this.chargeDmg = 0;
       this.stompCount = 0;
       this.setState('windup');
@@ -1616,6 +1756,12 @@ export class Trike extends Dino {
   }
 
   protected override windupUpdate(dt: number) {
+    if (this.framingLost(dt, this.windup * 2, 0.25)) {
+      // The player can't see the build-up any more: snort and stand down for now.
+      this.setState('advance');
+      this.cooldown = Math.max(this.cooldown, this.world.rng.range(1.5, 2.5));
+      return;
+    }
     this.playerPos(_p);
     this.faceToward(_p, dt, 3);
     const t = this.stateTime;
@@ -1645,6 +1791,10 @@ export class Trike extends Dino {
   }
 
   private chargeUpdate(dt: number) {
+    if (this.distToPlayer - this.impactDist > 1.5 && this.framingLost(dt, this.windup * 2, 0.25)) {
+      this.halt();
+      return;
+    }
     this.playerPos(_p);
     this.chargeSpeed = Math.min(11, this.chargeSpeed + 7 * dt);
     this.moveToward(_p, this.chargeSpeed, dt, this.impactDist);
@@ -1679,6 +1829,18 @@ export class Trike extends Dino {
     this.setState('leave');
     this.hostile = false;
     this.world.shootables.removeOwner(this);
+  }
+
+  /**
+   * Charge called off (the view swung away from it): dig in and skid to a halt
+   * short of the camera, toss the head, then back off and line up again.
+   */
+  private halt() {
+    this.telegraph = null;
+    this.skid = Math.min(this.chargeSpeed, this.skidRoom() * SKID_DECAY);
+    this.setState('halt');
+    this.cooldown = Math.max(this.cooldown, this.world.rng.range(1.8, 2.8));
+    this.sfx('stomp', 0.8, 0.8);
   }
 
   /** Camera forward (flattened, normalised) in this entity's frame. */
@@ -1745,6 +1907,7 @@ export class Trike extends Dino {
   protected override customUpdate(dt: number): void {
     if (this.state === 'charge') this.chargeUpdate(dt);
     else if (this.state === 'leave') this.leaveUpdate(dt);
+    else if (this.state === 'halt' && this.stateTime > 0.9) this.setState('advance');
   }
 
   override stagger() {
@@ -1775,7 +1938,7 @@ export class Trike extends Dino {
   }
 
   override update(dt: number): void {
-    if (this.state === 'stagger' && this.skid > 0.1 && dt > 0) {
+    if ((this.state === 'stagger' || this.state === 'halt') && this.skid > 0.1 && dt > 0) {
       // Stumbling skid out of a charge (clamped so it stops short of the camera).
       const step = Math.min(this.skid * dt, this.skidRoom());
       if (step <= 1e-4) this.skid = 0;
@@ -1839,6 +2002,11 @@ export class Trike extends Dino {
     } else if (st === 'stagger') {
       kneelT = t < 0.9 ? 1 : 0;
       jawT = 0.6;
+    } else if (st === 'halt') {
+      // Dug in: horns still half-lowered, a snort, front legs braced.
+      downT = t < 0.5 ? 0.6 : 0.2;
+      kneelT = t < 0.45 ? 0.25 : 0;
+      jawT = 0.45;
     } else if (dying) {
       kneelT = 1;
       jawT = 0.5;
@@ -1892,7 +2060,9 @@ export class Trike extends Dino {
     const toss =
       st === 'stagger'
         ? Math.sin(t * 9) * 0.25 * (1 - t / this.staggerTime)
-        : st === 'leave' && t < 0.8
+        : st === 'halt'
+          ? Math.sin(t * 8) * 0.22 * Math.max(0, 1 - t / 0.9)
+          : st === 'leave' && t < 0.8
           ? Math.sin(t * 11) * 0.3 * (1 - t / 0.8)
           : 0;
     r.head.rotation.x = 0.12 + this.headDown * 0.25 + (dying ? -0.3 * this.kneel : 0) - this.flinch * 0.1;

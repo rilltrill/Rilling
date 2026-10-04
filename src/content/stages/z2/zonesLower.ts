@@ -369,8 +369,11 @@ export function buildOR(ctx: ZoneCtx): THREE.Group {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const WALL_BREAK = { x: 60, w: 3.2, h: 2.7 };
-/** Ceiling vent in corridor C (x, z). */
-export const CORR_C_VENT: [number, number] = [63, -120];
+/**
+ * Ceiling vent in corridor C (x, z): ~5 m ahead of the corridor-C hold so the
+ * crawler lands well in front of a stopped camera (clear of the x 61.2 panel).
+ */
+export const CORR_C_VENT: [number, number] = [61.6, -119.9];
 export const GAS_CYL: [number, number][] = [
   [54.6, -119.4],
   [56.4, -122.8],
