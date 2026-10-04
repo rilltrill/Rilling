@@ -20,7 +20,6 @@ export type EnemyFactory = (world: World, spawn: EnemySpawn) => Enemy;
  *   dilo     – frilled spitter, ranged venom
  *   ptero    – flying swooper
  *   trike    – armoured charger (frill = armour, shoot the head/legs)
- *   para     – fleeing herbivore stampede (harmless obstacle-ish; ignore or shoot for nothing)
  * Bosses register their own ids from their stage modules.
  */
 export const ZOMBIE_IDS = ['walker', 'runner', 'crawler', 'brute', 'spitter', 'bloater'] as const;

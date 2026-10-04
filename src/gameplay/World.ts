@@ -52,6 +52,8 @@ export interface WorldEvents {
 
 const _v = new THREE.Vector3();
 export const MAX_ATTACKERS = 3;
+/** Max non-boss death animations rendering at once (newest kept). */
+export const MAX_CORPSES = 7;
 
 /**
  * One play-through of one stage: the scene graph, every live entity and all
@@ -240,7 +242,8 @@ export class World {
       if (d > radius) continue;
       const amount = damage * (1 - (d / radius) * 0.6);
       if (e instanceof Enemy) {
-        if (e.state === 'dying') continue;
+        // Dying or already-leaving (non-hostile) enemies can't be farmed for points.
+        if (e.state === 'dying' || (!e.hostile && !e.isBoss)) continue;
         if (e.isBoss) {
           e.hp -= Math.min(amount, e.maxHp * 0.05);
           e.flash(true);
@@ -332,6 +335,14 @@ export class World {
       }
     }
     if (removedAny) this.enemyCache = this.enemyCache.filter((e) => !e.removed);
+    // Corpse budget: death animations keep full draw cost, so when waves die fast
+    // the oldest bodies leave early instead of stacking up.
+    let dying = 0;
+    for (let i = this.enemyCache.length - 1; i >= 0; i--) {
+      const e = this.enemyCache[i];
+      if (e.isBoss || e.state !== 'dying' || e.removed) continue;
+      if (++dying > MAX_CORPSES) e.removed = true;
+    }
     // Recount attack slots from scratch each frame so removed enemies can never leak one.
     let inUse = 0;
     for (const e of this.enemyCache) if (e.holdsSlot && !e.removed && e.state !== 'dying') inUse++;

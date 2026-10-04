@@ -14,7 +14,7 @@ export const STORM = {
   skyTop: 0x0b0f18,
   skyHorizon: 0x2c3754,
   hemiSky: 0x7f93c8,
-  hemiGround: 0x2a3026,
+  hemiGround: 0x485040,
   hemi: 1.85,
   moon: 0x9fb0e0,
   moonI: 1.0,
@@ -22,10 +22,15 @@ export const STORM = {
 
 /**
  * The thunderstorm: a cloudy night dome, wind-driven rain streaks following
- * the camera (one LineSegments draw call) and lightning — brief, soft-edged
- * brightening of the sky, fog and hemisphere fill with a jagged bolt on the
- * horizon and delayed thunder. Flashes are capped at three short pulses and at
- * least ~6 s apart (no strobing).
+ * the camera (one LineSegments draw call) and lightning — a jagged bolt on the
+ * horizon, delayed thunder and a soft-edged brightening of the sky, fog and
+ * hemisphere fill.
+ *
+ * Photosensitivity (WCAG 2.3.1): a strike brightens the scene at most twice —
+ * a ~40 ms rise and a slow decay, then optionally one weaker echo (≤ 50 %)
+ * ≥ 0.22 s later that barely re-brightens the still-decaying first pulse — and
+ * any strike within 3 s of the last flash (scripted set pieces included) shows
+ * only its bolt and thunder. Automatic strikes are 7–13 s apart.
  */
 export class Storm {
   readonly group = new THREE.Group();
@@ -41,9 +46,14 @@ export class Storm {
   private rng = new Rng(4242);
   private t = 0;
   private next = 4;
-  /** Pulse schedule of the current flash: [startTime, strength]. */
-  private pulses: [number, number][] = [];
-  private boltT = 0;
+  /** Pulse schedule of the current flash: start times + strengths (≤ 2 pulses). */
+  private pulseT = [0, 0];
+  private pulseK = [0, 0];
+  private pulseN = 0;
+  /** Time of the last scene-brightening flash (−∞ = never). */
+  private lastFlash = -1e9;
+  /** Seconds the current bolt has been visible (< 0 = none). */
+  private boltAge = -1;
   /** 0..1 current flash brightness (read by the environment for its own accents). */
   flash = 0;
   private fogBase = new THREE.Color(STORM.fog);
@@ -180,12 +190,19 @@ export class Storm {
    */
   strike(world: World, close = false, dir?: THREE.Vector3) {
     const r = this.rng;
-    const n = close ? 3 : r.chance(0.5) ? 2 : 3;
-    this.pulses = [];
-    let t = this.t;
-    for (let i = 0; i < n; i++) {
-      this.pulses.push([t, (i === 0 ? 1 : r.range(0.45, 0.85)) * (close ? 1 : r.range(0.55, 0.85))]);
-      t += r.range(0.07, 0.16);
+    // At most one scene flash per 3 s; a strike inside that window is bolt + thunder only.
+    const bright = this.t - this.lastFlash >= 3;
+    if (bright) {
+      const peak = close ? 1 : r.range(0.55, 0.8);
+      this.lastFlash = this.t;
+      this.pulseN = 1;
+      this.pulseT[0] = this.t;
+      this.pulseK[0] = peak;
+      if (r.chance(close ? 0.7 : 0.45)) {
+        this.pulseN = 2;
+        this.pulseT[1] = this.t + r.range(0.22, 0.32);
+        this.pulseK[1] = peak * r.range(0.35, 0.5);
+      }
     }
     // Bolt on the horizon, in front of the camera (or toward `dir`).
     const bolt = this.bolts[r.int(0, this.bolts.length - 1)];
@@ -201,12 +218,12 @@ export class Storm {
     bolt.lookAt(cam.x, bolt.position.y, cam.z);
     bolt.scale.setScalar(close ? 1.6 : r.range(0.9, 1.4));
     bolt.visible = true;
-    this.boltT = t - this.t + 0.06;
+    this.boltAge = 0;
     const delay = close ? 0.05 : r.range(0.5, 1.6);
     const vol = close ? 1 : r.range(0.55, 0.85);
     world.later(delay, () => world.audio.play('thunder', { volume: vol, vary: 0.15, pitch: close ? 0.9 : 1 }));
     if (close) world.rig.shake(0.25);
-    this.next = this.t + r.range(7, 13);
+    this.next = Math.max(this.next, this.t + r.range(7, 13));
   }
 
   update(dt: number, world: World) {
@@ -218,23 +235,30 @@ export class Storm {
     // Automatic lightning.
     if (this.rate > 0 && this.t >= this.next) this.strike(world);
 
-    // Flash envelope: each pulse rises instantly and decays over ~0.12 s.
+    // Flash envelope: ~40 ms rise, then a soft ~0.45 s decay (no hard strobe edges).
     let f = 0;
-    for (const [s, k] of this.pulses) {
-      const a = this.t - s;
-      if (a >= 0 && a < 0.6) f = Math.max(f, k * Math.exp(-a * 9));
+    for (let i = 0; i < this.pulseN; i++) {
+      const a = this.t - this.pulseT[i];
+      if (a < 0 || a > 1.2) continue;
+      const e = a < 0.04 ? a / 0.04 : Math.exp(-(a - 0.04) * 5);
+      f = Math.max(f, this.pulseK[i] * e);
     }
     this.flash = f;
-    if (this.boltT > 0) {
-      this.boltT -= dt;
-      this.boltMat.opacity = Math.min(1, f * 2.2);
-      if (this.boltT <= 0) for (const b of this.bolts) b.visible = false;
+    // The bolt itself fades on its own clock (also shown for flash-less strikes).
+    if (this.boltAge >= 0) {
+      this.boltAge += dt;
+      const a = this.boltAge;
+      this.boltMat.opacity = a < 0.03 ? a / 0.03 : Math.min(1, 1.3 * Math.exp(-(a - 0.03) * 6));
+      if (a > 0.5) {
+        this.boltAge = -1;
+        for (const b of this.bolts) b.visible = false;
+      }
     }
-    this.hemi.intensity = STORM.hemi + f * 2.6;
-    this.hemi.color.copy(this.hemiSkyBase).lerp(this.hemiSkyHi, f);
-    this.moon.intensity = STORM.moonI + f * 1.6;
-    this.fog.color.copy(this.fogBase).lerp(this.fogHi, f * 0.55);
-    this.skyMat.color.setScalar(1 + f * 3.2);
+    this.hemi.intensity = STORM.hemi + f * 1.4;
+    this.hemi.color.copy(this.hemiSkyBase).lerp(this.hemiSkyHi, f * 0.8);
+    this.moon.intensity = STORM.moonI + f * 0.9;
+    this.fog.color.copy(this.fogBase).lerp(this.fogHi, f * 0.4);
+    this.skyMat.color.setScalar(1 + f * 1.5);
 
     // Gusts for the foliage.
     this.gustT -= dt;
@@ -270,7 +294,7 @@ export class Storm {
       p[j + 5] = z + slantZ * len;
     }
     (this.rain.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-    this.rainMat.opacity = 0.3 + f * 0.4;
+    this.rainMat.opacity = 0.3 + f * 0.25;
 
     // Splashes: respawn ahead of / around the camera on the ground, expand and vanish.
     world.camera.getWorldDirection(_v);

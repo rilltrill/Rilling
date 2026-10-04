@@ -148,7 +148,7 @@ export const Kit = {
    * Global retro switches. `grain` gives every untextured Kit.mat a subtle pixel
    * grit so even flat colours read as "textured" at arcade resolution.
    */
-  retro: { grain: false },
+  retro: { grain: true },
 
   /** Physically-based material for shiny/metal things (more expensive — use sparingly). */
   std(color: number, roughness = 0.6, metalness = 0.2, emissive?: number): THREE.MeshStandardMaterial {

@@ -7,6 +7,7 @@ import { Pickup } from '../gameplay/Pickup';
 import type { ShotTag } from '../gameplay/Shootables';
 
 const _v = new THREE.Vector3();
+const _ray = new THREE.Raycaster();
 
 /**
  * Debug "aimbot" used by ?autoplay=1 and the end-to-end tests to prove every
@@ -76,6 +77,9 @@ export class AutoPlayer {
     // 2. Boss weak points.
     if (w.boss && !w.boss.removed && w.boss.state !== 'dying') {
       const weak = this.parts(w.boss, 'weak').filter((o) => this.visible(o));
+      // Like a player, prefer weak points that are actually unobstructed.
+      const clear = weak.find((o) => this.unobstructed(o, w.boss!));
+      if (clear) return clear;
       if (weak.length) return weak[0];
     }
     // 3. Nearest enemy.
@@ -94,6 +98,24 @@ export class AutoPlayer {
       }
     }
     return null;
+  }
+
+  /** Is the first thing a ray from the camera hits this part (or another weak part of the same owner)? */
+  private unobstructed(obj: THREE.Object3D, owner: unknown): boolean {
+    const w = this.world;
+    const m = obj as THREE.Mesh;
+    if (m.isMesh && m.geometry) {
+      if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+      _v.copy(m.geometry.boundingSphere!.center).applyMatrix4(m.matrixWorld);
+    } else obj.getWorldPosition(_v);
+    _ray.ray.origin.copy(w.camera.position);
+    _ray.ray.direction.copy(_v).sub(w.camera.position).normalize();
+    const hits = _ray.intersectObjects(w.shootables.active(), false);
+    const first = hits[0];
+    if (!first) return false;
+    if (first.object === obj) return true;
+    const tag = first.object.userData.shot as ShotTag | undefined;
+    return !!tag && tag.owner === owner && tag.part === 'weak';
   }
 
   private bestPart(e: unknown): THREE.Object3D | null {

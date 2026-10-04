@@ -64,7 +64,7 @@ export class Baker {
 
   private glowMaterial(): THREE.MeshBasicMaterial {
     if (!this.glowMat) {
-      this.glowMat = Kit.track(new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, fog: false }));
+      this.glowMat = Kit.track(new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, fog: true }));
     }
     return this.glowMat;
   }

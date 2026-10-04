@@ -208,8 +208,10 @@ export function roadSign(text: string, px = 0.09): THREE.Group {
 
 export interface VisitorParts {
   root: THREE.Group;
-  /** Static parts to bake. */
+  /** Static parts to bake (the building — these stop bullets). */
   shell: THREE.Group;
+  /** Static plaza dressing to bake that must NOT stop bullets (the fountain sits in the fight zone). */
+  plaza: THREE.Group;
   doorL: THREE.Group;
   doorR: THREE.Group;
   /** Flickering lit windows (not baked). */
@@ -227,7 +229,8 @@ export interface VisitorParts {
 export function visitorCentre(): VisitorParts {
   const root = new THREE.Group();
   const shell = new THREE.Group();
-  root.add(shell);
+  const plaza = new THREE.Group();
+  root.add(shell, plaza);
   const stucco = Kit.tex('stucco', PAL.stucco, 0.6, 0.8);
   const stuccoDark = Kit.tex('stucco', PAL.stuccoDark, 0.6, 0.8);
   const thatch = Kit.tex('planks', PAL.thatch, 0.8, 0.6);
@@ -320,11 +323,11 @@ export function visitorCentre(): VisitorParts {
   const basin = Kit.tex('concrete', 0x8a867c, 1, 0.8);
   for (let i = 0; i < 10; i++) {
     const a = (i / 10) * Math.PI * 2;
-    Kit.add(shell, Kit.box(1.9, 0.6, 0.4), basin, Math.cos(a) * 2.9, 0.3, 12 + Math.sin(a) * 2.9, 0, -a + Math.PI / 2, 0);
+    Kit.add(plaza, Kit.box(1.9, 0.6, 0.4), basin, Math.cos(a) * 2.9, 0.3, 12 + Math.sin(a) * 2.9, 0, -a + Math.PI / 2, 0);
   }
-  Kit.add(shell, Kit.cyl(2.8, 2.8, 0.1, 10), Kit.mat(0x2a3a52, { emissive: 0x0c1626, emissiveIntensity: 1 }), 0, 0.45, 12);
-  Kit.add(shell, Kit.cyl(0.4, 0.6, 2.2, 8), basin, 0, 1.1, 12);
-  Kit.add(shell, Kit.sphere(0.55, 8, 6), Kit.glow(0xffb050, 0.8), 0, 2.6, 12);
+  Kit.add(plaza, Kit.cyl(2.8, 2.8, 0.1, 10), Kit.mat(0x2a3a52, { emissive: 0x0c1626, emissiveIntensity: 1 }), 0, 0.45, 12);
+  Kit.add(plaza, Kit.cyl(0.4, 0.6, 2.2, 8), basin, 0, 1.1, 12);
+  Kit.add(plaza, Kit.sphere(0.55, 8, 6), Kit.glow(0xffb050, 0.8), 0, 2.6, 12);
   // Doors (pivot at the outer edges).
   const doorMat = Kit.tex('planks', 0x5a3a24, 1.2, 0.8);
   const doorGlass = Kit.mat(0x26364e, { emissive: 0x0a1424, emissiveIntensity: 1 });
@@ -344,7 +347,7 @@ export function visitorCentre(): VisitorParts {
   const doorR = makeDoor(1);
   // Red emergency beacon above the doors.
   const beacon = Kit.add(root, Kit.box(0.8, 0.3, 0.3), Kit.glow(PAL.red, 2), 0, 6.1, -0.4);
-  return { root, shell, doorL, doorR, flicker, beacon, door: new THREE.Vector3(0, 0, 1.5) };
+  return { root, shell, plaza, doorL, doorR, flicker, beacon, door: new THREE.Vector3(0, 0, 1.5) };
 }
 
 // ─── Bridge ──────────────────────────────────────────────────────────────────

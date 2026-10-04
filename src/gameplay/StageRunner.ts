@@ -8,6 +8,7 @@ import type { Enemy } from './Enemy';
 import { Boss } from './Boss';
 import { Pickup } from './Pickup';
 import { Civilian } from './Civilian';
+import { Projectile } from './Projectile';
 
 interface WaveRun {
   def: WaveDef;
@@ -190,6 +191,7 @@ export class StageRunner {
       this.spawns = [];
       for (const wr of this.waves) wr.started = true;
       for (const e of w.enemies()) if (!e.isBoss && e.state !== 'dying' && e.hostile) e.die(null);
+      for (const e of w.entities) if (e instanceof Projectile && !e.removed) e.removed = true;
     });
     w.audio.play('boss_warning');
     w.audio.playMusic('boss');

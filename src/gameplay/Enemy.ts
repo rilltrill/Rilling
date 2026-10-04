@@ -167,7 +167,8 @@ export abstract class Enemy extends Entity {
   }
 
   setState(s: EnemyState) {
-    if (this.state === 'windup' && s !== 'windup') this.telegraph = null;
+    // Any state change ends the current warning ring (custom attacks re-arm their own).
+    if (s !== 'windup') this.telegraph = null;
     if (s !== 'windup' && s !== 'recover' && !this.keepsSlot(s)) this.releaseSlot();
     this.state = s;
     this.stateTime = 0;
@@ -197,7 +198,8 @@ export abstract class Enemy extends Entity {
     this.root.position.add(_v);
     this.moveSpeed = dt > 0 ? step / dt : 0;
     this.faceToward(target, dt);
-    return remaining - step;
+    // Land exactly on the stop distance (no float-epsilon "almost there" stalls).
+    return remaining - step < 1e-3 ? 0 : remaining - step;
   }
 
   /**
@@ -251,14 +253,14 @@ export abstract class Enemy extends Entity {
     return { x: (_w.x * 0.5 + 0.5) * width, y: (-_w.y * 0.5 + 0.5) * height };
   }
 
-  play(name: SfxName | null, volume = 1, vary = 0.1) {
+  play(name: SfxName | null, volume = 1, vary = 0.1, pitch = 1) {
     if (!name) return;
     // Quieter with distance, panned by where the enemy is on screen.
     const vol = volume * clamp(1.4 - this.distToPlayer / 30, 0.25, 1);
     this.anchor.getWorldPosition(_w);
     _w.project(this.world.camera);
     const pan = _w.z < 1 ? clamp(_w.x * 0.6, -0.6, 0.6) : 0;
-    this.world.audio.play(name, { volume: vol, vary, pan });
+    this.world.audio.play(name, { volume: vol, vary, pan, pitch });
   }
 
   /** Stereo pan for a hit at screen x. */
@@ -318,7 +320,8 @@ export abstract class Enemy extends Entity {
         {
           // Honour scripted low drop points (vents, ceilings); default to a 6 m fall.
           const g = this.groundY(pos.x, pos.z);
-          this.root.position.y = pos.y > g + 1.2 ? pos.y : g + 6;
+          const h = typeof this.spawn.opts.dropHeight === 'number' ? (this.spawn.opts.dropHeight as number) : 6;
+          this.root.position.y = pos.y > g + 1.2 ? pos.y : g + h;
         }
         this.vy = 0;
         break;
@@ -326,7 +329,8 @@ export abstract class Enemy extends Entity {
         this.playerPos(_p);
         _v.subVectors(_p, pos).setY(0);
         const d = _v.length();
-        const jump = Math.min(d * 0.55, 7);
+        const maxJump = typeof this.spawn.opts.leapMax === 'number' ? (this.spawn.opts.leapMax as number) : 7;
+        const jump = Math.min(d * 0.55, maxJump);
         this.entryTo.copy(pos).addScaledVector(_v.normalize(), jump);
         this.entryTo.y = this.groundY(this.entryTo.x, this.entryTo.z);
         break;
@@ -368,7 +372,8 @@ export abstract class Enemy extends Entity {
         const dur = 0.85;
         const k = clamp(t / dur, 0, 1);
         this.root.position.lerpVectors(this.entryFrom, this.entryTo, k);
-        this.root.position.y += Math.sin(k * Math.PI) * 2.2;
+        const arc = typeof this.spawn.opts.leapArc === 'number' ? (this.spawn.opts.leapArc as number) : 2.2;
+        this.root.position.y += Math.sin(k * Math.PI) * arc;
         this.moveSpeed = this.speed * 2;
         if (k >= 1) {
           this.world.fx.dust(this.worldPos(_w), 0.8);

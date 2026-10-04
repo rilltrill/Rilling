@@ -60,14 +60,14 @@ const beats: Beat[] = [
       {
         spawns: [
           { type: 'compy', pos: rel(D.HOLD_FENCE, 59, D.FENCE_SIDE), entry: 'leap', t: 0.4, count: 3, every: 0.45, offset: [-0.4, 0, -0.9] },
-          { type: 'compy', pos: [-5, 0, 13], t: 1.6 },
+          { type: 'compy', pos: [-2.4, 0, 12], t: 1.6 },
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
           { type: 'raptor', pos: rel(D.HOLD_FENCE, 61, D.FENCE_SIDE + 1), entry: 'leap', opts: { variant: 'tan' } },
-          { type: 'compy', pos: [-6.5, 0, 12], entry: 'leap', t: 0.8, count: 3, every: 0.4, offset: [0.5, 0, 1.2] },
+          { type: 'compy', pos: [-3, 0, 11.5], entry: 'leap', t: 0.8, count: 3, every: 0.4, offset: [0.8, 0, 0.9] },
         ],
       },
       {
@@ -127,7 +127,7 @@ const beats: Beat[] = [
     waves: [
       {
         spawns: [
-          { type: 'compy', pos: rel(D.HOLD_VISITOR, 186, -17), entry: 'leap', count: 5, every: 0.35, offset: [0.8, 0, -0.5] },
+          { type: 'compy', pos: rel(D.HOLD_VISITOR, 181, -6.5), entry: 'leap', count: 5, every: 0.35, offset: [0.8, 0, -0.5] },
           { type: 'dilo', pos: rel(D.HOLD_VISITOR, 191, -15), t: 1.2 },
         ],
       },
@@ -135,7 +135,7 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           { type: 'raptor', pos: rel(D.HOLD_VISITOR, 160, -14), entry: 'leap', opts: { variant: 'green' } },
-          { type: 'compy', pos: rel(D.HOLD_VISITOR, 176, 9), entry: 'leap', t: 0.6, count: 3, every: 0.35, offset: [0.4, 0, 0.8] },
+          { type: 'compy', pos: rel(D.HOLD_VISITOR, 179, 4.5), entry: 'leap', t: 0.6, count: 3, every: 0.35, offset: [0.4, 0, 0.8] },
         ],
       },
     ],
@@ -166,7 +166,7 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           { type: 'dilo', pos: rel(D.HOLD_VISITOR, 179, 10) },
-          { type: 'compy', pos: rel(D.HOLD_VISITOR, 190, -12), entry: 'leap', t: 0.5, count: 4, every: 0.3, offset: [0.6, 0, -0.6] },
+          { type: 'compy', pos: rel(D.HOLD_VISITOR, 184, -6), entry: 'leap', t: 0.5, count: 4, every: 0.3, offset: [0.6, 0, -0.6] },
         ],
       },
     ],
@@ -223,18 +223,19 @@ const beats: Beat[] = [
         ],
       },
       {
-        start: { remaining: 1, after: 7 },
+        start: { remaining: 1 },
         spawns: [
           { type: 'raptor', pos: [12, 0, 9], entry: 'leap', opts: { variant: 'blue' } },
           { type: 'raptor', pos: [-11, 0, 11], entry: 'leap', t: 0.7, opts: { variant: 'tan' } },
         ],
       },
       {
-        start: { remaining: 1 },
+        // Last push only once the road is clear (keeps the peak under the mobile draw-call budget).
+        start: { remaining: 0 },
         spawns: [
-          { type: 'compy', pos: rel(D.HOLD_ROADBLOCK, 257, -1.5), entry: 'leap', count: 3, every: 0.35, offset: [1.2, 0, 0] },
-          { type: 'dilo', pos: rel(D.HOLD_ROADBLOCK, 254, 1), t: 0.8 },
-          { type: 'raptor', pos: rel(D.HOLD_ROADBLOCK, 259, 5), entry: 'leap', t: 1.5, opts: { variant: 'red' } },
+          { type: 'compy', pos: rel(D.HOLD_ROADBLOCK, 257, -1.5), entry: 'leap', t: 1.2, count: 3, every: 0.35, offset: [1.2, 0, 0] },
+          { type: 'dilo', pos: rel(D.HOLD_ROADBLOCK, 254, 1), t: 1.8 },
+          { type: 'raptor', pos: rel(D.HOLD_ROADBLOCK, 259, 5), entry: 'leap', t: 3.8, opts: { variant: 'red' } },
         ],
       },
     ],
@@ -312,15 +313,16 @@ const beats: Beat[] = [
         spawns: [
           { type: 'ptero', pos: [-6, 10, 22], entry: 'fly' },
           { type: 'dilo', pos: [6.5, 0, 15], t: 0.5 },
-          { type: 'compy', pos: [-6, 0, 12], entry: 'leap', t: 1, count: 4, every: 0.3, offset: [1.2, 0, 0.6] },
+          { type: 'compy', pos: [-3, 0, 11], entry: 'leap', t: 1, count: 3, every: 0.3, offset: [1.2, 0, 0.6] },
         ],
       },
       {
-        start: { remaining: 1 },
+        // The pack's final rush once the road is clear (keeps the draw-call peak in budget).
+        start: { remaining: 0 },
         spawns: [
-          { type: 'raptor', pos: [-10, 0, 8], entry: 'leap', opts: { variant: 'blue' } },
-          { type: 'raptor', pos: [10, 0, 9], entry: 'leap', t: 0.5, opts: { variant: 'red' } },
-          { type: 'raptor', pos: [0, 0, 19], entry: 'leap', t: 1.0, opts: { variant: 'green' } },
+          { type: 'raptor', pos: [-10, 0, 8], entry: 'leap', t: 0.8, opts: { variant: 'blue' } },
+          { type: 'raptor', pos: [10, 0, 9], entry: 'leap', t: 1.3, opts: { variant: 'red' } },
+          { type: 'raptor', pos: [0, 0, 19], entry: 'leap', t: 1.9, opts: { variant: 'green' } },
         ],
       },
     ],

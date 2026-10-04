@@ -156,6 +156,8 @@ export class ParkEnv {
   private falling: FallingPiece[] = [];
   private collapseT = -1;
   bridgeDown = false;
+  /** The intact bridge baked as one piece (a few draw calls); swapped for the loose pieces when it collapses. */
+  private bridgeWhole = new THREE.Group();
   // Helipad.
   private pad!: P.HelipadParts;
   private heli!: P.HeliParts;
@@ -172,6 +174,9 @@ export class ParkEnv {
   private plazaPalms: Prefab[] = [];
   /** Optional per-frame hook for the jeep view model (set by the stage). */
   onUpdate: ((dt: number) => void) | null = null;
+  /** Night readability: the accent light trails the compy pack in the fence / plaza fights. */
+  private packPos = new THREE.Vector3();
+  private packBlend = 0;
 
   constructor(readonly world: World) {
     this.len = railLength();
@@ -342,8 +347,10 @@ export class ParkEnv {
   }
 
   /** Vegetation sink (prefab placements) for rail distance d on one side. */
-  private vegSink(d: number, side: number): Sink {
-    const key = `v${Math.floor(d / CHUNK)}${side < 0 ? 'L' : 'R'}`;
+  private vegSink(d: number, _side: number): Sink {
+    // Both roadsides share a sink per chunk: they're almost always on screen
+    // together, and it halves the vegetation draw calls.
+    const key = `v${Math.floor(d / CHUNK)}`;
     let s = this.sinks.get(key);
     if (!s) {
       s = new Sink();
@@ -758,7 +765,7 @@ export class ParkEnv {
       this.commitMerged(pools);
     }
     // Direction signs.
-    const s1 = P.roadSign('VISITOR CENTER >');
+    const s1 = P.roadSign('< VISITOR CENTER');
     this.place(s1, D.HOLD_VISITOR - 30, -(ROAD_HALF + 2.2), ParkEnv.faceRoad(-1) - 0.5);
     this.propChunk(D.HOLD_VISITOR - 30).add(s1);
     const s2 = P.roadSign('HELIPAD >');
@@ -793,8 +800,10 @@ export class ParkEnv {
     Kit.add(kiosk, Kit.box(3, 2.6, 2.4), Kit.tex('planks', 0x6a5038, 1, 0.8), 0, 1.3, 0);
     Kit.add(kiosk, Kit.cone(2.6, 1.6, 4), Kit.tex('planks', P.PAL.thatch, 1, 0.6), 0, 3.4, 0, 0, Math.PI / 4, 0);
     Kit.add(kiosk, Kit.box(1.6, 0.8, 0.06), Kit.glow(0xffc070, 0.6), 0, 1.6, 1.22);
+    plaza.add(v.plaza);
     v.root.add(plaza);
-    // Bake the shell (+ plaza); doors / flickering windows / beacon stay live.
+    // Bake the shell (+ plaza, incl. the fountain — not an occluder: compys
+    // land in it); doors / flickering windows / beacon stay live.
     const shellMeshes = this.baker.bake(v.shell);
     for (const m of shellMeshes) this.culled.push(m);
     this.baker.bake(plaza).forEach((m) => this.culled.push(m));
@@ -826,11 +835,13 @@ export class ParkEnv {
 
   private buildRoadblock() {
     const d = D.ROADBLOCK;
-    // Overturned tour car across the right lane (on its side).
-    const car = P.tourCar(false);
+    // Overturned tour car across the right lane: upside-down on its crushed
+    // roof, broadside, so its windows, livery stripes and wheels face the jeep
+    // (on its side it read as a plain crate).
+    const car = P.tourCar(true);
     this.carInner = car;
-    car.rotation.z = -Math.PI / 2;
-    car.position.set(-1.0, 1.0, 0);
+    car.rotation.z = Math.PI;
+    car.position.set(0, 1.76, 0);
     this.car.add(car);
     this.baker.bake(car);
     this.place(this.car, d, 1.7, Math.PI / 2 - 0.2);
@@ -845,6 +856,7 @@ export class ParkEnv {
     // Sawhorses with blinking amber lamps.
     for (const [lat, yaw] of [[-2.4, 0.1], [3.4, -0.15]] as const) {
       const s = P.sawhorse();
+      this.baker.bake(s.root); // the blinking lamp is flagged noMerge and stays live
       this.place(s.root, d - 2.4, lat, yaw);
       this.horses.push(s.root);
       this.blinkers.push({ obj: s.lamp, period: 0.9, duty: 0.45, phase: lat > 0 ? 0.45 : 0 });
@@ -858,7 +870,7 @@ export class ParkEnv {
     for (const [dd, lat] of [[-3.6, 3.7], [-3.2, -3.9], [-1.4, 5.0]] as const) {
       const p = this.at(D.ROADBLOCK + dd, lat, 0);
       const drum = new Destructible(world, {
-        model: fuelDrum(),
+        model: this.bakedDrum(false),
         pos: p,
         hp: 1,
         points: 200,
@@ -938,26 +950,26 @@ export class ParkEnv {
     const width = 7.6;
     const n = Math.round((D.BRIDGE_TO - D.BRIDGE_FROM) / 4);
     const segLen = (D.BRIDGE_TO - D.BRIDGE_FROM) / n;
-    for (let i = 0; i < n; i++) {
-      const g = P.bridgeSegment(segLen, width, i === 4);
+    // Loose pieces (hidden until the collapse) + the same bridge baked whole.
+    const whole = this.bridgeWhole;
+    const piece = (make: () => THREE.Group, d: number, list: THREE.Group[]) => {
+      const g = make();
       this.baker.bake(g).forEach((m) => this.culled.push(m));
       const holder = new THREE.Group();
       holder.add(g);
-      this.place(holder, D.BRIDGE_FROM + segLen * (i + 0.5), 0, 0, 0);
+      this.place(holder, d, 0, 0, 0);
       holder.position.y = 0;
+      holder.visible = false;
       this.root.add(holder);
-      this.bridgeSegs.push(holder);
-    }
-    for (let i = 1; i < n; i += 2) {
-      const t = P.trestle(GORGE_DEPTH, width);
-      this.baker.bake(t).forEach((m) => this.culled.push(m));
-      const holder = new THREE.Group();
-      holder.add(t);
-      this.place(holder, D.BRIDGE_FROM + segLen * i, 0, 0, 0);
-      holder.position.y = 0;
-      this.root.add(holder);
-      this.towers.push(holder);
-    }
+      list.push(holder);
+      const copy = make();
+      this.place(copy, d, 0, 0, 0);
+      copy.position.y = 0;
+      whole.add(copy);
+    };
+    for (let i = 0; i < n; i++) piece(() => P.bridgeSegment(segLen, width, i === 4), D.BRIDGE_FROM + segLen * (i + 0.5), this.bridgeSegs);
+    for (let i = 1; i < n; i += 2) piece(() => P.trestle(GORGE_DEPTH, width), D.BRIDGE_FROM + segLen * i, this.towers);
+    this.commit(whole);
     // Concrete abutments + river.
     const g = new THREE.Group();
     const conc = Kit.tex('concrete', 0x6c6a64, 0.8, 0.9);
@@ -998,6 +1010,9 @@ export class ParkEnv {
   collapseBridge(world: World) {
     if (this.collapseT >= 0) return;
     this.collapseT = 0;
+    this.bridgeWhole.visible = false;
+    for (const o of this.bridgeSegs) o.visible = true;
+    for (const o of this.towers) o.visible = true;
     const mid = Math.floor(this.bridgeSegs.length / 2);
     const strikeAt = this.bridgeSegs[mid].position;
     _v.subVectors(strikeAt, world.camera.position);
@@ -1005,7 +1020,7 @@ export class ParkEnv {
     world.fx.explosion(_w.copy(strikeAt).setY(1.2), 1.1);
     world.fx.sparks(_w, null, 16);
     world.audio.play('explosion', { volume: 0.8 });
-    world.hud.flash('#d8e4ff', 0.35);
+    // (No extra HUD flash: the close strike already brightens the scene once.)
     this.addFire(_w.copy(this.bridgeSegs[mid + 1].position), 0.7, null);
     this.bridgeDown = true;
     const rng = world.rng;
@@ -1092,8 +1107,16 @@ export class ParkEnv {
     if (this.padBarrels.length) return;
     for (const [dd, lat] of [[-21, 4.6], [-12, -5.2], [-8, 5.4]] as const) {
       const p = this.at(D.HELI_STOP + dd, lat, 0);
-      this.padBarrels.push(world.add(new Destructible(world, { model: fuelDrum(true), pos: p, hp: 1, points: 200, explode: { radius: 5, damage: 8 } })));
+      this.padBarrels.push(world.add(new Destructible(world, { model: this.bakedDrum(true), pos: p, hp: 1, points: 200, explode: { radius: 5, damage: 8 } })));
     }
+  }
+
+  /** A fuel drum baked to one lit + one glow mesh (2 draw calls instead of 4). */
+  private bakedDrum(red: boolean): THREE.Group {
+    const g = fuelDrum(red);
+    this.baker.bake(g);
+    for (const c of g.children) (c as THREE.Mesh).geometry?.computeBoundingSphere();
+    return g;
   }
 
   tankWorld(out = new THREE.Vector3()): THREE.Vector3 {
@@ -1326,6 +1349,29 @@ export class ParkEnv {
       }
     }
 
+    // Compys are tiny and olive at night: in the fence and plaza fights the
+    // accent light drifts over the pack (centroid of live compys near the camera).
+    const packZone = rd < D.FENCE_TO || (rd > 140 && rd < 225);
+    let packN = 0;
+    if (packZone) {
+      _w.set(0, 0, 0);
+      for (const e of w.enemies()) {
+        if (e.name !== 'compy' || e.state === 'dying' || !e.hostile) continue;
+        e.root.getWorldPosition(_s);
+        if (_s.distanceToSquared(w.camera.position) > 32 * 32) continue;
+        _w.add(_s);
+        packN++;
+      }
+      if (packN) {
+        _w.multiplyScalar(1 / packN);
+        _w.y += 2.8;
+        if (this.packBlend < 0.01) this.packPos.copy(_w);
+        else this.packPos.lerp(_w, 1 - Math.exp(-4 * dt));
+      }
+    }
+    this.packBlend += ((packN ? 1 : 0) - this.packBlend) * (1 - Math.exp(-3 * dt));
+    const pb = packZone ? this.packBlend : 0;
+
     // The accent point light goes where the action is.
     const pl = this.point;
     if (rd < D.FENCE_TO && this.sparkPts.length) {
@@ -1333,12 +1379,23 @@ export class ParkEnv {
       this.at((D.GAP_FROM + D.GAP_TO) / 2, D.FENCE_SIDE - 3, 2.2, pl.position);
       pl.distance = 30;
       pl.intensity = (Math.sin(t * 31) + Math.sin(t * 13.7) > 0.4 ? 150 : 45) * (rd < D.GAP_TO + 10 ? 1 : 0.4);
+      if (pb > 0.01) {
+        pl.position.lerp(this.packPos, pb * 0.8);
+        pl.intensity += (110 - pl.intensity) * pb * 0.75;
+      }
     } else if (rd > 140 && rd < 225) {
       pl.color.setHex(0xff3020);
       this.visitor.beacon.getWorldPosition(pl.position);
       pl.position.y += 0.8;
       pl.intensity = this.visitor.beacon.visible ? 140 : 25;
       pl.distance = 30;
+      if (pb > 0.01) {
+        // A warm pool over the pack (the red beacon would turn green compys black).
+        pl.color.lerp(_c.setHex(0xffd0a0), pb);
+        pl.position.lerp(this.packPos, pb * 0.85);
+        pl.intensity += (95 - pl.intensity) * pb * 0.85;
+        pl.distance = 26;
+      }
     } else if (nearFire && nearD < 60 * 60) {
       pl.color.setHex(0xff8a30);
       pl.position.copy(nearFire).setY(nearFire.y + 1.6);

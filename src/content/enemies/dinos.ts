@@ -519,8 +519,8 @@ abstract class Theropod extends Dino {
 
 const COMPY_PAL: Palette = {
   key: 'compy',
-  base: 0x8c9c46,
-  back: 0x56662a,
+  base: 0x9cae52,
+  back: 0x667a32,
   belly: 0xece2a2,
   stripe: 0x46542a,
   accent: 0xa0a040,
@@ -601,7 +601,7 @@ export class Compy extends Theropod {
       teeth: 0,
       sickle: false,
       quills: 0,
-      eyeSize: 0.022,
+      eyeSize: 0.034,
       compact: true,
       texDensity: 4,
     };

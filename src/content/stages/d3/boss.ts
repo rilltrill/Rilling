@@ -5,7 +5,8 @@ import type { ShotHit } from '../../../gameplay/Entity';
 import type { EntryKind } from '../../../core/types';
 import { registerEnemy, createEnemy } from '../../registry';
 import { Kit } from '../../kit/ModelKit';
-import { angleDelta, clamp, damp, lerp } from '../../../core/math';
+import { angleDelta, clamp, damp, lerp, smoothstep } from '../../../core/math';
+import { Pickup } from '../../../gameplay/Pickup';
 import { Sculpt, M, type Paint } from './sculpt';
 import { D } from './layout';
 import { park } from './env';
@@ -17,19 +18,23 @@ import { park } from './env';
  * the rig's motion back so it stands still in the world) and frames itself
  * with a camera focus object.
  *
- *   weak points : small glowing eyes (always) + the throat/mouth (only while
- *                 the jaws are open: roars, bites, lunges, stumbles)
+ *   weak points : glowing eyes (always) + the glowing throat/mouth (only while
+ *                 the jaws gape: roars, stumbles and every attack windup —
+ *                 the head is posed so the open maw faces the camera)
  *   body        : 'torso' ×0.3, legs/tail even less; brow ridges + back scutes
  *                 are armour (spark)
+ *   interrupts  : weak hits during a windup count in full, body hits at half
+ *                 the raw shot damage (bite 6, charge 6.5, lunge 7)
  *   PHASE 1 (behind)  : bursts out of the trees behind the jeep and chases it
  *                       — lunging BITE (ring, interruptible), TAIL SMASH (flings
  *                       palm trunks / rocks: shootable projectiles)
  *   PHASE 2 (ahead)   : roars, veers into the jungle, cuts ahead and ambushes
  *                       the jeep from the front — CHARGE (ring, interruptible),
  *                       bite, HEADBUTT DEBRIS; calls raptors + pteranodons
- *   PHASE 3 (helipad) : knocked down, the jeep races past to the helipad; it
- *                       chases onto the pad and makes FINAL LUNGES past the fuel
- *                       tank — shoot the tank as it passes for a giant blast.
+ *   PHASE 3 (helipad) : knocked down (a first-aid kit drops), the jeep races
+ *                       past to the helipad; it chases onto the pad, squares up
+ *                       beside the fuel tank and makes FINAL LUNGES — shoot the
+ *                       tank while it's close for a giant blast.
  *   death       : stumbles, crashes onto its side and slides along the road.
  */
 
@@ -60,6 +65,9 @@ type TState =
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const _u = new THREE.Vector3();
+
+/** Phase-3 standoff distance behind the parked jeep (rig z). */
+const P3_Z = 15.5;
 
 const PAL = {
   base: 0x76644c,
@@ -115,6 +123,8 @@ export class Tyrant extends Boss {
   private head!: THREE.Group;
   private jaw!: THREE.Group;
   private mouth!: THREE.Group;
+  /** Pivot at the jaw hinge turning half the jaw angle: keeps the throat glow centred in the open mouth. */
+  private maw!: THREE.Group;
   private tongue!: THREE.Mesh;
   private torsoMesh!: THREE.Mesh;
   private eyes: THREE.Mesh[] = [];
@@ -125,12 +135,19 @@ export class Tyrant extends Boss {
   private legs: Leg[] = [];
   private arms: THREE.Group[] = [];
   private focus = new THREE.Object3D();
+  private throat!: THREE.Mesh;
   private mat!: THREE.Material;
-  private flashMat!: THREE.Material;
+  /** Warm, low-contrast hit tint for body parts (never a white strobe). */
+  private tintMat!: THREE.Material;
   private eyeMat!: THREE.Material;
   private eyeDead!: THREE.Material;
   private haloMat!: THREE.Material;
   private flashes: FlashEntry[] = [];
+  /** Age of the last body tint (rate-limited to ~3/s under autofire). */
+  private lastTint = -1;
+  /** Weak-point hit pulses (scale bump instead of a material swap, so the glow stays visible). */
+  private eyePulse = 0;
+  private mouthPulse = 0;
 
   // Pose (smoothed) + targets.
   private gait = 0;
@@ -183,6 +200,9 @@ export class Tyrant extends Boss {
   private sfxT = 3;
   private debrisT = 0;
   private veerTarget: number = D.HELI_APPROACH;
+  /** Seconds the phase-1 chase has been parked at the end of its road. */
+  private parkedT = 0;
+  private healthDropped = false;
 
   // Death.
   private deathVel = new THREE.Vector3();
@@ -192,7 +212,7 @@ export class Tyrant extends Boss {
 
   protected override configure(): void {
     this.name = 'tyrant';
-    this.maxHp = 290;
+    this.maxHp = 350;
     this.speed = 8;
     this.points = 10000;
     this.sfxHit = 'hit_flesh';
@@ -206,10 +226,10 @@ export class Tyrant extends Boss {
 
   protected override build(): void {
     this.mat = Kit.mat(0xffffff, { vertexColors: true, tex: 'scales', texScale: 0.45, texStrength: 0.45, emissive: 0x1a1a20, emissiveIntensity: 1 });
-    this.flashMat = Kit.glow(0xffffff, 1.1);
+    this.tintMat = Kit.mat(0xffffff, { vertexColors: true, tex: 'scales', texScale: 0.45, texStrength: 0.45, emissive: 0x5a3020, emissiveIntensity: 1 });
     this.eyeMat = Kit.glow(0xffb020, 2.4);
     this.eyeDead = Kit.mat(0x2a2014);
-    this.haloMat = Kit.glow(0xff8a20, 1.5, true, 0.38);
+    this.haloMat = Kit.glow(0xff8a20, 1.5, true, 0.3);
     const mat = this.mat;
     const add = (parent: THREE.Object3D, s: Sculpt, part: 'torso' | 'limb' | 'tail' | 'armor' | 'weak') => {
       const m = Kit.add(parent, s.build(), mat);
@@ -284,18 +304,6 @@ export class Tyrant extends Boss {
       }
       this.headMeshes.push(add(this.head, s, 'armor'));
     }
-    // Eyes (weak) — small glowing slits under the brow + soft halos.
-    for (const sx of [-1, 1]) {
-      const eye = Kit.add(this.head, Kit.sphere(0.11, 8, 6), this.eyeMat, sx * 0.48, 0.3, 0.74, 0, 0, 0, 0.8, 1, 1.3);
-      eye.userData.baseMat = this.eyeMat;
-      this.hitbox(eye, 'weak');
-      this.eyes.push(eye);
-      const halo = Kit.add(this.head, Kit.sphere(0.22, 8, 6), this.haloMat, sx * 0.5, 0.3, 0.76);
-      halo.renderOrder = 2;
-      halo.userData.baseMat = this.haloMat;
-      this.hitbox(halo, 'weak');
-      this.halos.push(halo);
-    }
     // Jaw.
     this.jaw = Kit.pivot(this.head, 0, -0.3, 0.05, 'jaw');
     {
@@ -308,13 +316,16 @@ export class Tyrant extends Boss {
       }
       this.headMeshes.push(add(this.jaw, s, 'torso'));
     }
-    // Mouth interior (weak): gullet + glowing throat (head), tongue (jaw). Shown only when open.
+    // Mouth interior (weak): a dark gullet backdrop with a big glowing throat in
+    // front of it (head), tongue (jaw). Shown only while the jaws are open.
     this.mouth = new THREE.Group();
     this.mouth.position.set(0, -0.36, 0.2);
     this.head.add(this.mouth);
-    const gullet = Kit.add(this.mouth, Kit.box(0.7, 0.42, 1.25), Kit.mat(0x4a0c0c), 0, -0.05, 0.75);
-    const throat = Kit.add(this.mouth, Kit.sphere(0.3, 8, 6), Kit.glow(0xff3a14, 1.9), 0, -0.02, 0.15, 0, 0, 0, 1, 0.8, 0.7);
-    for (const m of [gullet, throat]) {
+    const gullet = Kit.add(this.mouth, Kit.box(0.64, 0.42, 0.45), Kit.mat(0x4a0c0c), 0, -0.04, 0.1);
+    this.maw = Kit.pivot(this.head, 0, -0.3, 0.05, 'maw');
+    const throat = Kit.add(this.maw, Kit.sphere(0.42, 10, 8), Kit.glow(0xff3a14, 1.9), 0, -0.05, 0.78, 0, 0, 0, 0.88, 0.62, 0.6);
+    this.throat = throat;
+    for (const m of [throat, gullet]) {
       m.userData.baseMat = m.material;
       this.hitbox(m, 'weak');
     }
@@ -322,8 +333,24 @@ export class Tyrant extends Boss {
     this.tongue.userData.baseMat = this.tongue.material;
     this.hitbox(this.tongue, 'weak');
     this.mouth.visible = false;
+    this.maw.visible = false;
     this.tongue.visible = false;
 
+    // Eyes (weak) — small glowing slits under the brow + soft halos that stand
+    // proud of the head's silhouette so they stay targetable from the front.
+    // (Registered after the mouth so aim helpers prefer the gaping throat.)
+    for (const sx of [-1, 1]) {
+      const eye = Kit.add(this.head, Kit.sphere(0.12, 8, 6), this.eyeMat, sx * 0.53, 0.31, 0.8, 0, sx * 0.35, 0, 0.8, 1, 1.3);
+      eye.userData.baseMat = this.eyeMat;
+      this.hitbox(eye, 'weak');
+      this.eyes.push(eye);
+      const halo = Kit.add(this.head, Kit.sphere(0.25, 8, 6), this.haloMat, sx * 0.56, 0.29, 0.88, 0, sx * 0.3, 0, 1.05, 0.72, 1.35);
+      halo.renderOrder = 2;
+      halo.userData.baseMat = this.haloMat;
+      halo.userData.noFlash = true;
+      this.hitbox(halo, 'weak');
+      this.halos.push(halo);
+    }
     // Tiny arms.
     for (const sx of [-1, 1]) {
       const sh = Kit.pivot(this.chest, sx * 0.62, -0.62, 0.15);
@@ -426,19 +453,24 @@ export class Tyrant extends Boss {
     }
   }
 
-  override flash(critical = false): void {
-    if (!critical) return;
-    for (const m of this.headMeshes) this.flashMesh(m, 0.06);
-  }
+  /**
+   * No whole-model flash: under turret autofire (14 shots/s) it strobed the head
+   * white and hid the glowing eyes/throat the player is aiming at. Hit feedback is
+   * a rate-limited warm tint on the struck body part (onDamaged) and a pulse of
+   * the struck weak point.
+   */
+  override flash(_critical = false): void {}
 
+  /** Briefly tint a body mesh warm. Glow (weak-point) materials are never swapped. */
   private flashMesh(mesh: THREE.Mesh, t: number) {
     if (this.state === 'dying') return;
+    if (mesh.userData.baseMat !== this.mat) return;
     const e = this.flashes.find((f) => f.mesh === mesh);
     if (e) {
       e.t = Math.max(e.t, t);
       return;
     }
-    mesh.material = this.flashMat;
+    mesh.material = this.tintMat;
     this.flashes.push({ mesh, t });
   }
 
@@ -461,24 +493,34 @@ export class Tyrant extends Boss {
   protected override onDamaged(hit: ShotHit, amount: number): void {
     super.onDamaged(hit, amount);
     const obj = hit.object as THREE.Mesh;
-    if (obj.isMesh && obj.userData.baseMat) this.flashMesh(obj, hit.part === 'weak' ? 0.07 : 0.035);
+    const weak = hit.part === 'weak';
+    if (weak) {
+      // Pulse the struck weak point (keeps its glow — the target never vanishes).
+      if (obj === this.throat || obj.parent === this.mouth || obj === this.tongue) this.mouthPulse = 1;
+      else this.eyePulse = 1;
+    } else if (obj.isMesh && this.age - this.lastTint >= 0.34) {
+      this.lastTint = this.age;
+      this.flashMesh(obj, 0.05);
+    }
     // Which side was hit (model space) → flinch away from it.
     const e = this.model.matrixWorld.elements;
     const d = hit.dir.x * e[0] + hit.dir.y * e[1] + hit.dir.z * e[2];
     this.flinchSide = d >= 0 ? 1 : -1;
-    this.flinch = Math.min(1.2, this.flinch + (hit.part === 'weak' ? 0.22 : 0.06) + amount * 0.05);
-    if (hit.part === 'weak') this.world.fx.sparks(hit.point, hit.normal, 3);
+    this.flinch = Math.min(1.2, this.flinch + (weak ? 0.22 : 0.06) + amount * 0.05);
+    if (weak) this.world.fx.sparks(hit.point, hit.normal, 3);
     if (this.winding) {
-      this.interruptDmg += amount;
+      // Weak-point hits count in full; body hits still add pressure at half the
+      // raw shot damage, so hosing the head while it lunges is never wasted.
+      this.interruptDmg += weak ? amount : hit.damage * 0.5;
       if (this.interruptDmg >= this.interruptThreshold()) this.interrupt();
     }
   }
 
   private interruptThreshold(): number {
     const st = this.state as TState;
-    if (st === 'lungeWind') return 11;
-    if (st === 'chargeWind') return 10;
-    return this.phase === 0 ? 8 : 9;
+    if (st === 'lungeWind') return 7;
+    if (st === 'chargeWind') return 6.5;
+    return 6;
   }
 
   private interrupt() {
@@ -510,8 +552,8 @@ export class Tyrant extends Boss {
     const dmg = this.maxHp * 0.2;
     this.hp -= dmg;
     this.clearFlashes();
-    for (const m of this.headMeshes) this.flashMesh(m, 0.25);
-    this.flashMesh(this.torsoMesh, 0.25);
+    for (const m of this.headMeshes) this.flashMesh(m, 0.2);
+    this.flashMesh(this.torsoMesh, 0.2);
     const sp = this.screenPos(this.chest);
     if (sp) {
       this.world.hud.popup('FUEL BLAST!', sp.x, sp.y - 60, 'headshot');
@@ -578,10 +620,32 @@ export class Tyrant extends Boss {
     if (type === 'raptor') this.world.fx.debris(e.worldPos(_v), 0x3d6a2c);
   }
 
-  private minionsOnce(key: string, fn: () => void) {
-    if (this.minionFlags.has(key)) return;
+  /** True the first time `key` is claimed (minion waves fire once; no per-frame closures). */
+  private once(key: string): boolean {
+    if (this.minionFlags.has(key)) return false;
     this.minionFlags.add(key);
-    fn();
+    return true;
+  }
+
+  /**
+   * Jaws-wide threat pose blended in by `k` so the open mouth and glowing
+   * throat face the jeep. Far away (roars) the head rears up; `low` (close-range
+   * bites, charges, lunges) leans the body in and drops the neck so the head
+   * stays in frame, tilting the skull back so the throat still faces the
+   * camera ~2 m below it.
+   */
+  private gape(k: number, low = false) {
+    if (k <= 0) return;
+    this.jawT = lerp(this.jawT, 1.1, k);
+    if (low) {
+      this.crouchT = Math.max(this.crouchT, 0.45 * k);
+      this.pitchT = lerp(this.pitchT, 0.14, k);
+      this.neckT = lerp(this.neckT, 0.06, k);
+      this.headT = lerp(this.headT, -0.42, k);
+    } else {
+      this.neckT = lerp(this.neckT, -0.24, k);
+      this.headT = lerp(this.headT, -0.3, k);
+    }
   }
 
   /** Camera framing target in rig space. */
@@ -592,10 +656,11 @@ export class Tyrant extends Boss {
     } else {
       this.head.getWorldPosition(_w);
       this.chest.getWorldPosition(_u);
-      out.lerpVectors(_u, _w, 0.6);
+      // Attack windups frame the head (eyes, gaping throat, telegraph ring).
+      out.lerpVectors(_u, _w, this.winding ? 0.85 : 0.6);
       this.world.rig.space.updateMatrixWorld();
       this.world.rig.space.worldToLocal(out);
-      out.y = clamp(out.y * 0.75 + 0.3, 1.8, 4.6);
+      out.y = clamp(out.y * 0.8 + 0.3, 1.8, 5);
     }
     return out;
   }
@@ -655,7 +720,7 @@ export class Tyrant extends Boss {
   }
 
   private afterAttack() {
-    this.cooldown = [2.4, 2.0, 1.5][this.phase] ?? 1.5;
+    this.cooldown = [2.4, 2.0, 2.2][this.phase] ?? 2.2;
     this.go(this.idleState());
   }
 
@@ -770,11 +835,9 @@ export class Tyrant extends Boss {
           this.neckT = -0.5 * k;
           this.headT = 0.2 - 0.45 * k;
         } else {
-          this.jawT = 1.1;
-          this.pitchT = 0.06;
+          this.pitchT = 0.04;
           this.crouchT = 0.2;
-          this.neckT = 0.08;
-          this.headT = 0.3;
+          this.gape(1);
           this.shakeHead = t < 2.0 ? 1 : 0.3;
         }
         this.arm = 1;
@@ -788,19 +851,16 @@ export class Tyrant extends Boss {
           w.fx.dust(this.worldPos(_v), 1.3, 0x4a4436);
         }
         if (t >= dur) {
-          if (this.roarFor === 2) {
-            this.minionsOnce('p2', () => {
-              this.spawnMinion('ptero', -7, 10, 14, 'fly');
-              this.spawnMinion('ptero', 7, 11, 18, 'fly');
-            });
+          if (this.roarFor === 2 && this.once('p2')) {
+            this.spawnMinion('ptero', -7, 10, 14, 'fly');
+            this.spawnMinion('ptero', 7, 11, 18, 'fly');
           }
-          if (this.afterRoar === 'stalk') {
-            this.minionsOnce('p1', () => {
-              this.spawnMinion('raptor', -9, 0, -10, 'leap', { variant: 'red' });
-              this.spawnMinion('raptor', 9, 0, -12, 'leap', { variant: 'tan' });
-            });
+          if (this.afterRoar === 'stalk' && this.once('p1')) {
+            this.spawnMinion('raptor', -9, 0, -10, 'leap', { variant: 'red' });
+            this.spawnMinion('raptor', 9, 0, -12, 'leap', { variant: 'tan' });
           }
-          this.cooldown = 1.4;
+          // First attack after the entrance roar comes later (the gun is usually hot by now).
+          this.cooldown = this.afterRoar === 'chase' && this.lastAttack === '' ? 2.6 : 1.4;
           this.go(this.afterRoar);
         }
         break;
@@ -813,13 +873,19 @@ export class Tyrant extends Boss {
         this.neckT = -0.12 + Math.sin(this.age * 1.4) * 0.05;
         this.headYawT = Math.sin(this.age * 0.8) * 0.15;
         this.driveRig(D.P0_LIMIT, 4.3);
+        // Never park mid-chase: once the jeep reaches the end of the phase-1
+        // road it cuts ahead regardless of its health.
+        this.parkedT = rig.d >= D.P0_LIMIT - 0.6 ? this.parkedT + dt : 0;
+        if (this.parkedT > 1.2 && this.phase === 0) {
+          this.phase = 1;
+          this.pendingPhase = Math.max(this.pendingPhase, 1);
+          break;
+        }
         this.cooldown -= dt;
         if (this.cooldown <= 0) this.go(this.chooseAttack());
-        if (this.hp < this.maxHp * 0.86) {
-          this.minionsOnce('p0', () => {
-            this.spawnMinion('raptor', -7.5, 0, 8, 'leap', { variant: 'green' });
-            this.spawnMinion('raptor', 8, 0, 11, 'leap', { variant: 'tan' });
-          });
+        if (this.hp < this.maxHp * 0.86 && this.once('p0')) {
+          this.spawnMinion('raptor', -7.5, 0, 8, 'leap', { variant: 'green' });
+          this.spawnMinion('raptor', 8, 0, 11, 'leap', { variant: 'tan' });
         }
         break;
       }
@@ -833,10 +899,13 @@ export class Tyrant extends Boss {
         }
         this.faceYaw(this.yawToJeep(), dt, 6);
         const k = clamp(t / dur, 0, 1);
+        // Leans in over the jeep with the jaws gaping — the glowing throat faces
+        // the camera for most of the windup.
         this.crouchT = 0.25 * k;
-        this.neckT = -0.1 + 0.35 * k;
-        this.headT = 0.25 - 0.45 * k;
-        this.jawT = 0.2 + 0.85 * k;
+        this.neckT = -0.1;
+        this.headT = 0.2;
+        this.jawT = 0.35;
+        this.gape(smoothstep(0.08, 0.4, k), true);
         this.headYawT = Math.sin(t * 13) * 0.05 * k;
         if (first) w.audio.play('dino_roar', { volume: 0.85, pitch: 0.85 });
         const done = this.telegraphAttack(
@@ -874,7 +943,7 @@ export class Tyrant extends Boss {
           w.audio.play('dino_roar', { volume: 0.7, pitch: 1.1 });
         }
         const side = this.flingSide;
-        const base = this.phase === 0 ? 11 : this.phase === 1 ? -13 : 20;
+        const base = this.phase === 0 ? 11 : this.phase === 1 ? -13 : P3_Z + 0.5;
         if (this.phase !== 0) this.anchored = true;
         this.steer(side * 4.6, base, 5, dt);
         const smashAt = 0.6;
@@ -888,7 +957,7 @@ export class Tyrant extends Boss {
           this.tailWhipT = side * 1.1;
           this.headYawT = -side * 0.3;
           this.neckT = -0.05;
-          this.jawT = 0.5;
+          this.jawT = 0.38;
         }
         const throws = this.phase === 0 ? 2 : this.phase === 1 ? 2 : 3;
         for (let i = this.flingThrown; i < throws; i++) {
@@ -979,11 +1048,9 @@ export class Tyrant extends Boss {
         this.headYawT = Math.sin(this.age * 0.7) * 0.2;
         this.cooldown -= dt;
         if (this.cooldown <= 0) this.go(this.chooseAttack());
-        if (this.hp < this.maxHp * 0.5) {
-          this.minionsOnce('p1b', () => {
-            this.spawnMinion('ptero', -6, 10, -20, 'fly');
-            this.spawnMinion('ptero', 6, 11, -24, 'fly');
-          });
+        if (this.hp < this.maxHp * 0.5 && this.once('p1b')) {
+          this.spawnMinion('ptero', -6, 10, -20, 'fly');
+          this.spawnMinion('ptero', 6, 11, -24, 'fly');
         }
         break;
       }
@@ -998,25 +1065,26 @@ export class Tyrant extends Boss {
           w.audio.play('dino_roar', { volume: 0.9, pitch: 0.62 });
         }
         if (t < chargeAt) {
+          // Lowers its head and paws the road… then rears up bellowing, jaws wide.
           this.faceYaw(this.yawToJeep(), dt, 6);
           this.crouchT = 0.4;
-          this.neckT = 0.35;
-          this.headT = 0.35;
+          this.neckT = 0.3;
+          this.headT = 0.3;
+          this.jawT = 0.3;
           this.tailLiftT = 0.25;
+          this.gape(smoothstep(0.25, 0.6, t));
           if (Math.floor((t - dt) * 2.8) !== Math.floor(t * 2.8)) {
             this.stompFx(0.7, 0.1);
             this.legs[1].foot.getWorldPosition(_v);
             w.fx.dust(_v, 0.9, 0x4a4436);
           }
         } else {
-          const k = clamp((t - chargeAt) / 0.8, 0, 1);
+          // Thunders in with the gaping mouth leading.
           this.steer(0.2, -5.2, 20, dt);
           this.faceYaw(this.yawToJeep(), dt, 8);
           this.crouchT = 0.15;
-          this.neckT = 0.42;
-          this.headT = 0.4;
-          this.jawT = 0.4 + 0.5 * k;
           this.tailLiftT = 0.4;
+          this.gape(1, true);
         }
         const done = this.telegraphAttack(
           dur,
@@ -1044,12 +1112,12 @@ export class Tyrant extends Boss {
       }
       case 'stumble': {
         // Interrupted: reels back, jaws hanging open (free shots at the throat).
-        const back = this.phase === 0 ? 14.5 : this.phase === 1 ? -15.5 : 21;
+        const back = this.phase === 0 ? 14.5 : this.phase === 1 ? -15.5 : P3_Z;
         if (this.phase !== 0) this.anchored = true;
         this.steer(p.x * 0.6, back, 6, dt);
-        this.jawT = 0.8;
-        this.neckT = -0.35 + Math.sin(t * 9) * 0.08;
         this.crouchT = 0.3;
+        this.gape(0.8);
+        this.neckT += Math.sin(t * 9) * 0.08;
         this.shakeHead = 1;
         this.faceYaw(this.yawToJeep() + Math.sin(t * 4) * 0.3, dt, 4);
         if (first) w.fx.dust(this.worldPos(_v), 1.4, 0x4a4436);
@@ -1085,8 +1153,15 @@ export class Tyrant extends Boss {
       case 'down': {
         // Lying on its side as the jeep races past; legs kicking.
         this.anchored = true;
+        if (!this.healthDropped && p.z > 3) {
+          // Breather: a first-aid kit floats between the jeep and the downed rex
+          // (in view as the camera swings back to it).
+          this.healthDropped = true;
+          _v.set(clamp(p.x * 0.4, -2.5, 2.5), 2.6, 5.5);
+          w.add(new Pickup(w, 'health', _v.clone(), 'rig', 9));
+        }
         this.rollT = 1.35;
-        this.jawT = 0.4 + Math.sin(t * 3) * 0.2;
+        this.jawT = 0.28 + Math.sin(t * 3) * 0.12;
         this.tailWhipT = Math.sin(t * 5) * 0.5;
         this.driveRig(D.HELI_STOP, 13);
         if ((p.z > 14 && t > 1.2) || t > 6) this.go('getup');
@@ -1107,10 +1182,10 @@ export class Tyrant extends Boss {
         const speedIntoRig = Math.max(0, rig.speed);
         // Running at (rig speed + relative closing speed): undo part of the anchoring by steering.
         p.z += speedIntoRig * dt;
-        this.steer(-2.4, 21, relMax + speedIntoRig, dt);
+        this.steer(-2.4, P3_Z + 1, relMax + speedIntoRig, dt);
         this.faceYaw(this.yawToJeep(), dt, 4);
         this.driveRig(D.HELI_STOP, 13);
-        if (rig.arrived && Math.abs(p.z - 21) < 2.5) {
+        if (rig.arrived && Math.abs(p.z - (P3_Z + 1)) < 2.5) {
           park()?.armFinale(w);
           this.afterRoar = 'lungeWind';
           this.cooldown = 0.5;
@@ -1129,7 +1204,7 @@ export class Tyrant extends Boss {
           w.audio.play('rex_roar', { volume: 0.9, pitch: 1.15 });
           if (!this.finalePrompted && park()?.tank && !park()!.tank!.removed) {
             this.finalePrompted = true;
-            w.hud.prompt('SHOOT THE FUEL TANK AS IT PASSES!');
+            w.hud.prompt('SHOOT THE FUEL TANK NEXT TO IT!');
           }
         }
         const k = clamp(t / dur, 0, 1);
@@ -1138,9 +1213,10 @@ export class Tyrant extends Boss {
         p.z = lerp(this.from.z, this.to.z, e);
         this.faceYaw(this.yawToJeep(), dt, 6);
         this.crouchT = 0.2;
-        this.neckT = 0.15 + 0.2 * k;
-        this.headT = 0.1 - 0.3 * k;
-        this.jawT = k > 0.35 ? 1 : 0.3;
+        this.neckT = 0.15;
+        this.headT = 0.1;
+        this.jawT = 0.3;
+        this.gape(smoothstep(0.06, 0.32, k), true);
         this.tailLiftT = 0.3;
         const done = this.telegraphAttack(
           dur,
@@ -1169,16 +1245,14 @@ export class Tyrant extends Boss {
       case 'retreat': {
         // Backs off up the road to line up the next lunge.
         this.anchored = true;
-        this.steer(-2.6 + Math.sin(this.age * 0.6) * 1.2, 21, 4.5, dt);
+        this.steer(-2.4 + Math.sin(this.age * 0.6) * 1.2, P3_Z, 4.5, dt);
         this.faceYaw(this.yawToJeep(), dt, 4);
         this.neckT = -0.1 + Math.sin(this.age * 1.3) * 0.06;
         this.cooldown -= dt;
-        if (this.cooldown <= 0 && p.z > 17) this.go(this.chooseAttack());
-        if (this.hp < this.maxHp * 0.18) {
-          this.minionsOnce('p2b', () => {
-            this.spawnMinion('raptor', -9, 0, 13, 'leap', { variant: 'blue' });
-            this.spawnMinion('raptor', 9, 0, 15, 'leap', { variant: 'red' });
-          });
+        if (this.cooldown <= 0 && p.z > P3_Z - 2) this.go(this.chooseAttack());
+        if (this.hp < this.maxHp * 0.18 && this.once('p2b')) {
+          this.spawnMinion('raptor', -9, 0, 13, 'leap', { variant: 'blue' });
+          this.spawnMinion('raptor', 9, 0, 15, 'leap', { variant: 'red' });
         }
         break;
       }
@@ -1308,9 +1382,21 @@ export class Tyrant extends Boss {
     this.head.rotation.y = this.headYaw * 0.5 + shake + this.flinchSide * fl * 0.15;
     this.head.rotation.z = shake * 0.6;
     this.jaw.rotation.x = this.jawOpen * 0.82;
-    const open = this.jawOpen > 0.28 && this.state !== 'dying';
+    // The mouth (weak) only exists while the jaws are really gaping.
+    const open = this.jawOpen > 0.42 && this.state !== 'dying';
     this.mouth.visible = open;
+    this.maw.visible = open;
     this.tongue.visible = open;
+    this.maw.rotation.x = this.jaw.rotation.x * 0.5;
+    // Weak-point hit pulses (glow stays on; the struck spot swells briefly).
+    this.eyePulse = Math.max(0, this.eyePulse - dt * 9);
+    this.mouthPulse = Math.max(0, this.mouthPulse - dt * 9);
+    const hs = 1 + this.eyePulse * 0.3;
+    for (const h of this.halos) h.scale.set(1.05 * hs, 0.72 * hs, 1.35 * hs);
+    // The throat glow fills the gap between the jaws as they open.
+    const ts = 1 + this.mouthPulse * 0.22;
+    const gap = clamp((this.jawOpen - 0.42) / 0.6, 0, 1);
+    this.throat.scale.set(0.88 * ts, (0.32 + 0.3 * gap) * ts, 0.6 * ts);
 
     // Arms flail.
     for (let i = 0; i < this.arms.length; i++) {
@@ -1357,6 +1443,7 @@ export class Tyrant extends Boss {
     this.deathVel.set(fwdX * sp, 0, fwdZ * sp);
     this.deathSide = this.flinchSide;
     this.mouth.visible = false;
+    this.maw.visible = false;
     this.tongue.visible = false;
     this.rollT = this.roll;
   }
@@ -1377,6 +1464,7 @@ export class Tyrant extends Boss {
       if (toward > 0) this.deathVel.addScaledVector(_u, toward);
       p.addScaledVector(_u, (7.5 - dist) * Math.min(1, dt * 4));
     }
+    w.rig.swerve = damp(w.rig.swerve, 0, 3, dt);
     const friction = t < 1.0 ? 0.8 : 2.4;
     this.deathVel.multiplyScalar(Math.exp(-friction * dt));
     p.y = w.groundAt(p.x, p.z);

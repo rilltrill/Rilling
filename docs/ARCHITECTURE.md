@@ -121,6 +121,8 @@ stages must exist (`content/registry.ts` lists the canonical roster).
 ## Bosses (see `gameplay/Boss.ts`)
 
 Extend `Boss`: set `title` (health-bar name), `maxHp`, `phases`; register
+small surface weak points (eyes) before large/inner ones (the AutoPlayer prefers
+unobstructed weak parts in registration order); register
 'weak' meshes (glowing) and 'armor' meshes; implement the fight in
 `customUpdate` with custom states. Helpers: `telegraphAttack(duration, onLand)`,
 `throwProjectile(fromWorldPos, opts)`, `phaseFor()`, `onPhase()`. Bosses must
