@@ -179,47 +179,69 @@ id from the stage folder (e.g. `registerEnemy('butcher', …)`).
 
 ## Art style: SPRITES (pixel-art characters, `gameplay/SpriteArt.ts`)
 
-Settings → ART: **3D | SPRITES** (`Settings.art`, URL `&art=sprites|3d`; live, also
-mid-stage from the pause menu's SETTINGS). In SPRITES every character — enemies,
-bosses, civilians — plus projectiles, pickups and severed limbs is drawn as a 2D
-pixel-art sprite, the way 90s arcade shooters used pre-rendered sprites.
+Settings → ART: **3D | SPRITES** (`Settings.art`, default **3D**; URL `&art=sprites|3d`
+overrides it until the player changes ART). Live, also mid-stage: the pause screen
+has a one-tap ART chip under RESUME. In SPRITES every character — enemies, bosses,
+civilians — plus projectiles, pickups and severed limbs is drawn as a 2D pixel-art
+sprite, the way 90s arcade shooters used pre-rendered sprites; gibs become pixel blobs.
 
 - **Live impostors.** `SpriteArt.beginFrame()` (called by `Game.renderWorld`
   around `engine.render`) re-renders each visible sprite source about 12×/s of
   game time (`SPRITE_FPS`, round-robin, ≤ 6 bakes and ≤ ~90 bake draw calls per
-  frame; never-drawn ones first) — so animation is choppy like sprite frames
-  while positions stay smooth.
+  frame; characters with no image yet first, with a bigger budget) — so animation
+  is choppy like sprite frames while positions stay smooth. A sprite also re-bakes
+  when the view direction to it turned > 4° or the retro grid changed.
 - **Bake.** The bake camera is the main camera with its projection *cropped* to the
-  source's on-screen bounds (no perspective mismatch), rendered at ~1.5 retro
-  pixels per texel (`pxPerTexel`) but never finer than 2.5 cm of model per texel
-  (`texelCm`, 5 cm for bosses) — like a fixed-resolution sprite sheet, close-ups
-  scale up into chunkier pixels (size caps 192 / 448 texels), 2× supersampled, into a 512² HDR scratch target with a depth
-  texture. Lights are mirrored into a tiny bake scene (same light set → same
-  shader programs; `precompile` warms the offscreen variants) with the stage fog.
+  source's on-screen bounds (no perspective mismatch). Texels are a WHOLE number of
+  retro pixels (`autoTexelScale`: 1, or 2 once a character is > 220 px tall; bosses 1;
+  more only to stay under the 256 / 512-texel caps; never finer than 1.2 cm of model),
+  aligned to the retro pixel grid, 2× supersampled into a 512² HDR scratch target with
+  a depth texture. Lights are mirrored into a tiny bake scene (+ a cool back light,
+  intensity 0 in daylight, so dark-stage silhouettes separate from the night);
+  `precompile` warms those variants. `RETRO_DETAIL` (ModelKit) boosts the
+  characters' pixel textures ×1.35 during bakes only, so surface detail survives.
+- **Live 3D parts.** Alpha-blended meshes (glow halos, IV tubes, spray), lines and
+  very thin geometry (`keepLive`), or anything with `userData.spriteKeep3D = true`,
+  are not baked: they stay real meshes drawn over the sprite (the baked parts are
+  moved to an unused layer for the main draw instead of hiding the root).
 - **Pixel-art pass** (`BAKE_FRAG`) into the sprite's own small RGBA8 target (pooled
-  by power-of-two size): crisp alpha, a 1-px dark outline (inside the silhouette
-  for big sprites, around it for small ones), inner contour lines where a part
-  overlaps another, a top-lit silhouette rim, log-luminance posterisation and a
-  little extra saturation. Each texel's view depth is packed into alpha.
-- **Display.** A screen-aligned quad per sprite follows the entity's root every
-  frame and writes **per-texel depth** (`gl_FragDepth`), so scenery occludes
-  sprites (and sprites each other) as the 3D models would. Hit flashes tint the
-  whole sprite white/red (`Enemy.flashKind`). Characters get a chunky blob shadow
-  (one instanced draw for all).
+  by power-of-two size), stored in *display* space (after the retro pass's tone
+  curve; the billboard inverts it): per texel the subsample nearest the median
+  brightness (texture survives; no mean-to-mush), unbiased coverage, local contrast,
+  a selective outline drawn on the silhouette's own edge texels (a dark, richer shade
+  of the local colour; lighter on top edges and on parts ≤ 3 texels thick; never on
+  1-texel runs — no bloat: the sprite covers what the model and its hitbox cover),
+  knocked-out box corners, inner contours, a top light, dithered luminance bands,
+  hue-shifted shading relative to the stage's light level, and the campaign's
+  64-colour palette (`spritePalette.ts`: hue-shifted ramps; a texel picks its ramp
+  by hue, then its step by lightness). Unlit (glow) materials are baked through a
+  twin that tags alpha, and those texels (eyes, weak points, hearts) skip all of it.
+  Each texel's view depth goes into alpha.
+- **Display.** A quad per sprite at the entity's root + bake offset, laid out in the
+  vertex shader at the baked pixel size with its corner snapped to the pixel grid
+  (texels always land on whole pixels; no crawl), writing **per-texel depth**
+  (`gl_FragDepth`, biased back ~2 cm so live parts on the surface win), so scenery
+  occludes sprites as the 3D models would. Hit flashes tint the sprite white/red
+  (`Enemy.flashKind`). Characters get a pixel blob shadow (one instanced draw),
+  capped on screen and gone once they are 0.8 m off the ground.
 - **Gameplay is untouched.** The 3D models keep animating and are the hitboxes;
-  they are only hidden (`root.visible = false`) for the main camera's draw and
-  restored in `endFrame()`, so raycasts, aim assist, AutoPlayer and the
-  simulator see exactly what they saw before. A source without an image yet
-  (just spawned off screen) falls back to its 3D model — never invisible.
-- Tuning: `&spriteLook=k:2,bands:0,outline:0.3,inner:0,rim:0,ss:1,shadows:0`
-  (see `SpriteLook`). A/B captures of the same frozen instant:
-  `node scripts/snap-art.mjs --shots "z1:4,d3:16:6000" --modes "3d,sprites"`;
-  deterministic draw-call / bake numbers: `node scripts/bench-art.mjs`.
+  they are only hidden for the main camera's draw and restored in `endFrame()`, so
+  raycasts, aim assist, AutoPlayer and the simulator see exactly what they saw
+  before. A character on screen without an image yet is hidden for ≤ 3 frames,
+  then falls back to its 3D model (`stats.fallbacks`, 0 in the bench scenes).
+- Tuning: `&spriteLook=pal:0,k:2,bands:0,outline:0.6,dirs:8,…` (see `SpriteLook`;
+  `dirs:8` = Doom-style turning in 45° steps). Look-dev captures with enemies placed
+  in front of the camera: `node scripts/look-art.mjs --url "/?stage=zoo&zoo=compy"
+  --place "runner:1.2:3,raptor:-2:7" --modes "3d,sprites,sprites@pal=0"`; A/B of a
+  frozen stage instant: `node scripts/snap-art.mjs --shots "z1:4,d3:16:6000"`;
+  deterministic draw-call / bake numbers, style-pop count and a silhouette-area
+  check (sprite vs model, per type): `node scripts/bench-art.mjs`.
 - Cost: a bake is the source's own draw calls + 1 (plus 2 render-target
   switches); characters are drawn ~12×/s instead of 60×/s, so average draw calls
   drop a lot in crowds, while a frame that bakes a 100-mesh boss costs about what
-  3D did (the bake budget keeps such frames from stacking). Memory: 3 MB scratch
-  + a few KB–1 MB per sprite (≈ 3–5 MB total).
+  3D did (the bake budget keeps such frames from stacking). The bake pass is a
+  few hundred ALU ops and ~100 texel fetches per sprite texel, on ~15k texels per
+  frame. Memory: 3 MB scratch + a few KB–1 MB per sprite (≈ 3–5 MB total).
 
 ## Audio
 
@@ -304,8 +326,8 @@ or new material types mid-stage still compile then: add such lights at build tim
 
 ## Debug URL flags
 
-`?stage=z1` jump into a stage · `&art=sprites|3d` character art (Settings ART) ·
-`&spriteLook=k:2` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
+`?stage=z1` jump into a stage · `&art=sprites|3d` character art (Settings ART, default 3D) ·
+`&spriteLook=pal:0,dirs:8` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
 overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor
 mode (`?stage`/`?autoplay` deep links render with retro OFF unless `retro` is

@@ -126,13 +126,13 @@ export const DEFAULT_LOOK: SpriteLook = {
   rim: 0.18,
   rimLight: 1,
   saturation: 1.12,
-  sharpen: 0.3,
-  detail: 1.35,
-  hue: 0.45,
+  sharpen: 0.25,
+  detail: 1.25,
+  hue: 0.3,
   pal: 1,
   round: 1,
   pxPerTexel: 0,
-  k2: 220,
+  k2: 300,
   k3: 0,
   ss: 2,
   shadows: 1,
@@ -325,13 +325,16 @@ const BAKE_FRAG = /* glsl */ `
   // Palette colour in two steps, the way a pixel artist picks one: first the ramp
   // (by hue and chroma, undithered — a surface keeps one ramp, no speckle between
   // hues), then the step along it by lightness, dithered.
-  vec3 palette(vec3 y, float th) {
+  // \`area\` = the colour of the texel's neighbourhood: the ramp follows the region,
+  // not each texel's texture noise.
+  vec3 palette(vec3 y, vec3 area, float th) {
     vec3 lab = toLab(y);
+    vec3 alab = toLab(area);
     float best = 1e9;
     float ramp = -1.0;
     for (int i = 0; i < ${PALETTE_MAX}; i++) {
       if (i >= uPalN) break;
-      vec3 d = lab - uPal[i].xyz;
+      vec3 d = alab - uPal[i].xyz;
       float e = d.x * d.x * 0.3 + dot(d.yz, d.yz) * 3.0;
       if (e < best) {
         best = e;
@@ -448,12 +451,20 @@ const BAKE_FRAG = /* glsl */ `
         float yl = luma(y);
         float cool = (1.0 - smoothstep(0.1, 0.6, yl / uRefL)) * uHue;
         float warm = smoothstep(1.1, 2.2, yl / uRefL) * uHue;
-        vec3 t = mix(vec3(1.0), vec3(0.84, 0.9, 1.32), cool) * mix(vec3(1.0), vec3(1.1, 1.03, 0.84), warm);
+        vec3 t = mix(vec3(1.0), vec3(0.88, 0.93, 1.22), cool) * mix(vec3(1.0), vec3(1.06, 1.02, 0.9), warm);
         vec3 y2 = y * t;
         y = clamp(y2 * (yl / max(luma(y2), 1e-6)), 0.0, 1.0);
       }
     }
-    if (uPalN > 0) y = palette(y, th);
+    if (uPalN > 0) {
+      vec3 area = c.rgb;
+      float na = 1.0;
+      if (sR && gR < 0.5) { area += nR.rgb; na += 1.0; }
+      if (sL && gL < 0.5) { area += nL.rgb; na += 1.0; }
+      if (sU && gU < 0.5) { area += nU.rgb; na += 1.0; }
+      if (sD && gD < 0.5) { area += nD.rgb; na += 1.0; }
+      y = palette(y, aces(area / na * uExp), th);
+    }
     gl_FragColor = store(y, depth);
   }
 `;
@@ -980,6 +991,7 @@ export class SpriteArt {
     }
 
     // Place billboards and hide the real models from the main camera.
+    cam.getWorldDirection(_fwd);
     let drawn = 0;
     let shadows = 0;
     let pending = 0;
@@ -1010,7 +1022,7 @@ export class SpriteArt {
       _v.setFromMatrixPosition(root.matrixWorld).add(s.offset);
       // Behind the camera (it wrapped around between bakes): nothing to draw.
       _d.subVectors(_v, _c);
-      if (_d.dot(cam.getWorldDirection(_fwd)) <= cam.near) {
+      if (_d.dot(_fwd) <= cam.near) {
         s.mesh.visible = false;
         this.hideModel(s);
         continue;
