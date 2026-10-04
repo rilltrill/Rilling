@@ -158,7 +158,9 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           W(3.8, -12.6, 'patient'),
-          W(-6.6, -5.5, 'doctor', { t: 0.8 }),
+          // (Out from beside the wreck, ~9 m ahead: it walks in left of centre, its
+          // ring clear of the lives/bomb panel.)
+          W(-5.0, -8.6, 'doctor', { t: 0.8 }),
           S('crawler', 1.4, -7.2, { entry: 'rise', t: 1.8 }),
         ],
       },
