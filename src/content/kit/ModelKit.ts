@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 import { Textures, type TexName } from './Textures';
 
+/**
+ * Global multiplier on the strength of every character's pixel texture (Kit
+ * retro textures, zombie and dino skins). 1 = as authored. ART: SPRITES raises it
+ * only while baking sprites, so surface detail survives the bake.
+ */
+export const RETRO_DETAIL = { value: 1 };
+
 export type { TexName } from './Textures';
 
 /**
@@ -80,6 +87,7 @@ function applyRetroTexture(
     uRetroScale: { value: rt.density * scale },
     uRetroStrength: { value: strength },
     uRetroGain: { value: rt.gain },
+    uRetroDetail: RETRO_DETAIL,
   };
   m.userData.retroTex = name;
   // Bakers that merge Kit materials into vertex-coloured batches read these.
@@ -107,6 +115,7 @@ function applyRetroTexture(
         uniform float uRetroScale;
         uniform float uRetroStrength;
         uniform float uRetroGain;
+        uniform float uRetroDetail;
         varying vec3 vRetroPos;`,
       )
       .replace(
@@ -117,7 +126,7 @@ function applyRetroTexture(
           vec3 an = abs(cross(dFdx(vRetroPos), dFdy(vRetroPos)));
           vec2 ruv = (an.x > an.y && an.x > an.z) ? vRetroPos.zy : ((an.y > an.z) ? vRetroPos.xz : vRetroPos.xy);
           vec3 rtex = texture2D(uRetroMap, ruv * uRetroScale).rgb * uRetroGain;
-          diffuseColor.rgb *= mix(vec3(1.0), rtex, uRetroStrength);
+          diffuseColor.rgb *= max(mix(vec3(1.0), rtex, uRetroStrength * uRetroDetail), vec3(0.0));
         }`,
       );
   };

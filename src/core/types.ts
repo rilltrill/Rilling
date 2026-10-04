@@ -80,7 +80,7 @@ export const DEFAULT_SETTINGS: Settings = {
   leftHanded: false,
   quality: 'medium',
   retro: 'crt',
-  art: 'sprites',
+  art: '3d',
   reduceFlashes: false,
   screenShake: 1,
   showFps: false,

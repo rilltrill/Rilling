@@ -33,11 +33,15 @@ for (const [stage, beat] of shots) {
   await page.routeWebSocket(/.*/, () => {});
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  // Pin the retro pass at full resolution (no dynamic-resolution steps: SwiftShader is slow).
   await page.addInitScript(() => {
-    setInterval(() => {
+    const iv = setInterval(() => {
       const g = window.__game;
-      if (g?.engine?.retro) g.engine.retro.scale = 1;
-    }, 50);
+      if (!g?.engine?.retro) return;
+      g.engine.applyLevel = () => {};
+      g.engine.retro.scale = 1;
+      clearInterval(iv);
+    }, 20);
   });
   const auto = args.noauto ? '' : '&autoplay=1';
   await page.goto(`${base}/?stage=${stage}&beat=${beat}&god=1${auto}&retro=crt&seed=7&mute=1&art=sprites${extra}`, { waitUntil: 'load' });

@@ -24,6 +24,8 @@ export interface MenuActions {
   continueNo(): void;
   /** Attract mode: start a self-playing demo stage behind a DEMO PLAY banner. */
   startDemo(): void;
+  /** Switch the character art live (pause-screen chip). */
+  setArt(art: ArtStyle): void;
 }
 
 /** Context shown on the pause screen. */
@@ -31,6 +33,8 @@ export interface PauseInfo {
   stage: string;
   campaign?: string;
   score: number;
+  /** Character art in effect (the ART chip lights it). */
+  art?: ArtStyle;
 }
 
 /** Arcade name entry after a qualifying run. */
@@ -968,6 +972,26 @@ export class Menus {
     }
     const col = el('div', 'menu-col pause-col', s);
     this.button(col, 'RESUME', () => this.actions.resume(), 'primary big');
+    if (info?.art) {
+      // One-tap A/B of the character art (live, behind the pause veil).
+      const row = el('div', 'set-row seg-row pause-art', col);
+      el('span', 'set-label', row, 'ART');
+      const wrap = el('div', 'set-seg', row);
+      for (const [value, text] of [
+        ['3d', '3D'],
+        ['sprites', 'SPRITES'],
+      ] as [ArtStyle, string][]) {
+        const b = el('button', `seg ${value === info.art ? 'on' : ''}`, wrap, text);
+        b.setAttribute('aria-label', `ART ${text}`);
+        onTap(b, () => {
+          wrap.querySelectorAll('.seg').forEach((x) => x.classList.remove('on'));
+          b.classList.add('on');
+          info.art = value;
+          this.feedback('ui_click');
+          this.actions.setArt(value);
+        });
+      }
+    }
     const grid = el('div', 'menu-grid', col);
     this.button(grid, 'RESTART STAGE', () => this.actions.restart(), 'small');
     this.button(grid, 'SETTINGS', () => this.showSettings(() => this.showPause(info)), 'small');

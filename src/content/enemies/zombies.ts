@@ -161,6 +161,11 @@ export abstract class Zombie extends Enemy {
   private pool: THREE.Mesh | null = null;
   protected flyers: Flyer[] = [];
 
+  /** Body parts this zombie has flung into the world (severed limbs): ART: SPRITES draws each as its own sprite. */
+  looseParts(): readonly { obj: THREE.Object3D }[] {
+    return this.flyers;
+  }
+
   /** After configure()/build(), before the entry starts: adapt to the player being on foot or in a vehicle. */
   private adaptToRig() {
     this.inVehicle = this.world.rig.mode === 'drive';

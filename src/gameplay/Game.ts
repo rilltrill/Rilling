@@ -138,6 +138,8 @@ export class Game implements MenuActions {
   autoplay: AutoPlayer | null = null;
   /** ART: SPRITES renderer for the current world (null in ART: 3D). */
   sprites: SpriteArt | null = null;
+  /** ART setting last applied (a change clears the URL override). */
+  private appliedArt: ArtStyle | undefined;
   private run: Run | null = null;
   /** Stage being built across the next frames (see startStage). */
   private loading: Loading | null = null;
@@ -290,21 +292,39 @@ export class Game implements MenuActions {
       this.redrawUntil = performance.now() + 100;
     }
     this.gridW = -1; // re-derive the overlay's pixel grid (quality changes its line count)
+    // A player's own ART change wins over a `&art=` link override.
+    if (this.appliedArt !== undefined && s.art !== this.appliedArt) this.flags.art = undefined;
+    this.appliedArt = s.art;
     if (this.world) this.syncSprites(this.world);
   }
 
   /** Character art in effect (URL flag over the ART setting). */
   get artStyle(): ArtStyle {
-    return this.flags.art ?? this.save.settings.art ?? 'sprites';
+    return this.flags.art ?? this.save.settings.art ?? '3d';
+  }
+
+  /** ART chip on the pause screen: switch live (and drop a `&art=` URL override). */
+  setArt(art: ArtStyle) {
+    this.flags.art = undefined;
+    this.save.updateSettings({ art });
+    this.settingsChanged(this.save.settings);
   }
 
   /** Create / drop the sprite renderer for `w` to match the ART setting (also mid-stage). */
   private syncSprites(w: World) {
     const want = this.artStyle === 'sprites';
     if (want && !this.sprites) {
-      this.sprites = new SpriteArt(this.engine.renderer, w, () => {
-        const { width, height } = this.engine.size;
-        return this.engine.retro.targetSize(width, height);
+      const r = this.engine.renderer;
+      const css = new THREE.Vector2();
+      const buf = new THREE.Vector2();
+      this.sprites = new SpriteArt(r, w, () => {
+        // Sprite texels are whole retro pixels; with the retro pass off the scene
+        // draws straight to the canvas, so snap to the retro grid scaled onto it.
+        r.getSize(css);
+        const grid = this.engine.retro.targetSize(css.x, css.y);
+        if (this.engine.retro.enabled) return { grid, target: grid };
+        r.getDrawingBufferSize(buf);
+        return { grid, target: { width: buf.x, height: buf.y } };
       });
       // Debug: `&spriteLook=bands:6,k:1` tunes the pixel-art pass.
       if (typeof location !== 'undefined') this.sprites.look = parseLook(new URLSearchParams(location.search).get('spriteLook'));
@@ -817,6 +837,7 @@ export class Game implements MenuActions {
       stage: note ?? this.runner?.stage.name ?? '',
       campaign: this.run?.campaign.name,
       score: this.world?.score.score ?? 0,
+      art: this.artStyle,
     };
   }
 

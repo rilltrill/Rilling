@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Rng } from '../../core/Rng';
 import type { HitPart } from '../../core/types';
-import { Kit } from '../kit/ModelKit';
+import { Kit, RETRO_DETAIL } from '../kit/ModelKit';
 import { Textures, type TexName } from '../kit/Textures';
 import { buildHumanoid, type HumanoidRig, type Limb, type LegLimb } from '../kit/humanoid';
 
@@ -141,7 +141,7 @@ function surfaceShader() {
   });
   return {
     names,
-    pars: `${samplers}\nvarying vec3 vZPos;\nvarying vec3 vZTex;`,
+    pars: `${samplers}\nuniform float uRetroDetail;\nvarying vec3 vZPos;\nvarying vec3 vZTex;`,
     main: `{
       vec3 zdx = dFdx(vZPos);
       vec3 zdy = dFdy(vZPos);
@@ -158,7 +158,7 @@ function surfaceShader() {
       vec3 zp = vec3(1.0);
       ${fetch}
       zp = mix(vec3(dot(zp, vec3(0.299, 0.587, 0.114))), zp, zsat);
-      vec3 zf = mix(vec3(1.0), zp * zg, zk);
+      vec3 zf = max(mix(vec3(1.0), zp * zg, zk * uRetroDetail), vec3(0.0));
       diffuseColor.rgb *= zf;
       totalEmissiveRadiance *= zf;
     }`,
@@ -221,6 +221,7 @@ export function zombieMaterial(): THREE.MeshLambertMaterial {
     const uniforms = zUniforms;
     m.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, uniforms);
+      sh.uniforms.uRetroDetail = RETRO_DETAIL;
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nattribute vec3 zTex;\nvarying vec3 vZPos;\nvarying vec3 vZTex;')
         .replace(

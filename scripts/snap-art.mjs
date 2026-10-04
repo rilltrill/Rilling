@@ -42,11 +42,15 @@ for (const [stage, beat, afterShot, autoShot] of shots) {
   page.on('console', (m) => m.type() === 'error' && !/403/.test(m.text()) && errors.push(m.text()));
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   if (args.flash) await page.addInitScript(() => (window.__snapFlash = true));
+  // Pin the retro pass at full resolution (no dynamic-resolution steps: SwiftShader is slow).
   await page.addInitScript(() => {
-    setInterval(() => {
+    const iv = setInterval(() => {
       const g = window.__game;
-      if (g?.engine?.retro) g.engine.retro.scale = 1;
-    }, 50);
+      if (!g?.engine?.retro) return;
+      g.engine.applyLevel = () => {};
+      g.engine.retro.scale = 1;
+      clearInterval(iv);
+    }, 20);
   });
   const auto = (autoShot ? autoShot === 'a' : !args.noauto) ? '&autoplay=1' : '';
   const url = `${base}/?stage=${stage}&beat=${beat}&god=1${auto}&retro=${retro}&seed=7&art=sprites&mute=1${extra}`;
