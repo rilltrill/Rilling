@@ -16,6 +16,7 @@ interface Burst {
 
 const _v = new THREE.Vector3();
 const _c = new THREE.Vector3();
+const _d = new THREE.Vector3();
 
 const MARKER_COLORS: Record<HitMarkerKind, string> = {
   hit: '#ffffff',
@@ -106,7 +107,7 @@ export class Overlay2D {
       if (!tg || e.removed) continue;
       tg.anchor.getWorldPosition(_v);
       const dist = _v.distanceTo(cam.position);
-      const ahead = _v.clone().sub(cam.position).dot(_c);
+      const ahead = _d.subVectors(_v, cam.position).dot(_c);
       _v.project(cam);
       const p = Math.min(1, Math.max(0, tg.progress));
       const danger = p > 0.7;
@@ -137,6 +138,19 @@ export class Overlay2D {
           g.beginPath();
           g.arc(x, y, base, 0, Math.PI * 2);
           g.fill();
+        }
+        if (p > 0.55) {
+          // "!" above the ring: this one is about to hit you.
+          const fs = Math.round(Math.max(18, Math.min(34, base * 0.5)));
+          g.font = `${fs}px 'Black Ops One', Impact, sans-serif`;
+          g.textAlign = 'center';
+          g.textBaseline = 'bottom';
+          g.lineWidth = 4;
+          g.strokeStyle = 'rgba(0,0,0,0.85)';
+          g.fillStyle = col;
+          const ty = Math.max(fs + 4, y - r - 2);
+          g.strokeText('!', x, ty);
+          g.fillText('!', x, ty);
         }
       } else {
         // Edge arrow pointing toward the off-screen threat.

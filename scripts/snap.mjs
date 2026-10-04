@@ -4,6 +4,10 @@
  *
  *   node scripts/snap.mjs --url "http://localhost:5173/?stage=z1&autoplay=1&god=1" \
  *        --out /tmp/shots/z1 --count 4 --interval 3000 [--width 844 --height 390] [--tap 400,200]
+ *        [--dpr 2] [--save '{"seenTutorial":true,"settings":{"quality":"high"}}']
+ *
+ *   --dpr   device pixel ratio (default 1) — 2 for crisp README screenshots
+ *   --save  JSON merged into the save (localStorage 'overrun.save.v1') before the page loads
  *
  * Prints a JSON summary (game state, errors, fps) and writes <out>-<i>.png files.
  * Requires a running dev server (`npx vite --port <n>`).
@@ -26,13 +30,24 @@ const count = Number(args.count ?? 1);
 const interval = Number(args.interval ?? 3000);
 const width = Number(args.width ?? 844);
 const height = Number(args.height ?? 390);
+const dpr = Number(args.dpr ?? 1);
 
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH || undefined,
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
 });
-const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: dpr, isMobile: true, hasTouch: true });
 const page = await ctx.newPage();
+if (args.save) {
+  const seed = JSON.parse(args.save);
+  await page.addInitScript((data) => {
+    try {
+      localStorage.setItem('overrun.save.v1', JSON.stringify({ version: 1, ...data }));
+    } catch {
+      /* storage unavailable */
+    }
+  }, seed);
+}
 const errors = [];
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));

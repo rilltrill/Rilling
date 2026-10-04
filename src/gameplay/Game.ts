@@ -7,6 +7,7 @@ import { AudioSystem } from '../audio/Audio';
 import type { MusicId } from '../audio/names';
 import { Hud } from '../ui/Hud';
 import { Menus, type MenuActions } from '../ui/Menus';
+import { MenuBackdrop, type BackdropTheme } from '../ui/MenuBackdrop';
 import { World } from './World';
 import { StageRunner } from './StageRunner';
 import { Shooter } from './Shooting';
@@ -26,6 +27,9 @@ export interface DebugFlags {
   debug?: boolean;
   mute?: boolean;
 }
+
+const _hurtV = new THREE.Vector3();
+const _hurtBest = new THREE.Vector3();
 
 type State = 'menu' | 'intro' | 'playing' | 'paused' | 'continue' | 'results' | 'gameover';
 
@@ -53,7 +57,12 @@ export class Game implements MenuActions {
   private run: Run | null = null;
   private clearTimer = -1;
   private holdStart = new Map<number, number>();
-  private menuScene = new THREE.Scene();
+  /** Animated attract scene behind the menus (built lazily, kept across stages — it doesn't use the Kit cache). */
+  private backdrop: MenuBackdrop | null = null;
+  /** Backdrop theme lock (campaign-clear shows that campaign's scene); null = alternate. */
+  private backdropTheme: BackdropTheme | null = null;
+  /** The first-run tutorial is open (the stage is paused underneath). */
+  private tutorialOpen = false;
   lastResult: StageResult | null = null;
   /** Exposed for tests / debugging. */
   stats = { frames: 0, stagesCleared: 0, errors: 0 };
@@ -74,9 +83,11 @@ export class Game implements MenuActions {
       cycleWeapon: () => this.state === 'playing' && this.world?.weapons.cycle(),
     });
     this.menus = new Menus(root.querySelector('#menu-layer') as HTMLElement, this.save, this.audio, campaigns, this);
+    this.menus.onScreen = (name) => {
+      if (name !== 'campaign-clear') this.backdropTheme = null;
+    };
     this.applySettings(s);
     if (flags.mute) this.audio.setMuted(true);
-    this.menuScene.background = new THREE.Color(0x07080c);
 
     this.input.handlers = {
       press: (x, y, id) => this.onPress(x, y, id),
@@ -169,6 +180,8 @@ export class Game implements MenuActions {
     w.events.on('player-dead', () => this.onPlayerDead());
     w.events.on('stage-clear', () => (this.clearTimer = 1.8));
     w.events.on('boss-dead', () => this.music(null));
+    w.events.on('boss-start', ({ boss }) => this.hud.bossIntro(boss.title));
+    w.events.on('player-hurt', () => this.showHurtDirection());
     const campaign = this.run?.campaign ?? this.findStage(stage.id)!.campaign;
     this.music(stage.music ?? (campaign.id === 'zombie' ? 'zombie' : 'dino'));
     // Render one frame so the intro card has the scene behind it.
@@ -186,6 +199,52 @@ export class Game implements MenuActions {
     this.menus.hide();
     this.hud.show(true);
     this.input.enabled = true;
+    if (!this.save.data.seenTutorial && !this.flags.autoplay && !this.flags.stage) this.openTutorial();
+  }
+
+  /** First stage ever: show the illustrated briefing; the stage waits underneath. */
+  private openTutorial() {
+    const w = this.world;
+    if (!w || !this.runner) return;
+    this.state = 'paused';
+    this.tutorialOpen = true;
+    this.input.reset();
+    // Populate the HUD once so the briefing sits over the real layout.
+    this.hud.sync(w, 0, this.runner.progress, this.engine.fps);
+    this.menus.showTutorial(() => this.closeTutorial());
+  }
+
+  private closeTutorial() {
+    if (!this.tutorialOpen) return;
+    this.tutorialOpen = false;
+    this.save.data.seenTutorial = true;
+    this.save.persist();
+    this.menus.hide();
+    if (this.state === 'paused') this.state = 'playing';
+  }
+
+  /** Red wedge on the screen edge facing the nearest hostile when the player is hit. */
+  private showHurtDirection() {
+    const w = this.world;
+    if (!w) return;
+    const cam = w.camera;
+    let best = Infinity;
+    for (const e of w.entities) {
+      if (!e.hostile || e.removed) continue;
+      e.root.getWorldPosition(_hurtV);
+      const d = _hurtV.distanceToSquared(cam.position);
+      if (d < best) {
+        best = d;
+        _hurtBest.copy(_hurtV);
+      }
+    }
+    if (best > 40 * 40) return;
+    _hurtBest.applyMatrix4(cam.matrixWorldInverse); // camera space: +x right, +y up, -z ahead
+    const ahead = -_hurtBest.z;
+    const off = Math.hypot(_hurtBest.x, _hurtBest.y) / Math.max(0.5, Math.abs(ahead));
+    if (ahead > 0 && off < 0.35) return; // right in front of you — the full-screen flash says enough
+    const ang = Math.atan2(-_hurtBest.y * (ahead > 0 ? 1 : 0.3), _hurtBest.x);
+    this.hud.damageFrom(ang);
   }
 
   private teardownWorld() {
@@ -196,6 +255,7 @@ export class Game implements MenuActions {
     this.runner = null;
     this.shooter = null;
     this.autoplay = null;
+    this.tutorialOpen = false;
     this.holdStart.clear();
     Kit.disposeAll();
   }
@@ -257,10 +317,15 @@ export class Game implements MenuActions {
     this.state = 'paused';
     this.input.reset();
     this.audio.play('ui_click');
-    this.menus.showPause();
+    this.menus.showPause({
+      stage: this.runner?.stage.name ?? '',
+      campaign: this.run?.campaign.name,
+      score: this.world?.score.score ?? 0,
+    });
   }
 
   resume() {
+    if (this.tutorialOpen) return this.closeTutorial();
     if (this.state !== 'paused') return;
     this.menus.hide();
     this.state = 'playing';
@@ -297,6 +362,7 @@ export class Game implements MenuActions {
         this.state = 'menu';
         this.music('results');
         this.menus.showCampaignClear(run.campaign, run.total, isBest);
+        this.backdropTheme = run.campaign.id === 'zombie' ? 'city' : 'jungle';
       }
     } else {
       this.teardownWorld();
@@ -396,7 +462,18 @@ export class Game implements MenuActions {
       this.engine.render(w.scene);
       this.hud.drawOverlay(null, dt);
     } else if (!w) {
-      this.engine.render(this.menuScene);
+      this.renderBackdrop(dt);
     }
+  }
+
+  private renderBackdrop(dt: number) {
+    if (!this.backdrop) {
+      this.backdrop = new MenuBackdrop();
+      this.backdrop.onThunder = (v) => this.audio.play('thunder', { volume: v });
+    }
+    this.backdrop.setTheme(this.backdropTheme);
+    const { width, height } = this.engine.size;
+    this.backdrop.update(dt, width, height);
+    this.backdrop.render(this.engine.renderer);
   }
 }

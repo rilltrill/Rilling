@@ -1,0 +1,120 @@
+# Typecheck, unit tests (incl. the headless stage simulator), production +
+# single-file builds, then Playwright end-to-end tests on a landscape Chromium
+# phone and an emulated iPhone (WebKit).
+name: CI
+
+on:
+  push:
+    branches: [main, claude/arcade-rail-shooter]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Typecheck · unit tests · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests + headless stage simulator
+        run: npx vitest run
+
+      - name: Build (PWA → dist/)
+        run: npm run build
+
+      - name: Build single-file HTML (dist-single/overrun.html)
+        run: npm run build:single
+
+      - name: Size report
+        run: |
+          {
+            echo "### Build sizes"
+            echo '```'
+            du -sh dist dist/assets/*.js dist/assets/*.css dist-single/overrun.html
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: overrun-single-file
+          path: dist-single/overrun.html
+          retention-days: 30
+
+  e2e:
+    name: E2E · ${{ matrix.project }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chromium-phone
+            browser: chromium
+          - project: webkit-iphone
+            browser: webkit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: overrun-single-file
+          path: dist-single
+
+      # @playwright/test is pinned (package.json), so this installs the matching browser build.
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Playwright (${{ matrix.project }})
+        run: npx playwright test --project=${{ matrix.project }}
+        env:
+          E2E_SKIP_BUILD: '1' # serve the dist/ built above
+
+      - name: Upload screenshots & report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.project }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
+          if-no-files-found: ignore

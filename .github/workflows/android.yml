@@ -1,0 +1,59 @@
+# Secondary platform: builds a debug APK (sideload with `adb install` or by
+# opening the file on the phone). iPhone builds live in ios.yml.
+name: Android
+
+on:
+  push:
+    branches: [main, claude/arcade-rail-shooter]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: Debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Sync the Capacitor Android project
+        run: |
+          if [ -d android ]; then
+            npx cap sync android
+          else
+            npx cap add android
+          fi
+
+      - name: Assemble debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OVERRUN-android-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14

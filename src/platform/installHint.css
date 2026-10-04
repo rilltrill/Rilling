@@ -1,0 +1,79 @@
+/* "Add to Home Screen" hint for iPhone Safari (src/platform/installHint.ts). */
+#install-hint {
+  position: absolute;
+  z-index: 6; /* above menus (3), below the rotate hint (10) */
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: 50%;
+  transform: translate(-50%, -140%);
+  opacity: 0;
+  transition: transform 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2), opacity 0.3s ease-out;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content; /* absolute + left:50% would otherwise shrink-wrap to half the screen */
+  max-width: min(94vw, 640px);
+  padding: 7px 6px 7px 14px;
+  border-radius: 999px;
+  background: rgba(10, 12, 18, 0.88);
+  border: 1px solid rgba(255, 216, 74, 0.35);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55), 0 0 18px rgba(255, 90, 30, 0.18);
+  color: #f4f1ea;
+  font-family: 'Rajdhani', 'Arial Narrow', system-ui, sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.15;
+  pointer-events: none; /* taps fall through to the title screen… */
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+#install-hint.show {
+  transform: translate(-50%, 0);
+  opacity: 1;
+}
+
+#install-hint .ih-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  color: #ffd84a;
+}
+
+#install-hint .ih-text b {
+  font-family: 'Black Ops One', 'Impact', system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: #ffd84a;
+  margin-right: 6px;
+}
+
+#install-hint .ih-close {
+  /* …except on the close button. 40 px hit target. */
+  pointer-events: auto;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  margin: -5px 0 -5px 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: #f4f1ea;
+  font: 700 18px/30px system-ui, sans-serif;
+  cursor: pointer;
+  position: relative;
+}
+
+#install-hint .ih-close::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+
+@media (max-height: 340px) {
+  #install-hint {
+    font-size: 12px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+}

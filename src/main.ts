@@ -4,9 +4,9 @@ import '@fontsource/rajdhani/latin-700.css';
 import './styles.css';
 import { Game, type DebugFlags } from './gameplay/Game';
 import { CAMPAIGNS } from './content';
+import { initPlatform } from './platform';
 
-function parseFlags(): DebugFlags {
-  const q = new URLSearchParams(location.search);
+function parseFlags(q: URLSearchParams): DebugFlags {
   const num = (k: string) => (q.has(k) ? Number(q.get(k)) : undefined);
   const bool = (k: string) => q.has(k) && q.get(k) !== '0';
   return {
@@ -38,31 +38,34 @@ function showError(msg: string) {
 
 function main() {
   const app = document.getElementById('app')!;
+  const query = new URLSearchParams(location.search);
+  const flags = parseFlags(query);
+
   // Landscape hint (dismissible).
   document.getElementById('rotate-dismiss')?.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
     document.body.classList.add('portrait-ok');
   });
-  // Block pinch-zoom / scroll bounce on iOS.
-  document.addEventListener('gesturestart', (e) => e.preventDefault());
-  document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+
+  // iOS / PWA / native polish: gestures, viewport, audio unlock, wake lock,
+  // install hint, service worker (src/platform).
+  initPlatform(app, {
+    testMode: !!(flags.stage || flags.autoplay),
+    forceInstallHint: query.get('installhint') === '1',
+  });
 
   if (!webglAvailable()) {
     showError('Your browser does not support WebGL, which OVERRUN needs to run.');
     return;
   }
   try {
-    const game = new Game(app, CAMPAIGNS, parseFlags());
+    const game = new Game(app, CAMPAIGNS, flags);
     (window as unknown as { __game: Game }).__game = game;
     game.boot();
   } catch (err) {
     console.error(err);
     showError(`Failed to start: ${(err as Error).message}`);
-  }
-
-  if (import.meta.env.PROD && 'serviceWorker' in navigator && location.protocol === 'https:') {
-    navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 }
 
