@@ -6,7 +6,8 @@ import { D, RAIL, rel, worldAt } from './layout';
 import { buildPark, park } from './env';
 import { JeepViewModel, buildJeepBody } from './jeep';
 import { perch, type PerchedCivilian } from './civilian';
-import { lightningTree } from './hazards';
+import { atDistance, lightningTree, when } from './hazards';
+import './alpha';
 import './boss';
 
 /**
@@ -14,13 +15,20 @@ import './boss';
  *
  * Night, violent thunderstorm. The ranger jeep flees through the park toward
  * the helipad: the T-rex paddock's torn fence (compys + raptors spill through
- * the gap) → raptor pack chasing alongside → the dark visitor centre (compys on
- * the plaza, then raptors smash the doors open) → pteranodons out of the storm
- * → a roadblock with dilophosaurs (blow the fuel drums) → the jeep bogs down
- * in the mud and must hold out → the trestle bridge (pteranodons; lightning
- * brings it down behind you) → THE TYRANT bursts out of the trees and chases
- * the jeep to the helipad → shoot the fuel tank as it lunges → helicopter
- * escape.
+ * the gap) → raptor pack chasing alongside (the red ALPHA springs an ambush
+ * with its pack) → the dark visitor centre (compys on the plaza, then the alpha
+ * and its pack smash the doors open) → pteranodons out of the storm
+ * (and a pack ambush) → a roadblock with dilophosaurs (blow the fuel drums) →
+ * another pack ambush on the jungle road → the jeep bogs down in the mud and
+ * must hold out (the alpha's last ambush) → the trestle bridge (pteranodons;
+ * lightning brings it down behind you) → THE TYRANT bursts out of the trees
+ * and chases the jeep to the helipad → shoot the fuel tank as it lunges → the
+ * last of the pack on the pad → helicopter escape.
+ *
+ * Pressure curve: the finale's regular fights carry real threat through the
+ * alpha pack (see alpha.ts: red = alpha, it takes sustained fire to break its
+ * pounce and its pack pounces with it), so the Tyrant isn't the only thing
+ * that can hurt you; the Tyrant itself is tuned in boss.ts (TYRANT_TUNE).
  */
 
 let viewModel: JeepViewModel | null = null;
@@ -96,14 +104,18 @@ const beats: Beat[] = [
         ],
       },
       {
-        // The pack comes through together: three raptors from the gap and the road.
+        // The pack comes through: a pair from the gap and the road…
         start: { remaining: 1 },
         spawns: [
           { type: 'raptor', pos: rel(D.HOLD_FENCE, 57, D.FENCE_SIDE + 1.5), entry: 'leap', hp: 1.3, opts: { variant: 'green' } },
           { type: 'raptor', pos: [-7, 0, 19], entry: 'leap', t: 0.5, hp: 1.3, opts: { variant: 'tan' } },
-          { type: 'raptor', pos: rel(D.HOLD_FENCE, 64, D.FENCE_SIDE + 1), entry: 'leap', t: 1, hp: 1.3, opts: { variant: 'tan' } },
           { type: 'compy', pos: rel(D.HOLD_FENCE, 62, D.FENCE_SIDE), entry: 'leap', t: 1.6, count: 2, every: 0.4 },
         ],
+      },
+      {
+        // …and a straggler as soon as the first falls (staggered: keeps the draw-call peak down).
+        start: { remaining: 3 },
+        spawns: [{ type: 'raptor', pos: rel(D.HOLD_FENCE, 64, D.FENCE_SIDE + 1), entry: 'leap', t: 0.3, hp: 1.3, opts: { variant: 'tan' } }],
       },
     ],
   },
@@ -132,19 +144,22 @@ const beats: Beat[] = [
         ],
       },
       {
-        start: { atD: 116 },
+        start: { atD: 110 },
         spawns: [
           { type: 'raptor', pos: [7.5, 0, 10], entry: 'leap', hp: 1.3, opts: { variant: 'blue' } },
           { type: 'raptor', pos: [-7, 0, 13], entry: 'leap', t: 0.4, hp: 1.3, opts: { variant: 'green' } },
         ],
       },
       {
-        // The alpha leads the last rush.
-        start: { atD: 136 },
+        // AMBUSH: the alpha and its pack spring out of the ferns ahead and pounce as
+        // they land (the leaps carry them to ~8–9 m, in the middle of the view).
+        // Early enough to be over before the visitor-centre hold (whose scientist
+        // stands at the right edge of the frame).
+        start: { atD: 128 },
         spawns: [
-          { type: 'raptor', pos: [-7.5, 0, 9], entry: 'leap', hp: 1.3, opts: { variant: 'red' } },
-          { type: 'raptor', pos: [7.5, 0, 12], entry: 'leap', t: 0.3, hp: 1.3, opts: { variant: 'tan' } },
-          { type: 'raptor', pos: [0.5, 0, 22], entry: 'leap', t: 0.7, hp: 1.3, opts: { variant: 'blue' } },
+          { type: 'raptor_alpha', pos: [-6, 0, 14.5], entry: 'leap', opts: { ambush: true } },
+          { type: 'raptor_pack', pos: [4, 0, 15], entry: 'leap', t: 0.15, hp: 1.3, opts: { variant: 'tan', ambush: true } },
+          { type: 'raptor_pack', pos: [0.5, 0, 16.5], entry: 'leap', t: 0.3, hp: 1.3, opts: { variant: 'blue', ambush: true } },
         ],
       },
     ],
@@ -193,17 +208,19 @@ const beats: Beat[] = [
       {
         // Three at once out of the doors.
         spawns: [
-          { type: 'raptor', pos: DOOR, entry: 'burst', t: 0.15, hp: 1.3, opts: { variant: 'red' } },
-          { type: 'raptor', pos: [DOOR[0] + 0.8, 0, DOOR[2] - 1.2], entry: 'burst', t: 0.5, hp: 1.3, opts: { variant: 'tan' } },
-          { type: 'raptor', pos: [DOOR[0] - 0.6, 0, DOOR[2] + 1], entry: 'burst', t: 0.85, hp: 1.3, opts: { variant: 'tan' } },
+          // The alpha leads; the pack charges across the plaza and pounces as soon as it's in reach.
+          { type: 'raptor_alpha', pos: DOOR, entry: 'burst', t: 0.15, opts: { ambush: true } },
+          { type: 'raptor_pack', pos: [DOOR[0] + 0.8, 0, DOOR[2] - 1.2], entry: 'burst', t: 0.5, hp: 1.3, opts: { variant: 'tan', ambush: true } },
+          { type: 'raptor_pack', pos: [DOOR[0] - 0.6, 0, DOOR[2] + 1], entry: 'burst', t: 0.85, hp: 1.3, opts: { variant: 'tan', ambush: true } },
         ],
       },
       {
-        start: { remaining: 1 },
+        // Once the pack is down — a breath while the bodies sink (keeps the
+        // draw-call peak down), then a spitter and compys across the plaza.
+        start: { remaining: 0 },
         spawns: [
-          { type: 'dilo', pos: rel(D.HOLD_VISITOR, 190, -22) },
-          { type: 'compy', pos: rel(D.HOLD_VISITOR, 186, -12), entry: 'leap', t: 0.5, count: 4, every: 0.3, offset: [-0.6, 0, -0.6] },
-          { type: 'raptor', pos: rel(D.HOLD_VISITOR, 196, -16), entry: 'leap', t: 1.4, hp: 1.3, opts: { variant: 'blue' } },
+          { type: 'dilo', pos: rel(D.HOLD_VISITOR, 190, -22), t: 1.2 },
+          { type: 'compy', pos: rel(D.HOLD_VISITOR, 186, -12), entry: 'leap', t: 1.9, count: 3, every: 0.3, offset: [-0.6, 0, -0.6] },
         ],
       },
     ],
@@ -220,6 +237,9 @@ const beats: Beat[] = [
         park()?.strike(w);
         w.audio.play('roar_distant', { volume: 0.9 });
       });
+      // The storm splits a palm ahead just as the pack springs its ambush (atD 218).
+      const onRoad = () => w.rig.d < D.HOLD_ROADBLOCK - 6;
+      atDistance(w, 215, () => lightningTree(w, [-5, 4.5, 22], 2, onRoad), onRoad);
     },
     waves: [
       {
@@ -230,17 +250,22 @@ const beats: Beat[] = [
         ],
       },
       {
-        start: { atD: 202 },
-        spawns: [
-          { type: 'compy', pos: [2, 0, 18], count: 4, every: 0.25, offset: [-1.2, 0, 0.4] },
-          { type: 'raptor', pos: [-7.5, 0, 12], entry: 'leap', t: 0.5, hp: 1.3, opts: { variant: 'green' } },
-        ],
+        // (Early enough that their bodies are left behind before the ambush at 218.)
+        start: { atD: 196 },
+        spawns: [{ type: 'compy', pos: [2, 0, 18], count: 4, every: 0.25, offset: [-1.2, 0, 0.4] }],
       },
       {
+        // A lone hunter runs ahead of the pack.
+        start: { atD: 205 },
+        spawns: [{ type: 'raptor', pos: [-7.5, 0, 12], entry: 'leap', hp: 1.3, opts: { variant: 'green' } }],
+      },
+      {
+        // Three of the pack spring out of the ferns ahead and pounce as they land.
         start: { atD: 218 },
         spawns: [
-          { type: 'raptor', pos: [8, 0, 10], entry: 'leap', hp: 1.3, opts: { variant: 'blue' } },
-          { type: 'raptor', pos: [-7.5, 0, 13], entry: 'leap', t: 0.35, hp: 1.3, opts: { variant: 'tan' } },
+          { type: 'raptor_pack', pos: [6, 0, 14.5], entry: 'leap', hp: 1.3, opts: { variant: 'blue', ambush: true } },
+          { type: 'raptor_pack', pos: [-5.5, 0, 15], entry: 'leap', t: 0.2, hp: 1.3, opts: { variant: 'tan', ambush: true } },
+          { type: 'raptor_pack', pos: [0.5, 0, 16.5], entry: 'leap', t: 0.35, hp: 1.3, opts: { variant: 'green', ambush: true } },
         ],
       },
     ],
@@ -279,7 +304,7 @@ const beats: Beat[] = [
         spawns: [
           { type: 'compy', pos: rel(D.HOLD_ROADBLOCK, 257, -3), entry: 'leap', t: 0.6, count: 3, every: 0.35, offset: [1, 0, 0] },
           { type: 'dilo', pos: rel(D.HOLD_ROADBLOCK, 254, -1), t: 1.2 },
-          { type: 'raptor', pos: rel(D.HOLD_ROADBLOCK, 259, -4), entry: 'leap', t: 2.2, hp: 1.3, opts: { variant: 'red' } },
+          { type: 'raptor', pos: rel(D.HOLD_ROADBLOCK, 259, -4), entry: 'leap', t: 2.2, hp: 1.3, opts: { variant: 'tan' } },
           { type: 'raptor', pos: [-10, 0, 13], entry: 'leap', t: 2.6, hp: 1.3, opts: { variant: 'green' } },
         ],
       },
@@ -302,8 +327,9 @@ const beats: Beat[] = [
       if (!park()?.roadblockBlasted) park()?.blastRoadblock(w);
       w.audio.play('engine_rev', { volume: 0.8 });
       w.later(3.5, () => w.audio.play('roar_distant', { volume: 1, pitch: 0.9 }));
-      // Lightning splits a palm ahead on the right as the first raptors close in.
-      w.later(2.4, () => lightningTree(w, [5.5, 4.5, 24], 2, () => w.rig.d < D.HOLD_MUD - 8));
+      // Lightning splits a palm ahead on the right just as the pack springs its ambush (atD 284).
+      const onRoad = () => w.rig.d < D.HOLD_MUD - 8;
+      atDistance(w, 281, () => lightningTree(w, [5.5, 4.5, 22], 2, onRoad), onRoad);
     },
     pickups: [{ kind: 'points', pos: [3, 2.3, 40] }],
     waves: [
@@ -324,9 +350,10 @@ const beats: Beat[] = [
       {
         start: { atD: 284 },
         spawns: [
-          { type: 'raptor', pos: [-8, 0, 12], entry: 'leap', hp: 1.3, opts: { variant: 'red' } },
-          { type: 'raptor', pos: [8, 0, 13], entry: 'leap', t: 0.4, hp: 1.3, opts: { variant: 'blue' } },
-          { type: 'ptero', pos: [5, 10, 22], entry: 'fly', t: 0.6 },
+          // Another three out of the ferns, pouncing as they land.
+          { type: 'raptor_pack', pos: [-5, 0, 15], entry: 'leap', hp: 1.3, opts: { variant: 'green', ambush: true } },
+          { type: 'raptor_pack', pos: [6, 0, 14.5], entry: 'leap', t: 0.2, hp: 1.3, opts: { variant: 'blue', ambush: true } },
+          { type: 'raptor_pack', pos: [1, 0, 16.5], entry: 'leap', t: 0.35, hp: 1.3, opts: { variant: 'tan', ambush: true } },
         ],
       },
     ],
@@ -347,8 +374,15 @@ const beats: Beat[] = [
       }
       w.audio.play('engine_rev', { volume: 1, pitch: 0.8 });
       w.hud.prompt("WE'RE STUCK! HOLD THEM OFF!");
-      // The storm joins in: a palm on the left of the road is struck and showers the jeep.
-      w.later(5, () => lightningTree(w, [-5.5, 4.5, 17], 3, () => !!park()?.mud));
+      // The storm joins the alpha's ambush: as the pack springs, a palm on the
+      // right of the road (away from the worker) is struck and showers the jeep.
+      const inMud = () => !!park()?.mud;
+      when(
+        w,
+        () => w.enemies().some((e) => e.name === 'alpha'),
+        () => w.later(0.6, () => lightningTree(w, [5.5, 4.5, 18], 3, inMud)),
+        inMud,
+      );
     },
     onEnd: (w) => {
       const env = park();
@@ -368,22 +402,30 @@ const beats: Beat[] = [
         ],
       },
       {
+        // (Spaced out a little so the first wave's bodies have sunk before the
+        // compys arrive: keeps the draw-call peak down.)
         start: { remaining: 1 },
         spawns: [
-          { type: 'ptero', pos: [4, 10, 22], entry: 'fly' },
-          { type: 'dilo', pos: [6.5, 0, 15], t: 0.5 },
-          { type: 'compy', pos: [2, 0, 13], entry: 'leap', t: 1, count: 3, every: 0.3, offset: [1.2, 0, 0.6] },
+          { type: 'ptero', pos: [4, 10, 22], entry: 'fly', t: 0.6 },
+          { type: 'dilo', pos: [6.5, 0, 15], t: 1.2 },
+          { type: 'compy', pos: [2, 0, 13], entry: 'leap', t: 2.2, count: 3, every: 0.3, offset: [1.2, 0, 0.6] },
         ],
       },
       {
         // The pack's final rush once the road is clear (keeps the draw-call peak in budget).
         start: { remaining: 0 },
         spawns: [
-          { type: 'raptor', pos: [8, 0, 12], entry: 'leap', t: 0.5, hp: 1.3, opts: { variant: 'blue' } },
-          { type: 'raptor', pos: [-2, 0, 20], entry: 'leap', t: 0.8, hp: 1.3, opts: { variant: 'red' } },
-          { type: 'raptor', pos: [4, 0, 19], entry: 'leap', t: 1.1, hp: 1.3, opts: { variant: 'green' } },
-          { type: 'ptero', pos: [-3, 10, 24], entry: 'fly', t: 1.6 },
+          // AMBUSH out of the reeds ahead and on the right (away from the worker on
+          // the left) — after a short lull, once the last wave's bodies have sunk.
+          { type: 'raptor_alpha', pos: [-2.5, 0, 16.5], entry: 'leap', t: 1.6, opts: { ambush: true } },
+          { type: 'raptor_pack', pos: [6, 0, 14.5], entry: 'leap', t: 1.75, hp: 1.3, opts: { variant: 'blue', ambush: true } },
+          { type: 'raptor_pack', pos: [2, 0, 17.5], entry: 'leap', t: 1.9, hp: 1.3, opts: { variant: 'green', ambush: true } },
         ],
+      },
+      {
+        // A flier out of the storm for the last one standing (staggered for the draw-call budget).
+        start: { remaining: 1 },
+        spawns: [{ type: 'ptero', pos: [-3, 10, 24], entry: 'fly', t: 0.3 }],
       },
     ],
   },
@@ -451,25 +493,44 @@ const beats: Beat[] = [
       w.hud.prompt('GET TO THE CHOPPER!');
     },
   },
-  { kind: 'wait', label: 'rotors', duration: 1.2, look: { at: HELI_LOOK, world: true, blend: 0.6 } },
-  { kind: 'move', label: 'board', to: D.BOARD, speed: 7, look: { at: HELI_LOOK, world: true, blend: 1 } },
+  {
+    // While the rotors spin up, the last of the pack breaks out of the treeline
+    // at the edges of the pad: one final shootable beat after the Tyrant falls
+    // (no long empty stretch before the escape).
+    kind: 'hold',
+    label: 'last of the pack',
+    minTime: 1.2,
+    timeout: 14,
+    look: { at: HELI_LOOK, world: true, blend: 0.6 },
+    waves: [
+      {
+        spawns: [
+          { type: 'raptor', pos: [-8, 0, 15], entry: 'leap', t: 0.3, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: [7.5, 0, 17], entry: 'leap', t: 0.8, opts: { variant: 'green' } },
+        ],
+      },
+    ],
+  },
+  { kind: 'move', label: 'board', to: D.BOARD, speed: 10, look: { at: HELI_LOOK, world: true, blend: 1 } },
   {
     kind: 'action',
     label: 'lift-off',
     run: (w) => board(w),
   },
   {
-    kind: 'move',
+    // The chopper climbs away over the pad. The stage clears mid-climb: the
+    // world keeps running under the results card's 1.8 s lead-in, so the shot
+    // never stops moving and there's no dead air after the last kill.
+    kind: 'action',
     label: 'escape',
-    to: D.END,
-    speed: 9,
     look: { at: PAD_LOOK, world: true, blend: 1.2 },
-    onStart: (w) => {
+    run: (w) => {
+      w.rig.moveTo(D.END, 12);
       w.audio.play('helicopter', { volume: 1 });
-      w.later(1, () => w.hud.banner('ESCAPED!', 'PRIMAL ISLAND CLEARED', 3.6));
+      w.later(0.4, () => w.hud.banner('ESCAPED!', 'PRIMAL ISLAND CLEARED', 3.6));
     },
   },
-  { kind: 'wait', label: 'fly away', duration: 1.4 },
+  { kind: 'wait', label: 'fly away', duration: 3.6, look: { at: PAD_LOOK, world: true, blend: 1.2 } },
 ];
 
 /** Board the helicopter: swap the jeep view for the cabin, park the jeep on the pad, jump the rig to the chopper. */

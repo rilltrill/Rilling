@@ -27,8 +27,9 @@ import { labs } from './env';
  *                 FADE         (phase 2+) cloaks, slips behind a pillar, ambushes with a
  *                              short-fuse pounce from close range         (ring on the chest)
  *   Enough HITS during a wind-up (or mid-leap) knock it down: free hits
- *   (3–4 stop a pounce, 3 a tail whip — from phase 2 a pounce takes one more
- *   against a healthy player; glowing weak points count double).
+ *   (3–4 stop a pounce, 3 a tail whip — a pounce takes one more against a
+ *   healthy player, both one less on the last heart; glowing weak points
+ *   count double).
  *   Fairness: attacks only start framed in the play area, never on top of two
  *   other live warnings; while it attacks at most one raptor may lunge and
  *   darts wait their turn; the pack arrives in waves; last-heart grace.
@@ -487,18 +488,20 @@ export class SpecimenX extends Boss {
    * who starts shooting ~0.35 s into the ring (≈ 4–5 taps per pounce, ~3 per whip):
    *   pounce  1.5/1.35/1.3 s wind + 0.5 s leap → 3 / 4 / 4  (2 weak hits)
    *   tail    1.4/1.3/1.2 s, ring on the glowing tail base → 3 / 3 / 3  (2 weak hits)
-   * From phase 2 the POUNCE presses a player who is still healthy (4+ hearts):
-   * one more hit (5 over its ~1.8 s ≈ 4–5 taps: two stripe shots + one). The
-   * whip never gets the extra hit — its 1.2–1.3 s wind-up leaves only ~3 taps
-   * after reacting. Someone hanging on gets the base numbers.
+   * The POUNCE presses a player who is still healthy (4+ hearts): one more hit
+   * (4 / 5 / 5 — at most two stripe shots + one over its ≥ 1.8 s ≈ 4–5 taps).
+   * The whip never gets the extra hit — its 1.2–1.4 s wind-up leaves only ~3
+   * taps after reacting. On the last heart both take one hit less.
    */
   private interruptThreshold() {
-    if (this.state === 'tailWind') return [3, 3, 3][this.phase] ?? 3;
-    const pressed = this.phase >= 1 && this.world.player.hp >= 4 ? 1 : 0;
-    return ([3, 4, 4][this.phase] ?? 4) + pressed;
+    const hp = this.world.player.hp;
+    const mercy = hp <= 1 ? 1 : 0;
+    if (this.state === 'tailWind') return ([3, 3, 3][this.phase] ?? 3) - mercy;
+    const pressed = hp >= 4 ? 1 : 0;
+    return ([3, 4, 4][this.phase] ?? 4) + pressed - mercy;
   }
 
-  /** Last-heart grace: a little more wind-up time when the player is on 1 heart. */
+  /** Last-heart grace: a little more wind-up time when the player is on 1 heart (and one hit less to stop it). */
   private grace() {
     return this.world.player.hp <= 1 ? 0.2 : 0;
   }

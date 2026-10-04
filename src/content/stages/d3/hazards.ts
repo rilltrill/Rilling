@@ -72,3 +72,21 @@ export function lightningTree(w: World, at: V3, count = 2, active: () => boolean
     });
   }
 }
+
+/**
+ * Run `fn` once `cond()` holds (polled every 0.1 s of game time, so it pauses
+ * with the game). Gives up when `active()` turns false first (beat over).
+ */
+export function when(w: World, cond: () => boolean, fn: () => void, active: () => boolean = () => true) {
+  const poll = () => {
+    if (!active()) return;
+    if (cond()) fn();
+    else w.later(0.1, poll);
+  };
+  poll();
+}
+
+/** Run `fn` once the rig reaches rail distance `d` (see `when`). */
+export function atDistance(w: World, d: number, fn: () => void, active: () => boolean = () => true) {
+  when(w, () => w.rig.d >= d, fn, active);
+}
