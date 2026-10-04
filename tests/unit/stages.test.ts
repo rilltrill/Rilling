@@ -71,6 +71,7 @@ describe.each(ALL_STAGES.map((s) => [s.id, s] as const))('stage %s', (_id, stage
     if (!r.completed || r.errors.length) console.log(stage.id, JSON.stringify(r, null, 2));
     expect(r.errors).toEqual([]);
     expect(r.completed, `stuck at beat ${r.beatLabel} after ${r.time.toFixed(0)}s`).toBe(true);
+    expect(r.unframedPounces, 'crawler pounces whose ring never showed during the coil').toEqual([]);
     // Arcade pacing: a stage should take roughly 2–10 minutes.
     expect(r.time).toBeLessThan(600);
   });

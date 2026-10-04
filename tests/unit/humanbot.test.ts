@@ -24,6 +24,7 @@ import { DEFAULT_SETTINGS } from '../../src/core/types';
 import { Kit } from '../../src/content/kit/ModelKit';
 import { ALL_STAGES } from '../../src/content';
 import { Enemy } from '../../src/gameplay/Enemy';
+import type { Boss } from '../../src/gameplay/Boss';
 import { Projectile } from '../../src/gameplay/Projectile';
 import { Pickup } from '../../src/gameplay/Pickup';
 import { Civilian } from '../../src/gameplay/Civilian';
@@ -548,7 +549,7 @@ export function simulateHuman(
       for (const e of world.entities) {
         if (e instanceof Projectile) e.removed = true;
         else if (e instanceof Enemy && e.state !== 'dying') {
-          if (e.isBoss) e.stateTime = 0;
+          if (e.isBoss) (e as Boss).onContinue();
           else if (e.state === 'windup' || e.state === 'recover') e.stagger();
         }
       }

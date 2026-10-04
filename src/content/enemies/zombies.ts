@@ -2080,8 +2080,13 @@ export class Crawler extends Zombie {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /** 2.4 m riot-armoured hulk. Shoot the head (or hit hard) to stagger its smash. */
+/** Seconds after a headshot stagger before another headshot can stagger a brute again. */
+export const BRUTE_HEAD_STAGGER_COOLDOWN = 1.6;
+
 export class Brute extends Zombie {
   private stepIdx = 0;
+  /** Age at the last headshot stagger (see onDamaged). */
+  private headStaggerAt = -99;
   private growlT = 3;
   private mutant!: Limb;
 
@@ -2191,9 +2196,14 @@ export class Brute extends Zombie {
 
   protected override onDamaged(hit: ShotHit, amount: number) {
     super.onDamaged(hit, amount);
-    if (this.hp > 0 && hit.part === 'head') {
+    // A headshot staggers a brute — but not again straight away, or steady pistol
+    // headshots stun-lock it and its smash never comes.
+    if (this.hp > 0 && hit.part === 'head' && this.age - this.headStaggerAt >= BRUTE_HEAD_STAGGER_COOLDOWN) {
       this.stagger();
-      if (this.state === 'stagger') this.world.audio.play('brute_roar', { volume: 0.35, pitch: 1.3, vary: 0.1 });
+      if (this.state === 'stagger') {
+        this.headStaggerAt = this.age;
+        this.world.audio.play('brute_roar', { volume: 0.35, pitch: 1.3, vary: 0.1 });
+      }
     }
   }
 

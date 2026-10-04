@@ -46,6 +46,15 @@ export abstract class Boss extends Enemy {
   /** Called when the boss crosses a phase threshold. */
   protected onPhase(_phase: number): void {}
 
+  /**
+   * The player just used a continue: give them a fresh start against the current
+   * attack. The default restarts its telegraph; a boss that tracks an attack that
+   * already struck should override this (e.g. end the attack and take a gap).
+   */
+  onContinue(): void {
+    this.stateTime = 0;
+  }
+
   protected override onDamaged(hit: ShotHit, amount: number): void {
     super.onDamaged(hit, amount);
     const p = this.phaseFor();

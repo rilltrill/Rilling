@@ -16,6 +16,7 @@ import { Kit } from '../content/kit/ModelKit';
 import { AutoPlayer } from '../debug/AutoPlayer';
 import type { WeaponId } from '../core/types';
 import { zooStage } from '../content/stages/zoo';
+import type { Boss } from './Boss';
 import { Enemy } from './Enemy';
 import type { Entity } from './Entity';
 import { Projectile } from './Projectile';
@@ -899,7 +900,7 @@ export class Game implements MenuActions {
       if (e instanceof Projectile) {
         e.removed = true;
       } else if (e instanceof Enemy && e.state !== 'dying') {
-        if (e.isBoss) e.stateTime = 0;
+        if (e.isBoss) (e as Boss).onContinue();
         else if (e.state === 'windup' || e.state === 'recover') e.stagger();
       }
     }
