@@ -14,6 +14,7 @@ import type { CampaignDef, StageDef } from './StageTypes';
 import { Kit } from '../content/kit/ModelKit';
 import { AutoPlayer } from '../debug/AutoPlayer';
 import type { WeaponId } from '../core/types';
+import { zooStage } from '../content/stages/zoo';
 
 export interface DebugFlags {
   stage?: string;
@@ -118,8 +119,13 @@ export class Game implements MenuActions {
 
   private findStage(id: string): { stage: StageDef; campaign: CampaignDef } | null {
     for (const c of this.campaigns) for (const s of c.stages) if (s.id === id) return { stage: s, campaign: c };
+    if (id === 'zoo') {
+      this.zoo ??= zooStage(new URLSearchParams(location.search));
+      return { stage: this.zoo, campaign: this.campaigns[0] };
+    }
     return null;
   }
+  private zoo: StageDef | null = null;
 
   private applySettings(s: Settings) {
     this.audio.setVolumes(s.sfxVolume, s.musicVolume);

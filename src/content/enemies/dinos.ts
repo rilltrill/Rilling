@@ -79,8 +79,8 @@ export class Raptor extends Enemy {
   }
 
   protected override animate(dt: number) {
-    this.phase += dt * (2 + this.moveSpeed * 1.6);
-    const run = Math.min(1, this.moveSpeed / 3);
+    this.phase += dt * (2 + this.groundSpeed * 1.6);
+    const run = Math.min(1, this.groundSpeed / 3);
     const s = Math.sin(this.phase);
     this.legs[0].hip.rotation.x = s * 0.9 * run;
     this.legs[1].hip.rotation.x = -s * 0.9 * run;

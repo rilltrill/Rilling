@@ -53,8 +53,8 @@ export class Walker extends Enemy {
 
   protected override animate(dt: number) {
     const r = this.r;
-    this.phase += dt * (1.5 + this.moveSpeed * 3.2);
-    const moving = Math.min(1, this.moveSpeed / 0.5);
+    this.phase += dt * (1.5 + this.groundSpeed * 3.2);
+    const moving = Math.min(1, this.groundSpeed / 0.5);
     poseWalk(r, this.phase, Math.max(0.25, moving), 0.45);
     // Arms reaching forward, swaying.
     const reach = this.state === 'windup' ? -1.9 - Math.sin(this.stateTime * 18) * 0.15 : -1.35;

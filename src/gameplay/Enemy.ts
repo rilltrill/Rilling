@@ -179,6 +179,26 @@ export abstract class Enemy extends Entity {
     return remaining - step;
   }
 
+  /**
+   * Speed over the ground in m/s, for driving walk/run cycles. Enemies in the
+   * rig frame are carried along with the vehicle, so they must run at least as
+   * fast as it moves.
+   */
+  get groundSpeed(): number {
+    if (this.frame === 'rig') return this.moveSpeed + this.world.rig.speed;
+    return this.moveSpeed;
+  }
+
+  /** Signed distance along the rail heading from the player (negative = behind). */
+  aheadOfPlayer(): number {
+    if (this.frame === 'rig') return -this.root.position.z;
+    const rig = this.world.rig.space;
+    _w.subVectors(this.root.position, rig.position);
+    // Rig forward is local -Z rotated by heading.
+    const h = rig.rotation.y;
+    return _w.x * -Math.sin(h) + _w.z * -Math.cos(h);
+  }
+
   /** Is the anchor inside the camera view (with margin)? */
   onScreen(margin = 0.92): boolean {
     this.anchor.getWorldPosition(_w);
@@ -434,6 +454,19 @@ export abstract class Enemy extends Entity {
       if (this.root.position.y < g + 0.5) this.root.position.y = g;
     }
 
+    // Safety nets against soft-locks: enemies left behind by a moving rig, or
+    // ones that never manage to get on screen, quietly leave.
+    if (!this.isBoss && this.state !== 'dying' && this.state !== 'entry') {
+      if (this.frame === 'world' && this.world.rig.moving && this.aheadOfPlayer() < -8 && this.distToPlayer > 10) {
+        this.despawn();
+        return;
+      }
+      if (this.age > 45 && !this.onScreen(1.2)) {
+        this.despawn();
+        return;
+      }
+    }
+
     if (this.sfxIdle && this.state !== 'dying') {
       this.idleSfxTimer -= dt;
       if (this.idleSfxTimer <= 0) {
@@ -500,6 +533,7 @@ export abstract class Enemy extends Entity {
   /** Remove without awarding points (e.g. despawn after a chase). */
   despawn() {
     this.hostile = false;
+    this.telegraph = null;
     this.removed = true;
   }
 
