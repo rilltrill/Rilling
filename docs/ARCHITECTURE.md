@@ -46,6 +46,7 @@ src/
     stages/index.ts        CAMPAIGNS
   fx/Fx.ts                 pooled particles, gibs, explosions
   audio/                   names.ts (sfx/music ids), Audio.ts, Sfx.ts, Music.ts
+  gameplay/SpriteArt.ts    ART: SPRITES — live pixel-art impostors of characters
   ui/                      Hud.ts, Overlay2D.ts, Menus.ts, dom.ts
   debug/AutoPlayer.ts      aimbot for ?autoplay=1 and the stage simulator
 tests/unit/                vitest — includes the headless stage simulator
@@ -176,6 +177,46 @@ id from the stage folder (e.g. `registerEnemy('butcher', …)`).
   in 'crt' mode, scanlines, curvature, convergence error, phosphor bloom and
   vignette. Settings → DISPLAY: CRT / PIXEL / OFF (`Settings.retro`).
 
+## Art style: SPRITES (pixel-art characters, `gameplay/SpriteArt.ts`)
+
+Settings → ART: **3D | SPRITES** (`Settings.art`, URL `&art=sprites|3d`; live, also
+mid-stage from the pause menu's SETTINGS). In SPRITES every character — enemies,
+bosses, civilians — plus projectiles, pickups and severed limbs is drawn as a 2D
+pixel-art sprite, the way 90s arcade shooters used pre-rendered sprites.
+
+- **Live impostors.** `SpriteArt.beginFrame()` (called by `Game.renderWorld`
+  around `engine.render`) re-renders each visible sprite source about 12×/s of
+  game time (`SPRITE_FPS`, round-robin, ≤ 6 bakes per frame; never-drawn ones
+  first) — so animation is choppy like sprite frames while positions stay smooth.
+- **Bake.** The bake camera is the main camera with its projection *cropped* to the
+  source's on-screen bounds (no perspective mismatch), rendered at ~1.5 retro
+  pixels per texel (`pxPerTexel`, size caps 192 / 448 texels for bosses — close-ups
+  get chunkier), 2× supersampled, into a 512² HDR scratch target with a depth
+  texture. Lights are mirrored into a tiny bake scene (same light set → same
+  shader programs; `precompile` warms the offscreen variants) with the stage fog.
+- **Pixel-art pass** (`BAKE_FRAG`) into the sprite's own small RGBA8 target (pooled
+  by power-of-two size): crisp alpha, a 1-px dark outline (inside the silhouette
+  for big sprites, around it for small ones), inner contour lines where a part
+  overlaps another, a top-lit silhouette rim, log-luminance posterisation and a
+  little extra saturation. Each texel's view depth is packed into alpha.
+- **Display.** A screen-aligned quad per sprite follows the entity's root every
+  frame and writes **per-texel depth** (`gl_FragDepth`), so scenery occludes
+  sprites (and sprites each other) as the 3D models would. Hit flashes tint the
+  whole sprite white/red (`Enemy.flashKind`). Characters get a chunky blob shadow
+  (one instanced draw for all).
+- **Gameplay is untouched.** The 3D models keep animating and are the hitboxes;
+  they are only hidden (`root.visible = false`) for the main camera's draw and
+  restored in `endFrame()`, so raycasts, aim assist, AutoPlayer and the
+  simulator see exactly what they saw before. A source without an image yet
+  (just spawned off screen) falls back to its 3D model — never invisible.
+- Tuning: `&spriteLook=k:2,bands:0,outline:0.3,inner:0,rim:0,ss:1,shadows:0`
+  (see `SpriteLook`). A/B captures of the same frozen instant:
+  `node scripts/snap-art.mjs --shots "z1:4,d3:16:6000" --modes "3d,sprites"`;
+  deterministic draw-call / bake numbers: `node scripts/bench-art.mjs`.
+- Cost: a bake is the source's own draw calls + 1; with ~4 bakes per frame the
+  sprite path draws far fewer calls than 3D (characters are drawn ~12×/s instead
+  of 60×/s). Memory: 3 MB scratch + a few KB–1 MB per sprite (≈ 3–5 MB total).
+
 ## Audio
 
 `audio/`: `Audio.ts` (buses, voice pool, pre-render cache, ducking, iOS unlock,
@@ -259,7 +300,8 @@ or new material types mid-stage still compile then: add such lights at build tim
 
 ## Debug URL flags
 
-`?stage=z1` jump into a stage · `&beat=5` start at beat 5 · `&autoplay=1`
+`?stage=z1` jump into a stage · `&art=sprites|3d` character art (Settings ART) ·
+`&spriteLook=k:2` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
 overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor
 mode (`?stage`/`?autoplay` deep links render with retro OFF unless `retro` is

@@ -7,18 +7,20 @@ import { Projectile } from './Projectile';
 import { Pickup } from './Pickup';
 
 /**
- * ART: SPRITES — every character (enemies, bosses, civilians) is drawn as a
- * 2D pixel-art sprite, like the pre-rendered sprites of 90s light-gun games.
+ * ART: SPRITES — every character (enemies, bosses, civilians), plus the things
+ * they throw, the pickups they drop and the limbs they lose, is drawn as a 2D
+ * pixel-art sprite, like the pre-rendered sprites of 90s arcade shooters.
  *
- * Live impostors: about 12 times a second (round-robin, capped per frame) each
- * visible character is re-rendered from the main camera into a small offscreen
- * image — a crop of the main camera's projection around its on-screen bounds,
- * lit by mirrors of the stage's own lights and fog — at ~1.5 retro screen pixels
- * per texel. A bake pass turns that into pixel art (crisp alpha, a 1-px dark
- * outline, luminance posterisation with ordered dithering, a restricted colour
- * palette) and packs each texel's depth into its alpha, so the screen-aligned
- * billboard that shows it writes per-pixel depth: scenery occludes sprites (and
- * sprites each other) exactly like the 3D models would.
+ * Live impostors: about 12 times a second of game time (round-robin, capped per
+ * frame) each visible source is re-rendered from the main camera into a small
+ * offscreen image — the main camera's projection cropped to its on-screen bounds,
+ * lit by mirrors of the stage's own lights, with the stage fog — at ~1.5 retro
+ * screen pixels per texel, 2x supersampled. A bake pass turns that into pixel art
+ * (crisp alpha, a 1-px dark outline, inner contour lines, a top-lit rim,
+ * log-luminance posterisation) and packs each texel's view depth into its alpha,
+ * so the screen-aligned billboard that shows it writes per-pixel depth: scenery
+ * occludes sprites (and sprites each other) like the 3D models would. Characters
+ * get a chunky blob shadow (one instanced draw for all).
  *
  * Gameplay is untouched: the real 3D models keep updating, animating and being
  * raycast (hitboxes, aim assist, AutoPlayer, the simulator); they are only hidden
@@ -33,7 +35,7 @@ const MAX_FIRST_BAKES = 18;
 /** Retro screen pixels per sprite texel (chunkiness), before the size caps. */
 const PX_PER_TEXEL = 1.5;
 /** Sprite size caps in texels (beyond them texels grow: close-ups get chunkier). */
-const MAX_TEX = 224;
+const MAX_TEX = 192;
 const MAX_TEX_BOSS = 448;
 /** Scratch target (raw bake: HDR colour + depth). Must hold the biggest sprite. */
 const SCRATCH = 512;

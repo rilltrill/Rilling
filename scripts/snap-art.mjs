@@ -33,7 +33,8 @@ const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
 });
 const results = [];
-for (const [stage, beat] of shots) {
+// A shot is stage:beat[:afterMs[:a]] — per-shot extra wait after the busy check, 'a' = autoplay on.
+for (const [stage, beat, afterShot, autoShot] of shots) {
   const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
   await page.routeWebSocket(/.*/, () => {});
@@ -47,7 +48,7 @@ for (const [stage, beat] of shots) {
       if (g?.engine?.retro) g.engine.retro.scale = 1;
     }, 50);
   });
-  const auto = args.noauto ? "" : "&autoplay=1";
+  const auto = (autoShot ? autoShot === 'a' : !args.noauto) ? '&autoplay=1' : '';
   const url = `${base}/?stage=${stage}&beat=${beat}&god=1${auto}&retro=${retro}&seed=7&art=sprites&mute=1${extra}`;
   await page.goto(url, { waitUntil: 'load' });
   const t0 = Date.now();
@@ -68,7 +69,8 @@ for (const [stage, beat] of shots) {
     );
     if (busy >= minOn) break;
   }
-  if (args.after) await page.waitForTimeout(Number(args.after));
+  const after = Number(afterShot ?? args.after ?? 0);
+  if (after > 0) await page.waitForTimeout(after);
   const freeze = await page.evaluate(() => {
     const g = window.__game;
     if (!g?.world) return null;

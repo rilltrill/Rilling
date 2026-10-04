@@ -300,7 +300,7 @@ export class Game implements MenuActions {
 
   /** Create / drop the sprite renderer for `w` to match the ART setting (also mid-stage). */
   private syncSprites(w: World) {
-    const want = this.artStyle === 'sprites' && !this.engine.contextLost;
+    const want = this.artStyle === 'sprites';
     if (want && !this.sprites) {
       this.sprites = new SpriteArt(this.engine.renderer, w, () => {
         const { width, height } = this.engine.size;
