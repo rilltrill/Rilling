@@ -437,9 +437,14 @@ const beats: Beat[] = [
       { kind: 'shotgun', pos: [-4.2, 1.3, 6], t: 14 },
       { kind: 'health', pos: [4.2, 1.3, 6], t: 30 },
       { kind: 'health', pos: [-4, 1.3, 6.5], t: 55 },
+      // A long fight (a struggling player) gets more first aid.
+      { kind: 'health', pos: [4, 1.3, 6.5], t: 85 },
+      { kind: 'health', pos: [-4.2, 1.3, 6], t: 112 },
     ],
     waves: [
       { start: { after: 26 }, spawns: [{ type: 'crawler', pos: [-4.5, 0, 9], entry: 'rise' }, { type: 'crawler', pos: [4.5, 0, 10], t: 0.6, entry: 'rise' }] },
+      // Runner + walker together: a second threat while he's winding up.
+      { start: { after: 42 }, spawns: [{ type: 'walker', pos: [-4.6, 0, 10.5], entry: 'rise', opts: { variant: 'office' } }, { type: 'runner', pos: [5.5, 0, 15], t: 0.6 }] },
       { start: { after: 58 }, spawns: [{ type: 'walker', pos: [-5, 0, 11], entry: 'rise', opts: { variant: 'worker' } }, { type: 'runner', pos: [5, 0, 14], t: 0.8 }] },
     ],
   },

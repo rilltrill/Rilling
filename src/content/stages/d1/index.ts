@@ -111,13 +111,11 @@ const beats: Beat[] = [
         spawns: [{ type: 'compy', pos: [-1.5, 0, 18], count: 3, every: 0.3, offset: [1.4, 0, 0.8] }],
       },
       {
-        // The pack proper: three out of the left treeline at once, the leader from the right.
-        start: { atD: 114 },
+        // Two more out of the left treeline, springing as they land.
+        start: { atD: 116 },
         spawns: [
           { type: 'jungle_raptor', pos: [-6.5, 0, 9], entry: 'leap', opts: { variant: 'blue', ambush: true } },
-          { type: 'jungle_raptor', pos: [-7, 0, 14], entry: 'leap', t: 0.25, opts: { variant: 'tan', ambush: true } },
-          { type: 'jungle_raptor', pos: [-8, 0, 11.5], entry: 'leap', t: 0.5, opts: { variant: 'tan', ambush: true } },
-          { type: 'jungle_raptor', pos: [7.5, 0, 12], entry: 'leap', t: 0.8, opts: { variant: 'red', ambush: true } },
+          { type: 'jungle_raptor', pos: [-7, 0, 14], entry: 'leap', t: 0.5, opts: { variant: 'tan', ambush: true } },
         ],
       },
     ],
@@ -134,9 +132,8 @@ const beats: Beat[] = [
         start: { atD: D.FENCE_BREAK - 12 },
         spawns: [
           { type: 'jungle_raptor', pos: [-8.5, 0, 12], entry: 'leap', t: 0.25, opts: { variant: 'red', ambush: true } },
-          { type: 'jungle_raptor', pos: [-9.5, 0, 15], entry: 'leap', t: 0.5, opts: { variant: 'tan', ambush: true } },
-          { type: 'jungle_raptor', pos: [-8, 0, 9.5], entry: 'leap', t: 0.75, opts: { variant: 'tan', ambush: true } },
-          { type: 'jungle_raptor', pos: [-10, 0, 17.5], entry: 'leap', t: 1.1, opts: { variant: 'blue' } },
+          { type: 'jungle_raptor', pos: [-9.5, 0, 15], entry: 'leap', t: 0.65, opts: { variant: 'tan', ambush: true } },
+          { type: 'jungle_raptor', pos: [-8, 0, 9.5], entry: 'leap', t: 1.1, opts: { variant: 'tan' } },
         ],
       },
       {
@@ -242,9 +239,9 @@ const beats: Beat[] = [
     pickups: [{ kind: 'bomb', pos: [-3.5, 2.2, 12], t: 2 }],
     waves: [
       {
-        // A bull trike: its charge only stops when it drops (the frill and horns are armour —
-        // aim for the face), so it takes a couple of seconds of fire on the head.
-        spawns: [{ type: 'trike', pos: [D.CAR_SIDE - 0.5, 0, D.CAR - D.TRIKE_HOLD], entry: 'burst', t: 0.35, hp: 2.5 }],
+        // A big bull (twice the stock hp): it soaks up the opening burst (the frill and horns
+        // are armour), so its charge usually gets going — break it with fire on the face.
+        spawns: [{ type: 'trike', pos: [D.CAR_SIDE - 0.5, 0, D.CAR - D.TRIKE_HOLD], entry: 'burst', t: 0.35, hp: 2 }],
       },
       {
         start: { after: 4, remaining: 0 },
@@ -317,8 +314,7 @@ const beats: Beat[] = [
       {
         spawns: [
           { type: 'jungle_raptor', pos: [-10, 0, 12], entry: 'leap', opts: { variant: 'blue', ambush: true } },
-          { type: 'jungle_raptor', pos: [12, 0, 9], entry: 'leap', t: 0.3, opts: { variant: 'red', ambush: true } },
-          { type: 'jungle_raptor', pos: [-9, 0, 17], entry: 'leap', t: 0.6, opts: { variant: 'tan', ambush: true } },
+          { type: 'jungle_raptor', pos: [12, 0, 9], entry: 'leap', t: 0.6, opts: { variant: 'red', ambush: true } },
           { type: 'compy', pos: [-1.5, 0, 18], count: 3, every: 0.3, offset: [1.5, 0, 0], t: 1.0 },
         ],
       },

@@ -550,7 +550,7 @@ export class Behemoth extends Boss {
    * almost nothing; this keeps the stagger earnable but demands real aim.
    */
   private interruptNeed() {
-    return [11, 12, 13][this.phase] ?? 13;
+    return [8, 9, 10][this.phase] ?? 10;
   }
 
   protected override onPhase(phase: number): void {
@@ -696,7 +696,8 @@ export class Behemoth extends Boss {
         flightTime: kind === 'car' ? (fast ? 1.65 : 1.95) : fast ? 1.4 : 1.6,
         arc: kind === 'car' ? 0.5 : 0.4,
         damage: 1,
-        hp: kind === 'car' ? 4 : 3,
+        // Twin-gun rounds (0.8) to shoot it down: a car takes 4, a slab 3.
+        hp: kind === 'car' ? 3 : 2.2,
         points: kind === 'car' ? 400 : 250,
         mesh,
         size: kind === 'car' ? 1.3 : 1.0,

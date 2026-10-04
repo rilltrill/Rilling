@@ -507,14 +507,17 @@ const beats: Beat[] = toughen([
         ],
       },
       {
+        // The last stand before the giant: a second riot brute vaults the sandbags (left of
+        // centre, away from the cop) and the last pack comes round with it.
         start: { remaining: 1 },
         spawns: [
-          { type: 'pack_runner', pos: [-4.5, 0, -7], entry: 'leap', opts: { variant: 'soldier', pack: 'barr' } },
-          { type: 'pack_runner', pos: [4.5, 0, -7], entry: 'leap', t: 0.4, opts: { variant: 'soldier', pack: 'barr' } },
-          { type: 'pack_runner', pos: [5, 0, -9], entry: 'leap', t: 0.8, opts: { variant: 'soldier', pack: 'barr' } },
+          { type: 'pack_runner', pos: [-4.5, 0, -7], entry: 'leap', opts: { variant: 'soldier', pack: 'barr', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [4.5, 0, -7], entry: 'leap', t: 0.4, opts: { variant: 'soldier', pack: 'barr', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [5, 0, -9], entry: 'leap', t: 0.8, opts: { variant: 'soldier', pack: 'barr', cue: 'brute', wait: 9 } },
           { type: 'bloater', pos: [-1.5, 0, 16], t: 0.9 },
           { type: 'walker', pos: [1, 0, 19], t: 1.3, opts: { variant: 'soldier' } },
           { type: 'walker', pos: [-3, 0, 17], t: 1.8, opts: { variant: 'soldier' } },
+          { type: 'riot_brute', pos: [-5.5, 0, 12], entry: 'leap', t: 2.2, opts: { landAt: [-0.8, 0, 4.1], leapArc: 2.8 } },
         ],
       },
     ],

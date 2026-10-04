@@ -30,12 +30,16 @@ const PUS_BELLY: [number, number, number, number, number][] = [
  * beating heart in the chest and glowing pustules (weak points), glowing eyes
  * (the head is worth much more while he roars).
  *
- * Phase 1 (100–66%): cleaver slams, hook throws, charges.
- * Phase 2 (66–33%):  rips off the apron (3 more pustules), summons walkers,
- *                    adds barrel / car-door throws.
- * Phase 3 (< 33%):   frenzy — faster windups, double slams, hook volleys.
+ * Phase 1 (100–66%): cleaver slams, hook throws, charges (one heart hit stops either).
+ * Phase 2 (66–33%):  rips off the apron (3 more pustules), summons walkers and a
+ *                    runner, adds barrel / car-door throws, two-hook volleys.
+ * Phase 3 (< 33%):   frenzy — faster windups, shorter gaps, three-hook volleys,
+ *                    two heart hits to stop a charge.
+ * Between the phase changes (83% and 50% health) he bellows for help: a roar,
+ * and walkers (the first time with a runner) rise while he keeps attacking.
  * Every attack is telegraphed: slams and charges with the ring on his heart
  * (enough weak-point damage interrupts them), throws as shootable projectiles.
+ * Tuning: BUTCHER_TUNE below.
  */
 
 type Part = { mesh: THREE.Mesh; hp: number; popped: boolean };
@@ -48,6 +52,43 @@ const BLOOD = 0x4a0808;
 
 /** Charge wind-up (s): not shortened by later phases. */
 const CHARGE_WIND = 0.85;
+
+/**
+ * Difficulty knobs (calibrated with the human-like bot, tests/unit/humanbot.test.ts).
+ * Every attack keeps a ring of ≥ 0.8 s on the heart or on the thrown object.
+ */
+export const BUTCHER_TUNE = {
+  /** Damage multiplier on body / limb hits (a missed heart shot still counts for something). */
+  bodyChip: 0.35,
+  /** Weak-point damage that interrupts a slam, by phase (a pistol heart hit = 2, a head hit = 1). */
+  interruptNeed: [2, 4, 4],
+  /** Seconds at the start of a slam's ring in which hits don't count toward the interrupt (they still hurt him). */
+  slamGrace: 0.3,
+  /** ...and a charge (the heart swells 1.5× while he charges). */
+  chargeNeed: [2, 2, 4],
+  /** Extra slams chained after one that lands, by phase. */
+  slamCombo: [0, 0, 0],
+  /**
+   * Health fractions at which he bellows for help (a roar, then minions rise),
+   * between the phase-change summons — tied to his health, not the clock, so a
+   * long fight doesn't bring more of them.
+   */
+  callAt: [0.83, 0.5],
+  callMinions: [
+    ['runner', 'walker'],
+    ['walker', 'walker'],
+  ],
+  /** Shortest charge run after the wind-up (s): the whole charge ring lasts ≥ CHARGE_WIND + this. */
+  chargeMinRun: 0.8,
+  /** Heart scale while the cleaver is up (a bigger target: "shoot it to stop him"). */
+  slamHeartSwell: 1.3,
+  /** Gap after an attack before the next, [min, max] s by phase. */
+  gap: [
+    [1.3, 2.0],
+    [1.0, 1.5],
+    [0.65, 1.05],
+  ] as [number, number][],
+};
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -105,6 +146,9 @@ export class Butcher extends Boss {
   private volley = 0;
   private heavyKind: 'barrel' | 'door' = 'barrel';
   private comboLeft = 0;
+  /** Bellows for help done so far (BUTCHER_TUNE.callAt) and whether the current roar is one. */
+  private calls = 0;
+  private calling = false;
   private apronOff = false;
   private apronVel = new THREE.Vector3();
   private apronSpin = new THREE.Vector3();
@@ -429,7 +473,7 @@ export class Butcher extends Boss {
     if (hit.part === 'weak') return vulnerable ? 1.5 : 1;
     if (hit.part === 'head') return this.mouthOpen() ? 1.2 : 0.4;
     // Body shots chip a little (a missed heart shot still counts for something).
-    return 0.25;
+    return BUTCHER_TUNE.bodyChip;
   }
 
   private mouthOpen(): boolean {
@@ -438,7 +482,8 @@ export class Butcher extends Boss {
 
   protected override onDamaged(hit: ShotHit, amount: number): void {
     if (hit.part === 'weak' || hit.part === 'head') {
-      this.dmgInState += amount;
+      // (Fire already resting on the heart can't cancel a slam the instant its ring shows.)
+      if (this.state !== 'slam' || this.stateTime >= BUTCHER_TUNE.slamGrace) this.dmgInState += amount;
       this.flinchT = Math.min(1.4, this.flinchT + 0.45);
       // Pustules pop after enough damage.
       for (const list of [this.pustules, this.bellyPustules]) {
@@ -497,6 +542,7 @@ export class Butcher extends Boss {
   private go(s: string) {
     this.telegraph = null;
     this.dmgInState = 0;
+    this.calling = false;
     this.roarSfx = false;
     this.fired = false;
     // Only the pick-up → throw sequence may carry a prop; anything else (phase
@@ -546,16 +592,16 @@ export class Butcher extends Boss {
   }
 
   /**
-   * Weak-point damage needed to interrupt a slam / charge: two pistol hits on a
-   * weak spot (weak ×2 → 2 per hit) in every phase.
+   * Weak-point damage needed to interrupt a slam / charge (pistol on a weak spot =
+   * 2 per hit): one heart hit in his first phase (it teaches the move), two later.
    */
   private get interruptNeed() {
-    return this.phase === 0 ? 3 : 4;
+    return BUTCHER_TUNE.interruptNeed[Math.min(this.phase, BUTCHER_TUNE.interruptNeed.length - 1)];
   }
 
-  /** Charges are stopped by one heart hit in phase 1 (it teaches the move), two later. */
+  /** Charges are stopped by one heart hit early on (it teaches the move), two in the frenzy. */
   private get chargeNeed() {
-    return this.phase === 0 ? 2 : this.interruptNeed;
+    return BUTCHER_TUNE.chargeNeed[Math.min(this.phase, BUTCHER_TUNE.chargeNeed.length - 1)];
   }
 
   private standDist() {
@@ -585,7 +631,7 @@ export class Butcher extends Boss {
     this.lastAttack = kind;
     switch (kind) {
       case 'slam':
-        this.comboLeft = this.phase === 2 ? 1 : 0;
+        this.comboLeft = BUTCHER_TUNE.slamCombo[Math.min(this.phase, BUTCHER_TUNE.slamCombo.length - 1)];
         this.go('slamStep');
         break;
       case 'hook':
@@ -684,7 +730,13 @@ export class Butcher extends Boss {
         this.slide(_w, this.speed * this.speedMul, dt, 0.15);
         this.faceToward(_p, dt, 5);
         this.nextAttack -= dt;
-        if (this.nextAttack <= 0) {
+        const callAt = BUTCHER_TUNE.callAt[this.calls];
+        if (callAt !== undefined && this.hp / this.maxHp <= callAt) {
+          // Bellow for help (minions rise as he roars).
+          this.calls++;
+          this.go('roar');
+          this.calling = true;
+        } else if (this.nextAttack <= 0) {
           this.startAttack(this.chooseAttack());
         } else if (this.age > 10 && this.world.rng.chance(dt * 0.04)) {
           this.go('roar');
@@ -795,9 +847,10 @@ export class Butcher extends Boss {
           // Fair in every phase: a fixed 0.85 s wind-up and a run of at least
           // 0.7 s, so there is always ≥ 1.5 s to land the weak-point hits that
           // trip him (one in phase 1, two later; the heart swells as a target).
+          const minRun = BUTCHER_TUNE.chargeMinRun;
           const dist = Math.max(0, this.relOf(this.root.position).fwd - 2.7);
-          const runSpeed = Math.min(6.5 * this.speedMul, dist / 0.7);
-          this.chargeDur = CHARGE_WIND + (runSpeed > 0 ? dist / runSpeed : 0.7);
+          const runSpeed = Math.min(6.5 * this.speedMul, dist / minRun);
+          this.chargeDur = CHARGE_WIND + (runSpeed > 0 ? dist / runSpeed : minRun);
           this.chargeT = 0;
         }
         this.chargeT += dt;
@@ -807,9 +860,12 @@ export class Butcher extends Boss {
           break;
         }
         if (t > CHARGE_WIND) {
+          // One continuous ring from the roar to the impact (the run doesn't restart it).
           const carried = this.dmgInState;
+          const ring = this.telegraph;
           this.go('charge');
           this.dmgInState = carried;
+          this.telegraph = ring;
         }
         break;
       }
@@ -849,7 +905,8 @@ export class Butcher extends Boss {
         this.faceToward(_p, dt, 4);
         if (t > 0.2 && !this.roarSfx) {
           this.roarSfx = true;
-          this.roarFx(0.9);
+          this.roarFx(this.calling ? 1.05 : 0.9);
+          if (this.calling) this.summon(BUTCHER_TUNE.callMinions[(this.calls - 1) % BUTCHER_TUNE.callMinions.length]);
         }
         if (t > 1.7) {
           this.nextAttack = Math.min(this.nextAttack, 0.6);
@@ -868,7 +925,7 @@ export class Butcher extends Boss {
         if (p === 1 && t > 0.55 && !this.apronOff) this.ripApron();
         if (t > 1.0 && !this.roarSfx) {
           this.roarSfx = true;
-          if (p === 1) this.summon(['walker', 'walker', 'walker']);
+          if (p === 1) this.summon(['walker', 'runner', 'walker']);
           else this.summon(['walker', 'crawler', 'walker', 'runner']);
           if (p === 2) {
             // Restore + forget cached materials first so a hit-flash can't revert the swap.
@@ -890,8 +947,8 @@ export class Butcher extends Boss {
   }
 
   private cooldown() {
-    const r = this.world.rng;
-    return this.phase === 0 ? r.range(1.5, 2.3) : this.phase === 1 ? r.range(1.1, 1.7) : r.range(0.7, 1.2);
+    const [a, b] = BUTCHER_TUNE.gap[Math.min(this.phase, BUTCHER_TUNE.gap.length - 1)];
+    return this.world.rng.range(a, b);
   }
 
   private updateChargeTelegraph() {
@@ -950,6 +1007,11 @@ export class Butcher extends Boss {
   private throwHook() {
     this.hookInHand.visible = false;
     const from = this.launchFrom(this.hookInHand, 0.45);
+    if (this.phase > 0) {
+      // Volleys fan out (left, right, centre) so a hook never flies hidden behind the one before it.
+      const h = this.world.rig.space.rotation.y;
+      from.addScaledVector(_r.set(Math.cos(h), 0, -Math.sin(h)), ((this.volley % 3) - 1) * 0.45);
+    }
     const ft = (this.phase === 0 ? 1.65 : this.phase === 1 ? 1.45 : 1.25) + (this.volley > 1 ? 0.1 * this.volley : 0);
     this.throwProjectile(from, {
       mesh: this.thrownHook.clone(),
@@ -1035,7 +1097,7 @@ export class Butcher extends Boss {
     // Heart beat + pustule throb.
     const bpm = this.phase === 0 ? 1.2 : this.phase === 1 ? 1.6 : 2.2;
     const beat = Math.pow(Math.max(0, Math.sin(a * Math.PI * 2 * bpm)), 6);
-    this.heartSwell = damp(this.heartSwell, s === 'chargeWind' || s === 'charge' ? 1.5 : 1, 8, dt);
+    this.heartSwell = damp(this.heartSwell, s === 'chargeWind' || s === 'charge' ? 1.5 : s === 'slam' ? BUTCHER_TUNE.slamHeartSwell : 1, 8, dt);
     const hs = this.heartSwell;
     this.heart.scale.set((1 + beat * 0.25) * hs, (1.15 + beat * 0.3) * hs, (0.9 + beat * 0.2) * hs);
     for (let i = 0; i < this.allPustules.length; i++) {

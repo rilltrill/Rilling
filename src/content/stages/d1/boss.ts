@@ -22,17 +22,24 @@ import { JungleRaptor } from './pack';
  *   attacks     : RAM (head down, paws, charges)      — ring on the head
  *                 BITE (rears up, jaws wide)           — ring on the head, throat exposed
  *                 TAIL SWEEP (phase 2+, from the side) — ring on the tail
- *                 ROCK FLING (phase 2+, shootable rocks)
+ *                 ROCK FLING (phase 2+, a volley of shootable rocks)
  *   Every windup is interrupted by landing enough hits before the ring closes
  *   (the beast stumbles, jaws open → free hits on the throat). The stagger meter
- *   counts raw gun damage weighted by where it lands — eyes/throat ×2, head ×1,
- *   body ×0.3 — so ~3 eye hits (a 3 taps/s player can do it) stop a ram or bite;
- *   during the tail sweep the ring sits on the tail and tail hits count in full.
+ *   counts raw gun damage weighted by where it lands — eyes/throat ×2, the rest
+ *   of the head ×0.15, body ×0.05 — and only after a short grace (DEVIL_TUNE):
+ *   fire already resting on the eyes can't cancel a ring the instant it shows, it
+ *   takes ~5 eye hits of steady fire (≈ 0.35 s of the mounted gun on target), so
+ *   a ram or bite breaks around 0.8 s into its 1.2–1.9 s ring for a player who
+ *   keeps the gun on the eyes. During the tail sweep the ring sits on the tail and
+ *   tail hits count in full. The intro roar prompts SHOOT ITS GLOWING EYES!
  *   Fairness with the mounted gun: every windup/throw starts only when its ring is
  *   inside the play area (not under the HUD or the boss bar) and vents the turret,
  *   so an overheat lockout can never eat a telegraph. Rocks are lobbed low enough
  *   that their whole flight stays on screen (see Boulder).
- *   phase 2 : roars and calls the raptor pack.  phase 3 : frenzy (faster, chains).
+ *   phase 2 : roars and calls the raptor pack; raptors on screen pounce alongside
+ *             its windups (JungleRaptor.rally); attacks may chain.
+ *   phase 3 : frenzy (faster, more chains, bigger rock volleys).
+ *   mercy   : on the last two hearts its rings break much sooner (DEVIL_TUNE.mercy).
  *   death   : tumbles off the road into the river.
  */
 
@@ -69,24 +76,34 @@ const VENT_HEAT = 0.3;
  * throat hit fills 1.6, the rest of the head barely anything.
  */
 export const DEVIL_TUNE = {
+  /** Health: ≈ 60–75 s of fight for a decent mounted-gun player (three ~20 s phases). */
+  hp: 420,
+  /** Damage multiplier on the weak points while it stumbles / roars (jaws hanging open). */
+  openBonus: 1.25,
   /**
    * Seconds at the start of a windup in which hits don't fill the stagger meter:
    * fire already resting on the eyes can't cancel the ring the instant it shows —
    * the player has to keep it there. (The ring is up from its first frame and the
-   * grace overlaps a 0.25–0.4 s reaction, so it costs a reacting player nothing.)
+   * grace overlaps a 0.25–0.4 s reaction, so it costs a reacting player little.)
    */
-  grace: 0.4,
+  grace: 0.45,
   /**
-   * Meter that breaks a ram / bite, by phase: 5 eye or throat hits after the grace
-   * (≈ 0.35 s of mounted-gun fire on the eyes) — a ram (1.9 s) or a bite (1.45 s,
-   * 1.23 s in a frenzy) breaks at ≈ 0.8 s with steady fire on the weak point;
-   * hosing the skull or the body doesn't stop it.
+   * Meter that breaks a RAM, by phase: 5 eye hits after the grace (≈ 0.35 s of
+   * mounted-gun fire on the eyes, 14 rounds/s). The ram's ring is the longest
+   * (1.9 s; 1.75 s / 1.6 s in phases 2 / 3): steady fire on the eyes breaks it
+   * ≈ 0.8 s in; hosing the skull or the body doesn't stop it.
    */
-  guard: [6.6, 7, 7.4],
-  /** Meter that breaks a tail sweep (ring on the tail; tail and eye hits count in full): ≈ 5–6 tail hits. */
+  ramGuard: [6.6, 7, 7.4],
+  /**
+   * Meter that breaks a BITE (shorter ring: 1.45 s; 1.33 s / 1.23 s in phases
+   * 2 / 3; the open throat counts as a weak point too): 4–5 eye/throat hits
+   * after the grace, ≈ 0.3–0.35 s of fire on target — it breaks ≈ 0.8 s in.
+   */
+  biteGuard: [6.4, 6.6, 6.8],
+  /** Meter that breaks a tail sweep (ring on the tail; tail, body and eye hits count in full): ≈ 5–6 tail hits. */
   tailGuard: [4.6, 4.6, 5.2],
   /** Stumble (jaws hanging open) after a broken attack. */
-  stumble: 1.1,
+  stumble: 1.0,
   /** Chase time before the next attack after a stumble / after an attack, by phase. */
   stumbleGap: [1.1, 1.0, 0.6],
   gap: [1.9, 1.5, 1.1],
@@ -97,12 +114,14 @@ export const DEVIL_TUNE = {
   /** Raptors on screen called into a pounce alongside each ram / bite / sweep, by phase. */
   rally: [0, 1, 2],
   /**
-   * Arcade mercy: on the last heart a ring breaks sooner (shorter grace, lighter
-   * meter), so one bad patch near the end doesn't snowball into a continue.
+   * Arcade mercy, by hearts left: on the last two hearts a ring breaks much
+   * sooner (short grace, lighter meter: ≈ 3 eye hits), so one bad patch doesn't
+   * snowball into a continue. [hearts ≤, grace, meter ×]
    */
-  mercyHp: 1,
-  mercyGrace: 0.15,
-  mercyGuard: 0.6,
+  mercy: [
+    [1, 0.15, 0.55],
+    [2, 0.2, 0.65],
+  ] as [number, number, number][],
 };
 
 /**
@@ -246,7 +265,7 @@ export class Carnotaur extends Boss {
   protected override configure(): void {
     this.name = 'carnotaur';
     // Tuned for the heat-limited turret: autoplayer ≈ 60 s, decent human ≈ 60–90 s.
-    this.maxHp = 360;
+    this.maxHp = DEVIL_TUNE.hp;
     this.speed = 7;
     this.points = 6000;
     this.sfxHit = 'hit_flesh';
@@ -478,7 +497,7 @@ export class Carnotaur extends Boss {
   // ─── Damage ───────────────────────────────────────────────────────────────
 
   protected override damageMultiplier(hit: ShotHit): number {
-    const bonus = this.state === 'stumble' || this.state === 'roar' ? 1.4 : 1;
+    const bonus = this.state === 'stumble' || this.state === 'roar' ? DEVIL_TUNE.openBonus : 1;
     switch (hit.part) {
       case 'weak':
         return 1 * bonus;
@@ -528,7 +547,7 @@ export class Carnotaur extends Boss {
     if (obj.isMesh) this.flashMesh(obj, hit.part === 'weak' ? 0.07 : 0.035);
     this.flinchVel = Math.min(4, this.flinchVel + clamp(amount * (hit.part === 'weak' ? 0.9 : 0.35), 0, 1.6));
     if (hit.part === 'weak') this.world.fx.sparks(hit.point, hit.normal, 3);
-    if (this.winding && this.stateTime >= (this.mercy() ? DEVIL_TUNE.mercyGrace : DEVIL_TUNE.grace)) {
+    if (this.winding && this.stateTime >= (this.mercy()?.[1] ?? DEVIL_TUNE.grace)) {
       this.interruptDmg += hit.damage * this.interruptWeight(hit.part);
       if (this.interruptDmg >= this.interruptThreshold()) this.interrupt();
     }
@@ -558,16 +577,19 @@ export class Carnotaur extends Boss {
     }
   }
 
-  /** Turret: ram/bite ≈ 5 eye/throat hits after the grace; tail sweep ≈ 5–6 tail hits (see DEVIL_TUNE). */
+  /** Turret: ram ≈ 5, bite ≈ 4 eye/throat hits after the grace; tail sweep ≈ 5–6 tail hits (see DEVIL_TUNE). */
   private interruptThreshold() {
     const ph = Math.min(this.phase, 2);
-    const k = this.mercy() ? DEVIL_TUNE.mercyGuard : 1;
+    const k = this.mercy()?.[2] ?? 1;
     if (this.state === 'tailWind') return DEVIL_TUNE.tailGuard[ph] * k;
-    return DEVIL_TUNE.guard[ph] * k;
+    if (this.state === 'biteWind') return DEVIL_TUNE.biteGuard[ph] * k;
+    return DEVIL_TUNE.ramGuard[ph] * k;
   }
 
-  private mercy(): boolean {
-    return this.world.player.hp <= DEVIL_TUNE.mercyHp;
+  /** The mercy row for the player's hearts (see DEVIL_TUNE.mercy), or undefined. */
+  private mercy(): [number, number, number] | undefined {
+    const hp = this.world.player.hp;
+    return DEVIL_TUNE.mercy.find((m) => hp <= m[0]);
   }
 
   /**
@@ -715,9 +737,10 @@ export class Carnotaur extends Boss {
     const r = this.world.rng.next();
     const p = this.phase;
     let pick: CState;
-    if (p === 0) pick = r < 0.55 ? 'ramWind' : 'biteWind';
-    else if (p === 1) pick = r < 0.3 ? 'ramWind' : r < 0.6 ? 'biteWind' : r < 0.85 ? 'flank' : 'scoop';
-    else pick = r < 0.25 ? 'ramWind' : r < 0.5 ? 'biteWind' : r < 0.75 ? 'flank' : 'scoop';
+    // The ram (the longest ring, the bull's signature move) leads every phase.
+    if (p === 0) pick = r < 0.6 ? 'ramWind' : 'biteWind';
+    else if (p === 1) pick = r < 0.35 ? 'ramWind' : r < 0.65 ? 'biteWind' : r < 0.85 ? 'flank' : 'scoop';
+    else pick = r < 0.3 ? 'ramWind' : r < 0.55 ? 'biteWind' : r < 0.78 ? 'flank' : 'scoop';
     if (pick === this.lastAttack && ++this.repeatCount >= 2) {
       pick = pick === 'ramWind' ? 'biteWind' : 'ramWind';
       this.repeatCount = 0;
@@ -854,6 +877,8 @@ export class Carnotaur extends Boss {
         if (first) {
           this.roaringFor = this.pendingRoar;
           w.audio.play('rex_roar', { volume: 1, pitch: this.roaringFor >= 2 ? 1.1 : 0.95 });
+          // Its attacks break only under fire on the weak point: say so up front.
+          if (this.roaringFor === 0) w.hud.prompt('SHOOT ITS GLOWING EYES!');
           if (this.roaringFor === 1) w.hud.prompt('IT CALLED THE PACK!');
           if (this.roaringFor === 2) {
             w.hud.prompt('FRENZY!');
@@ -1123,7 +1148,7 @@ export class Carnotaur extends Boss {
     if (st !== 'intro' && st !== 'leapIn') {
       const left = Math.max(0, D.END - w.rig.d);
       // Seconds of fight a decent player still needs at this health.
-      const expectLeft = 14 + 56 * (this.hp / this.maxHp);
+      const expectLeft = 14 + 64 * (this.hp / this.maxHp);
       const need = left / expectLeft;
       const cruising = st === 'chase' || st === 'flank' || st === 'tailWind' || st === 'stumble';
       desired = cruising ? clamp(need * 1.35, 3.6, 7.5) : clamp(need * 0.7, 2, 4.5);

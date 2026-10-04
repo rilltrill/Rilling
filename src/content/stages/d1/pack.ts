@@ -9,12 +9,17 @@ import { registerEnemy } from '../../registry';
  */
 export const PACK_TUNE = {
   /**
-   * Interrupt damage that breaks an AMBUSH or RALLIED pounce (its red ring): three
-   * body hits or two head hits — a short burst on target (~0.3 s of mounted-gun
-   * fire) instead of the stock raptor's first round. A stock pounce still breaks
-   * at the first round.
+   * Interrupt damage that breaks an AMBUSH pounce (its red ring): three body hits
+   * or two head hits — a short burst on target (~0.3 s of mounted-gun fire)
+   * instead of the stock raptor's first round. A stock pounce still breaks at the
+   * first round.
    */
   guard: 2.4,
+  /**
+   * Interrupt damage that breaks a pounce the Horned Devil called (alongside its own
+   * windup): five body hits or two head hits (~0.4 s of fire) — two rings, two targets.
+   */
+  rallyGuard: 4,
   /** Seconds after landing from the entry leap in which an ambusher may spring straight into its pounce… */
   ambushWindow: 2.5,
   /** …from up to this far beyond its striking range (a longer leap). */
@@ -22,10 +27,10 @@ export const PACK_TUNE = {
   /** A raptor answers the boss's call only if its own attack cooldown is about done. */
   rallyCooldown: 0.6,
   /**
-   * Arcade mercy: on the last heart every pounce breaks at the first round again
-   * (no guard), so one bad patch never snowballs into a continue.
+   * Arcade mercy: on the last two hearts every pounce breaks at the first round
+   * again (no guard), so one bad patch never snowballs into a continue.
    */
-  mercyHp: 1,
+  mercyHp: 2,
 };
 
 const _p = new THREE.Vector3();
@@ -41,18 +46,19 @@ const _p = new THREE.Vector3();
  *  RALLY: the Horned Devil's windup roar calls raptors that could strike right
  *  now into a pounce alongside it (boss phase 2+): two rings, two targets.
  *
- * An ambush / rallied pounce takes a short burst to break (`guard`) instead of
- * the first round. Every pounce only starts when the stock attack rules allow
- * it this frame (in the playable view, clear of the HUD panels and civilians,
- * at range, a free attack slot), so every ring is readable and shootable from
- * its first frame; the leap in is a fair warning too (shots land and kill
- * while it's in the air).
+ * An ambush / rallied pounce takes a short burst to break (`guard` /
+ * `rallyGuard`) instead of the first round, and vents an overheated mounted gun
+ * when it starts. Every pounce only starts when the stock attack rules allow it
+ * this frame (in the playable view, clear of the HUD panels and civilians, at
+ * range, a free attack slot), so every ring is readable and shootable from its
+ * first frame; the leap in is a fair warning too (shots land and kill while it's
+ * in the air).
  */
 export class JungleRaptor extends Raptor {
   /** Interrupt damage taken during the current attack. */
   private meter = 0;
-  /** This pounce is an ambush or was called by the boss: it has a guard. */
-  private guarded = false;
+  /** Guard of the current pounce (an ambush or a pounce the boss called), 0 = a stock pounce. */
+  private guarded = 0;
   /** Seconds left to spring an ambush pounce straight out of the entry leap. */
   private ambushT = 0;
   /** True while a shot is being resolved (stagger() from bombs / continues always applies). */
@@ -69,7 +75,7 @@ export class JungleRaptor extends Raptor {
 
   override setState(s: string) {
     const fromEntry = this.state === 'entry';
-    if (s !== 'windup' && s !== 'pounce') this.guarded = false;
+    if (s !== 'windup' && s !== 'pounce') this.guarded = 0;
     super.setState(s);
     if (fromEntry && s === 'advance' && this.spawn.opts.ambush) this.ambushT = PACK_TUNE.ambushWindow;
   }
@@ -77,7 +83,7 @@ export class JungleRaptor extends Raptor {
   protected override advanceUpdate(dt: number) {
     if (this.ambushT > 0) {
       this.ambushT -= dt;
-      if (this.strikeNow(PACK_TUNE.ambushReach)) {
+      if (this.strikeNow(PACK_TUNE.ambushReach, PACK_TUNE.guard)) {
         this.ambushT = 0;
         return;
       }
@@ -92,7 +98,7 @@ export class JungleRaptor extends Raptor {
    */
   rally(): boolean {
     if (this.removed || !this.hostile || this.state !== 'advance' || this.cooldown > PACK_TUNE.rallyCooldown) return false;
-    return this.strikeNow(0.6);
+    return this.strikeNow(0.6, PACK_TUNE.rallyGuard);
   }
 
   /**
@@ -100,7 +106,7 @@ export class JungleRaptor extends Raptor {
    * playable view, clear of HUD panels and civilians, between the minimum strike
    * distance and `range + reach`, a free attack slot).
    */
-  private strikeNow(reach: number): boolean {
+  private strikeNow(reach: number, guard: number): boolean {
     this.playerPos(_p);
     const pos = this.root.position;
     const dist = Math.hypot(pos.x - _p.x, pos.z - _p.z);
@@ -109,7 +115,7 @@ export class JungleRaptor extends Raptor {
     if (!this.takeSlot()) return false;
     this.cooldown = 0;
     this.setState('windup');
-    this.guarded = true;
+    this.guarded = guard;
     this.ventGun();
     return true;
   }
@@ -147,7 +153,7 @@ export class JungleRaptor extends Raptor {
     if (this.resolvingShot && this.state !== 'dying') {
       const mercy = this.world.player.hp <= PACK_TUNE.mercyHp;
       // A guarded pounce keeps coming (it still flinches and bleeds) until the burst breaks it.
-      if (this.guarded && this.attacking() && !mercy && this.meter < PACK_TUNE.guard) return;
+      if (this.guarded > 0 && this.attacking() && !mercy && this.meter < this.guarded) return;
       this.meter = 0;
     }
     super.stagger();
