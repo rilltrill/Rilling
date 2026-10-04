@@ -24,6 +24,16 @@ const _targets: THREE.Object3D[] = [];
 const _hits: THREE.Intersection[] = [];
 
 /**
+ * The truck's twin gun is locked out (overheated, ~1.1 s to cool). The World vents
+ * it when a BOSS ring opens; the finale's own attackers do the same job by holding
+ * their ring while it cools: a ring only counts down while the player can fire, so
+ * no hit here ever rides on a lockout — the pressure is the rings, not the heat.
+ */
+function gunLocked(w: World): boolean {
+  return w.weapons.overheated;
+}
+
+/**
  * A spitter perched on the overpass deck. Same model, hit zones and bile
  * attack as the roster spitter, but it never walks off its ledge: it holds
  * position, turns to face the truck and spits whenever it is on screen.
@@ -103,6 +113,12 @@ export class TruckRunner extends Runner {
     // or can't shoot: a brute or another runner standing in the line of fire sends it sidestepping.
     if (s === 'windup' && this.state !== 'dying' && (!this.framed() || !this.clearShot())) s = 'advance';
     super.setState(s);
+  }
+
+  /** The ring holds (crouched, ready) while the twin gun is locked out — see gunLocked(). */
+  protected override windupUpdate(dt: number) {
+    if (gunLocked(this.world)) this.stateTime = Math.max(0, this.stateTime - dt);
+    super.windupUpdate(dt);
   }
 
   // ─── Line of fire ──────────────────────────────────────────────────────────
@@ -477,6 +493,12 @@ export class RiotBrute extends Brute {
     if (s === 'windup' && this.state !== 'dying' && this.ringAt && !this.inPlayArea(this.ringAt)) s = 'advance';
     super.setState(s);
     if (s === 'windup' && this.telegraph) this.telegraph.anchor = this.ringAt;
+  }
+
+  /** Fists stay up while the twin gun is locked out: the smash only counts down while you can fire back. */
+  protected override windupUpdate(dt: number) {
+    if (gunLocked(this.world)) this.stateTime = Math.max(0, this.stateTime - dt);
+    super.windupUpdate(dt);
   }
 
   override onShot(hit: ShotHit): ShotOutcome {

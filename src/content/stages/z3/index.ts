@@ -19,10 +19,11 @@ import './minions';
  * bridge → THE BEHEMOTH climbs onto the bridge and chases the truck.
  *
  * As the campaign finale it is the hardest DEAD ZONE stage, tuned with the
- * human-like bot (tests/unit/humanbot.test.ts, seeds 1–12): ≈ 3.5–4 hearts lost
- * at σ 0.03 and ≈ 7–7.5 at σ 0.05 (the challenge of the build the owner played),
- * spread over the riot-brute stops and the boss — the army barricade is the
- * heaviest stop (≈ 1.5 at σ 0.03), and no regular fight regularly costs 3+.
+ * human-like bot (tests/unit/humanbot.test.ts, seeds 1–18): ≈ 3.5 hearts lost
+ * at σ 0.03 and ≈ 7 at σ 0.05 (the challenge of the build the owner played,
+ * without its overheat-lockout hits). A clean aim pays for each riot brute it
+ * doesn't break in time (≈ 1 a stop, 2 at the army barricade, never 3+); a
+ * loose aim also pays the giant, whose wind-ups only a weak-point burst stops.
  */
 
 /** World position at rail distance d, x metres right, y up (for `world: true` spawns/looks). */
@@ -41,14 +42,16 @@ let viewModel: TruckViewModel | null = null;
  * packs that creep up both flanks out of sight and rush together, spitters on
  * the overpass deck, and at every stop a riot brute that can't be staggered by
  * the light rounds. Its pack slips aboard first and lies in wait; the brute
- * vaults in close and the pack comes round both sides with it, so the short
- * runner rings land while the big one soaks fire and heats the barrels. The
- * brute's smash ring closes on its split, glowing skull ("SHOOT THE HEAD!"):
- * the head takes ×2.5, the riot plates only dent (RIOT_ARMOR_DENT), so a
- * body-aimer still gets there, just slower. A player who hosepipes the nearest
- * target gets punished; one who answers the rings in order (and feathers the
- * trigger to keep the barrels cool) stays clean. Every attack still starts
- * framed in the middle band of the screen with a clear line of fire.
+ * vaults in close and the pack comes round both sides with it, so the player
+ * has to answer the short runner rings AND break the big one in time. The
+ * brute's smash ring (2 s) closes on its split, glowing skull ("SHOOT THE
+ * HEAD!"): the head takes ×2.5, the riot plates only dent (RIOT_ARMOR_DENT).
+ * Fire on the head from the moment the ring opens kills it with ~0.3 s to
+ * spare; a body-aimer, or one who hosepipes the runners first, eats the smash.
+ * That is the stops' whole threat (riot_brute is the dial): no attack here
+ * rides on the gun overheating — every ring holds while the barrels are locked
+ * out (minions.ts gunLocked), and every one starts framed in the middle band of
+ * the screen with a clear line of fire.
  */
 const TOUGH: Record<string, number> = {
   walker: 1.6,
@@ -56,7 +59,7 @@ const TOUGH: Record<string, number> = {
   pack_runner: 2,
   crawler: 1.4,
   roadside_crawler: 1.4,
-  riot_brute: 1.8,
+  riot_brute: 2.7,
   bloater: 1.4,
   spitter: 1.4,
   deck_spitter: 1.4,

@@ -9,6 +9,7 @@ import { createEnemy, registerEnemy } from '../../registry';
 import { z1Scene } from './env';
 import { bakeInto, texGlow } from './bake';
 import type { HitPart } from '../../../core/types';
+import type { Projectile } from '../../../gameplay/Projectile';
 
 /** Chest pustules [x, y, z, radius, hp] in chest space; belly ones in spine space. */
 const PUS_CHEST: [number, number, number, number, number][] = [
@@ -33,12 +34,15 @@ const PUS_BELLY: [number, number, number, number, number][] = [
  * Phase 1 (100–66%): cleaver slams, hook throws, charges (one heart hit stops either).
  * Phase 2 (66–33%):  rips off the apron (3 more pustules), summons walkers and a
  *                    runner, adds barrel / car-door throws, two-hook volleys;
- *                    two heart hits to stop a slam or a charge.
+ *                    two heart hits to stop a slam.
  * Phase 3 (< 33%):   frenzy — faster windups, shorter gaps, three-hook volleys,
- *                    and a slam's first 0.5 s of hits don't count (aim, don't spray).
- * At 83%, 50% and 20% health he bellows for help: a roar, and minions rise
- * while he keeps attacking (a runner + walker, two walkers, and in the frenzy a
- * crawler + walker: the last push asks you to split your fire).
+ *                    more slams and charges than throws, two heart hits to stop
+ *                    a charge, and the first hits on a slam's (0.5 s) or a
+ *                    charge's (0.3 s) ring don't count toward stopping it (aim,
+ *                    don't spray).
+ * At 83% and 50% health (between the phase changes) he bellows for help: a
+ * roar, and minions rise while he keeps attacking (a runner + walker, then two
+ * walkers) — you have to split your fire.
  * Every attack is telegraphed: slams and charges with the ring on his heart
  * (enough weak-point damage interrupts them), throws as shootable projectiles.
  * Tuning: BUTCHER_TUNE below.
@@ -72,31 +76,48 @@ export const BUTCHER_TUNE = {
    */
   slamGrace: [0.3, 0.3, 0.5],
   /** ...and a charge (the heart swells 1.5× while he charges). */
-  chargeNeed: [2, 4, 4],
+  chargeNeed: [2, 2, 4],
+  /** Grace at the start of a charge's ring (its wind-up), by phase, as slamGrace. */
+  chargeGrace: [0, 0, 0.3],
+  /** How often he picks each attack, by phase (the frenzy favours the heart-ring attacks over throws). */
+  attackWeights: [
+    { slam: 3.5, hook: 3, charge: 1.6, heavy: 0 },
+    { slam: 3.5, hook: 3, charge: 2.2, heavy: 2.8 },
+    { slam: 4.2, hook: 2.4, charge: 2.8, heavy: 2.0 },
+  ],
   /** Extra slams chained after one that lands, by phase. */
   slamCombo: [0, 0, 0],
   /**
    * Health fractions at which he bellows for help (a roar, then minions rise),
    * on top of the phase-change summons — tied to his health, not the clock, so
-   * a long fight doesn't bring more of them.
+   * a long fight doesn't bring more of them. (A third call at 20% made the
+   * frenzy too busy for good players.)
    */
-  callAt: [0.83, 0.5, 0.2],
+  callAt: [0.83, 0.5],
   callMinions: [
     ['runner', 'walker'],
     ['walker', 'walker'],
-    ['crawler', 'walker'],
   ],
   /** Shortest charge run after the wind-up (s): the whole charge ring lasts ≥ CHARGE_WIND + this. */
   chargeMinRun: 0.8,
   /** Heart scale while the cleaver is up (a bigger target: "shoot it to stop him"). */
   slamHeartSwell: 1.3,
+  /** Sideways spread (m) between the hooks of a volley at release (left, right, centre). */
+  hookFan: 0.45,
+  /**
+   * He whirls the next hook until the previous throw is this far through its
+   * flight (or shot down). Every throw flies at the same spot in front of the
+   * camera, so a hook released sooner flew hidden behind the one before it for up
+   * to ~40% of its flight (the humanbot's shootable check); now ≤ ~20%.
+   */
+  hookClear: 0.8,
   /** Seconds he holds his next attack after the player continues. */
   continueRest: 3,
   /** Gap after an attack before the next, [min, max] s by phase. */
   gap: [
     [1.3, 2.0],
-    [0.9, 1.4],
-    [0.55, 0.95],
+    [1.0, 1.5],
+    [0.65, 1.05],
   ] as [number, number][],
 };
 
@@ -162,6 +183,9 @@ export class Butcher extends Boss {
   /** Bellows for help done so far (BUTCHER_TUNE.callAt) and whether the current roar is one. */
   private calls = 0;
   private calling = false;
+  /** The last thing he threw (a hook waits until it's out of the way) and when this state's hook left his hand. */
+  private lastThrown: Projectile | null = null;
+  private throwT = 0;
   /** No new attack before this age (a breather after a continue). */
   private restUntil = 0;
   private apronOff = false;
@@ -497,8 +521,8 @@ export class Butcher extends Boss {
 
   protected override onDamaged(hit: ShotHit, amount: number): void {
     if (hit.part === 'weak' || hit.part === 'head') {
-      // (Fire already resting on the heart can't cancel a slam the instant its ring shows.)
-      if (this.state !== 'slam' || this.stateTime >= this.slamGrace) this.dmgInState += amount;
+      // (Fire already resting on the heart can't cancel a ring the instant it shows.)
+      if (this.countsTowardInterrupt()) this.dmgInState += amount;
       this.flinchT = Math.min(1.4, this.flinchT + 0.45);
       // Pustules pop after enough damage.
       for (const list of [this.pustules, this.bellyPustules]) {
@@ -625,9 +649,13 @@ export class Butcher extends Boss {
     return BUTCHER_TUNE.interruptNeed[Math.min(this.phase, BUTCHER_TUNE.interruptNeed.length - 1)];
   }
 
-  /** Charges are stopped by one heart hit in his first phase (it teaches the move), two later. */
-  private get slamGrace() {
-    return BUTCHER_TUNE.slamGrace[Math.min(this.phase, BUTCHER_TUNE.slamGrace.length - 1)];
+  /** Charges are stopped by one heart hit early on (it teaches the move), two in the frenzy. */
+  /** Weak-point hits count toward stopping a slam / charge only after its grace (see BUTCHER_TUNE). */
+  private countsTowardInterrupt(): boolean {
+    const p = Math.min(this.phase, 2);
+    if (this.state === 'slam') return this.stateTime >= BUTCHER_TUNE.slamGrace[p];
+    if (this.state === 'chargeWind') return this.stateTime >= BUTCHER_TUNE.chargeGrace[p];
+    return true;
   }
 
   private get chargeNeed() {
@@ -641,11 +669,12 @@ export class Butcher extends Boss {
   private chooseAttack(): string {
     const r = this.world.rng;
     const dist = this.relOf(this.root.position).fwd;
+    const wt = BUTCHER_TUNE.attackWeights[Math.min(this.phase, BUTCHER_TUNE.attackWeights.length - 1)];
     const opts: [string, number][] = [];
-    opts.push(['slam', 3.5]);
-    opts.push(['hook', 3]);
-    if (dist > 6.5) opts.push(['charge', this.phase === 0 ? 1.6 : 2.2]);
-    if (this.phase >= 1) opts.push(['heavy', 2.8]);
+    opts.push(['slam', wt.slam]);
+    opts.push(['hook', wt.hook]);
+    if (dist > 6.5) opts.push(['charge', wt.charge]);
+    if (wt.heavy > 0) opts.push(['heavy', wt.heavy]);
     // Avoid repeating the same thing three times running.
     const filtered = opts.map(([k, w]) => [k, k === this.lastAttack ? w * 0.4 : w] as [string, number]);
     const total = filtered.reduce((n, [, w]) => n + w, 0);
@@ -826,11 +855,13 @@ export class Butcher extends Boss {
       case 'hookWind': {
         this.faceToward(_p, dt, 8);
         const wind = 0.8 * this.windMul;
-        if (t >= wind && !this.fired) {
+        // (Keeps whirling while the previous throw is still in the way.)
+        if (t >= wind && !this.fired && this.hookLaneClear()) {
           this.fired = true;
+          this.throwT = t;
           this.throwHook();
         }
-        if (t > wind + 0.35) {
+        if (this.fired && t > this.throwT + 0.35) {
           this.volley--;
           if (this.volley > 0) {
             this.go('hookWind');
@@ -840,7 +871,7 @@ export class Butcher extends Boss {
             this.go('stalk');
           }
         }
-        if (t > wind + 0.2 && !this.hookInHand.visible) this.hookInHand.visible = true;
+        if (this.fired && t > this.throwT + 0.2 && !this.hookInHand.visible) this.hookInHand.visible = true;
         break;
       }
       case 'heavyPick': {
@@ -976,6 +1007,13 @@ export class Butcher extends Boss {
     }
   }
 
+  /** Is the previous throw out of the way of the next hook (far enough along, or gone)? */
+  private hookLaneClear(): boolean {
+    const prev = this.lastThrown;
+    if (!prev || prev.removed || !prev.telegraph) return true;
+    return prev.telegraph.progress >= BUTCHER_TUNE.hookClear;
+  }
+
   private cooldown() {
     const [a, b] = BUTCHER_TUNE.gap[Math.min(this.phase, BUTCHER_TUNE.gap.length - 1)];
     return this.world.rng.range(a, b);
@@ -1040,10 +1078,10 @@ export class Butcher extends Boss {
     if (this.phase > 0) {
       // Volleys fan out (left, right, centre) so a hook never flies hidden behind the one before it.
       const h = this.world.rig.space.rotation.y;
-      from.addScaledVector(_r.set(Math.cos(h), 0, -Math.sin(h)), ((this.volley % 3) - 1) * 0.45);
+      from.addScaledVector(_r.set(Math.cos(h), 0, -Math.sin(h)), ((this.volley % 3) - 1) * BUTCHER_TUNE.hookFan);
     }
     const ft = (this.phase === 0 ? 1.65 : this.phase === 1 ? 1.45 : 1.25) + (this.volley > 1 ? 0.1 * this.volley : 0);
-    this.throwProjectile(from, {
+    this.lastThrown = this.throwProjectile(from, {
       mesh: this.thrownHook.clone(),
       flightTime: ft,
       arc: this.arcFor(from, 0.6),
@@ -1066,7 +1104,7 @@ export class Butcher extends Boss {
     const from = this.launchFrom(prop, 0.3);
     this.propBarrel.visible = false;
     this.propDoor.visible = false;
-    this.throwProjectile(from, {
+    this.lastThrown = this.throwProjectile(from, {
       mesh: (barrel ? this.thrownBarrel : this.thrownDoor).clone(),
       flightTime: barrel ? 2.0 : 2.1,
       arc: this.arcFor(from, barrel ? 0.6 : 0.5),
@@ -1254,7 +1292,7 @@ export class Butcher extends Boss {
       case 'hookWind': {
         const wind = 0.8 * this.windMul;
         const k = clamp(t / wind, 0, 1);
-        const rel = clamp((t - wind) / 0.25, 0, 1);
+        const rel = this.fired ? clamp((t - this.throwT) / 0.25, 0, 1) : 0;
         // Whirl the hook overhead, then fling it forward.
         shLx = -1.6 * k * (1 - rel) - 0.9 * rel;
         shLz = 0.25 + 0.8 * k * (1 - rel);
