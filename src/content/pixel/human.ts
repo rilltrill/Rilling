@@ -249,6 +249,15 @@ export function paintHuman(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: Hum
       seed: i * 13 + 5,
     });
   }
+  // Arms torn off at the shoulder: the stump is part of the trunk (it wins over the
+  // shirt there), with a knob of bone and blood running down the side.
+  for (const side of [1, -1] as const) {
+    if ((st.severed[side > 0 ? 0 : 1] ?? 0) < 2) continue;
+    const p = f.at(r.chest, side * (shX + 0.02), -0.035, 0);
+    f.ball(p, 0.068 * s, M.gore, { ...T, rag: 0.012 * s, flags: PF.SPIKY, seed: 9 + side, zBias: -0.08, k: 0.02 * s });
+    f.ball(f.at(r.chest, side * (shX + 0.055), -0.03, 0.01), 0.02 * s, M.bone, { ...T, zBias: -0.1, k: 0.004 * s });
+    f.decal(f.at(r.chest, side * shX, -0.06, 0.06), f.at(r.spine, side * 0.17 * b, 0.12, 0.08), 0.03 * s, 0.012 * s, M.blood, { ...T, flags: PF.FLAT, rag: 0.008 * s });
+  }
   // Clothing details (decals: paint only where the trunk is).
   const front = f.facing(f.at(r.spine, 0, 0.25, 0.1), f.dir(r.spine, 0, 0, 1));
   const fz = 0.11 * sb;
@@ -274,14 +283,7 @@ export function paintHuman(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: Hum
   for (const side of [1, -1] as const) {
     const sev = st.severed[side > 0 ? 0 : 1] ?? 0;
     const arm = side > 0 ? r.armL : r.armR;
-    if (sev >= 2) {
-      // Shoulder stump on the trunk.
-      f.layer({ k: 0.02 * s });
-      const p = side > 0 ? shL : shR;
-      f.ball(p, 0.062 * s, M.gore, { part: PART.TORSO, rag: 0.008 * s, flags: PF.SPIKY, seed: 9 + side });
-      f.ball(f.add(p, f.dir(r.chest, side, -0.4, 0), 0.03 * s), 0.016 * s, M.bone, { part: PART.TORSO });
-      continue;
-    }
+    if (sev >= 2) continue; // (stump painted with the trunk)
     const mid = f.depth(f.at(arm.shoulder, 0, -0.25, 0));
     f.layer({ k: 0.035 * s, tone: mid > torsoDepth + 0.05 ? -0.1 : 0 });
     paintArm(f, arm.shoulder, sev >= 1 ? null : arm.elbow, side, L, M, s, st);
@@ -588,8 +590,9 @@ export function paintArm(f: PixelFigure, sh: THREE.Object3D, elbow: THREE.Object
   if (!elbow) {
     // Forearm blown off: ragged stump with a knob of bone.
     const e = f.at(sh, 0, -0.3 * a, 0);
-    f.ball(e, 0.048 * s, M.gore, { ...A, rag: 0.009 * s, flags: PF.SPIKY, seed: 17 + side });
-    f.ball(f.at(sh, 0, -0.345 * a, 0), 0.016 * s, M.bone, A);
+    f.ball(e, 0.052 * s, M.gore, { ...A, rag: 0.01 * s, flags: PF.SPIKY, seed: 17 + side, zBias: -0.05 });
+    f.ball(f.at(sh, 0, -0.35 * a, 0), 0.018 * s, M.bone, { ...A, zBias: -0.08 });
+    f.decal(f.at(sh, 0, -0.27 * a, 0.03), f.at(sh, 0, -0.18 * a, 0.035), 0.03 * s, 0.014 * s, M.blood, { ...A, flags: PF.FLAT, rag: 0.006 * s });
     return;
   }
   const foreMat = L.sleeves === 'long' ? M.sleeve : M.skin;

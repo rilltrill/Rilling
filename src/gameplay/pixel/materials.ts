@@ -75,6 +75,8 @@ export interface PixelMaterial {
   dither: number;
   /** Specular glint strength (wet, leather, plastic). */
   spec: number;
+  /** Third material id (body stripes in their own colour) — 0 = none. */
+  tertiary?: number;
 }
 
 // ─── Colour maths ──────────────────────────────────────────────────────────
@@ -183,7 +185,7 @@ function writeRow(id: number, m: PixelMaterial) {
   table[q] = m.glow ? 255 : 0;
   table[q + 1] = Math.round(Math.min(1, Math.max(0, m.dither * 2)) * 255);
   table[q + 2] = Math.round(Math.min(1, Math.max(0, m.spec)) * 255);
-  table[q + 3] = 255;
+  table[q + 3] = m.tertiary ?? 0;
 }
 
 /**
@@ -292,13 +294,17 @@ export const Mat = {
   camo(hex: number): number {
     return material(`camo|${h6(hex)}`, () => base(makeRamp(hex), PAT.CAMO, { strength: 0.8, scale: 0.12, dither: 0.1 }));
   },
-  /** Reptile hide: scales + body stripes; `belly` = the underside material. */
+  /**
+   * Reptile hide: scales + body stripes; `belly` = the underside material id,
+   * `stripe` = the stripes' own colour (hex; else a darker shade of the hide).
+   */
   hide(hex: number, o: { stripe?: number; belly?: number; stripes?: number; scale?: number } = {}): number {
     return material(`hide|${h6(hex)}|${o.stripe ?? 0}|${o.belly ?? 0}|${o.stripes ?? 0}|${o.scale ?? 0}`, () =>
       base(makeRamp(hex, { light: 0.55, sat: 1.12 }), o.stripes ? PAT.STRIPES : PAT.SCALES, {
         strength: o.stripes ?? 0.6,
         scale: o.scale ?? 0.16,
         secondary: o.belly ?? 0,
+        tertiary: o.stripe !== undefined ? material(`stripe|${h6(o.stripe)}`, () => base(makeRamp(o.stripe!, { light: 0.5, sat: 1.15 }), PAT.SCALES, { strength: 0.4, scale: 0.16, dither: 0.1 })) : 0,
         dither: 0.12,
         spec: 0.15,
       }),

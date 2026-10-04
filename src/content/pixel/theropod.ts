@@ -53,7 +53,7 @@ export function paintTheropod(f: PixelFigure, r: TheroRig, s: TheroSpec, p: Pale
   f.maxTexels = 200;
   const sc = scaleOf(r.pelvis);
   const belly = Mat.hide(p.belly, { scale: 0.2 });
-  const hide = Mat.hide(p.base, { stripes: 0.85, belly, scale: 0.26 / Math.max(0.6, s.stripes / 2) });
+  const hide = Mat.hide(p.base, { stripes: 0.85, belly, stripe: p.stripe, scale: 0.26 / Math.max(0.6, s.stripes / 2) });
   const back = Mat.hide(p.back, { scale: 0.2 });
   const claw = Mat.gloss(p.claw);
   const teeth = Mat.teeth(p.teeth);

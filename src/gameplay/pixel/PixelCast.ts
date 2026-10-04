@@ -297,7 +297,11 @@ const PAINT_FRAG = /* glsl */ `
       // STRIPES: dark bands across u (wobbly), scale speckles, pale belly underneath.
       float wob = vnoise(vec2(bU * 6.0, bV * 9.0) + sd) * 0.5;
       float s = fract(bU / scale + wob);
-      if (s < 0.32) tone -= 0.32 * str;
+      float ter = floor(m2.a * 255.0 + 0.5);
+      if (s < 0.32) {
+        if (ter > 0.5) mat = ter;
+        else tone -= 0.32 * str;
+      }
       vec2 q = uv / 0.035;
       q.x += mod(floor(q.y), 2.0) * 0.5;
       vec2 f = fract(q);
