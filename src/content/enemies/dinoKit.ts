@@ -856,8 +856,8 @@ export function buildTrike(model: THREE.Group, p: Palette = TRIKE_PAL): TrikeRig
   const K = `trike|${p.key}`;
   const meshes: TrikeRig['meshes'] = { head: [], torso: [], limb: [], tail: [], armor: [] };
   // Leg geometry drives the body height.
-  const rear: [number, number] = [0.8, 0.68];
-  const front: [number, number] = [0.64, 0.6];
+  const rear: [number, number] = [0.74, 0.64];
+  const front: [number, number] = [0.6, 0.56];
   const foot = 0.1;
   const hipH = rear[0] * Math.cos(0.12) + rear[1] * Math.cos(0.12) + foot;
   const body = Kit.pivot(model, 0, hipH + 0.08, 0, 'body');
@@ -914,7 +914,7 @@ export function buildTrike(model: THREE.Group, p: Palette = TRIKE_PAL): TrikeRig
   meshes.armor.push(Kit.add(head, hornGeo, mat));
   const frillGeo = dgeo(`${K}|frill`, () => {
     const sc = new Sculpt(0.05, 55);
-    const R = 1.1;
+    const R = 1.05;
     const fp: PaintFn = (x, y, _z, _nx, _ny, nz) => {
       const r = Math.hypot(x, y) / R;
       if (nz < -0.3) return r > 0.8 ? p.back : p.base;
@@ -925,7 +925,7 @@ export function buildTrike(model: THREE.Group, p: Palette = TRIKE_PAL): TrikeRig
       if (r > 0.3 && hash3(Math.round(x * 4), Math.round(y * 4), 1, 5) < 0.22) return p.stripe;
       return r < 0.35 ? p.back : p.base;
     };
-    const tilt = M(0, 0.32, -0.3, -0.85, 0, 0);
+    const tilt = M(0, 0.22, -0.3, -0.85, 0, 0);
     sc.fan(R, -0.3, Math.PI + 0.3, 14, [0.35, 0.68, 1], (i) => (i % 2 ? 1.0 : 0.94), 0.1, fp, tilt);
     // Epoccipital spikes around the rim.
     for (let i = 0; i <= 14; i++) {
@@ -986,7 +986,8 @@ export function buildTrike(model: THREE.Group, p: Palette = TRIKE_PAL): TrikeRig
   for (const isFront of [true, false]) {
     const g = legGeos(isFront);
     for (const side of [1, -1]) {
-      const upper = Kit.pivot(body, side * (isFront ? 0.64 : 0.58), isFront ? -0.42 : -0.08, isFront ? 1.18 : -0.75, 'leg');
+      // Pivot heights put both pairs of feet on the ground at rest (body sits at hipH + 0.08).
+      const upper = Kit.pivot(body, side * (isFront ? 0.64 : 0.58), isFront ? -0.3 : -0.08, isFront ? 1.18 : -0.75, 'leg');
       upper.rotation.z = isFront ? -side * 0.1 : 0;
       meshes.limb.push(Kit.add(upper, g.up, mat));
       const lower = Kit.pivot(upper, 0, -(isFront ? front[0] : rear[0]), 0, 'lowerleg');

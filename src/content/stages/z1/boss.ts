@@ -80,6 +80,7 @@ export class Butcher extends Boss {
   private mouthGlow!: THREE.Mesh;
   private lookPivot = new THREE.Object3D();
   private hookGeo!: THREE.BufferGeometry;
+  private hookGeoBig!: THREE.BufferGeometry;
 
   // AI.
   private nextAttack = 2.0;
@@ -296,6 +297,7 @@ export class Butcher extends Boss {
     bake(this.elL, 'armor', (g) => Kit.add(g, Kit.box(0.42, 0.3, 0.44), mail, 0, -0.66, 0));
     this.handL = Kit.pivot(this.elL, 0, -0.86, 0.05);
     this.hookGeo = Kit.track(new THREE.TorusGeometry(0.2, 0.035, 4, 10, Math.PI * 1.45));
+    this.hookGeoBig = Kit.track(new THREE.TorusGeometry(0.32, 0.075, 5, 10, Math.PI * 1.45));
     this.hookInHand = this.makeHook(true);
     this.hookInHand.position.set(0, -0.15, 0);
     this.handL.add(this.hookInHand);
@@ -315,15 +317,19 @@ export class Butcher extends Boss {
 
   private makeHook(withChain: boolean): THREE.Group {
     const g = new THREE.Group();
+    // Held hooks are small; thrown ones are chunky so they read (and can be hit) mid-air.
+    const k = withChain ? 1 : 1.6;
     bakeInto(g, (b) => {
-      const iron = Kit.mat(0x8a8e95);
+      const iron = Kit.mat(0xa4a8ae);
       if (withChain) for (let i = 0; i < 3; i++) Kit.add(b, Kit.box(0.06, 0.12, 0.03), iron, 0, -i * 0.12, 0, 0, i % 2 ? Math.PI / 2 : 0, 0);
-      const hk = new THREE.Mesh(this.hookGeo, iron);
+      const hk = new THREE.Mesh(withChain ? this.hookGeo : this.hookGeoBig, iron);
       hk.position.set(0.02, withChain ? -0.55 : 0, 0);
       hk.rotation.set(0, 0, Math.PI * 0.85);
       b.add(hk);
-      Kit.add(b, Kit.cone(0.05, 0.14, 5), iron, 0.2, withChain ? -0.48 : 0.07, 0, 0, 0, 0.4);
-      Kit.add(b, Kit.box(0.08, 0.05, 0.05), Kit.mat(0x5a0a0a), 0.18, withChain ? -0.62 : -0.06, 0);
+      Kit.add(b, Kit.cone(0.05 * k, 0.14 * k, 5), iron, 0.2 * k, withChain ? -0.48 : 0.07 * k, 0, 0, 0, 0.4);
+      // Shank + rusty blood.
+      Kit.add(b, Kit.box(0.07 * k, 0.32 * k, 0.07 * k), iron, -0.17 * k, withChain ? -0.4 : 0.15 * k, 0, 0, 0, 0.2);
+      Kit.add(b, Kit.box(0.1 * k, 0.06 * k, 0.08 * k), Kit.mat(0x7a0a0a), 0.18 * k, withChain ? -0.62 : -0.06 * k, 0);
     });
     return g;
   }
@@ -410,6 +416,21 @@ export class Butcher extends Boss {
 
   // ─── AI helpers ───────────────────────────────────────────────────────────
 
+  /** Like moveToward but never turns the body (he always squares up to the player). */
+  private slide(target: THREE.Vector3, speed: number, dt: number, stopAt = 0): number {
+    _v.set(target.x - this.root.position.x, 0, target.z - this.root.position.z);
+    const dist = _v.length();
+    const remaining = dist - stopAt;
+    if (remaining <= 0.001) {
+      this.moveSpeed = 0;
+      return Math.max(0, remaining);
+    }
+    const step = Math.min(remaining, speed * dt);
+    this.root.position.addScaledVector(_v, step / dist);
+    this.moveSpeed = dt > 0 ? step / dt : 0;
+    return remaining - step;
+  }
+
   private go(s: string) {
     this.telegraph = null;
     this.dmgInState = 0;
@@ -440,7 +461,12 @@ export class Butcher extends Boss {
   }
 
   private get windMul() {
-    return this.phase === 0 ? 1 : this.phase === 1 ? 0.88 : 0.72;
+    return this.phase === 0 ? 1 : this.phase === 1 ? 0.9 : 0.8;
+  }
+
+  /** Weak-point damage needed to interrupt a slam / charge: always two pistol hits on a weak spot. */
+  private get interruptNeed() {
+    return this.phase === 0 ? 3 : 4;
   }
 
   private standDist() {
@@ -554,7 +580,7 @@ export class Butcher extends Boss {
         }
         if (t < 1.4) {
           this.rel(0, this.standDist() + 7.5, _w);
-          this.moveToward(_w, 3.2, dt, 0);
+          this.slide(_w, 3.2, dt, 0);
         } else if (!this.roarSfx) {
           this.roarSfx = true;
           this.roarFx(1);
@@ -566,7 +592,7 @@ export class Butcher extends Boss {
       case 'stalk': {
         const sway = Math.sin(this.age * 0.55 + this.strafeSeed) * 2.4;
         this.rel(sway, this.standDist(), _w);
-        this.moveToward(_w, this.speed * this.speedMul, dt, 0.15);
+        this.slide(_w, this.speed * this.speedMul, dt, 0.15);
         this.faceToward(_p, dt, 5);
         this.nextAttack -= dt;
         if (this.nextAttack <= 0) {
@@ -578,17 +604,16 @@ export class Butcher extends Boss {
       }
       case 'slamStep': {
         const rr = this.relOf(this.root.position);
-        this.rel(clamp(rr.right, -1.5, 1.5), 3.3, _w);
-        const rem = this.moveToward(_w, 3.4 * this.speedMul, dt, 0);
+        this.rel(clamp(rr.right, -1.5, 1.5), 4.0, _w);
+        const rem = this.slide(_w, 3.4 * this.speedMul, dt, 0);
         this.faceToward(_p, dt, 8);
         if (rem < 0.15 || t > 3) this.go('slam');
         break;
       }
       case 'slam': {
-        const wind = 1.75 * this.windMul;
+        const wind = 2.0 * this.windMul;
         this.faceToward(_p, dt, 6);
-        const need = 3 + this.phase;
-        if (this.dmgInState >= need) {
+        if (this.dmgInState >= this.interruptNeed) {
           this.interrupted();
           break;
         }
@@ -611,7 +636,7 @@ export class Butcher extends Boss {
       case 'flinch': {
         // Reel back a step.
         this.rel(this.relOf(this.root.position).right, this.relOf(this.root.position).fwd + 1, _w);
-        if (t < 0.5) this.moveToward(_w, 1.8, dt, 0);
+        if (t < 0.5) this.slide(_w, 1.8, dt, 0);
         this.faceToward(_p, dt, 3);
         if (t > 1.35) this.go('backoff');
         break;
@@ -619,7 +644,7 @@ export class Butcher extends Boss {
       case 'backoff': {
         const rr = this.relOf(this.root.position);
         this.rel(rr.right * 0.9, this.standDist(), _w);
-        const rem = this.moveToward(_w, 2.2 * this.speedMul, dt, 0.1);
+        const rem = this.slide(_w, 2.2 * this.speedMul, dt, 0.1);
         this.faceToward(_p, dt, 8);
         if (rem < 0.2 || t > 3.5) {
           this.nextAttack = this.cooldown();
@@ -680,7 +705,7 @@ export class Butcher extends Boss {
         }
         this.chargeT += dt;
         this.updateChargeTelegraph();
-        if (this.dmgInState >= 5 + this.phase) {
+        if (this.dmgInState >= this.interruptNeed + 1) {
           this.stumbled();
           break;
         }
@@ -690,7 +715,7 @@ export class Butcher extends Boss {
       case 'charge': {
         this.chargeT += dt;
         this.updateChargeTelegraph();
-        if (this.dmgInState >= 4 + this.phase) {
+        if (this.dmgInState >= this.interruptNeed + 1) {
           this.stumbled();
           break;
         }
@@ -698,7 +723,7 @@ export class Butcher extends Boss {
         this.rel(clamp(rr.right, -1.2, 1.2), 2.7, _w);
         const remainT = Math.max(0.05, this.chargeDur - this.chargeT);
         const dist = this.root.position.distanceTo(_w);
-        this.moveToward(_w, Math.max(2, dist / remainT), dt, 0);
+        this.slide(_w, Math.max(2, dist / remainT), dt, 0);
         this.faceToward(_p, dt, 10);
         if (this.chargeT >= this.chargeDur) {
           this.telegraph = null;
@@ -714,7 +739,7 @@ export class Butcher extends Boss {
         // Tripped by the damage: down on one knee, heart exposed.
         if (t < 0.4) {
           this.rel(this.relOf(this.root.position).right, Math.max(3, this.relOf(this.root.position).fwd - 0.6), _w);
-          this.moveToward(_w, 2, dt, 0);
+          this.slide(_w, 2, dt, 0);
         }
         if (t > 1.9) this.go('backoff');
         break;
@@ -811,8 +836,8 @@ export class Butcher extends Boss {
       arc: 0.9,
       hp: 1,
       points: 150,
-      size: 0.42,
-      spin: 9,
+      size: 0.5,
+      spin: 8,
       source: this.title,
       burst: 'debris',
       color: 0x8a8f96,
@@ -950,7 +975,7 @@ export class Butcher extends Boss {
         break;
       }
       case 'slam': {
-        const wind = 1.75 * this.windMul;
+        const wind = 2.0 * this.windMul;
         const raise = clamp(t / (wind - 0.2), 0, 1);
         const down = clamp((t - (wind - 0.18)) / 0.18, 0, 1);
         const up = raise * (1 - down);
@@ -1067,6 +1092,10 @@ export class Butcher extends Boss {
       default:
         break;
     }
+
+    // Camera framing: look higher while the cleaver is up, lower when he's down on a knee.
+    const lookY = s === 'slam' || s === 'slamStuck' ? 2.55 : s === 'stumble' ? 1.5 : s === 'charge' || s === 'chargeWind' ? 1.75 : 1.85;
+    this.lookPivot.position.y = damp(this.lookPivot.position.y, lookY, 2.5, dt);
 
     // Hit flinch overlay.
     spineX -= this.flinchT * 0.12;

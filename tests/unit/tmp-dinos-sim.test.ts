@@ -164,18 +164,20 @@ describe('tmp dinos', () => {
   });
 
   it('every attack lands when the player does not shoot', { timeout: 300_000 }, () => {
-    const h = (label: string, spawns: any[]): Beat => ({ kind: 'hold', label, timeout: 20, waves: [{ spawns }] });
-    const st = stage([
-      h('compy', [{ type: 'compy', pos: [-3, 0, 16], count: 4, every: 0.35, offset: [2, 0, 0] }]),
-      h('raptor', [{ type: 'raptor', pos: [-4, 0, 18] }, { type: 'raptor', pos: [4, 0, 18], opts: { variant: 'red' } }]),
-      h('dilo', [{ type: 'dilo', pos: [-5, 0, 18] }]),
-      h('ptero', [{ type: 'ptero', pos: [-8, 10, 30], entry: 'fly' }]),
-      h('trike', [{ type: 'trike', pos: [0, 0, 30] }]),
-    ]);
-    const r = run(st, 5, 200, 0);
-    console.log('noshoot', JSON.stringify({ damage: r.damage, beatTimes: r.beatTimes, errors: r.errors, despawned: r.despawned }, null, 1));
-    expect(r.errors).toEqual([]);
-    for (const k of ['compy', 'raptor', 'dilo', 'ptero', 'trike']) expect(r.damage[k] ?? 0, k).toBeGreaterThan(0);
+    const h = (label: string, spawns: any[]): Beat => ({ kind: 'hold', label, timeout: 25, waves: [{ spawns }] });
+    const cases: [string, any[]][] = [
+      ['compy', [{ type: 'compy', pos: [-3, 0, 16], count: 4, every: 0.35, offset: [2, 0, 0] }]],
+      ['raptor', [{ type: 'raptor', pos: [-4, 0, 18] }, { type: 'raptor', pos: [4, 0, 18], opts: { variant: 'red' } }]],
+      ['dilo', [{ type: 'dilo', pos: [-5, 0, 18] }]],
+      ['ptero', [{ type: 'ptero', pos: [-8, 10, 30], entry: 'fly' }]],
+      ['trike', [{ type: 'trike', pos: [0, 0, 30] }]],
+    ];
+    for (const [k, spawns] of cases) {
+      const r = run(stage([h(k, spawns)]), 5, 30, 0);
+      console.log('noshoot', k, JSON.stringify({ damage: r.damage, errors: r.errors }));
+      expect(r.errors).toEqual([]);
+      expect(r.damage[k] ?? 0, k).toBeGreaterThan(0);
+    }
     const d = stage([
       {
         kind: 'move', label: 'chase', to: 500, speed: 12, mode: 'drive',
@@ -221,6 +223,13 @@ describe('tmp dinos', () => {
       let n = 0;
       e.model.traverse((o) => ((o as THREE.Mesh).isMesh ? n++ : 0));
       counts[id + ((opts as { variant?: string }).variant ?? '')] = n;
+      e.root.rotation.y = 0;
+      e.root.position.set(0, 0, 0);
+      e.update(0);
+      e.root.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(e.model, true);
+      const sz = box.getSize(new THREE.Vector3());
+      console.log(id, 'size w/h/len', sz.x.toFixed(2), sz.y.toFixed(2), sz.z.toFixed(2), 'top', box.max.y.toFixed(2), 'bottom', box.min.y.toFixed(3));
       const parts = new Set(world.shootables.objects.filter((o) => o.userData.shot.owner === e).map((o) => o.userData.shot.part));
       console.log(id, n, [...parts].join(','));
     }

@@ -363,8 +363,9 @@ const beats: Beat[] = [
     pos: [0, 0, 22],
     look: { at: [0, 2.2, 16] },
     pickups: [
-      { kind: 'shotgun', pos: [-4.2, 1.3, 6], t: 18 },
-      { kind: 'health', pos: [4.2, 1.3, 6], t: 42 },
+      { kind: 'shotgun', pos: [-4.2, 1.3, 6], t: 14 },
+      { kind: 'health', pos: [4.2, 1.3, 6], t: 30 },
+      { kind: 'health', pos: [-4, 1.3, 6.5], t: 55 },
     ],
     waves: [
       { start: { after: 26 }, spawns: [{ type: 'crawler', pos: [-4.5, 0, 9], entry: 'rise' }, { type: 'crawler', pos: [4.5, 0, 10], t: 0.6, entry: 'rise' }] },

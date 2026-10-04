@@ -1196,7 +1196,9 @@ export class MenuBackdrop {
   /** Called when thunder should be heard (volume 0..1). */
   onThunder: ((volume: number) => void) | null = null;
   private res: Disposable[] = [];
-  private shots: Record<BackdropTheme, Vignette>;
+  /** Built on demand: the second shot is first needed under the fade to black. */
+  private shots: Partial<Record<BackdropTheme, Vignette>> = {};
+  private shared: Shared;
   private current: BackdropTheme = 'city';
   private locked: BackdropTheme | null = null;
   private t = 0;
@@ -1261,8 +1263,7 @@ export class MenuBackdrop {
     mistTex.wrapS = THREE.RepeatWrapping;
     const brng = new Lcg(9);
     const bolts = [0, 1, 2].map(() => own(boltGeometry(brng)));
-    const shared: Shared = { own, glowTex, puffTex, mistTex, bolts };
-    this.shots = { city: buildCity(shared), jungle: buildJungle(shared) };
+    this.shared = { own, glowTex, puffTex, mistTex, bolts };
 
     this.fadeMat = own(
       new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 1, depthTest: false, depthWrite: false, fog: false }),
@@ -1273,7 +1274,16 @@ export class MenuBackdrop {
     this.fadeMesh.renderOrder = 1000;
     this.fadeMesh.frustumCulled = false;
     this.camera.add(this.fadeMesh);
-    this.shots.city.reset();
+    this.shot('city').reset();
+  }
+
+  private shot(theme: BackdropTheme): Vignette {
+    let v = this.shots[theme];
+    if (!v) {
+      v = theme === 'city' ? buildCity(this.shared) : buildJungle(this.shared);
+      this.shots[theme] = v;
+    }
+    return v;
   }
 
   get theme(): BackdropTheme {
@@ -1294,10 +1304,10 @@ export class MenuBackdrop {
     if (this.t >= SHOT) {
       this.t = 0;
       this.current = this.locked ?? (this.current === 'city' ? 'jungle' : 'city');
-      this.shots[this.current].reset();
+      this.shot(this.current).reset();
       this.strikeT = -1;
     }
-    const v = this.shots[this.current];
+    const v = this.shot(this.current);
     const cam = this.camera;
     if (cam.parent !== v.scene) v.scene.add(cam);
     const aspect = width / Math.max(1, height);
@@ -1343,7 +1353,7 @@ export class MenuBackdrop {
 
   render(renderer: THREE.WebGLRenderer) {
     if (this.disposed) return;
-    renderer.render(this.shots[this.current].scene, this.camera);
+    renderer.render(this.shot(this.current).scene, this.camera);
   }
 
   dispose() {
@@ -1351,6 +1361,6 @@ export class MenuBackdrop {
     this.disposed = true;
     for (const r of this.res) r.dispose();
     this.res = [];
-    for (const v of Object.values(this.shots)) v.scene.clear();
+    for (const v of Object.values(this.shots)) v?.scene.clear();
   }
 }

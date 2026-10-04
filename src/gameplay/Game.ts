@@ -162,6 +162,11 @@ export class Game implements MenuActions {
     this.world = w;
     this.shooter = new Shooter(w);
     this.runner = new StageRunner(w, stage);
+    // HUD wiring first: the opening beat (usually a banner, or a boss when
+    // debugging with ?beat=) talks to the HUD from inside runner.start().
+    this.hud.reset();
+    w.events.on('boss-start', ({ boss }) => this.hud.bossIntro(boss.title));
+    w.events.on('player-hurt', () => this.showHurtDirection());
     try {
       this.runner.start(this.flags.beat ?? 0);
     } catch (err) {
@@ -170,7 +175,6 @@ export class Game implements MenuActions {
     }
     this.autoplay = this.flags.autoplay ? new AutoPlayer(w, this.shooter) : null;
     this.clearTimer = -1;
-    this.hud.reset();
     w.weapons.onChange = () => this.audio.play('ui_click', { volume: 0.4 });
     w.weapons.onReloadDone = () => this.audio.play('reload_done', { volume: 0.7 });
     w.score.onMultiplier = (m) => {
@@ -180,8 +184,6 @@ export class Game implements MenuActions {
     w.events.on('player-dead', () => this.onPlayerDead());
     w.events.on('stage-clear', () => (this.clearTimer = 1.8));
     w.events.on('boss-dead', () => this.music(null));
-    w.events.on('boss-start', ({ boss }) => this.hud.bossIntro(boss.title));
-    w.events.on('player-hurt', () => this.showHurtDirection());
     const campaign = this.run?.campaign ?? this.findStage(stage.id)!.campaign;
     this.music(stage.music ?? (campaign.id === 'zombie' ? 'zombie' : 'dino'));
     // Render one frame so the intro card has the scene behind it.

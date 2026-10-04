@@ -20,6 +20,11 @@
   </head>
   <body>
     <div id="app">
+      <!-- Shown while the bundle loads; the opaque game canvas paints over it. -->
+      <div id="boot-splash" aria-hidden="true">
+        <div class="bs-logo">OVERRUN</div>
+        <div class="bs-bar"><i></i></div>
+      </div>
       <div id="stage"></div>
       <div id="play-surface"></div>
       <div id="hud-layer"></div>

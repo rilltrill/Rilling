@@ -244,7 +244,7 @@ export class JungleEnv {
   private buildBackdrop() {
     const b = this.backdrop;
     this.root.add(b);
-    b.add(EnvKit.sky(0x3f8fd6, 0xcfe4dc, 0xa8c4b0, 330));
+    b.add(EnvKit.sky(0x2f7fd0, 0xc6dfd6, 0xa8c4b0, 330));
     const rng = new Rng(77);
     // Mountain ring (unfogged, pre-hazed colours).
     const far = new THREE.Group();
@@ -256,13 +256,6 @@ export class JungleEnv {
       const wdt = rng.range(70, 120);
       const col = rng.chance(0.5) ? 0x86a59b : 0x9bb6ae;
       Kit.add(far, cone, Kit.mat(col, { fog: false }), Math.sin(a) * r, h / 2 - 6, Math.cos(a) * r, 0, rng.next() * 6, 0, wdt, h, wdt * 0.8);
-    }
-    // Closer jungle-covered hills.
-    for (let i = 0; i < 16; i++) {
-      const a = (i / 16) * Math.PI * 2 + rng.spread(0.15);
-      const r = rng.range(190, 220);
-      const h = rng.range(22, 40);
-      Kit.add(far, this.flora.blob(rng), Kit.mat(0x6f9480, { fog: false }), Math.sin(a) * r, h * 0.3, Math.cos(a) * r, 0, rng.next() * 6, 0, rng.range(40, 60), h, rng.range(30, 45));
     }
     // The volcano, ahead and to the left of the road.
     const vx = -95;
@@ -448,13 +441,16 @@ export class JungleEnv {
       layer('rock', 14, [4.6, 16], (r) => f.rock(r, r.range(0.5, 1.4)));
       // Meadow extras: cycads, tall grass, lone trees and far treeline.
       if (c1 > D.MEADOW_FROM && c0 < D.MEADOW_TO) {
-        for (let k = 0; k < 26; k++) {
+        for (let k = 0; k < 44; k++) {
           const d = rng.range(Math.max(c0, D.MEADOW_FROM), Math.min(c1, D.MEADOW_TO));
-          const l = rng.spread(44);
+          const l = rng.spread(46);
           const p = this.P(d, l);
           if (Math.abs(l) < 5 || Math.abs(d - D.STAMPEDE_CROSS) < 10) continue;
           if (Math.hypot(d - D.CAR, l - D.CAR_SIDE) < 7) continue;
-          const o = rng.chance(0.55) ? f.grass(rng) : rng.chance(0.6) ? f.cycad(rng) : f.rock(rng, rng.range(0.4, 1));
+          const x = rng.next();
+          const far = Math.abs(l) > 16;
+          const o =
+            x < 0.38 ? f.grass(rng) : x < 0.6 ? f.cycad(rng) : x < 0.75 ? f.fern(rng, 1.3) : x < 0.85 && far ? f.palm(rng) : f.rock(rng, rng.range(0.4, 1));
           o.position.add(p);
           o.scale.multiplyScalar(rng.range(1, 1.5));
           sideGroup(l).add(o);
@@ -484,10 +480,10 @@ export class JungleEnv {
     // Dilo hiding bushes at the fallen tree, and the boulder for the bomb pickup in the meadow.
     const extra = new THREE.Group();
     for (const [d, l, s] of [
-      [D.TREE - 2, -7.6, 1.7],
-      [D.TREE - 1.5, 7.8, 1.6],
-      [D.TREE - 6, -9.5, 1.4],
-      [D.TREE - 5, 10.5, 1.5],
+      [D.TREE - 2, -7.6, 1.25],
+      [D.TREE - 1.5, 7.8, 1.2],
+      [D.TREE - 6, -9.5, 1.1],
+      [D.TREE - 5, 10.5, 1.15],
     ] as [number, number, number][]) {
       const b = f.bush(rng, s, true);
       b.position.copy(this.P(d, l));

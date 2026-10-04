@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import { Rng } from '../../../core/Rng';
 import { EnvKit } from '../../kit/EnvKit';
+import { bakeMerge } from './bake';
 
 /**
  * Cheap atmospheric effects for MAIN STREET: fake light pools and volumetric
@@ -453,6 +454,13 @@ export function nightSky(moonDir: THREE.Vector3, horizon: number, top: number): 
     cm2.scale.set(1, 1, 0.3);
     cm2.lookAt(moonPos.clone().multiplyScalar(2));
     cm2.renderOrder = -1;
+  }
+  // Moon + craters → one draw call.
+  {
+    const mg = new THREE.Group();
+    for (const o of [...g.children]) if (o !== dome) mg.add(o);
+    bakeMerge(mg);
+    g.add(mg);
   }
   const halo = new THREE.Mesh(
     Kit.plane(70, 70),

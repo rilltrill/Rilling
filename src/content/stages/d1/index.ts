@@ -243,13 +243,13 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'river ford',
     look: { at: [0, 1.6, 13], blend: 0.8 },
-    civilians: [{ pos: [4.2, 0, 5.2], variant: 'scientist' }],
+    civilians: [{ pos: [5.4, 0, 7], variant: 'scientist' }],
     pickups: [{ kind: 'health', pos: [-3.5, 2.6, 11], t: 1 }],
     waves: [
       {
         spawns: [
           { type: 'compy', pos: [-5.5, 0, 8.5], entry: 'leap' },
-          { type: 'compy', pos: [5.8, 0, 10], entry: 'leap', t: 0.4 },
+          { type: 'compy', pos: [3.5, 0, 11], entry: 'leap', t: 0.4 },
           { type: 'compy', pos: [-7, 0, 14], entry: 'leap', t: 0.9 },
           { type: 'compy', pos: [7.5, 0, 15], entry: 'leap', t: 1.3 },
           { type: 'compy', pos: [0, 0, 17], entry: 'leap', t: 1.7 },

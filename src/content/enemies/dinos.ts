@@ -524,7 +524,7 @@ export class Compy extends Theropod {
     this.sfxAttack = 'compy_chirp';
     this.sfxDie = null;
     this.bloodColor = 0x8a1010;
-    this.idleCall = { name: 'compy_chirp', pitch: rng.range(0.9, 1.25), vol: 0.45, min: 1.5, max: 5 };
+    this.idleCall = { name: 'compy_chirp', pitch: rng.range(0.9, 1.25), vol: 0.4, min: 2.5, max: 7 };
     this.strideLen = 0.42;
     this.maxFreq = 6;
     this.runRef = 2.5;
@@ -561,8 +561,8 @@ export class Compy extends Theropod {
       footH: 0.014,
       hips: [0.072, 0.085, 0.11],
       torso: { len: 0.21, r0: [0.078, 0.092], r1: [0.058, 0.07], rise: 0.04 },
-      neck: { lens: [0.16], r0: [0.04, 0.045], r1: [0.03, 0.034], rest: [-0.95] },
-      headRest: 0.8,
+      neck: { lens: [0.16], r0: [0.04, 0.045], r1: [0.03, 0.034], rest: [-0.65] },
+      headRest: 0.55,
       skull: { len: 0.07, r: [0.038, 0.042] },
       snout: { len: 0.07, r1: [0.016, 0.016], drop: 0.01 },
       jaw: { len: 0.095, r0: [0.028, 0.015], r1: [0.012, 0.008] },
@@ -751,7 +751,7 @@ export class Raptor extends Theropod {
       teeth: 8,
       sickle: true,
       quills: alpha ? 1.35 : 0.5,
-      eyeSize: 0.044,
+      eyeSize: 0.038,
     };
   }
 
@@ -825,6 +825,7 @@ export class Dilo extends Theropod {
     this.weaveFreq = 0.8;
     this.lieHeight = 0.17;
     this.landDust = 0.7;
+    this.modelScale = 0.9;
   }
 
   protected makeSpec(): TheroSpec {
@@ -1045,6 +1046,7 @@ export class Ptero extends Dino {
   private lookYaw = 0;
   private jawOpen = 0;
   private lastFlap = 0;
+  private lastCry = -1;
   private seed = 0;
 
   protected override configure() {
@@ -1263,7 +1265,7 @@ export class Ptero extends Dino {
     if (this.state === 'stagger' && dt > 0) {
       // Hit in flight: lose height, drift.
       this.flyVel.multiplyScalar(Math.exp(-3 * dt));
-      this.lift = Math.max(1.2, this.lift - (1.5 + this.flyVel.y * 0) * dt);
+      this.lift = Math.max(1.2, this.lift - 1.5 * dt);
     }
     super.update(dt);
     if (this.state !== 'dying' && !this.removed) this.lift = Math.max(1.2, this.lift);
@@ -1271,7 +1273,10 @@ export class Ptero extends Dino {
 
   protected override onDamaged(hit: ShotHit, amount: number): void {
     super.onDamaged(hit, amount);
-    if (this.hp > 0) this.sfx('raptor_screech', 0.6, 1.9);
+    if (this.hp > 0 && this.age - this.lastCry > 0.5) {
+      this.lastCry = this.age;
+      this.sfx('raptor_screech', 0.6, 1.9);
+    }
   }
 
   protected override onDeath(hit: ShotHit | null): void {
@@ -1575,6 +1580,17 @@ export class Trike extends Dino {
 
   private leaveUpdate(dt: number) {
     const t = this.stateTime;
+    if (this.frame === 'rig' && this.world.rig.speed > 2) {
+      // Riding alongside a vehicle: peel away to the side and drop behind.
+      this.playerPos(_p);
+      const out = this.root.position.x >= _p.x ? 1 : -1;
+      const k = Math.min(1, t / 0.8);
+      this.root.position.x += out * 6 * k * dt;
+      this.root.position.z += 5 * k * dt;
+      this.faceToward(_w.set(this.root.position.x + out * 3, 0, this.root.position.z - 6), dt, 3);
+      if (t > 3.2 || (t > 1.5 && !this.onScreen(1.3))) this.despawn();
+      return;
+    }
     // Swing the head away from the camera, then gallop off to the side.
     this.root.rotation.y += this.leaveSide * dt * (t < 0.7 ? 2.2 : 0.5);
     const spd = t < 0.4 ? lerp(this.chargeSpeed, 5, t / 0.4) : Math.min(10, 5 + (t - 0.4) * 4);
@@ -1597,6 +1613,8 @@ export class Trike extends Dino {
   }
 
   override stagger() {
+    // Already veering off after a hit: nothing can turn it back into an attacker.
+    if (this.state === 'leave') return;
     const wasCharging = this.state === 'charge';
     super.stagger();
     if (this.state !== 'stagger') return;
@@ -1687,7 +1705,7 @@ export class Trike extends Dino {
         ux += this.kneel * 0.75;
         lx += this.kneel * 1.6;
       }
-      if (st === 'windup' && i === 1) {
+      if (st === 'windup' && i === 1 && gs < 3) {
         // Right forefoot paws the ground.
         const pk = ((t - 0.15) / 0.6) % 1;
         const paw = t > 0.15 && t < 1.95 ? Math.sin(Math.PI * clamp(pk, 0, 1)) : 0;

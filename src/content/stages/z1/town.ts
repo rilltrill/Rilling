@@ -181,7 +181,7 @@ export function buildTown(): Town {
   crosswalk(0, CROSS_Z1 + 1.8);
   crosswalk(SECOND_X, SQ_Z0 + 1.8);
   // Puddles (glossy) and manholes.
-  const puddle = Kit.std(0x07090e, 0.06, 0.35);
+  const puddle = Kit.std(0x2a3546, 0.05, 0.25);
   const puddleSpots: [number, number, number][] = [
     [-2.4, -6, 1.6], [2.8, -27, 2.2], [-1.2, -52, 1.4], [3.5, -80, 1.8], [-3.6, -110, 2.4], [1.2, -133, 1.5],
     [-30, -155, 1.6], [-41, -156, 1.2], [-59.5, -185, 2.0], [-55.5, -214, 1.8], [-61, -238, 1.5], [-56, -276, 2.2], [-62, -290, 1.6],
@@ -469,7 +469,7 @@ export function buildTown(): Town {
     [-4.5, -30, 0.08, 4, ['fl']],
     [-4.6, -64, 0, 6],
     [4.5, -45, Math.PI - 0.1, 3, ['rr']],
-    [-4.3, -86.5, 0.55, 5, ['fl', 'fr'], true],
+    [-4.3, -86.5, 1.25, 5, ['fl', 'fr'], true],
     [4.5, -106, Math.PI, 7],
     [-4.4, -110, 0.12, 0, ['fl']],
     [-4.0, -136, 0.35, 1, ['fr']],
@@ -791,6 +791,7 @@ export function buildTown(): Town {
     Kit.add(door, Kit.box(1.3, 0.7, 0.14), M.carGlass, 0, 0.4, 0);
     Kit.add(door, Kit.box(1.5, 0.12, 0.16), Kit.mat(0x18181a), 0, -0.45, 0);
     Kit.add(door, Kit.box(0.3, 0.2, 0.18), Kit.glow(0xff2a1a, 1), 0.7, 0.75, 0);
+    mergedGroup(door);
     // Door sits on the bus's rear face (local -Z) — in bus space.
     door.position.set(0, 1.75, -5.47);
     door.rotation.y = Math.PI;

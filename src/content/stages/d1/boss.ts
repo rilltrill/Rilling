@@ -228,18 +228,18 @@ export class Carnotaur extends Boss {
 
     this.head = Kit.pivot(this.neck, 0, 0.55, 0.95, 'head');
     const skull = this.mergeInto(this.head, (g) => {
-      // Short, deep skull (wide at the back so the eyes read from the front).
-      Kit.add(g, Kit.box(1.0, 0.92, 0.95), skin, 0, 0.1, 0.25);
-      Kit.add(g, Kit.box(0.74, 0.62, 0.8), skin, 0, -0.02, 1.05);
-      Kit.add(g, Kit.box(0.62, 0.3, 0.5), skin, 0, 0.18, 1.42, 0.15, 0, 0);
-      // Brow ridges above the eyes + bumpy snout.
+      // Short, deep, bumpy skull (wide at the back so the eyes read from the front).
+      Kit.add(g, blob, skin, 0, 0.12, 0.32, 0, 0, 0, 0.52, 0.5, 0.62);
+      Kit.add(g, Kit.cyl(0.24, 0.36, 0.95, 6), skin, 0, 0.0, 1.05, Math.PI / 2, 0, 0, 1, 1, 0.78);
+      Kit.add(g, Kit.cyl(0.2, 0.3, 0.7, 6), skinDark, 0, 0.2, 1.0, Math.PI / 2 - 0.12, 0, 0, 0.8, 1, 0.5);
+      // Brow ridges + horn bosses above the eyes, warty snout.
       for (const sx of [-1, 1]) {
-        Kit.add(g, Kit.box(0.34, 0.16, 0.5), skinDark, sx * 0.4, 0.55, 0.42, 0, 0, sx * -0.2);
-        Kit.add(g, bump, skinDark, sx * 0.22, 0.35, 1.0, 0, 0, 0, 0.11, 0.08, 0.13);
-        Kit.add(g, bump, skinDark, sx * 0.18, 0.3, 1.3, 0, 0, 0, 0.09, 0.07, 0.1);
+        Kit.add(g, Kit.box(0.36, 0.17, 0.52), skinDark, sx * 0.38, 0.55, 0.42, 0.1, 0, sx * -0.25);
+        Kit.add(g, bump, skinDark, sx * 0.4, 0.35, 0.08, 0, 0, 0, 0.18, 0.2, 0.2);
+        for (let i = 0; i < 4; i++) Kit.add(g, bump, skinDark, sx * (0.2 - i * 0.02), 0.28 - i * 0.02, 0.85 + i * 0.2, 0, i, 0, 0.08, 0.06, 0.1);
+        Kit.add(g, bump, skin, sx * 0.34, -0.12, 0.6, 0, 0, 0, 0.16, 0.14, 0.24);
+        Kit.add(g, Kit.box(0.08, 0.07, 0.06), Kit.mat(0x1a0c08), sx * 0.13, 0.08, 1.52);
       }
-      Kit.add(g, Kit.box(0.2, 0.08, 0.06), Kit.mat(0x1a0c08), 0.18, 0.12, 1.66);
-      Kit.add(g, Kit.box(0.2, 0.08, 0.06), Kit.mat(0x1a0c08), -0.18, 0.12, 1.66);
     });
     for (const m of skull) {
       this.hitbox(m, 'torso');
@@ -279,8 +279,8 @@ export class Carnotaur extends Boss {
     // Jaw + throat.
     this.jaw = Kit.pivot(this.head, 0, -0.3, 0.3, 'jaw');
     const jaw = this.mergeInto(this.jaw, (g) => {
-      Kit.add(g, Kit.box(0.66, 0.24, 1.25), skin, 0, -0.1, 0.62);
-      Kit.add(g, Kit.box(0.5, 0.12, 1.0), belly, 0, -0.24, 0.55);
+      Kit.add(g, Kit.cyl(0.22, 0.34, 1.25, 6), skin, 0, -0.08, 0.62, Math.PI / 2, 0, 0, 1, 1, 0.42);
+      Kit.add(g, Kit.box(0.46, 0.1, 0.95), belly, 0, -0.2, 0.55);
       for (let i = 0; i < 5; i++) for (const sx of [-1, 1]) Kit.add(g, Kit.cone(0.04, 0.14, 4), teeth, sx * 0.26, 0.07, 0.55 + i * 0.15);
     });
     for (const m of jaw) this.hitbox(m, 'torso');
@@ -317,11 +317,12 @@ export class Carnotaur extends Boss {
     for (const sx of [-1, 1]) {
       const hip = Kit.pivot(this.hips, sx * 0.62, -0.15, 0.1);
       const thigh = this.mergeInto(hip, (g) => {
-        Kit.add(g, blob, skin, 0, -0.45, 0.05, 0, 0, 0, 0.36, 0.72, 0.5);
+        Kit.add(g, blob, skin, 0, -0.42, 0.05, 0, 0, 0, 0.46, 0.78, 0.62);
+        Kit.add(g, Kit.box(0.1, 0.5, 0.5), skinDark, sx * 0.4, -0.35, 0.05, 0, 0, sx * 0.15);
       });
       const knee = Kit.pivot(hip, 0, -1.0, 0.18);
       const shin = this.mergeInto(knee, (g) => {
-        Kit.add(g, Kit.box(0.3, 0.95, 0.36), skin, 0, -0.42, -0.1, -0.22, 0, 0);
+        Kit.add(g, Kit.box(0.36, 0.95, 0.42), skin, 0, -0.42, -0.1, -0.22, 0, 0);
       });
       const ankle = Kit.pivot(knee, 0, -0.88, -0.28);
       const foot = this.mergeInto(ankle, (g) => {
@@ -735,17 +736,17 @@ export class Carnotaur extends Boss {
       }
       case 'flank': {
         // Run up alongside the jeep on the treeline side.
-        this.steer(-5.8, 0.2, 9, dt);
+        this.steer(-7.4, 1.2, 9, dt);
         this.faceYaw(Math.PI, dt, 3.5);
         this.neckTarget = 0.1;
-        if ((Math.abs(p.x + 5.8) < 0.5 && Math.abs(p.z - 0.2) < 0.6) || t > 2.6) this.go('tailWind');
+        if ((Math.abs(p.x + 7.4) < 0.6 && Math.abs(p.z - 1.2) < 0.7) || t > 2.6) this.go('tailWind');
         break;
       }
       case 'tailWind': {
         // Coil the tail away from the jeep, then whip it across.
         const dur = this.windupTime(1.5);
         this.winding = true;
-        this.steer(-5.8, 0.2, 5, dt);
+        this.steer(-7.4, 1.2, 5, dt);
         const whipAt = dur - 0.3;
         if (t < whipAt) {
           const k = clamp(t / whipAt, 0, 1);

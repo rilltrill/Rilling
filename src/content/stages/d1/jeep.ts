@@ -72,11 +72,10 @@ export class JeepViewModel {
       Kit.add(b, Kit.box(0.08, 0.45, 2.4), olive, sx * 0.92, 1.08, 0.05);
       Kit.add(b, Kit.box(0.12, 0.07, 2.4), khaki, sx * 0.92, 1.32, 0.05);
       Kit.add(b, Kit.box(0.16, 0.12, 0.05), Kit.glow(0xff2a1a, 1.1), sx * 0.72, 0.92, 1.26);
-      // Sport roll bar behind the front seats (its top rail just shows at the bottom of the view).
-      Kit.add(b, Kit.cyl(0.035, 0.035, 0.72, 8), dark, sx * 0.84, 1.22, -1.0, 0, 0, sx * 0.12);
-      Kit.add(b, Kit.cyl(0.03, 0.03, 0.75, 8), dark, sx * 0.8, 1.2, -0.62, 0.75, 0, sx * 0.1);
+      // Waist-high roll bar in front of the gunner (peeks in at the bottom when the gun swings).
+      Kit.add(b, Kit.cyl(0.032, 0.032, 0.6, 8), dark, sx * 0.84, 1.15, -0.74, 0, 0, sx * 0.1);
     }
-    Kit.add(b, Kit.cyl(0.035, 0.035, 1.6, 8), dark, 0, 1.57, -1.02, 0, 0, Math.PI / 2);
+    Kit.add(b, Kit.cyl(0.032, 0.032, 1.62, 8), dark, 0, 1.44, -0.76, 0, 0, Math.PI / 2);
     // Grille + bull bar.
     Kit.add(b, Kit.box(1.4, 0.42, 0.1), dark, 0, 0.74, -2.76);
     Kit.add(b, Kit.cyl(0.05, 0.05, 1.7, 6), metal, 0, 0.96, -2.94, 0, 0, Math.PI / 2);
