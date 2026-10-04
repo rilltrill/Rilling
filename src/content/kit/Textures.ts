@@ -43,6 +43,9 @@ export const TEX_NAMES = [
   'clouds',
   'marble',
   'cardboard',
+  'fabric',
+  'slats',
+  'smoke',
 ] as const;
 
 export type TexName = (typeof TEX_NAMES)[number];
@@ -306,9 +309,9 @@ const DEFS: Record<TexName, TexDef> = {
     gen: (x, y, n, s) => {
       let v = 0.82 + (n.fbm(x, y, s, 4, 3) - 0.5) * 0.32 + (n.hash(x, y) - 0.5) * 0.08;
       const vein = Math.abs(n.fbm(x, y, s, 4, 2, 8) - 0.5);
-      if (vein < 0.012) return [v * 0.78, v * 0.6, v * 0.86]; // thin purplish veins
+      if (vein < 0.012) return [v * 0.84, v * 0.74, v * 0.86]; // thin dusky veins
       const rot = n.cell(x, y, s, 5, 30);
-      if (rot.d1 < 0.14 && rot.id > 0.55) return [v * 0.72, v * 0.58, v * 0.48]; // small rot sores
+      if (rot.d1 < 0.14 && rot.id > 0.55) return [v * 0.8, v * 0.7, v * 0.62]; // small rot sores
       return v;
     },
   },
@@ -393,6 +396,29 @@ const DEFS: Record<TexName, TexDef> = {
       return [v, v * 0.92, v * 0.78];
     },
   },
+  fabric: {
+    size: 32, metres: 0.6, levels: 5,
+    gen: (x, y, n, s) => {
+      const fold = Math.sin((x / s) * Math.PI * 2 * 3 + n.fbm(x, y, s, 3, 2) * 4) * 0.1;
+      const seam = y % 16 === 0 ? -0.14 : y % 16 === 1 ? 0.05 : 0;
+      const stain = n.fbm(x, y, s, 4, 2, 13) > 0.78 ? -0.18 : 0;
+      return 0.84 + fold + seam + stain + (n.hash(x, y) - 0.5) * 0.05;
+    },
+  },
+  slats: {
+    size: 32, metres: 1, levels: 5,
+    gen: (x, y, n) => {
+      const ly = y % 6;
+      return (ly === 0 ? 0.42 : ly === 5 ? 0.62 : 0.86 - ly * 0.03) + (n.hash(x, y) - 0.5) * 0.06;
+    },
+  },
+  smoke: {
+    size: 32, metres: 2, levels: 4,
+    gen: (x, y, n, s) => {
+      const t = clamp01((n.fbm(x, y, s, 3, 3) - 0.35) / 0.4);
+      return 0.6 + 0.4 * t * t * (3 - 2 * t);
+    },
+  },
   feathers: {
     size: 32, metres: 0.5, levels: 5,
     gen: (x, y, n) => {
@@ -433,14 +459,24 @@ function generate(name: TexName): RetroTexture {
   for (let y = 0; y < s; y++) {
     for (let x = 0; x < s; x++) {
       const raw = def.gen(x, y, n, s);
-      const rgb = typeof raw === 'number' ? [raw, raw, raw] : raw;
       const d = BAYER[(y % 4) * 4 + (x % 4)];
       const i = (y * s + x) * 4;
-      for (let c = 0; c < 3; c++) {
-        const q = Math.round(clamp01(rgb[c]) * L + d) / L;
-        const v = clamp01(q);
-        data[i + c] = Math.round(v * 255);
-        sum += srgbToLinear(v);
+      if (typeof raw === 'number') {
+        const v = clamp01(Math.round(clamp01(raw) * L + d) / L);
+        for (let c = 0; c < 3; c++) {
+          data[i + c] = Math.round(v * 255);
+          sum += srgbToLinear(v);
+        }
+      } else {
+        // Tinted texels: quantise luminance and re-apply the hue ratio, so dithering
+        // never shifts the hue (per-channel quantisation turned subtle tints magenta).
+        const l = (raw[0] + raw[1] + raw[2]) / 3;
+        const q = clamp01(Math.round(clamp01(l) * L + d) / L);
+        for (let c = 0; c < 3; c++) {
+          const v = clamp01((q * raw[c]) / Math.max(1e-3, l));
+          data[i + c] = Math.round(v * 255);
+          sum += srgbToLinear(v);
+        }
       }
       data[i + 3] = 255;
     }
