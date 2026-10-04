@@ -54,7 +54,7 @@ while (Date.now() - t0 < 20000) {
 }
 if (wait) await page.waitForTimeout(wait);
 const info = await page.evaluate(
-  async ([place, settle, flash]) => {
+  async ([place, settle, flash, gore]) => {
     const g = window.__game;
     const w = g.world;
     if (g.autoplay) g.autoplay = null;
@@ -69,6 +69,13 @@ const info = await page.evaluate(
       pos.y = w.groundAt(pos.x, pos.z);
       w.add(reg.createEnemy(id, w, { pos, frame: 'world', entry: 'walk', hpMul: 1, speedMul: 1, opts: {} }));
     }
+    if (gore) {
+      // Gore check: a burst of chunks at each enemy's chest, mid-flight when frozen.
+      for (const en of w.enemies()) {
+        const p = (en.anchor ?? en.root).getWorldPosition(camPos.clone());
+        w.fx.gibs(p, 0x9a1a14, 10, 0.12);
+      }
+    }
     const n = Math.round(settle / 16.7);
     for (let i = 0; i < n; i++) w.update(1 / 60);
     w.timeScale = 0;
@@ -80,7 +87,7 @@ const info = await page.evaluate(
     }
     return { entities: w.entities.length, beat: g.runner?.label };
   },
-  [place, settle, args.flash ?? null],
+  [place, settle, args.flash ?? null, !!args.gore],
 );
 const rows = {};
 for (const mode of modes) {

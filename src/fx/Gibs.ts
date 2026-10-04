@@ -86,8 +86,68 @@ function jitterGeo(base: THREE.BufferGeometry, amount: number, seed: number): TH
   return g;
 }
 
+/**
+ * ART: SPRITES look for gibs: each chunk is a camera-facing pixel blob snapped to
+ * the retro pixel grid, top-lit with a 1-px dark edge (no tumbling cubes next to
+ * pixel-art characters). Same instances, same physics — only the draw changes.
+ */
+const GIB_SPRITE_VERT = /* glsl */ `
+  uniform vec2 uTarget;
+  varying vec2 vUv;
+  varying vec3 vCol;
+  varying float vPx;
+  varying float vSeed;
+  void main() {
+    vUv = uv;
+    vCol = instanceColor;
+    vec3 c = instanceMatrix[3].xyz;
+    float sz = (length(instanceMatrix[0].xyz) + length(instanceMatrix[1].xyz) + length(instanceMatrix[2].xyz)) / 3.0;
+    vec4 mv = modelViewMatrix * vec4(c, 1.0);
+    vec4 cc = projectionMatrix * mv;
+    float ppm = projectionMatrix[1][1] * 0.5 * uTarget.y / max(cc.w, 1e-3);
+    float px = clamp(floor(sz * 0.85 * ppm + 0.5), 1.0, 24.0);
+    vPx = px;
+    vec2 pc = (cc.xy / cc.w * 0.5 + 0.5) * uTarget;
+    vec2 corner = floor(pc - 0.5 * px + 0.5);
+    vec2 ndc = (corner + uv * px) / uTarget * 2.0 - 1.0;
+    vSeed = float(gl_InstanceID);
+    gl_Position = vec4(ndc * cc.w, cc.z, cc.w);
+  }
+`;
+const GIB_SPRITE_FRAG = /* glsl */ `
+  precision highp float;
+  uniform vec3 uLight;
+  varying vec2 vUv;
+  varying vec3 vCol;
+  varying float vPx;
+  varying float vSeed;
+  float inside(vec2 q, float h) {
+    vec2 d = (q / vPx) * 2.0 - 1.0;
+    return length(d * vec2(1.0 + 0.35 * h, 1.0 - 0.3 * h)) <= 1.05 ? 1.0 : 0.0;
+  }
+  void main() {
+    vec2 q = floor(vUv * vPx) + 0.5;
+    float h = fract(sin(vSeed * 12.9898) * 43758.5453) * 2.0 - 1.0;
+    if (vPx > 2.5 && inside(q, h) < 0.5) discard;
+    vec2 d = (q / vPx) * 2.0 - 1.0;
+    vec3 col = vCol * uLight * (0.85 + 0.3 * (d.y - d.x) * 0.5);
+    // 1-px dark edge on chunks big enough to carry one.
+    if (vPx > 3.5) {
+      float n = inside(q + vec2(1.0, 0.0), h) * inside(q - vec2(1.0, 0.0), h) * inside(q + vec2(0.0, 1.0), h) * inside(q - vec2(0.0, 1.0), h);
+      if (n < 0.5) col *= 0.38;
+    }
+    gl_FragColor = vec4(col, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
+
 export class GibMesh {
   readonly mesh: THREE.InstancedMesh;
+  /** The tumbling-chunk look (ART: 3D) while the pixel-blob look is on. */
+  private solid: { geo: THREE.BufferGeometry; mat: THREE.Material } | null = null;
+  private spriteGeo: THREE.BufferGeometry | null = null;
+  private spriteMat: THREE.ShaderMaterial | null = null;
   onLand: GibLandFn | null = null;
   onTrail: GibTrailFn | null = null;
   /** Event payload for `onLand` / `onTrail`. */
@@ -329,7 +389,35 @@ export class GibMesh {
     this.mesh.visible = false;
   }
 
+  /**
+   * Pixel-blob gibs (ART: SPRITES) on / off. `light` = approximate scene light
+   * (shared colour), `target` = the main render target size in pixels (shared).
+   */
+  setSprite(on: boolean, light?: THREE.Color, target?: { value: THREE.Vector2 }) {
+    if (on && !this.solid && light && target) {
+      this.solid = { geo: this.mesh.geometry, mat: this.mesh.material as THREE.Material };
+      this.spriteGeo ??= new THREE.PlaneGeometry(1, 1);
+      this.spriteMat ??= new THREE.ShaderMaterial({
+        vertexShader: GIB_SPRITE_VERT,
+        fragmentShader: GIB_SPRITE_FRAG,
+        uniforms: { uLight: { value: light }, uTarget: target },
+        fog: false,
+      });
+      this.spriteMat.uniforms.uTarget = target;
+      this.spriteMat.uniforms.uLight.value = light;
+      this.mesh.geometry = this.spriteGeo;
+      this.mesh.material = this.spriteMat;
+    } else if (!on && this.solid) {
+      this.mesh.geometry = this.solid.geo;
+      this.mesh.material = this.solid.mat;
+      this.solid = null;
+    }
+  }
+
   dispose() {
+    this.setSprite(false);
+    this.spriteGeo?.dispose();
+    this.spriteMat?.dispose();
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();
     this.mesh.dispose();

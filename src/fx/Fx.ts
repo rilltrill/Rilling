@@ -165,6 +165,12 @@ export class Fx {
     this.decals.lightUniform.setRGB(0.8, 0.8, 0.8);
   }
 
+  /** ART: SPRITES — gibs as pixel blobs on the retro grid (`target` = main render target size, shared). */
+  setGibSprites(on: boolean, target?: { value: THREE.Vector2 }) {
+    this.meat.setSprite(on, this.soft.lightUniform, target);
+    this.shards.setSprite(on, this.soft.lightUniform, target);
+  }
+
   /**
    * Give the FX system the player camera (muzzle flashes, distance LOD). Optional
    * for LOD: without it, Fx adopts the camera it is first rendered with.

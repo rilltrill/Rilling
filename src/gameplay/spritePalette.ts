@@ -98,6 +98,15 @@ function hueToward(h: number, target: number, t: number): number {
   return h + d * t;
 }
 
+/** Ramp index of every colour in `buildPalette(id)` (0 = the black, then one id per ramp). */
+export function paletteRamps(id: PaletteId): Float32Array {
+  const out: number[] = [0];
+  RAMPS[id].forEach((r, i) => {
+    for (let k = 0; k < r.n; k++) out.push(i + 1);
+  });
+  return new Float32Array(out.slice(0, PALETTE_MAX));
+}
+
 /**
  * The palette for a campaign: `PALETTE_MAX` colours or fewer, as linear sRGB
  * triplets (display space). Always includes near-black.

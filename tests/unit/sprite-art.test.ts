@@ -29,6 +29,9 @@ describe('ART: SPRITES', () => {
     expect(autoTexelScale(85, 2, 90, 240)).toBe(2);
     expect(autoTexelScale(230, 3, 90, 240)).toBe(3);
     for (const s of [1, 50, 89, 91, 200, 239, 241, 999]) expect(Number.isInteger(autoTexelScale(s, 2, 90, 240))).toBe(true);
+    // 0 = that step never happens.
+    expect(autoTexelScale(5000, 2, 220, 0)).toBe(2);
+    expect(autoTexelScale(5000, 1, 0, 0)).toBe(1);
   });
 
   it('builds restricted, in-gamut palettes per campaign', () => {

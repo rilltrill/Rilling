@@ -91,6 +91,8 @@ for (const [stage, beat] of shots) {
         g.flags.art = mode;
         g.settingsChanged(g.save.settings);
         const rows = [];
+        let fallbacks = 0;
+        let pendingMax = 0;
         for (let i = 0; i < frames + 30; i++) {
           w.time += 1 / 60;
           r.info.reset();
@@ -99,6 +101,11 @@ for (const [stage, beat] of shots) {
           const b = performance.now();
           gl.finish();
           if (i >= 30) rows.push({ ms: b - a, calls: r.info.render.calls, tris: r.info.render.triangles, bakes: g.sprites?.stats.bakes ?? 0, spriteMs: g.sprites?.stats.lastMs ?? 0 });
+          // Style pops: characters drawn as 3D models while SPRITES is on (whole pass, warm-up frames included).
+          if (g.sprites) {
+            fallbacks += g.sprites.stats.fallbacks;
+            pendingMax = Math.max(pendingMax, g.sprites.stats.pending);
+          }
         }
         const avg = (k) => +(rows.reduce((s, x) => s + x[k], 0) / rows.length).toFixed(2);
         const max = (k) => +Math.max(...rows.map((x) => x[k])).toFixed(2);
@@ -121,7 +128,18 @@ for (const [stage, beat] of shots) {
           characters: w.entities.filter((e) => e.constructor && (e.hostile || e.isBoss || e.constructor.name.includes('Civilian'))).length,
           sprites: g.sprites ? g.sprites.stats.drawn : 0,
           rtMB: g.sprites ? +(g.sprites.stats.rtBytes / 1048576).toFixed(2) : 0,
+          fallbacks,
+          pendingMax,
         };
+      }
+      // Silhouette check: sprite opaque area vs the 3D model's area, per character type (±10 % target).
+      if (g.sprites) {
+        const cov = {};
+        for (const c of g.sprites.debugCoverage()) {
+          if (c.model < 30) continue; // too small to measure
+          (cov[c.name] ??= []).push(+(c.sprite / c.model).toFixed(3));
+        }
+        out.coverage = cov;
       }
       return out;
     },

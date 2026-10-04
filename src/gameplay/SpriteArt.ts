@@ -6,7 +6,7 @@ import { Civilian } from './Civilian';
 import { Projectile } from './Projectile';
 import { Pickup } from './Pickup';
 import { RETRO_DETAIL } from '../content/kit/ModelKit';
-import { buildPalette, linearToOklab, PALETTE_MAX, type PaletteId } from './spritePalette';
+import { buildPalette, linearToOklab, PALETTE_MAX, paletteRamps, type PaletteId } from './spritePalette';
 
 /**
  * ART: SPRITES — every character (enemies, bosses, civilians), plus the things
@@ -103,7 +103,7 @@ export interface SpriteLook {
   round: number;
   /** Retro pixels per texel; 0 = auto (1 far, 2 mid, 3 close). Whole numbers only. */
   pxPerTexel: number;
-  /** Auto scale: on-screen size (retro px) where texels become 2 and 3 pixels. */
+  /** Auto scale: on-screen size (retro px) where texels become 2 and 3 pixels (0 = never). */
   k2: number;
   k3: number;
   /** Supersampling (1 or 2). */
@@ -116,20 +116,20 @@ export interface SpriteLook {
 
 export const DEFAULT_LOOK: SpriteLook = {
   bands: 14,
-  dither: 0.2,
+  dither: 0.15,
   outline: 0.4,
   inner: 0.3,
   rim: 0.18,
   rimLight: 1,
   saturation: 1.12,
-  sharpen: 0.4,
-  detail: 1.6,
+  sharpen: 0.3,
+  detail: 1.35,
   hue: 0.45,
   pal: 1,
   round: 1,
   pxPerTexel: 0,
-  k2: 200,
-  k3: 420,
+  k2: 220,
+  k3: 0,
   ss: 2,
   shadows: 1,
   texelCm: 1.2,
@@ -156,6 +156,8 @@ export function parseLook(spec: string | null | undefined, base: SpriteLook = DE
 export function autoTexelScale(size: number, prev: number, k2: number, k3: number): number {
   const up = 1.1;
   const down = 0.9;
+  if (!(k3 > 0)) k3 = Infinity;
+  if (!(k2 > 0)) k2 = Infinity;
   let k = size < k2 ? 1 : size < k3 ? 2 : 3;
   if (prev === k - 1 && size < (k === 2 ? k2 : k3) * up) k = prev;
   else if (prev === k + 1 && size > (k === 1 ? k2 : k3) * down) k = prev;
@@ -208,7 +210,7 @@ const BAKE_FRAG = /* glsl */ `
   uniform float uRound;
   uniform float uSmall;      // 1 = tiny sprite (softer outline)
   uniform int uPalN;
-  uniform vec3 uPal[${PALETTE_MAX}];     // OKLab
+  uniform vec4 uPal[${PALETTE_MAX}];     // OKLab + ramp id
   uniform vec3 uPalRgb[${PALETTE_MAX}];  // display-linear rgb
   ${TONE}
 
@@ -234,6 +236,7 @@ const BAKE_FRAG = /* glsl */ `
     float lum[4];
     int n = 0;
     int ng = 0;
+    bool h00 = false;
     float gl = -1.0;
     vec3 gcol = vec3(0.0);
     for (int j = 0; j < 2; j++) {
@@ -243,6 +246,7 @@ const BAKE_FRAG = /* glsl */ `
         vec4 c = texelFetch(tColor, q, 0);
         if (c.a < 0.5) continue;
         d = min(d, dist(q));
+        if (i == 0 && j == 0) h00 = true;
         float l = luma(c.rgb);
         if (c.a < 0.9) {
           ng++;
@@ -261,8 +265,10 @@ const BAKE_FRAG = /* glsl */ `
       glow = 1.0;
       return vec4(gcol, 1.0);
     }
+    // Half-covered ties go by one fixed sample: area stays unbiased (the silhouette
+    // matches the model's, and its hitbox), the edge just settles a quarter texel over.
     float cov = float(n) / float(uSS * uSS);
-    if (cov < 0.5) return vec4(0.0, 0.0, 0.0, cov);
+    if (cov < 0.5 || (n * 2 == uSS * uSS && !h00 && uSS > 1)) return vec4(0.0, 0.0, 0.0, 0.0);
     int best = 0;
     float bs = 1e9;
     for (int a = 0; a < 4; a++) {
@@ -283,17 +289,20 @@ const BAKE_FRAG = /* glsl */ `
     if (!inside(p)) return false;
     int n = 0;
     int ng = 0;
+    bool h00 = false;
     for (int j = 0; j < 2; j++) {
       for (int i = 0; i < 2; i++) {
         if (i >= uSS || j >= uSS) continue;
         float a = texelFetch(tColor, p * uSS + ivec2(i, j), 0).a;
         if (a >= 0.5) {
           n++;
+          if (i == 0 && j == 0) h00 = true;
           if (a < 0.9) ng++;
         }
       }
     }
-    return n * 2 >= uSS * uSS || (ng > 0 && uSmall > 0.5);
+    if (ng > 0 && (ng * 2 >= n || uSmall > 0.5)) return true;
+    return n * 2 > uSS * uSS || (n * 2 == uSS * uSS && (h00 || uSS == 1));
   }
   float packDepth(float d) {
     float t = clamp((d - uDepthRange.x) / max(uDepthRange.y - uDepthRange.x, 1e-4), 0.0, 1.0);
@@ -308,16 +317,29 @@ const BAKE_FRAG = /* glsl */ `
                 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
                 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s);
   }
-  // Nearest palette colour (OKLab, chroma weighted up a little so hues hold), lightness dithered.
+  // Palette colour in two steps, the way a pixel artist picks one: first the ramp
+  // (by hue and chroma, undithered — a surface keeps one ramp, no speckle between
+  // hues), then the step along it by lightness, dithered.
   vec3 palette(vec3 y, float th) {
     vec3 lab = toLab(y);
-    lab.x += th * 0.06;
     float best = 1e9;
+    float ramp = -1.0;
+    for (int i = 0; i < ${PALETTE_MAX}; i++) {
+      if (i >= uPalN) break;
+      vec3 d = lab - uPal[i].xyz;
+      float e = d.x * d.x * 0.3 + dot(d.yz, d.yz) * 3.0;
+      if (e < best) {
+        best = e;
+        ramp = uPal[i].w;
+      }
+    }
+    float L = lab.x + th * 0.07;
+    best = 1e9;
     vec3 res = y;
     for (int i = 0; i < ${PALETTE_MAX}; i++) {
       if (i >= uPalN) break;
-      vec3 d = lab - uPal[i];
-      float e = d.x * d.x + dot(d.yz, d.yz) * 2.2;
+      if (abs(uPal[i].w - ramp) > 0.5) continue;
+      float e = abs(L - uPal[i].x);
       if (e < best) {
         best = e;
         res = uPalRgb[i];
@@ -762,10 +784,10 @@ export class SpriteArt {
     this.scratch.depthTexture = new THREE.DepthTexture(SCRATCH, SCRATCH, THREE.UnsignedIntType);
     this.scratch.scissorTest = true;
 
-    const pal: THREE.Vector3[] = [];
+    const pal: THREE.Vector4[] = [];
     const palRgb: THREE.Vector3[] = [];
     for (let i = 0; i < PALETTE_MAX; i++) {
-      pal.push(new THREE.Vector3());
+      pal.push(new THREE.Vector4());
       palRgb.push(new THREE.Vector3());
     }
     this.postMat = new THREE.ShaderMaterial({
@@ -848,6 +870,7 @@ export class SpriteArt {
     this.shadows.name = 'sprite-shadows';
     this.group.add(this.shadows);
     world.scene.add(this.group);
+    world.fx.setGibSprites(true, this.targetU);
   }
 
   /**
@@ -1510,13 +1533,14 @@ export class SpriteArt {
     if (id === this.paletteId) return;
     this.paletteId = id;
     const p = buildPalette(id);
+    const ramps = paletteRamps(id);
     const n = p.length / 3;
-    const lab = this.postMat.uniforms.uPal.value as THREE.Vector3[];
+    const lab = this.postMat.uniforms.uPal.value as THREE.Vector4[];
     const rgb = this.postMat.uniforms.uPalRgb.value as THREE.Vector3[];
     for (let i = 0; i < n; i++) {
       rgb[i].set(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]);
       const [L, a, b] = linearToOklab(p[i * 3], p[i * 3 + 1], p[i * 3 + 2]);
-      lab[i].set(L, a, b);
+      lab[i].set(L, a, b, ramps[i]);
     }
     this.palN = n;
   }
@@ -1682,6 +1706,7 @@ export class SpriteArt {
   }
 
   dispose() {
+    this.world.fx.setGibSprites(false);
     for (const [obj, s] of [...this.sprites]) this.release(obj, s);
     for (const list of this.free.values()) for (const rt of list) rt.dispose();
     this.free.clear();
