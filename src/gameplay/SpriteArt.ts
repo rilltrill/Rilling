@@ -32,6 +32,12 @@ export const SPRITE_FPS = 12;
 /** Most character re-renders in one frame (never-drawn characters may exceed it). */
 const MAX_BAKES_PER_FRAME = 6;
 const MAX_FIRST_BAKES = 18;
+/**
+ * Draw calls the bakes of one frame may spend (a bake costs its source's meshes
+ * + 1); at least one bake always runs. Keeps a 100-mesh boss from landing on the
+ * same frame as a crowd's bakes.
+ */
+const BAKE_CALL_BUDGET = 90;
 /** Retro screen pixels per sprite texel (chunkiness), before the size caps. */
 const PX_PER_TEXEL = 1.5;
 /** Sprite size caps in texels (beyond them texels grow: close-ups get chunkier). */
@@ -315,6 +321,8 @@ interface Sprite {
   shadowR: number;
   /** Last bake found it off screen / empty: re-check on the normal schedule, not every frame. */
   away: boolean;
+  /** Draw calls its last bake cost (visible meshes + the pixel pass). */
+  cost: number;
 }
 
 export interface SpriteStats {
@@ -521,7 +529,7 @@ export class SpriteArt {
     let bakes = 0;
     if (due.length) {
       due.sort((a, b) => (a.ready === b.ready ? a.next - b.next : a.ready ? 1 : -1));
-      const cap = Math.min(due.length, Math.max(MAX_BAKES_PER_FRAME, Math.min(firsts, MAX_FIRST_BAKES)));
+      const cap = Math.max(MAX_BAKES_PER_FRAME, Math.min(firsts, MAX_FIRST_BAKES));
       this.syncLights();
       const r = this.renderer;
       const prevTarget = r.getRenderTarget();
@@ -529,8 +537,11 @@ export class SpriteArt {
       const prevAlpha = r.getClearAlpha();
       r.setClearColor(0x000000, 0);
       try {
-        for (let i = 0; i < cap; i++) {
+        let spent = 0;
+        for (let i = 0; i < due.length && bakes < cap; i++) {
           const s = due[i];
+          if (bakes > 0 && spent + s.cost > BAKE_CALL_BUDGET) continue; // a cheaper one may still fit
+          spent += s.cost;
           // Spread the next bakes over the interval (phase kept, never bunching up).
           s.next = Math.max(s.next + 1 / SPRITE_FPS, w.time + 0.5 / SPRITE_FPS);
           if (s.away) s.next = w.time + 0.5 / SPRITE_FPS; // off-screen re-checks at 24 Hz
@@ -656,7 +667,7 @@ export class SpriteArt {
       mesh.visible = false;
       mesh.name = 'sprite';
       this.group.add(mesh);
-      s = { obj, e, mesh, mat, rt: null, rtKey: '', next: 0, ready: false, offset: new THREE.Vector3(), hidden: false, seen: f, shadowR: 0, away: false };
+      s = { obj, e, mesh, mat, rt: null, rtKey: '', next: 0, ready: false, offset: new THREE.Vector3(), hidden: false, seen: f, shadowR: 0, away: false, cost: 8 };
       this.sprites.set(obj, s);
     }
     s.seen = f;
@@ -702,9 +713,13 @@ export class SpriteArt {
     return b;
   }
 
+  /** Visible meshes counted by the last `bounds` call (≈ the bake's draw calls). */
+  private meshCount = 0;
+
   /** World-space bounds of the visible meshes under `root`. */
   private bounds(root: THREE.Object3D, out: THREE.Box3): boolean {
     out.makeEmpty();
+    this.meshCount = 0;
     const stack: THREE.Object3D[] = [root];
     while (stack.length) {
       const o = stack.pop()!;
@@ -717,6 +732,7 @@ export class SpriteArt {
           if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
           _mb.copy(m.geometry.boundingBox!).applyMatrix4(m.matrixWorld);
           out.union(_mb);
+          this.meshCount++;
         }
       }
       for (const c of o.children) stack.push(c);
@@ -731,8 +747,10 @@ export class SpriteArt {
     if (!this.bounds(src, _box)) {
       s.ready = false;
       s.away = true;
+      s.cost = 1;
       return;
     }
+    s.cost = this.meshCount + 1;
     // On-screen rectangle (NDC) and depth range of the bounds.
     const near = cam.near;
     let x0 = Infinity;
