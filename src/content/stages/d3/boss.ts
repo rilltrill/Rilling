@@ -8,6 +8,7 @@ import { Kit } from '../../kit/ModelKit';
 import { angleDelta, clamp, damp, lerp, smoothstep } from '../../../core/math';
 import { Pickup } from '../../../gameplay/Pickup';
 import { Sculpt, M, type Paint } from './sculpt';
+import { bakedLambert, clean, tx, type TexSpec } from './retro';
 import { D } from './layout';
 import { park } from './env';
 
@@ -69,11 +70,13 @@ const _u = new THREE.Vector3();
 /** Phase-3 standoff distance behind the parked jeep (rig z). */
 const P3_Z = 15.5;
 
+// Warm earthy browns (lifted for the night + CRT pass so the king stays a warm
+// silhouette against the blue storm instead of graying out).
 const PAL = {
-  base: 0x76644c,
-  back: 0x473a2c,
-  belly: 0xbfa886,
-  stripe: 0x3b3026,
+  base: 0x84694a,
+  back: 0x4e3d2a,
+  belly: 0xc4a982,
+  stripe: 0x3e2e20,
   mouth: 0x5e1414,
   gum: 0x8a2a2a,
   teeth: 0xeee2c2,
@@ -82,6 +85,23 @@ const PAL = {
 };
 
 const frac = (v: number) => v - Math.floor(v);
+
+/**
+ * Retro surface per paint colour: a big wrinkled hide over the body, fine
+ * scales on the countershaded belly, bony keratin scutes, wet mouth skin, and
+ * clean teeth / claws (they read as bright pixels against the hide).
+ */
+const HIDE: TexSpec = { name: 'hide', scale: 0.85, strength: 0.95 };
+const TEX_OF_PAINT = new Map<number, TexSpec>([
+  [PAL.belly, { name: 'scales', scale: 1.5, strength: 0.7 }],
+  [PAL.scute, { name: 'rock', scale: 2.2, strength: 0.75 }],
+  [PAL.mouth, { name: 'skin', scale: 1.2, strength: 0.5 }],
+  [PAL.gum, { name: 'skin', scale: 1.2, strength: 0.5 }],
+  [PAL.teeth, { name: 'grain', scale: 1, strength: 0 }],
+  [PAL.claw, { name: 'grain', scale: 1, strength: 0 }],
+  [0x1a0e0a, { name: 'grain', scale: 1, strength: 0 }],
+]);
+const texForPaint = (c: number): TexSpec => TEX_OF_PAINT.get(c) ?? HIDE;
 
 /** Countershaded, tiger-striped hide. */
 function hide(stripes = 0.85, phase = 0): Paint {
@@ -225,14 +245,16 @@ export class Tyrant extends Boss {
   // ─── Model ────────────────────────────────────────────────────────────────
 
   protected override build(): void {
-    this.mat = Kit.mat(0xffffff, { vertexColors: true, tex: 'scales', texScale: 0.45, texStrength: 0.45, emissive: 0x1a1a20, emissiveIntensity: 1 });
-    this.tintMat = Kit.mat(0xffffff, { vertexColors: true, tex: 'scales', texScale: 0.45, texStrength: 0.45, emissive: 0x5a3020, emissiveIntensity: 1 });
+    // One per-vertex-textured material for the whole body (raw-position projection:
+    // the breathing torso's texels don't crawl).
+    this.mat = bakedLambert({ emissive: 0x22170c, unscaled: true });
+    this.tintMat = bakedLambert({ emissive: 0x5a3020, unscaled: true });
     this.eyeMat = Kit.glow(0xffb020, 2.4);
     this.eyeDead = Kit.mat(0x2a2014);
     this.haloMat = Kit.glow(0xff8a20, 1.5, true, 0.3);
     const mat = this.mat;
     const add = (parent: THREE.Object3D, s: Sculpt, part: 'torso' | 'limb' | 'tail' | 'armor' | 'weak') => {
-      const m = Kit.add(parent, s.build(), mat);
+      const m = Kit.add(parent, s.build(texForPaint), mat);
       m.userData.baseMat = mat;
       this.hitbox(m, part);
       return m;
@@ -321,7 +343,7 @@ export class Tyrant extends Boss {
     this.mouth = new THREE.Group();
     this.mouth.position.set(0, -0.36, 0.2);
     this.head.add(this.mouth);
-    const gullet = Kit.add(this.mouth, Kit.box(0.64, 0.42, 0.45), Kit.mat(0x4a0c0c), 0, -0.04, 0.1);
+    const gullet = Kit.add(this.mouth, Kit.box(0.64, 0.42, 0.45), tx('skin', 0x521010, 2, 0.5), 0, -0.04, 0.1);
     this.maw = Kit.pivot(this.head, 0, -0.3, 0.05, 'maw');
     const throat = Kit.add(this.maw, Kit.sphere(0.42, 10, 8), Kit.glow(0xff3a14, 1.9), 0, -0.05, 0.78, 0, 0, 0, 0.88, 0.62, 0.6);
     this.throat = throat;
@@ -329,7 +351,7 @@ export class Tyrant extends Boss {
       m.userData.baseMat = m.material;
       this.hitbox(m, 'weak');
     }
-    this.tongue = Kit.add(this.jaw, Kit.box(0.38, 0.1, 1.1), Kit.mat(0xa03848), 0, 0.0, 0.85);
+    this.tongue = Kit.add(this.jaw, Kit.box(0.38, 0.1, 1.1), tx('skin', 0xa03848, 2.5, 0.6), 0, 0.0, 0.85);
     this.tongue.userData.baseMat = this.tongue.material;
     this.hitbox(this.tongue, 'weak');
     this.mouth.visible = false;
@@ -670,16 +692,16 @@ export class Tyrant extends Boss {
     const r = this.world.rng;
     if (kind === 0) {
       // Snapped palm trunk with a frond tuft.
-      Kit.add(g, Kit.cyl(0.2, 0.25, 2.4, 6), Kit.tex('bark', 0x6e5d4a, 1.5, 0.8), 0, 0, 0, Math.PI / 2, 0, 0);
-      for (let i = 0; i < 4; i++) Kit.add(g, Kit.box(0.08, 0.5, 1.4), Kit.mat(0x3f6d3a), 0, 0, 1.2, 0.5, (i / 4) * Math.PI * 2, 0.6);
+      Kit.add(g, Kit.cyl(0.2, 0.25, 2.4, 6), tx('bark', 0x7a6650, 1.5, 0.9), 0, 0, 0, Math.PI / 2, 0, 0);
+      for (let i = 0; i < 4; i++) Kit.add(g, Kit.box(0.08, 0.5, 1.4), tx('leaves', 0x4a7b42, 2, 0.8), 0, 0, 1.2, 0.5, (i / 4) * Math.PI * 2, 0.6);
     } else if (kind === 1) {
-      Kit.add(g, Kit.ico(0.55, 0), Kit.tex('rock', 0x5a5850, 1, 0.9), 0, 0, 0, r.next(), r.next(), 0, 1, 0.8, 1.1);
-      Kit.add(g, Kit.ico(0.25, 0), Kit.mat(0x3a5a2a), 0.2, 0.35, 0);
+      Kit.add(g, Kit.ico(0.55, 0), tx('rock', 0x6a665c, 1.6, 1), 0, 0, 0, r.next(), r.next(), 0, 1, 0.8, 1.1);
+      Kit.add(g, Kit.ico(0.25, 0), tx('grass', 0x3f6a2e, 3, 0.8), 0.2, 0.35, 0);
     } else {
       // Wrecked car door / fence panel.
-      Kit.add(g, Kit.box(1.3, 1.0, 0.1), Kit.tex('metal', 0xcfc8b4, 1, 0.35), 0, 0, 0);
-      Kit.add(g, Kit.box(1.32, 0.16, 0.12), Kit.mat(0xb8302a), 0, -0.2, 0);
-      Kit.add(g, Kit.box(0.9, 0.4, 0.12), Kit.mat(0x1a2840), 0.1, 0.25, 0);
+      Kit.add(g, Kit.box(1.3, 1.0, 0.1), tx('metal', 0xcfc8b4, 1.6, 0.6), 0, 0, 0);
+      Kit.add(g, Kit.box(1.32, 0.16, 0.12), tx('metal', 0xb8302a, 1.6, 0.6), 0, -0.2, 0);
+      Kit.add(g, Kit.box(0.9, 0.4, 0.12), clean(0x24344e), 0.1, 0.25, 0);
     }
     return g;
   }

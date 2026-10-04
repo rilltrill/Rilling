@@ -7,6 +7,7 @@ import { D, X } from './layout';
 import { addText } from './font';
 import {
   PAL,
+  S,
   billboard,
   bus,
   bush,
@@ -111,17 +112,91 @@ function occluder(ctx: Ctx, d: number, x: number, y: number, w: number, h: numbe
 
 // ─── Road ────────────────────────────────────────────────────────────────────
 
-const ROAD_W = X.ROAD_R - X.ROAD_L;
-const ROAD_C = (X.ROAD_R + X.ROAD_L) / 2;
+/**
+ * Lateral road profile: [x, wear]. Lane edges are clean asphalt, lane centres
+ * carry the dark oil streak of a million sumps, shoulders and the median strip
+ * are dusty and pale. Vertex colours interpolate between columns, so on the
+ * arcade monitor the lanes read as dithered bands instead of one flat slab.
+ */
+const PROFILE: [number, number][] = [
+  [X.ROAD_R, 1.2],
+  [6.4, 1.08],
+  [X.LANE_HALF, 1.0],
+  [3.73, 0.72],
+  [1.87, 1.02],
+  [0, 0.72],
+  [-1.87, 1.02],
+  [-3.73, 0.72],
+  [-X.LANE_HALF, 1.0],
+  [X.MEDIAN, 1.12],
+  [-8.6, 1.0],
+  [-10.45, 0.76],
+  [-12.3, 1.02],
+  [-14.25, 0.76],
+  [-16.2, 1.02],
+  [-18.1, 0.76],
+  [-20.0, 1.0],
+  [X.ROAD_L, 1.2],
+];
+
+/** Small deterministic hash → [0, 1). */
+function hash(a: number, b: number): number {
+  let h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/** Asphalt surface between rail distances d0..d1 with per-vertex lane wear. */
+function roadStrip(ctx: Ctx, d0: number, d1: number, step: number, mat: THREE.Material): THREE.Mesh {
+  const pos: number[] = [];
+  const col: number[] = [];
+  const idx: number[] = [];
+  const nc = PROFILE.length;
+  let rows = 0;
+  for (let d = d0; d <= d1 + 0.001; d += step) {
+    const dd = Math.min(d, d1);
+    const f = ctx.frame(dd);
+    // Slow resurfacing variation along the road + the odd patched lane.
+    const along = 1 + 0.05 * Math.sin(dd * 0.043 + 1.3) * Math.sin(dd * 0.0171) + 0.03 * Math.sin(dd * 0.21);
+    const block = Math.floor(dd / 15);
+    for (let c = 0; c < nc; c++) {
+      const [x, wear] = PROFILE[c];
+      const lane = Math.floor((x + 22) / 3.8);
+      const patch = hash(block, lane) < 0.14 ? 0.8 : hash(block, lane + 40) < 0.1 ? 1.14 : 1;
+      const k = wear * along * patch;
+      pos.push(f.pos.x + f.right.x * x, f.pos.y, f.pos.z + f.right.z * x);
+      col.push(k, k, k);
+    }
+    if (rows > 0) {
+      const a = (rows - 1) * nc;
+      const b = rows * nc;
+      // Columns run right → left, so (a, next, b) winds up toward +Y.
+      for (let c = 0; c < nc - 1; c++) idx.push(a + c, b + c, a + c + 1, a + c + 1, b + c, b + c + 1);
+    }
+    rows++;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return new THREE.Mesh(Kit.track(g), mat);
+}
+
+/** Road paint: same asphalt texture at lower strength reads as worn paint. */
+const PAINT_WHITE = 0xd8d2c4;
+const PAINT_YELLOW = 0xd8a428;
+const paint = (c: number) => M.lam(c, 'asphalt', 0.55, 0.55);
+/** The highway surface (also used by the start apron). */
+const asphalt = () => M.lam(PAL.asphalt, 'asphalt', 0.55, 1);
 
 export function buildRoad(ctx: Ctx, from: number, to: number) {
-  const asphalt = M.lam(PAL.asphalt, 'asphalt', 1, 0.85);
-  const white = M.lam(0xcfc8bc);
-  const yellow = M.lam(0xc89a2a);
+  const white = paint(PAINT_WHITE);
+  const yellow = paint(PAINT_YELLOW);
   for (let d0 = from; d0 < to; d0 += CHUNK) {
     const d1 = Math.min(to, d0 + CHUNK);
     const g = ctx.chunk(d0 + 1);
-    g.add(EnvKit.ribbon(ctx.curve, ROAD_W, asphalt, { from: d0, to: d1, step: 2.5, offset: ROAD_C, y: 0.0 }));
+    g.add(roadStrip(ctx, d0, d1, 5, asphalt()));
     // Solid edge lines.
     for (const [off, mat] of [
       [5.6, white],
@@ -143,11 +218,10 @@ export function buildRoad(ctx: Ctx, from: number, to: number) {
 /** Road extension behind the start (seen in the opening look-back). */
 export function buildStartApron(ctx: Ctx, root: THREE.Group) {
   const g = new THREE.Group();
-  const asphalt = M.lam(PAL.asphalt, 'asphalt', 1, 0.85);
-  Kit.add(g, Kit.box(ROAD_W, 0.02, 320), asphalt, ROAD_C, 0, 160);
-  Kit.add(g, Kit.box(0.16, 0.03, 320), M.lam(0xcfc8bc), 5.6, 0.02, 160);
-  Kit.add(g, Kit.box(0.16, 0.03, 320), M.lam(0xc89a2a), -5.6, 0.02, 160);
-  for (let z = 4; z < 320; z += 10) for (const x of [-1.87, 1.87, -12.3, -16.2]) Kit.add(g, Kit.box(0.15, 0.03, 3), M.lam(0xcfc8bc), x, 0.02, z);
+  g.add(roadStrip(ctx, -320, 0, 5, asphalt()));
+  Kit.add(g, Kit.box(0.16, 0.03, 320), paint(PAINT_WHITE), 5.6, 0.02, 160);
+  Kit.add(g, Kit.box(0.16, 0.03, 320), paint(PAINT_YELLOW), -5.6, 0.02, 160);
+  for (let z = 4; z < 320; z += 10) for (const x of [-1.87, 1.87, -12.3, -16.2]) Kit.add(g, Kit.box(0.15, 0.03, 3), paint(PAINT_WHITE), x, 0.02, z);
   for (let z = 2; z < 200; z += 4) {
     const s = new THREE.Group();
     jersey(s, 0, 0, 3.96);
@@ -172,14 +246,15 @@ export function buildStartApron(ctx: Ctx, root: THREE.Group) {
       const h = rng.range(5, 16);
       const w = rng.range(8, 18);
       const dep = rng.range(8, 14);
-      Kit.add(g, Kit.box(w, h, dep), M.lam(rng.pick([0x3a2e30, 0x2e2c36, 0x42382e]), 'brick', 1, 0.5), x, h / 2, z);
-      Kit.add(g, Kit.box(w + 0.4, 0.5, dep + 0.4), M.lam(0x241e22), x, h + 0.25, z);
+      Kit.add(g, Kit.box(w, h, dep), M.lam(rng.pick([0x4a3434, 0x3a3644, 0x4c4032]), 'brick', 0.35, 1), x, h / 2, z);
+      Kit.add(g, Kit.box(w + 0.4, 0.5, dep + 0.4), S.conc(0x2e2628), x, h + 0.25, z);
       const burning = rng.chance(0.5);
       // Window rows on the face looking down the highway.
       for (let fy = 2; fy < h - 1; fy += 3) {
         for (let fx = -w / 2 + 1.5; fx < w / 2 - 1; fx += 2.6) {
-          const lit = burning && rng.chance(0.35) ? M.glow(0xff8a30, 1.3) : rng.chance(0.12) ? M.glow(0xffd090, 0.8) : M.lam(0x141218);
-          Kit.add(g, Kit.box(1.2, 1.3, 0.12), lit, x + fx, fy, z - dep / 2 - 0.05);
+          const lit = burning && rng.chance(0.35) ? M.glow(0xff8a30, 1.3) : rng.chance(0.12) ? M.glow(0xffd090, 0.8) : S.clean(0x161420);
+          // A single quad facing down the highway (−Z): the only side anyone sees.
+          Kit.add(g, Kit.plane(1.2, 1.3), lit, x + fx, fy, z - dep / 2 - 0.05, 0, Math.PI, 0);
         }
       }
       if (burning) ctx.fires.add(new THREE.Vector3(x, h, z), rng.range(1.6, 2.6), 1);
@@ -194,8 +269,8 @@ export function buildStartApron(ctx: Ctx, root: THREE.Group) {
 /** Median jersey barrier, both guard rails and light poles between d0..d1. */
 export function buildFurniture(ctx: Ctx, d0: number, d1: number, opts: { rails?: boolean; poles?: boolean; median?: boolean } = {}) {
   const rng = ctx.rng;
-  const rail = M.lam(PAL.metal, 'metal', 1, 0.5);
-  const post = M.lam(PAL.metalDark);
+  const rail = S.steel(PAL.metal);
+  const post = S.steel(PAL.metalDark);
   for (let d = d0; d < d1; d += 4) {
     if (opts.median !== false) {
       const s = new THREE.Group();
@@ -220,8 +295,8 @@ export function buildFurniture(ctx: Ctx, d0: number, d1: number, opts: { rails?:
 
 /** Utility poles with sagging wires (nice silhouettes against the dusk sky). */
 export function buildUtilityLine(ctx: Ctx, d0: number, d1: number, x: number) {
-  const wood = M.lam(0x3a2c22, 'bark', 1, 0.5);
-  const wire = M.lam(0x141416);
+  const wood = M.lam(0x4a3828, 'bark', 0.6, 1);
+  const wire = S.clean(0x141416);
   let prev: THREE.Vector3[] | null = null;
   for (let d = d0; d <= d1; d += 32) {
     const lean = ctx.rng.spread(0.06);
@@ -284,13 +359,13 @@ function house(rng: Rng, burning: boolean): THREE.Group {
   const w = rng.range(8, 12);
   const dpt = rng.range(7, 10);
   const h = rng.range(3, 5.5);
-  Kit.add(g, Kit.box(w, h, dpt), M.lam(rng.pick([0x8a7a6a, 0x6a7a8a, 0x9a8a6a, 0x7a6a6a]), 'stucco', 1, 0.6), 0, h / 2, 0);
-  const roof = M.lam(rng.pick([0x3a2a2a, 0x2a2a34, 0x4a3a2a]), 'planks', 1, 0.5);
+  Kit.add(g, Kit.box(w, h, dpt), M.lam(rng.pick([0x9a826a, 0x6a7e94, 0xa88e5e, 0x8a6a6a]), 'stucco', 0.35, 1), 0, h / 2, 0);
+  const roof = M.lam(rng.pick([0x4a2c2a, 0x2e3040, 0x54402a]), 'planks', 0.35, 1);
   for (const s of [-1, 1]) Kit.add(g, Kit.box(w + 0.6, 0.25, dpt * 0.58), roof, 0, h + dpt * 0.18, s * dpt * 0.24, s * 0.62, 0, 0);
   for (const x of [-w / 3, w / 3]) {
-    Kit.add(g, Kit.box(1.4, 1.2, 0.1), burning ? M.glow(0xff8a30, 1.3) : rng.chance(0.3) ? M.glow(0xffd090, 0.9) : M.lam(0x1a1a22), x, h * 0.55, dpt / 2 + 0.02);
+    Kit.add(g, Kit.box(1.4, 1.2, 0.1), burning ? M.glow(0xff8a30, 1.3) : rng.chance(0.3) ? M.glow(0xffd090, 0.9) : S.clean(0x1a1a22), x, h * 0.55, dpt / 2 + 0.02);
   }
-  Kit.add(g, Kit.box(1.1, 2.1, 0.1), M.lam(0x3a2a1a), 0, 1.05, dpt / 2 + 0.02);
+  Kit.add(g, Kit.box(1.1, 2.1, 0.1), M.lam(0x4a3220, 'planks', 1.5, 0.9), 0, 1.05, dpt / 2 + 0.02);
   return g;
 }
 
@@ -308,23 +383,23 @@ export function buildOutskirts(ctx: Ctx) {
   {
     const d = 72;
     const g = new THREE.Group();
-    const white = M.lam(0xd8d4cc);
+    const white = S.steel(0xdcd8d0);
     for (const x of [-5, 5]) for (const z of [-3.5, 3.5]) Kit.add(g, Kit.box(0.5, 5, 0.5), white, x, 2.5, z);
-    Kit.add(g, Kit.box(14, 0.7, 10), M.lam(0xb02a20), 0, 5.3, 0);
+    Kit.add(g, Kit.box(14, 0.7, 10), M.lam(0xc42a20, 'metal', 0.45, 0.8), 0, 5.3, 0);
     Kit.add(g, Kit.box(14.1, 0.25, 10.1), white, 0, 5.1, 0);
     for (const x of [-4, 0, 4]) Kit.add(g, Kit.box(1.4, 0.06, 0.8), M.glow(0xf0f0ff, 1.2), x, 4.93, 0);
     for (const x of [-3, 3]) {
-      Kit.add(g, Kit.box(0.9, 1.7, 0.5), M.lam(0xc8c4bc), x, 0.85, 0);
+      Kit.add(g, Kit.box(0.9, 1.7, 0.5), S.steel(0xd0ccc4), x, 0.85, 0);
       Kit.add(g, Kit.box(0.5, 0.4, 0.52), M.glow(0x9ad0ff, 0.8), x, 1.3, 0);
     }
     // Shop.
-    Kit.add(g, Kit.box(12, 4.5, 8), M.lam(0x8a8478, 'stucco'), 0, 2.25, 13);
+    Kit.add(g, Kit.box(12, 4.5, 8), M.lam(0x9a8a74, 'brick', 0.45, 1), 0, 2.25, 13);
     Kit.add(g, Kit.box(8, 2, 0.1), M.glow(0xfff0c0, 0.9), 0, 1.8, 8.95);
     ctx.put(g, d, 24, 0, Math.PI / 2);
     // Tall pole sign.
     const s = new THREE.Group();
-    Kit.add(s, Kit.cyl(0.3, 0.3, 12, 8), M.lam(PAL.metalDark), 0, 6, 0);
-    Kit.add(s, Kit.box(5, 2.6, 0.6), M.lam(0xb02a20), 0, 13, 0);
+    Kit.add(s, Kit.cyl(0.3, 0.3, 12, 8), S.steel(PAL.metalDark), 0, 6, 0);
+    Kit.add(s, Kit.box(5, 2.6, 0.6), S.plate(0xc42a20), 0, 13, 0);
     addText(s, 'GAS', M.glow(0xffe6a0, 1.3), 0, 13.4, 0.32, 0.2, 0.06);
     addText(s, '24H', M.glow(0xffffff, 1.0), 0, 12.3, 0.32, 0.12, 0.06);
     ctx.put(s, d - 18, 15, 0, -0.5);
@@ -338,26 +413,26 @@ export function buildOutskirts(ctx: Ctx) {
     const w = rng.range(22, 36);
     const h = rng.range(7, 11);
     const dep = rng.range(16, 24);
-    Kit.add(g, Kit.box(w, h, dep), M.lam(rng.pick([0x6a6a70, 0x5a6470, 0x7a6a5a]), 'corrugated', 1, 0.5), 0, h / 2, 0);
-    Kit.add(g, Kit.box(w + 0.4, 0.5, dep + 0.4), M.lam(0x3a3a40), 0, h + 0.25, 0);
-    for (let x = -w / 2 + 4; x < w / 2 - 3; x += 6) Kit.add(g, Kit.box(4, 4.5, 0.12), M.lam(0x4a4a50, 'corrugated'), x, 2.25, dep / 2 + 0.03);
+    Kit.add(g, Kit.box(w, h, dep), M.lam(rng.pick([0x7a7a84, 0x5a6c80, 0x8a7460]), 'corrugated', 0.25, 0.9), 0, h / 2, 0);
+    Kit.add(g, Kit.box(w + 0.4, 0.5, dep + 0.4), S.steel(0x3a3a40), 0, h + 0.25, 0);
+    for (let x = -w / 2 + 4; x < w / 2 - 3; x += 6) Kit.add(g, Kit.box(4, 4.5, 0.12), M.lam(0x4e5058, 'corrugated', 0.4, 1), x, 2.25, dep / 2 + 0.03);
     if (rng.chance(0.6)) Kit.add(g, Kit.box(w * 0.5, 0.6, 0.12), M.glow(0xffd090, 0.8), 0, h - 1.5, dep / 2 + 0.05);
     ctx.put(g, d, rng.range(42, 60), 0, -Math.PI / 2);
     if (rng.chance(0.4)) ctx.fires.add(ctx.at(d, 48, h), 2.4, 1);
   }
   // Sound wall with graffiti (right).
   {
-    const panel = M.lam(0x8a847a, 'concrete', 1, 0.6);
+    const panel = M.lam(0x948c80, 'concrete', 0.55, 1);
     const tags = ["THEY'RE COMING", 'GOD HELP US', 'HEAD SHOTS ONLY', 'NO WAY OUT', 'RUN'];
     let t = 0;
     for (let d = 182; d < 252; d += 4) {
       const p = new THREE.Group();
       Kit.add(p, Kit.box(0.3, 4.6, 4.0), panel, 0, 2.3, 0);
-      Kit.add(p, Kit.box(0.4, 4.8, 0.3), M.lam(0x6a665e), 0, 2.4, 2.0);
+      Kit.add(p, Kit.box(0.4, 4.8, 0.3), S.conc(0x6a665e), 0, 2.4, 2.0);
       ctx.put(p, d + 2, 11.5, 0);
       if ((d - 182) % 20 === 8 && t < tags.length) {
         const tg = new THREE.Group();
-        addText(tg, tags[t], M.lam(rng.pick([0xd02020, 0x30a0e0, 0xe0e020, 0xf0f0f0])), 0, 0, 0, 0.12, 0.02);
+        addText(tg, tags[t], S.clean(rng.pick([0xe02020, 0x30a8f0, 0xf0e020, 0xf4f4f4])), 0, 0, 0, 0.12, 0.02);
         ctx.put(tg, d + 6, 11.33, 2.3, -Math.PI / 2);
         t++;
       }
@@ -418,8 +493,9 @@ interface CarOptsLite {
 export function buildOverpass(ctx: Ctx) {
   const d = D.OVERPASS;
   const g = new THREE.Group();
-  const conc = M.lam(PAL.concrete, 'concrete', 1, 0.7);
-  const dark = M.lam(PAL.concreteDark, 'concrete', 1, 0.7);
+  const conc = S.conc(PAL.concrete);
+  const dark = S.conc(PAL.concreteDark);
+  const rail = S.steel(PAL.metal);
   // Deck (spans local X), bottom at 6.3, top at 7.3.
   Kit.add(g, Kit.box(80, 1.0, 12), conc, -3, 6.8, 0);
   for (const z of [-4.5, -1.5, 1.5, 4.5]) Kit.add(g, Kit.box(80, 0.8, 0.7), dark, -3, 5.9, z);
@@ -427,9 +503,9 @@ export function buildOverpass(ctx: Ctx) {
   // so whatever stands on the deck edge is in plain view.
   Kit.add(g, Kit.box(80, 1.0, 0.3), conc, -3, 7.8, -5.85);
   Kit.add(g, Kit.box(80, 0.3, 0.35), conc, -3, 7.45, 5.85);
-  Kit.add(g, Kit.box(80, 0.08, 0.08), M.lam(PAL.metal), -3, 8.35, 5.85);
-  Kit.add(g, Kit.box(80, 0.06, 0.06), M.lam(PAL.metal), -3, 7.95, 5.85);
-  for (let x = -42; x <= 36; x += 2.5) Kit.add(g, Kit.box(0.07, 0.8, 0.07), M.lam(PAL.metal), x, 7.95, 5.85);
+  Kit.add(g, Kit.box(80, 0.08, 0.08), rail, -3, 8.35, 5.85);
+  Kit.add(g, Kit.box(80, 0.06, 0.06), rail, -3, 7.95, 5.85);
+  for (let x = -42; x <= 36; x += 2.5) Kit.add(g, Kit.box(0.07, 0.8, 0.07), rail, x, 7.95, 5.85);
   // Piers.
   for (const x of [12.5, X.MEDIAN, -26]) {
     for (const z of [-3.5, 3.5]) Kit.add(g, Kit.box(1.4, 6.3, 1.4), dark, x, 3.15, z);
@@ -438,7 +514,7 @@ export function buildOverpass(ctx: Ctx) {
   // Embankments at both ends.
   for (const s of [-1, 1]) {
     const x = s > 0 ? 40 : -46;
-    Kit.add(g, Kit.box(14, 7.3, 14), M.lam(PAL.dirt, 'dirt'), x, 3.65, 0);
+    Kit.add(g, Kit.box(14, 7.3, 14), M.lam(PAL.dirt, 'dirt', 0.45, 1), x, 3.65, 0);
   }
   // Green sign panels hung on the near parapet.
   const s1 = signPanel(['BRIDGE 3 MI', 'SAFE ZONE ^'], 7.4, 2.6);
@@ -461,23 +537,25 @@ export function buildOverpass(ctx: Ctx) {
 
 export function buildBillboards(ctx: Ctx) {
   const rng = ctx.rng;
-  const red = M.lam(0xc0281c);
-  const yellow = M.lam(0xf0c030);
-  const white = M.lam(0xe8e4d8);
-  const black = M.lam(0x16161a);
+  // Printed faces stay clean (readable); paper sheets over the planks get a faint seam.
+  const red = S.clean(0xd42a1c);
+  const yellow = S.clean(0xf8c830);
+  const white = S.clean(0xf0ece0);
+  const black = S.clean(0x16161a);
+  const sheet = (c: number) => M.lam(c, 'planks', 0.35, 0.18);
   const repent = billboard((f) => {
-    Kit.add(f, Kit.box(12, 5, 0.1), white, 0, 0, 0.05);
+    Kit.add(f, Kit.box(12, 5, 0.1), sheet(0xf0ece0), 0, 0, 0.05);
     addText(f, 'REPENT', red, 0, 0.8, 0.12, 0.34, 0.06);
     addText(f, 'THE END IS NEAR', black, 0, -1.4, 0.12, 0.13, 0.05);
   });
   ctx.put(repent, D.BILLBOARDS_FROM + 4, 18, 0, -0.42);
   const burger = billboard((f) => {
-    Kit.add(f, Kit.box(12, 5, 0.1), red, 0, 0, 0.05);
+    Kit.add(f, Kit.box(12, 5, 0.1), sheet(0xd42a1c), 0, 0, 0.05);
     // Burger.
-    Kit.add(f, Kit.box(3.2, 0.9, 0.2), M.lam(0xd89a40), -3.4, 0.9, 0.15);
-    Kit.add(f, Kit.box(3.4, 0.45, 0.2), M.lam(0x5a2a14), -3.4, 0.2, 0.15);
-    Kit.add(f, Kit.box(3.5, 0.18, 0.2), M.lam(0x4aa030), -3.4, -0.15, 0.15);
-    Kit.add(f, Kit.box(3.2, 0.7, 0.2), M.lam(0xd89a40), -3.4, -0.65, 0.15);
+    Kit.add(f, Kit.box(3.2, 0.9, 0.2), S.clean(0xe8a440), -3.4, 0.9, 0.15);
+    Kit.add(f, Kit.box(3.4, 0.45, 0.2), S.clean(0x6a2e14), -3.4, 0.2, 0.15);
+    Kit.add(f, Kit.box(3.5, 0.18, 0.2), S.clean(0x50b030), -3.4, -0.15, 0.15);
+    Kit.add(f, Kit.box(3.2, 0.7, 0.2), S.clean(0xe8a440), -3.4, -0.65, 0.15);
     addText(f, 'BURGER', yellow, 1.9, 1.0, 0.12, 0.2, 0.05);
     addText(f, 'BARN', yellow, 1.9, -0.8, 0.12, 0.26, 0.05);
     addText(f, 'EXIT 9 >', white, 1.9, -2.0, 0.12, 0.08, 0.04);
@@ -485,8 +563,8 @@ export function buildBillboards(ctx: Ctx) {
   ctx.put(burger, D.BILLBOARDS_FROM + 46, -27, 0, 0.42);
   // Burning, sagging billboard.
   const burnt = billboard((f) => {
-    Kit.add(f, Kit.box(12, 5, 0.1), M.lam(0x2a2226), 0, 0, 0.05);
-    addText(f, 'MOTEL', M.lam(0x5a4a40), 0, 0.5, 0.12, 0.28, 0.05);
+    Kit.add(f, Kit.box(12, 5, 0.1), M.lam(0x2a2226, 'planks', 0.7, 1), 0, 0, 0.05);
+    addText(f, 'MOTEL', M.lam(0x5a4a40, 'planks', 0.7, 0.6), 0, 0.5, 0.12, 0.28, 0.05);
   }, false);
   burnt.rotation.z = 0.12;
   ctx.put(burnt, D.BILLBOARDS_FROM + 92, 19, 0, -0.35);
@@ -494,16 +572,16 @@ export function buildBillboards(ctx: Ctx) {
   // Motel with neon.
   {
     const g = new THREE.Group();
-    Kit.add(g, Kit.box(34, 6, 10), M.lam(0x8a6a5a, 'stucco'), 0, 3, 0);
-    Kit.add(g, Kit.box(34.4, 0.4, 12), M.lam(0x4a3028), 0, 6.2, 1);
+    Kit.add(g, Kit.box(34, 6, 10), M.lam(0xa07460, 'stucco', 0.35, 1), 0, 3, 0);
+    Kit.add(g, Kit.box(34.4, 0.4, 12), M.lam(0x4a3028, 'planks', 0.45, 1), 0, 6.2, 1);
     for (let x = -15; x <= 15; x += 3.4) {
-      Kit.add(g, Kit.box(1, 2.1, 0.1), M.lam(0x5a3a2a), x - 0.8, 1.05, 5.02);
-      Kit.add(g, Kit.box(1, 1, 0.1), rng.chance(0.4) ? M.glow(0xffc070, 0.9) : M.lam(0x1a1a20), x + 0.6, 1.6, 5.02);
-      Kit.add(g, Kit.box(1, 1, 0.1), rng.chance(0.3) ? M.glow(0xffc070, 0.9) : M.lam(0x1a1a20), x + 0.6, 4.4, 5.02);
+      Kit.add(g, Kit.box(1, 2.1, 0.1), M.lam(0x6a3e2a, 'planks', 1.5, 0.9), x - 0.8, 1.05, 5.02);
+      Kit.add(g, Kit.box(1, 1, 0.1), rng.chance(0.4) ? M.glow(0xffc070, 0.9) : S.clean(0x1a1a20), x + 0.6, 1.6, 5.02);
+      Kit.add(g, Kit.box(1, 1, 0.1), rng.chance(0.3) ? M.glow(0xffc070, 0.9) : S.clean(0x1a1a20), x + 0.6, 4.4, 5.02);
     }
     const sign = new THREE.Group();
-    Kit.add(sign, Kit.cyl(0.25, 0.25, 9, 6), M.lam(PAL.metalDark), 0, 4.5, 0);
-    Kit.add(sign, Kit.box(7, 2.2, 0.4), M.lam(0x1a1a24), 0, 9.6, 0);
+    Kit.add(sign, Kit.cyl(0.25, 0.25, 9, 6), S.steel(PAL.metalDark), 0, 4.5, 0);
+    Kit.add(sign, Kit.box(7, 2.2, 0.4), S.steel(0x1a1a24), 0, 9.6, 0);
     addText(sign, 'MOTEL', M.glow(0xff3a8a, 1.5), 0, 9.9, 0.22, 0.2, 0.05);
     addText(sign, 'VACANCY', M.glow(0x40ff90, 1.2), 0, 8.95, 0.22, 0.09, 0.04);
     sign.position.set(-14, 0, 12);
@@ -513,7 +591,7 @@ export function buildBillboards(ctx: Ctx) {
   // Gantry sign over the lanes.
   {
     const g = new THREE.Group();
-    const steel = M.lam(PAL.metalDark);
+    const steel = S.steel(PAL.metalDark);
     for (const x of [-8.2, 9.2]) Kit.add(g, Kit.box(0.4, 7.2, 0.4), steel, x, 3.6, 0);
     Kit.add(g, Kit.box(17.8, 0.5, 0.5), steel, 0.5, 7.0, 0);
     Kit.add(g, Kit.box(17.8, 0.3, 0.3), steel, 0.5, 6.2, 0);
@@ -540,8 +618,8 @@ export function buildTankerSite(ctx: Ctx) {
   ctx.put(holder, T + 2, 6.4, 0, 0.6);
   // Fuel spill: a glossy, oily sheen with a ragged outline (overlapping thin slabs), not a black hole.
   {
-    const oil = M.lam(0x2c2734);
-    const sheen = M.lam(0x3a3446);
+    const oil = M.lam(0x2c2734, 'asphalt', 1, 0.35);
+    const sheen = S.clean(0x3e3850);
     const slabs: [number, number, number, number, number][] = [
       [0, 0, 6.5, 3.6, 0.2],
       [-2.2, 1.1, 4.2, 2.6, -0.5],
@@ -572,10 +650,10 @@ export function buildTunnel(ctx: Ctx): { lights: THREE.Group; fixtures: THREE.Ve
   const rng = ctx.rng;
   const t0 = D.TUNNEL_FROM;
   const t1 = D.TUNNEL_TO;
-  const wall = M.lam(0x7a8088, 'tiles', 1, 0.6);
-  const grime = M.lam(0x3a3a3c, 'concrete', 1, 0.7);
-  const ceil = M.lam(0x2a2a30, 'concrete', 1, 0.6);
-  const stripe = M.lam(0xc08a20);
+  const wall = M.lam(0x8a929c, 'tiles', 0.6, 1);
+  const grime = M.lam(0x44403e, 'concrete', 0.7, 1);
+  const ceil = M.lam(0x5a5662, 'concrete', 0.55, 1);
+  const stripe = S.hazard(0xe0a020);
   const lights = new THREE.Group();
   lights.name = 'tunnel-lights';
   const fixtures: THREE.Vector3[] = [];
@@ -594,7 +672,7 @@ export function buildTunnel(ctx: Ctx): { lights: THREE.Group; fixtures: THREE.Ve
     }
     Kit.add(seg, Kit.box(W + 1, 0.6, 6.02), ceil, C, TUNNEL.H + 0.3, 0);
     // Light fixture housings (dark) — the lit panels live in `lights`.
-    for (const x of [-2.6, 3.8]) Kit.add(seg, Kit.box(0.5, 0.18, 2.2), M.lam(0x1c1c1e), x, TUNNEL.H - 0.08, 0);
+    for (const x of [-2.6, 3.8]) Kit.add(seg, Kit.box(0.5, 0.18, 2.2), S.trim(0x24242a), x, TUNNEL.H - 0.08, 0);
     ctx.put(seg, d + 3, 0, 0, 0);
     for (const x of [-2.6, 3.8]) {
       const l = Kit.mesh(Kit.box(0.36, 0.06, 1.9), M.glow(0xffa848, 1.6));
@@ -606,12 +684,12 @@ export function buildTunnel(ctx: Ctx): { lights: THREE.Group; fixtures: THREE.Ve
       const e = new THREE.Group();
       Kit.add(e, Kit.box(0.1, 0.5, 1.2), M.glow(0x30ff70, 1.2), 0, 0, 0);
       ctx.put(e, d, TUNNEL.R - 0.02, 3.2, 0);
-      ctx.put(Kit.mesh(Kit.box(0.3, 1.2, 0.8), M.lam(0xb03020)), d + 2, TUNNEL.R - 0.15, 1.1, 0);
+      ctx.put(Kit.mesh(Kit.box(0.3, 1.2, 0.8), S.steel(0xc03020)), d + 2, TUNNEL.R - 0.15, 1.1, 0);
     }
     if ((d - t0) % 42 === 18) {
       // Jet fans.
       for (const x of [-1.4, 2.6]) {
-        const f = Kit.mesh(Kit.cyl(0.55, 0.55, 3, 10), M.lam(0x5a5e64, 'metal'));
+        const f = Kit.mesh(Kit.cyl(0.55, 0.55, 3, 10), S.steel(0x5a5e64));
         f.rotation.x = Math.PI / 2;
         ctx.put(f, d, x, TUNNEL.H - 1.0, 0);
       }
@@ -630,23 +708,23 @@ export function buildTunnel(ctx: Ctx): { lights: THREE.Group; fixtures: THREE.Ve
     [t1, -1],
   ] as const) {
     const p = new THREE.Group();
-    const conc = M.lam(0x8a847c, 'concrete', 1, 0.7);
+    const conc = M.lam(0x968e84, 'concrete', 0.5, 1);
     // Facade: above the openings + side pillars + middle pillar between bores.
     Kit.add(p, Kit.box(52, 9, 2), conc, -6, TUNNEL.H + 4.5, 0);
     Kit.add(p, Kit.box(16, TUNNEL.H, 2), conc, TUNNEL.R + 8, TUNNEL.H / 2, 0);
     Kit.add(p, Kit.box(10, TUNNEL.H, 2), conc, X.FAR_EDGE - 5.6, TUNNEL.H / 2, 0);
     Kit.add(p, Kit.box(1.6, TUNNEL.H, 2), conc, -8.2, TUNNEL.H / 2, 0);
-    Kit.add(p, Kit.box(53, 0.6, 2.6), M.lam(0x5a5650), -6, TUNNEL.H + 0.3, 0.2 * dir);
+    Kit.add(p, Kit.box(53, 0.6, 2.6), S.hazard(0xe0a020), -6, TUNNEL.H + 0.3, 0.2 * dir);
     // Oncoming bore: dark mouth.
-    Kit.add(p, Kit.box(11.6, TUNNEL.H, 6), M.lam(0x0c0c10), -14.8, TUNNEL.H / 2, -3.2 * dir);
-    if (dir > 0) addText(p, 'ROUTE 9 TUNNEL', M.lam(0xe8e4d8), 0.7, TUNNEL.H + 3.0, 1.06, 0.16, 0.05);
+    Kit.add(p, Kit.box(11.6, TUNNEL.H, 6), S.clean(0x0c0c10), -14.8, TUNNEL.H / 2, -3.2 * dir);
+    if (dir > 0) addText(p, 'ROUTE 9 TUNNEL', S.clean(0xece8dc), 0.7, TUNNEL.H + 3.0, 1.06, 0.16, 0.05);
     // Lamps flanking the portal.
     for (const x of [-6.8, 8.2]) Kit.add(p, Kit.box(0.6, 0.3, 0.3), M.glow(0xffb050, 1.5), x, TUNNEL.H + 1.3, 1.1 * dir);
     ctx.put(p, d - dir, 0, 0, 0);
   }
   // The ridge the tunnel cuts through: rock masses either side and over the top.
-  const rock = M.lam(PAL.rock, 'rock', 1, 0.8);
-  const rockDark = M.lam(0x463e48, 'rock', 1, 0.8);
+  const rock = M.lam(0x6a5c62, 'rock', 0.18, 1);
+  const rockDark = M.lam(0x4e4450, 'rock', 0.18, 1);
   const ridge = new THREE.Group();
   for (let d = t0 - 8; d < t1 + 10; d += 14) {
     for (const side of [-1, 1]) {
@@ -688,9 +766,9 @@ export function cableY(d: number): number {
 export function buildBridge(ctx: Ctx) {
   const a = D.BRIDGE_FROM;
   const b = D.BRIDGE_TO;
-  const orange = M.lam(0xa8402a, 'metal', 1, 0.5);
-  const orangeDark = M.lam(0x7a2e22, 'metal', 1, 0.5);
-  const conc = M.lam(0x8a847c, 'concrete', 1, 0.7);
+  const orange = M.lam(0xb8442a, 'metal', 0.55, 0.9);
+  const orangeDark = M.lam(0x84301f, 'metal', 0.55, 0.9);
+  const conc = S.conc(0x8a847c);
   const W = BRIDGE.R - BRIDGE.L;
   const C = (BRIDGE.R + BRIDGE.L) / 2;
   for (let d = a; d < b; d += 10) {
@@ -722,9 +800,9 @@ export function buildBridge(ctx: Ctx) {
       [BRIDGE.L + 0.7, 0],
     ] as const) {
       const p = new THREE.Group();
-      Kit.add(p, Kit.cyl(0.09, 0.13, 8, 6), M.lam(PAL.metalDark), 0, 4, 0);
-      Kit.add(p, Kit.box(0.08, 0.08, 1.8), M.lam(PAL.metalDark), 0, 7.95, 0.9);
-      Kit.add(p, Kit.box(0.34, 0.14, 0.6), M.lam(0x222226), 0, 7.9, 1.75);
+      Kit.add(p, Kit.cyl(0.09, 0.13, 8, 6), S.steel(PAL.metalDark), 0, 4, 0);
+      Kit.add(p, Kit.box(0.08, 0.08, 1.8), S.steel(PAL.metalDark), 0, 7.95, 0.9);
+      Kit.add(p, Kit.box(0.34, 0.14, 0.6), S.trim(0x222226), 0, 7.9, 1.75);
       Kit.add(p, Kit.box(0.28, 0.05, 0.5), M.glow(PAL.sodium, 1.4), 0, 7.82, 1.75);
       void yaw;
       ctx.put(p, d, x, 0, x > 0 ? -Math.PI / 2 : Math.PI / 2);
@@ -748,9 +826,10 @@ export function buildBridge(ctx: Ctx) {
   // Towers.
   for (const d of [D.TOWER_A, D.TOWER_B]) {
     const t = new THREE.Group();
+    const tower = M.lam(0xb8442a, 'metal', 0.2, 1);
     for (const x of [BRIDGE.CABLE_R, BRIDGE.CABLE_L]) {
       const h = BRIDGE.TOWER_TOP - BRIDGE.WATER;
-      Kit.add(t, Kit.box(3, h, 4.2), orange, x, BRIDGE.WATER + h / 2, 0);
+      Kit.add(t, Kit.box(3, h, 4.2), tower, x, BRIDGE.WATER + h / 2, 0);
       Kit.add(t, Kit.box(3.4, 2, 4.6), orangeDark, x, BRIDGE.TOWER_TOP, 0);
       for (let y = -20; y < BRIDGE.TOWER_TOP; y += 6) Kit.add(t, Kit.box(3.1, 0.25, 4.3), orangeDark, x, y, 0);
       // Pier in the water.
@@ -760,8 +839,8 @@ export function buildBridge(ctx: Ctx) {
     }
     const span = BRIDGE.CABLE_R - BRIDGE.CABLE_L;
     const mid = (BRIDGE.CABLE_R + BRIDGE.CABLE_L) / 2;
-    for (const y of [BRIDGE.TOWER_TOP - 2, 34, 18]) Kit.add(t, Kit.box(span, 2.4, 3.2), orange, mid, y, 0);
-    Kit.add(t, Kit.box(span, 2.4, 3.2), orange, mid, -4, 0);
+    for (const y of [BRIDGE.TOWER_TOP - 2, 34, 18]) Kit.add(t, Kit.box(span, 2.4, 3.2), tower, mid, y, 0);
+    Kit.add(t, Kit.box(span, 2.4, 3.2), tower, mid, -4, 0);
     ctx.put(t, d, 0, 0, 0, cables);
   }
   ctx.landmarks.push(cables);
@@ -770,7 +849,7 @@ export function buildBridge(ctx: Ctx) {
 /** Water, shore cliffs, a burning ship and the far shore with the SAFE ZONE checkpoint. */
 export function buildBay(ctx: Ctx, root: THREE.Group) {
   const rng = ctx.rng;
-  const water = new THREE.Mesh(Kit.plane(1400, 900), M.lam(0x2c2a4a, 'water', 1, 0.7));
+  const water = new THREE.Mesh(Kit.plane(1400, 900), M.lam(0x34305a, 'water', 0.14, 0.9));
   water.rotation.x = -Math.PI / 2;
   water.position.set(0, BRIDGE.WATER, -940);
   root.add(water);
@@ -780,25 +859,26 @@ export function buildBay(ctx: Ctx, root: THREE.Group) {
     [D.BRIDGE_TO - 6, Math.PI],
   ] as const) {
     const g = new THREE.Group();
-    Kit.add(g, Kit.box(520, -BRIDGE.WATER + 1, 6), M.lam(0x4a3e44, 'rock', 1, 0.8), 0, BRIDGE.WATER / 2 - 0.5, 0);
+    const cliff = M.lam(0x564850, 'rock', 0.3, 1);
+    Kit.add(g, Kit.box(520, -BRIDGE.WATER + 1, 6), cliff, 0, BRIDGE.WATER / 2 - 0.5, 0);
     for (let i = 0; i < 26; i++) {
-      const m = Kit.add(g, Kit.jitter(Kit.ico(1, 0), 0.3, i + (yaw ? 50 : 0)), M.lam(0x3e343a, 'rock'), rng.range(-200, 200), BRIDGE.WATER + rng.range(0, 8), rng.range(-4, -1));
+      const m = Kit.add(g, Kit.jitter(Kit.ico(1, 0), 0.3, i + (yaw ? 50 : 0)), M.lam(0x463a42, 'rock', 0.3, 1), rng.range(-200, 200), BRIDGE.WATER + rng.range(0, 8), rng.range(-4, -1));
       m.scale.set(rng.range(5, 14), rng.range(6, 16), rng.range(4, 9));
     }
     // Bridge abutment.
-    Kit.add(g, Kit.box(40, -BRIDGE.WATER, 10), M.lam(0x7a746c, 'concrete'), 0, BRIDGE.WATER / 2, -4);
+    Kit.add(g, Kit.box(40, -BRIDGE.WATER, 10), M.lam(0x7a746c, 'concrete', 0.5, 0.9), 0, BRIDGE.WATER / 2, -4);
     ctx.put(g, d, 0, 0, yaw);
   }
   // Far shore ground.
   const far = EnvKit.ground(700, PAL.dirt, 0, -1500, -0.04);
-  far.material = M.lam(0x4a3e34, 'dirt', 1, 0.6);
+  far.material = M.lam(0x4a3e34, 'dirt', 0.5, 0.7);
   root.add(far);
   // A burning freighter out in the bay.
   {
     const g = new THREE.Group();
-    Kit.add(g, Kit.box(14, 6, 70), M.lam(0x3a2a2a, 'metal'), 0, 1, 0);
-    Kit.add(g, Kit.box(12, 9, 12), M.lam(0xd8d4cc), 0, 8, 26);
-    for (let z = -26; z < 20; z += 9) Kit.add(g, Kit.box(12, 4.5, 8), M.lam(rng.pick([0xa83a2a, 0x2a5a8a, 0x3a7a4a, 0xc89a2a]), 'corrugated'), 0, 6, z);
+    Kit.add(g, Kit.box(14, 6, 70), M.lam(0x4a2c2a, 'metal', 0.3, 1), 0, 1, 0);
+    Kit.add(g, Kit.box(12, 9, 12), M.lam(0xd8d4cc, 'metal', 0.3, 0.6), 0, 8, 26);
+    for (let z = -26; z < 20; z += 9) Kit.add(g, Kit.box(12, 4.5, 8), M.lam(rng.pick([0xb83a2a, 0x2a5a9a, 0x3a8a4a, 0xd8a02a]), 'metal', 0.3, 0.9), 0, 6, z);
     g.position.set(-150, BRIDGE.WATER, -905);
     g.rotation.y = 0.5;
     g.rotation.z = 0.08;
@@ -810,7 +890,7 @@ export function buildBay(ctx: Ctx, root: THREE.Group) {
   {
     const d = D.END - 2;
     const g = new THREE.Group();
-    const steel = M.lam(PAL.metalDark);
+    const steel = S.steel(PAL.metalDark);
     for (const x of [-9, 10]) Kit.add(g, Kit.box(0.6, 8, 0.6), steel, x, 4, 0);
     Kit.add(g, Kit.box(19.6, 0.6, 0.6), steel, 0.5, 7.8, 0);
     const s = signPanel(['SAFE ZONE', 'MILITARY CHECKPOINT'], 15.5, 2.9, 0x1a3a1a);
@@ -819,7 +899,7 @@ export function buildBay(ctx: Ctx, root: THREE.Group) {
     for (const x of [-16, 17]) {
       const t = new THREE.Group();
       Kit.add(t, Kit.box(0.3, 10, 0.3), steel, 0, 5, 0);
-      Kit.add(t, Kit.box(2.4, 1.2, 0.5), M.lam(0x2a2a2e), 0, 10.4, 0);
+      Kit.add(t, Kit.box(2.4, 1.2, 0.5), S.steel(0x2a2a2e), 0, 10.4, 0);
       for (const lx of [-0.6, 0.6]) Kit.add(t, Kit.box(0.9, 0.8, 0.1), M.glow(0xf0f4ff, 2), lx, 10.4, 0.27);
       t.position.set(x, 0, -4);
       g.add(t);
@@ -828,13 +908,13 @@ export function buildBay(ctx: Ctx, root: THREE.Group) {
     sandbags(g, 7, -2, 6, 3);
     // Tank guarding the checkpoint.
     const tank = new THREE.Group();
-    const olive = M.lam(PAL.olive, 'metal', 1, 0.4);
-    const dark = M.lam(0x2a2e22);
+    const olive = M.lam(0x56663a, 'metal', 0.8, 0.7);
+    const dark = S.trim(0x2a2e22);
     Kit.add(tank, Kit.box(3.4, 1.0, 6.6), olive, 0, 1.1, 0);
     for (const sx of [-1, 1]) Kit.add(tank, Kit.box(0.9, 1.0, 7.0), dark, sx * 1.75, 0.6, 0);
     Kit.add(tank, Kit.box(2.4, 0.8, 3.0), olive, 0, 2.0, -0.3);
     Kit.add(tank, Kit.cyl(0.14, 0.18, 4.4, 8), dark, 0, 2.05, 3.2, Math.PI / 2, 0, 0);
-    addText(tank, 'U.S. ARMY', M.lam(0xe8e4d8), 0, 1.2, 3.31, 0.06, 0.02);
+    addText(tank, 'U.S. ARMY', S.clean(0xece8dc), 0, 1.2, 3.31, 0.06, 0.02);
     tank.position.set(-14, 0, -10);
     tank.rotation.y = 0.5;
     g.add(tank);
@@ -851,6 +931,8 @@ export function buildBarricade(ctx: Ctx) {
   for (const x of [-5.2, -3.6, 3.6, 5.2, 7.4, -10.5, -12.5, -14.5, -16.5, -18.5, -20.5]) {
     const s = new THREE.Group();
     jersey(s, 0, 0, 1.9, 0, 0xb8b4a8);
+    // Military hazard band round the top of each block.
+    Kit.add(s, Kit.box(0.32, 0.2, 1.92), S.hazard(0xe8b420), 0, 0.8, 0);
     s.position.set(x, 0, 0);
     s.rotation.y = Math.PI / 2;
     g.add(s);
@@ -858,25 +940,25 @@ export function buildBarricade(ctx: Ctx) {
   sandbags(g, -4.4, 1.2, 3.4, 3);
   sandbags(g, 4.6, 1.2, 4.2, 3);
   // Gate posts.
-  for (const x of [-2.6, 2.6]) Kit.add(g, Kit.box(0.25, 2.6, 0.25), M.lam(PAL.metalDark), x, 1.3, 0);
+  for (const x of [-2.6, 2.6]) Kit.add(g, Kit.box(0.25, 2.6, 0.25), S.hazard(0xe8b420), x, 1.3, 0);
   // Floodlight towers.
   for (const x of [8.4, -9.4]) {
     const t = new THREE.Group();
-    Kit.add(t, Kit.box(0.25, 7, 0.25), M.lam(PAL.metalDark), 0, 3.5, 0);
-    Kit.add(t, Kit.box(1.8, 0.9, 0.4), M.lam(0x2a2a2e), 0, 7.2, 0);
+    Kit.add(t, Kit.box(0.25, 7, 0.25), S.steel(PAL.metalDark), 0, 3.5, 0);
+    Kit.add(t, Kit.box(1.8, 0.9, 0.4), S.steel(0x2a2a2e), 0, 7.2, 0);
     Kit.add(t, Kit.box(0.7, 0.6, 0.1), M.glow(0xf0f4ff, 1.8), -0.45, 7.2, 0.22);
     t.position.set(x, 0, -2);
     g.add(t);
   }
   // Army truck parked across the right lanes, canvas back.
   const tr = new THREE.Group();
-  const olive = M.lam(PAL.olive, 'cloth', 1, 0.4);
+  const olive = M.lam(0x56663a, 'metal', 0.8, 0.7);
   Kit.add(tr, Kit.box(2.5, 2.2, 2.6), olive, 0, 1.9, 3.2);
-  Kit.add(tr, Kit.box(2.4, 0.9, 0.06), M.lam(PAL.glass), 0, 2.5, 4.52);
-  Kit.add(tr, Kit.box(2.6, 2.6, 5.4), M.lam(0x5a6040, 'cloth', 1, 0.6), 0, 2.6, -1.0);
-  Kit.add(tr, Kit.box(2.5, 0.5, 8.8), M.lam(0x1c1c20), 0, 0.95, 0.4);
-  for (const z of [3.2, -0.6, -2.4]) for (const s of [-1, 1]) Kit.add(tr, Kit.cyl(0.55, 0.55, 0.4, 8), M.lam(PAL.tyre), s * 1.1, 0.55, z, 0, 0, Math.PI / 2);
-  addText(tr, 'U.S. ARMY', M.lam(0xe8e4d8), 0, 2.9, -3.72, 0.07, 0.02);
+  Kit.add(tr, Kit.box(2.4, 0.9, 0.06), S.clean(PAL.glass), 0, 2.5, 4.52);
+  Kit.add(tr, Kit.box(2.6, 2.6, 5.4), S.canvas(0x66704a), 0, 2.6, -1.0);
+  Kit.add(tr, Kit.box(2.5, 0.5, 8.8), S.trim(0x1c1c20), 0, 0.95, 0.4);
+  for (const z of [3.2, -0.6, -2.4]) for (const s of [-1, 1]) Kit.add(tr, Kit.cyl(0.55, 0.55, 0.4, 8), S.trim(PAL.tyre), s * 1.1, 0.55, z, 0, 0, Math.PI / 2);
+  addText(tr, 'U.S. ARMY', S.clean(0xece8dc), 0, 2.9, -3.72, 0.07, 0.02);
   tr.position.set(-14, 0, 4);
   tr.rotation.y = 1.2;
   g.add(tr);

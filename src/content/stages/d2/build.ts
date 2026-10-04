@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
-import { glow, mat } from './bake';
+import { glow } from './bake';
 import { pixelText, textWidth } from './font';
+import { S } from './surf';
 
 /**
  * Small scenery vocabulary shared by every room: boxes from bounds, walls
@@ -26,6 +27,16 @@ export function slab(g: THREE.Object3D, m: THREE.Material, x0: number, x1: numbe
   const h = Math.abs(y1 - y0);
   const d = Math.abs(z1 - z0);
   return Kit.add(g, Kit.box(w, h, d), m, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
+}
+
+/** Upward-facing floor quad over [x0, x1] × [z0, z1] at height y (2 triangles; floors only show their top). */
+export function floorQuad(g: THREE.Object3D, m: THREE.Material, x0: number, x1: number, z0: number, z1: number, y: number): THREE.Mesh {
+  return Kit.add(g, Kit.plane(Math.abs(x1 - x0), Math.abs(z1 - z0)), m, (x0 + x1) / 2, y, (z0 + z1) / 2, -Math.PI / 2);
+}
+
+/** Flat upward-facing quad centred at (x, y, z), w × d, yawed by ry (papers, smears, puddles). */
+export function decal(g: THREE.Object3D, m: THREE.Material, x: number, y: number, z: number, w: number, d: number, ry = 0): THREE.Mesh {
+  return Kit.add(g, Kit.plane(w, d), m, x, y, z, -Math.PI / 2, 0, ry);
 }
 
 /** Centred box with optional yaw / pitch / roll. */
@@ -83,7 +94,7 @@ export function frameX(g: THREE.Object3D, m: THREE.Material, x: number, cz: numb
 
 /** Recessed fluorescent ceiling panel (glow) with a metal rim. */
 export function lightPanel(g: THREE.Object3D, x: number, y: number, z: number, w = 1.2, d = 0.6, m: THREE.Material = glow(0xe8f0ff, 1.15), ry = 0) {
-  box(g, mat(0x50555c, 'metal', 2), x, y + 0.02, z, w + 0.16, 0.08, d + 0.16, ry);
+  box(g, S.metal(0x5a6068), x, y + 0.02, z, w + 0.16, 0.08, d + 0.16, ry);
   box(g, m, x, y - 0.03, z, w, 0.04, d, ry);
 }
 
@@ -93,15 +104,15 @@ export function beacon(g: THREE.Object3D, strobe: THREE.Material, x: number, y: 
   p.position.set(x, y, z);
   p.rotation.y = ry;
   g.add(p);
-  box(p, mat(0x2a2a2e, 'metal'), 0, 0, 0.06, 0.26, 0.16, 0.12);
+  box(p, S.metal(0x3a3a40), 0, 0, 0.06, 0.26, 0.16, 0.12);
   Kit.add(p, Kit.sphere(0.13, 8, 5), strobe, 0, 0.08, 0.12, 0, 0, 0, 1, 0.9, 1);
 }
 
 /** Ceiling air vent (dark slatted grate). */
 export function vent(g: THREE.Object3D, x: number, y: number, z: number, w = 0.9, d = 0.9) {
-  box(g, mat(0x8a8e94, 'metal', 2), x, y, z, w + 0.12, 0.06, d + 0.12);
-  box(g, mat(0x0c0d10), x, y - 0.02, z, w, 0.04, d);
-  for (let i = 0; i < 5; i++) box(g, mat(0x6a6e74, 'metal', 2), x, y - 0.05, z - d / 2 + (i + 0.5) * (d / 5), w, 0.04, 0.05);
+  box(g, S.metal(0x8a8e94), x, y, z, w + 0.12, 0.06, d + 0.12);
+  box(g, S.plain(0x0c0d10), x, y - 0.02, z, w, 0.04, d);
+  for (let i = 0; i < 5; i++) box(g, S.metal(0x6a6e74), x, y - 0.05, z - d / 2 + (i + 0.5) * (d / 5), w, 0.04, 0.05);
 }
 
 /** Pixel-text sign on a backing board. Text faces +Z rotated by ry. */
@@ -123,7 +134,7 @@ export function sign(
   p.position.set(x, y, z);
   p.rotation.y = ry;
   g.add(p);
-  box(p, mat(board), 0, 0, 0, w, h, 0.06);
+  box(p, S.plain(board), 0, 0, 0, w, h, 0.06);
   pixelText(p, text, ink, 0, 0, 0.04, px, 0, px * 0.5);
   return p;
 }
@@ -139,7 +150,7 @@ export function pipe(g: THREE.Object3D, m: THREE.Material, a: THREE.Vector3, b: 
 }
 
 /** Metal railing from (x0, z0) to (x1, z1) at base height y. */
-export function railing(g: THREE.Object3D, x0: number, z0: number, x1: number, z1: number, y: number, m: THREE.Material = mat(0x7a7e86, 'metal', 2)) {
+export function railing(g: THREE.Object3D, x0: number, z0: number, x1: number, z1: number, y: number, m: THREE.Material = S.metal(0x7a7e86)) {
   const a = new THREE.Vector3(x0, y + 1.0, z0);
   const b = new THREE.Vector3(x1, y + 1.0, z1);
   pipe(g, m, a, b, 0.04, 6);
@@ -154,7 +165,7 @@ export function railing(g: THREE.Object3D, x0: number, z0: number, x1: number, z
 
 /** Hazard-striped floor band along X between x0 and x1 at z. */
 export function hazardBand(g: THREE.Object3D, x0: number, x1: number, z: number, d = 0.4) {
-  slab(g, mat(0xe0b020, 'hazard', 1, 1), x0, x1, 0, 0.012, z - d / 2, z + d / 2);
+  floorQuad(g, S.hazard(), x0, x1, z - d / 2, z + d / 2, 0.012);
 }
 
 /** Potted / planted palm: segmented trunk + drooping fronds. */
@@ -164,10 +175,10 @@ export function palm(g: THREE.Object3D, x: number, z: number, h: number, rng: ()
   p.rotation.y = rng() * Math.PI * 2;
   g.add(p);
   if (pot) {
-    Kit.add(p, Kit.cyl(0.42, 0.32, 0.6, 8), mat(0x7a4a32, 'stucco', 2), 0, 0.3, 0);
-    Kit.add(p, Kit.cyl(0.38, 0.38, 0.06, 8), mat(0x2a1e14), 0, 0.6, 0);
+    Kit.add(p, Kit.cyl(0.42, 0.32, 0.6, 8), S.stucco(0x8a5034), 0, 0.3, 0);
+    Kit.add(p, Kit.cyl(0.38, 0.38, 0.06, 8), S.stucco(0x3a2a1c), 0, 0.6, 0);
   }
-  const trunk = mat(0x6a5238, 'bark', 2);
+  const trunk = S.bark(0x6a5238);
   const segs = Math.max(3, Math.round(h / 0.7));
   let lean = (rng() - 0.5) * 0.25;
   let px = 0;
@@ -178,8 +189,8 @@ export function palm(g: THREE.Object3D, x: number, z: number, h: number, rng: ()
   }
   lean += 0;
   const top = (pot ? 0.6 : 0) + h;
-  const leaf = mat(0x2e6a2a, 'leaves', 1.5, 0.6, true);
-  const leafDark = mat(0x234f22, 'leaves', 1.5, 0.6, true);
+  const leaf = S.leaves(0x347a2e);
+  const leafDark = S.leaves(0x255424);
   const n = 7;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2 + rng() * 0.4;
@@ -198,14 +209,14 @@ export function palm(g: THREE.Object3D, x: number, z: number, h: number, rng: ()
 /** Leafy bush (jittered icosahedrons). */
 export function bush(g: THREE.Object3D, x: number, z: number, s: number, seed: number, color = 0x2f6a2c) {
   const geo = Kit.jitter(Kit.ico(1, 1), 0.25, seed);
-  const m = mat(color, 'leaves', 1.2, 0.7);
+  const m = S.leaves(color);
   Kit.add(g, geo, m, x, s * 0.55, z, 0, seed, 0, s, s * 0.75, s);
-  Kit.add(g, geo, mat(color - 0x0a1a08, 'leaves', 1.2, 0.7), x + s * 0.6, s * 0.4, z + s * 0.3, 0, seed * 2, 0, s * 0.7, s * 0.6, s * 0.7);
+  Kit.add(g, geo, S.leaves(color - 0x0a1a08), x + s * 0.6, s * 0.4, z + s * 0.3, 0, seed * 2, 0, s * 0.7, s * 0.6, s * 0.7);
 }
 
 /** Fern: fan of thin leaves. */
 export function fern(g: THREE.Object3D, x: number, z: number, s: number, rng: () => number, color = 0x3a7a30) {
-  const m = mat(color, 'leaves', 2, 0.5, true);
+  const m = S.leaves(color);
   const n = 7;
   for (let i = 0; i < n; i++) {
     const a = (i / n) * Math.PI * 2 + rng() * 0.5;
@@ -216,5 +227,5 @@ export function fern(g: THREE.Object3D, x: number, z: number, s: number, rng: ()
 
 /** Generic crate. */
 export function crate(g: THREE.Object3D, x: number, z: number, s: number, ry = 0, y = 0) {
-  box(g, mat(0x7a5a36, 'planks', 1.5), x, y + s / 2, z, s, s, s, ry);
+  box(g, S.planks(0x7a5a36), x, y + s / 2, z, s, s, s, ry);
 }

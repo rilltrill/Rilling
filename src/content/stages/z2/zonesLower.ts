@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
-import { C, G, M, MD } from './mats';
+import { C, G, M, T, TX } from './mats';
 import {
   anesthesia,
   autopsyTable,
@@ -47,7 +47,7 @@ import {
 
 const bulkhead = (g: THREE.Object3D, x: number, y: number, z: number, ry: number, on = true) => {
   const s = grp(g, x, y, z, ry);
-  box(s, 0.34, 0.2, 0.1, M(0x2a2e2c), 0, 0, 0.05);
+  box(s, 0.34, 0.2, 0.1, T(0x2a2e2c, TX.paint), 0, 0, 0.05);
   box(s, 0.28, 0.14, 0.04, on ? G(0xfff0c8, 1.4) : M(0x3a3a34), 0, 0, 0.11);
   for (let i = -1; i <= 1; i++) box(s, 0.02, 0.16, 0.02, M(0x1a1a1a), i * 0.09, 0, 0.14);
 };
@@ -63,12 +63,12 @@ export function buildStair(ctx: ZoneCtx): THREE.Group {
   const r = R.stair;
   const cx = (r.x0 + r.x1) / 2;
   const w = r.x1 - r.x0;
-  const conc = M(C.concrete, 'concrete', 1.2, 0.8);
+  const conc = T(C.concrete, TX.concrete);
   const st = styles.concrete();
   const top = 3.6;
   // Upper landing slab.
   box(g, w, 0.5, -STAIR_TOP + r.z1, conc, cx, -0.25, (STAIR_TOP + r.z1) / 2);
-  box(g, w - 0.4, 0.012, 0.18, M(0xc9a227, 'hazard', 1, 0.7), cx, 0.006, STAIR_TOP + 0.1);
+  box(g, w - 0.4, 0.012, 0.18, T(0xd0a82a, TX.hazard), cx, 0.006, STAIR_TOP + 0.1);
   // Steps (solid down to B1).
   const n = Math.round((STAIR_TOP - STAIR_BOT) / 0.3);
   const rise = -B / n;
@@ -79,9 +79,9 @@ export function buildStair(ctx: ZoneCtx): THREE.Group {
     box(g, w - 0.3, 0.025, 0.05, M(0x1c1e1c), cx, t + 0.012, z0 - 0.03);
   }
   // Lower landing + soffit (underside of the ground floor) + ceiling.
-  box(g, w, 0.2, STAIR_BOT - r.z0, M(0x4e524c, 'concrete', 1, 0.8), cx, B - 0.1, (STAIR_BOT + r.z0) / 2);
+  box(g, w, 0.2, STAIR_BOT - r.z0, T(0x4e524c, TX.concrete), cx, B - 0.1, (STAIR_BOT + r.z0) / 2);
   box(g, w, 0.5, STAIR_BOT - r.z0, conc, cx, -0.05, (STAIR_BOT + r.z0) / 2);
-  box(g, w + 0.3, 0.2, r.z1 - r.z0 + 0.3, M(0x5a5c56, 'concrete', 1, 0.6), cx, top + 0.1, (r.z0 + r.z1) / 2);
+  box(g, w + 0.3, 0.2, r.z1 - r.z0 + 0.3, T(0x5a5c56, TX.concrete), cx, top + 0.1, (r.z0 + r.z1) / 2);
   // Walls: full-height sides, end wall above the soffit (the morgue builds the lower one).
   wall(g, 'z', r.z0, r.z1, r.x0, B, top, [], st, 0.3, 1);
   wall(g, 'z', r.z0, r.z1, r.x1, B, top, [], st, 0.3, -1);
@@ -92,7 +92,7 @@ export function buildStair(ctx: ZoneCtx): THREE.Group {
   for (const x of [r.x0 + 0.35, r.x1 - 0.35]) {
     const h = grp(g, x, 0.95 + B / 2, (STAIR_TOP + STAIR_BOT) / 2, 0);
     h.rotation.x = tilt;
-    cyl(h, 0.035, 0.035, len + 1.4, M(C.stairRail), 0, 0, 0, 6, Math.PI / 2);
+    cyl(h, 0.035, 0.035, len + 1.4, T(C.stairRail, TX.paint), 0, 0, 0, 6, Math.PI / 2);
     for (let k = -3; k <= 3; k++) box(h, 0.03, 0.12, 0.03, M(0x4a4a44), (x < cx ? -1 : 1) * 0.07, 0, k * 1.5);
   }
   // Painted level marker + signs on the end wall (seen from the top).
@@ -155,8 +155,8 @@ export function buildMorgue(ctx: ZoneCtx): THREE.Group {
   buildShell(g, {
     ...r,
     style: styles.morgue(),
-    floor: M(0x4a5654, 'tiles', 0.8, 0.55),
-    ceiling: M(0x6a7470, 'tiles', 0.5, 0.7),
+    floor: T(0x4e5c5a, TX.floorTile),
+    ceiling: T(0x6a7470, TX.ceiling),
     sides: {
       zMax: [{ at: 79, w: 3.6, h: 2.8 }],
       zMin: [{ at: 79, w: 4.6, h: 3.0 }],
@@ -182,7 +182,7 @@ export function buildMorgue(ctx: ZoneCtx): THREE.Group {
     door.userData.openSign = -1;
     ctx.dyn.add(door);
     bakeInto(door, (h) => {
-      box(h, 0.68, 0.62, 0.04, M(C.steel, 'metal', 3, 0.6), 0.34, 0, 0);
+      box(h, 0.68, 0.62, 0.04, T(C.steel, TX.steel), 0.34, 0, 0);
       box(h, 0.06, 0.2, 0.05, M(0x3a3e40), 0.6, 0, 0.03);
       box(h, 0.18, 0.08, 0.01, M(0xe8e4d0), 0.2, 0.18, 0.025);
     });
@@ -192,8 +192,8 @@ export function buildMorgue(ctx: ZoneCtx): THREE.Group {
     tray.position.copy(trayFrom);
     ctx.dyn.add(tray);
     bakeInto(tray, (h) => {
-      box(h, 1.8, 0.05, 0.6, M(C.steel), 0, 0, 0);
-      box(h, 1.5, 0.04, 0.5, M(0xb8c4c0, 'cloth', 1, 0.5), 0, 0.04, 0);
+      box(h, 1.8, 0.05, 0.6, T(C.steel, TX.steel), 0, 0, 0);
+      box(h, 1.5, 0.04, 0.5, T(0xb8c4c0, TX.cloth), 0, 0.04, 0);
       box(h, 0.5, 0.02, 0.4, M(C.bloodFresh), dirX * 0.4, 0.065, 0);
     });
     sc.drawers.push({ door, tray, trayFrom, trayTo, pos: new THREE.Vector3(fx, fy, fz), t: 0, open: false });
@@ -211,7 +211,7 @@ export function buildMorgue(ctx: ZoneCtx): THREE.Group {
     bakeInto(pivot, (h) => {
       cyl(h, 0.01, 0.01, 1.2, M(0x3a3a3a), 0, -0.6, 0, 4);
       cyl(h, 0.12, 0.12, 0.1, M(0xd8dcd8), 0, -1.25, 0, 10, Math.PI / 2);
-      cyl(h, 0.25, 0.22, 0.08, M(C.steel), 0, -1.6, 0, 10);
+      cyl(h, 0.25, 0.22, 0.08, T(C.steel, TX.steel), 0, -1.6, 0, 10);
       for (let k = 0; k < 3; k++) {
         const a = (k / 3) * Math.PI * 2;
         cyl(h, 0.006, 0.006, 0.35, M(0x3a3a3a), Math.cos(a) * 0.1, -1.45, Math.sin(a) * 0.1, 3);
@@ -220,10 +220,10 @@ export function buildMorgue(ctx: ZoneCtx): THREE.Group {
     sc.swingers.push({ obj: pivot, amp: 0.06, rate: 0.9 + rng.next() * 0.4, phase: rng.next() * 6 });
   }
   // Sinks along the south wall, drain, gurneys with body bags.
-  blk(g, 4.2, 0.9, 0.7, M(C.steel, 'metal', 3, 0.5), 74, B, -94.4);
+  blk(g, 4.2, 0.9, 0.7, T(C.steel, TX.steel), 74, B, -94.4);
   for (const sx of [72.8, 75.2]) box(g, 0.8, 0.02, 0.5, M(0x2a3034), sx, B + 0.91, -94.4);
-  for (const sx of [72.8, 75.2]) cyl(g, 0.02, 0.02, 0.4, M(C.steel), sx, B + 1.1, -94.65, 5);
-  box(g, 0.6, 0.02, 0.6, M(0x7a807c, 'grate', 1.5, 0.9), 79, B + 0.01, -85);
+  for (const sx of [72.8, 75.2]) cyl(g, 0.02, 0.02, 0.4, T(C.steel, TX.steel), sx, B + 1.1, -94.65, 5);
+  box(g, 0.6, 0.02, 0.6, T(0x7a807c, TX.grate), 79, B + 0.01, -85);
   const gb = grp(g, 85.4, B, -93, 0.1);
   gurney(gb, 0, 0, 0, Math.PI / 2, { sheet: 0x2a3a34 });
   bodyBag(gb, 0, 0.98, 0, Math.PI / 2);
@@ -231,8 +231,8 @@ export function buildMorgue(ctx: ZoneCtx): THREE.Group {
   bodyBag(g, 80.9, B, -93.6, 1.4);
   ivStand(g, 84.6, B, -78.0);
   // Pipes and ceiling lights.
-  pipe(g, 72.4, -75, 72.4, -95, -0.7, 0.09, M(0x5a6a7a));
-  pipe(g, 85.6, -75, 85.6, -95, -0.75, 0.12, M(0x8a4a2a));
+  pipe(g, 72.4, -75, 72.4, -95, -0.7, 0.09, T(0x5a6a7a, TX.paint));
+  pipe(g, 85.6, -75, 85.6, -95, -0.75, 0.12, T(0x8a4a2a, TX.paint));
   for (let z = -77.6; z > -95; z -= 3.6) {
     for (const x of [75, 83]) {
       if (x === 83 && z < -80 && z > -82) flickerPanel(ctx, g, x, B + r.h, z, 0, 'buzz');
@@ -264,20 +264,20 @@ export function buildCorrB(ctx: ZoneCtx): THREE.Group {
   buildShell(g, {
     ...r,
     style: styles.concrete(),
-    floor: M(0x4a4e4a, 'concrete', 1, 0.7),
-    ceiling: M(0x5a5e58, 'concrete', 1, 0.6),
+    floor: T(0x4a4e4a, TX.concrete),
+    ceiling: T(0x5a5e58, TX.concrete),
     sides: { zMin: null, zMax: null, xMin: [{ at: -100, w: 1.3, h: 2.2 }], xMax: [{ at: -104, w: 1.3, h: 2.2 }] },
   });
   // Closed doors in the openings.
-  box(g, 0.06, 2.2, 1.3, M(0x5a6a6a, 'metal', 2, 0.4), r.x0, B + 1.1, -100);
-  box(g, 0.06, 2.2, 1.3, M(0x6a5a4a, 'metal', 2, 0.4), r.x1, B + 1.1, -104);
+  box(g, 0.06, 2.2, 1.3, T(0x5a6a6a, TX.paint), r.x0, B + 1.1, -100);
+  box(g, 0.06, 2.2, 1.3, T(0x6a5a4a, TX.paint), r.x1, B + 1.1, -104);
   plateSign(g, 'LINEN', r.x0 + 0.17, B + 2.5, -100, Math.PI / 2, 0.03, 0x1a1a1a, 0xd8d8cc);
   plateSign(g, 'DANGER', r.x1 - 0.17, B + 2.5, -104, -Math.PI / 2, 0.03, 0xffffff, 0x9a1a1a);
   // Pipes + cable tray.
-  pipe(g, 77.2, -95, 77.2, -108, B + 2.85, 0.08, M(0x4a6a8a));
-  pipe(g, 77.5, -95, 77.5, -108, B + 2.65, 0.06, M(0xa83a2a));
-  pipe(g, 80.9, -95, 80.9, -108, B + 2.8, 0.1, M(0x7a6a4a));
-  box(g, 0.4, 0.05, 13, M(0x6a6e6a, 'grate', 1, 0.8), 80.4, B + 2.5, -101.5);
+  pipe(g, 77.2, -95, 77.2, -108, B + 2.85, 0.08, T(0x4a6a8a, TX.paint));
+  pipe(g, 77.5, -95, 77.5, -108, B + 2.65, 0.06, T(0xa83a2a, TX.paint));
+  pipe(g, 80.9, -95, 80.9, -108, B + 2.8, 0.1, T(0x7a6a4a, TX.paint));
+  box(g, 0.4, 0.05, 13, T(0x6a6e6a, TX.grate), 80.4, B + 2.5, -101.5);
   flickerPanel(ctx, g, 79, B + r.h, -98, 0, 'blink');
   panel(g, 79, B + r.h, -102, 0, false);
   flickerPanel(ctx, g, 79, B + r.h, -106, 0, 'buzz');
@@ -310,8 +310,8 @@ export function buildOR(ctx: ZoneCtx): THREE.Group {
   buildShell(g, {
     ...r,
     style: styles.or(),
-    floor: M(C.orFloor, 'tiles', 0.8, 0.45),
-    ceiling: M(0x8a9490, 'tiles', 0.5, 0.6),
+    floor: T(0x62726a, TX.terrazzo),
+    ceiling: T(0x8a9490, TX.ceiling),
     sides: {
       zMax: [{ at: 79, w: 4.6, h: 3.0 }],
       xMin: [{ at: -121, w: 4.6, h: 3.0 }],
@@ -323,7 +323,7 @@ export function buildOR(ctx: ZoneCtx): THREE.Group {
   box(g, 0.04, 1.8, ga.z1 - ga.z0, Kit.mat(0x7ab8b0, { transparent: true, opacity: 0.16 }), r.x1, ga.y + 0.9, (ga.z0 + ga.z1) / 2);
   for (let k = 0; k < 4; k++) box(g, 0.08, 1.8, 0.08, M(0x5a6260), r.x1, ga.y + 0.9, ga.z0 + 1.8 + k * 1.8);
   box(g, 0.1, 0.06, ga.z1 - ga.z0, M(0x8a908c), ga.x0 + 0.5, ga.y + 0.95, (ga.z0 + ga.z1) / 2);
-  for (const z of [-114, -116.5, -119]) box(g, 0.5, 0.45, 1.6, M(0x2a3a4a), ga.x0 + 2.4, ga.y + 0.22, z);
+  for (const z of [-114, -116.5, -119]) box(g, 0.5, 0.45, 1.6, T(0x2a3a4a, TX.cloth), ga.x0 + 2.4, ga.y + 0.22, z);
   box(g, 0.6, 0.03, 1.2, G(0xd8e8d0, 0.9), ga.x0 + 2.0, ga.y + ga.h - 0.03, -114.5);
   box(g, 0.6, 0.03, 1.2, G(0xd8e8d0, 0.9), ga.x0 + 2.0, ga.y + ga.h - 0.03, -119.5);
   box(g, 0.05, 1.0, 6, G(0x3a5a50, 0.7), ga.x1 - 0.05, ga.y + 1.2, -117);
@@ -337,14 +337,14 @@ export function buildOR(ctx: ZoneCtx): THREE.Group {
   ivStand(g, 84.2, B, -115.0);
   monitor(g, 85.2, B + 1.3, -119.0, -Math.PI / 2, true);
   const mstand = grp(g, 85.2, B, -119.0, 0);
-  cyl(mstand, 0.03, 0.03, 1.3, M(C.steel), 0, 0.65, 0, 5);
+  cyl(mstand, 0.03, 0.03, 1.3, T(C.steel, TX.steel), 0, 0.65, 0, 5);
   // X-ray light boxes on the north wall.
   for (const sx of [73.2, 74.8]) {
     box(g, 1.3, 0.9, 0.05, G(0xd8f0ff, 0.9), sx, B + 1.9, r.z1 - 0.17);
     for (let k = 0; k < 5; k++) box(g, 0.08, 0.5, 0.01, M(0x2a2e30), sx - 0.3 + k * 0.15, B + 1.9, r.z1 - 0.2, 0, 0, (k - 2) * 0.12);
   }
   // Scrub sink.
-  blk(g, 2.6, 0.95, 0.6, M(C.steel, 'metal', 3, 0.5), 76.4, B, r.z1 - 0.45);
+  blk(g, 2.6, 0.95, 0.6, T(C.steel, TX.steel), 76.4, B, r.z1 - 0.45);
   sign(g, 'OR 2', 79, B + 3.4, r.z1 - 0.19, Math.PI, 0.06, 0x9fffc8, 0x101814, 1.3);
   sign(g, 'SURGERY', 79, B + 3.4, r.z1 + 0.19, 0, 0.05, 0x9fffc8, 0x101814, 1.3);
   // Panels around the lamp.
@@ -356,7 +356,7 @@ export function buildOR(ctx: ZoneCtx): THREE.Group {
   bloodPool(g, 82.6, B, -118.2, 1.3, rng);
   dragTrail(g, 82, -119.6, 76.4, -123.4, B, rng);
   dragTrail(g, 79, -108.2, 81.6, -116.6, B, rng);
-  for (let k = 0; k < 4; k++) box(g, rng.range(0.6, 1.2), 0.02, rng.range(0.5, 1), MD(0x4a8a78), 80 + rng.spread(4), B + 0.012, -118 + rng.spread(5), rng.next() * 3);
+  for (let k = 0; k < 4; k++) box(g, rng.range(0.6, 1.2), 0.02, rng.range(0.5, 1), T(0x4a8a78, TX.cloth), 80 + rng.spread(4), B + 0.012, -118 + rng.spread(5), rng.next() * 3);
   wallSmear(g, r.x0 + 0.17, B + 1.5, -113, Math.PI / 2, rng, true);
   wallSmear(g, 86.83, B + 1.0, -110.6, -Math.PI / 2, rng);
   papers(g, 78, -117, 4, 6, 18, B, rng);
@@ -384,8 +384,8 @@ export function buildCorrC(ctx: ZoneCtx): THREE.Group {
   buildShell(g, {
     ...r,
     style: styles.concrete(),
-    floor: M(0x464a46, 'concrete', 1, 0.7),
-    ceiling: M(0x5a5e58, 'concrete', 1, 0.6),
+    floor: T(0x464a46, TX.concrete),
+    ceiling: T(0x5a5e58, TX.concrete),
     sides: {
       xMin: null,
       xMax: null,
@@ -393,15 +393,15 @@ export function buildCorrC(ctx: ZoneCtx): THREE.Group {
       zMax: [{ at: 66, w: 1.3, h: 2.2 }],
     },
   });
-  box(g, 1.3, 2.2, 0.06, M(0x5a4a3a, 'metal', 2, 0.4), 66, B + 1.1, r.z1);
+  box(g, 1.3, 2.2, 0.06, T(0x5a4a3a, TX.paint), 66, B + 1.1, r.z1);
   plateSign(g, 'STAFF ONLY', 66, B + 2.55, r.z1 - 0.17, Math.PI, 0.025, 0x1a1a1a, 0xd8d8cc);
   // Boiler room behind the breakable wall.
   const bo = R.boiler;
   sideRoom(g, bo.x0, bo.x1, bo.z0, bo.z1 - 0.15, B, bo.h, 0x221a14, (s) => {
-    cyl(s, 1.0, 1.0, 4.0, M(0x6a3a2a, 'metal', 1, 0.6), 60, B + 1.4, -126.8, 12, 0, 0, Math.PI / 2);
+    cyl(s, 1.0, 1.0, 4.0, T(0x6a3a2a, TX.paint), 60, B + 1.4, -126.8, 12, 0, 0, Math.PI / 2);
     box(s, 0.6, 0.4, 0.05, G(0xff7a2a, 1.6), 60, B + 1.1, -125.75);
-    pipe(s, 57, -125, 63, -125, B + 3.0, 0.1, M(0x7a5a3a));
-    cyl(s, 0.1, 0.1, 3, M(0x7a5a3a), 57.5, B + 1.6, -127.5, 6);
+    pipe(s, 57, -125, 63, -125, B + 3.0, 0.1, T(0x7a5a3a, TX.paint));
+    cyl(s, 0.1, 0.1, 3, T(0x7a5a3a, TX.paint), 57.5, B + 1.6, -127.5, 6);
   });
   // The breakable wall: blocks filling the opening (dynamic).
   const holder = new THREE.Group();
@@ -412,8 +412,8 @@ export function buildCorrC(ctx: ZoneCtx): THREE.Group {
   const rows = 3;
   const pw = WALL_BREAK.w / cols;
   const ph = WALL_BREAK.h / rows;
-  const blockMat = M(C.concrete, 'concrete', 1.2, 0.8);
-  const lowMat = M(0x3d4a44, 'concrete', 1.5, 0.7);
+  const blockMat = T(C.concrete, TX.block);
+  const lowMat = T(0x3f5a4e, TX.block);
   for (let c = 0; c < cols; c++) {
     for (let rr = 0; rr < rows; rr++) {
       const m = new THREE.Mesh(Kit.box(pw - 0.02, ph - 0.02, 0.3), rr === 0 ? lowMat : blockMat);
@@ -431,9 +431,9 @@ export function buildCorrC(ctx: ZoneCtx): THREE.Group {
   });
   sc.wall = { pieces, holder, centre: new THREE.Vector3(WALL_BREAK.x, B + 1.3, r.z0), out: new THREE.Vector3(0, 0, 1), shake: 0, broken: false };
   // Pipes, trays, lamps.
-  pipe(g, 52, r.z1 - 0.35, 71, r.z1 - 0.35, B + 3.0, 0.1, M(0x4a6a8a));
-  pipe(g, 52, r.z1 - 0.6, 71, r.z1 - 0.6, B + 3.1, 0.07, M(0xa83a2a));
-  pipe(g, 52, r.z0 + 0.4, 71, r.z0 + 0.4, B + 3.05, 0.12, M(0x7a6a4a));
+  pipe(g, 52, r.z1 - 0.35, 71, r.z1 - 0.35, B + 3.0, 0.1, T(0x4a6a8a, TX.paint));
+  pipe(g, 52, r.z1 - 0.6, 71, r.z1 - 0.6, B + 3.1, 0.07, T(0xa83a2a, TX.paint));
+  pipe(g, 52, r.z0 + 0.4, 71, r.z0 + 0.4, B + 3.05, 0.12, T(0x7a6a4a, TX.paint));
   for (let x = 54; x < 71; x += 3.6) {
     if (x > 60 && x < 62) flickerPanel(ctx, g, x, B + r.h, -121, Math.PI / 2, 'blink');
     else if (x > 57 && x < 59) danglingPanel(ctx, g, x, B + r.h, -121, 0.3);
@@ -446,7 +446,7 @@ export function buildCorrC(ctx: ZoneCtx): THREE.Group {
   exitSign(g, 52.4, B + 2.9, -122.6, -Math.PI / 2);
   // Gore + puddles.
   dragTrail(g, 70, -121.4, 52, -120.2, B, rng);
-  for (let i = 0; i < 4; i++) cyl(g, rng.range(0.4, 0.9), rng.range(0.4, 0.9), 0.01, M(0x1a2226), rng.range(53, 70), B + 0.006, -121 + rng.spread(1.4), 10);
+  for (let i = 0; i < 4; i++) cyl(g, rng.range(0.4, 0.9), rng.range(0.4, 0.9), 0.01, T(0x222e36, TX.water), rng.range(53, 70), B + 0.006, -121 + rng.spread(1.4), 10);
   wallSmear(g, 57, B + 1.2, r.z1 - 0.17, Math.PI, rng, true);
   // (Under the smear, well ahead of the brute-hold camera.)
   corpse(g, 57.4, B, -119.45, Math.PI / 2 + 0.2, rng, 0x6fb8ac);
@@ -469,7 +469,7 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
   buildShell(g, {
     ...r,
     style: styles.atrium(),
-    floor: M(C.marble, 'checker', 0.32, 0.32),
+    floor: T(C.marble, TX.marble),
     ceiling: null,
     sides: {
       xMax: [{ at: -121, w: 4.6, h: 3.0 }],
@@ -481,10 +481,10 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
   sideRoom(g, 38.6, 41.4, -139, -136.15, B, 2.9, 0x141a18);
   // Balconies.
   const D = BALCONY_DEPTH;
-  const slab = M(C.balcony, 'concrete', 1, 0.5);
-  const fascia = M(0xc8c8be);
+  const slab = T(C.balcony, TX.concrete);
+  const fascia = T(0xc8c8be, TX.plaster);
   const glass = Kit.mat(0x9fd0d0, { transparent: true, opacity: 0.18 });
-  const railM = M(0x8a9094, 'metal', 2, 0.4);
+  const railM = T(0x8a9094, TX.steel);
   const strips: [number, number, number, number][] = [
     [r.x0, r.x1, r.z1 - D, r.z1],
     [r.x0, r.x1, r.z0, r.z0 + D],
@@ -534,23 +534,23 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
     [37, r.z0 + D],
     [r.x0 + D, -121],
   ] as [number, number][]) {
-    cyl(g, 0.45, 0.45, topY - B, M(0xa8a89e, 'concrete', 1, 0.4), cx, (topY + B) / 2, cz, 10);
+    cyl(g, 0.45, 0.45, topY - B, T(0xa8a89e, TX.concrete), cx, (topY + B) / 2, cz, 10);
     cyl(g, 0.55, 0.55, 0.4, M(0x5a5a54), cx, B + 0.2, cz, 10);
   }
   // Skylight: beams + moonlit glass.
-  for (let x = r.x0; x <= r.x1; x += 3) box(g, 0.25, 0.4, r.z1 - r.z0, M(0x1c2024), x, topY, (r.z0 + r.z1) / 2);
-  for (let z = r.z0; z <= r.z1; z += 3) box(g, r.x1 - r.x0, 0.4, 0.25, M(0x1c2024), (r.x0 + r.x1) / 2, topY, z);
+  for (let x = r.x0; x <= r.x1; x += 3) box(g, 0.25, 0.4, r.z1 - r.z0, T(0x1c2024, TX.paint), x, topY, (r.z0 + r.z1) / 2);
+  for (let z = r.z0; z <= r.z1; z += 3) box(g, r.x1 - r.x0, 0.4, 0.25, T(0x1c2024, TX.paint), (r.x0 + r.x1) / 2, topY, z);
   box(g, r.x1 - r.x0, 0.05, r.z1 - r.z0, G(0x1a2a48, 1.0), (r.x0 + r.x1) / 2, topY + 0.3, (r.z0 + r.z1) / 2);
   for (let k = 0; k < 7; k++) box(g, 2.6, 0.06, 2.6, G(0x0c1018, 1), r.x0 + 1.5 + rng.int(0, 9) * 3, topY + 0.25, r.z0 + 1.5 + rng.int(0, 9) * 3);
   // Fountain basin (the pool grows in it).
-  const ring = new THREE.Mesh(Kit.track(new THREE.TorusGeometry(5.2, 0.35, 6, 28)), M(0x8a867a, 'concrete', 1.5, 0.6));
+  const ring = new THREE.Mesh(Kit.track(new THREE.TorusGeometry(5.2, 0.35, 6, 28)), T(0x8a867a, TX.concrete));
   ring.rotation.x = -Math.PI / 2;
   ring.position.set(POOL[0], B + 0.25, POOL[2]);
   g.add(ring);
-  cyl(g, 5.1, 5.1, 0.1, M(0x2a0a0a), POOL[0], B + 0.05, POOL[2], 24);
+  cyl(g, 5.1, 5.1, 0.1, T(0x3a0c0c, TX.flesh), POOL[0], B + 0.05, POOL[2], 24);
   // Flesh creeping out of the pool: veins across the floor and up the columns.
-  const vein = M(C.flesh);
-  const veinDark = M(C.fleshDark);
+  const vein = T(C.flesh, TX.flesh);
+  const veinDark = T(C.fleshDark, TX.flesh);
   const node = G(0xff4a2a, 1.3);
   for (let i = 0; i < 16; i++) {
     const a = (i / 16) * Math.PI * 2 + rng.spread(0.15);
@@ -592,12 +592,12 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
   }
   // Furniture: information desk, benches, planters, dead piano of a lobby.
   const desk = grp(g, 29.5, B, -112.5, 0.4);
-  blk(desk, 3.4, 1.1, 1.0, M(0x6a5a4a, 'planks', 1, 0.5), 0, 0, 0);
+  blk(desk, 3.4, 1.1, 1.0, T(0x6a5a4a, TX.wood), 0, 0, 0);
   blk(desk, 3.5, 0.06, 1.1, M(0xb9b3a2), 0, 1.1, 0);
   sign(desk, 'INFORMATION', 0, 0.75, 0.52, 0, 0.03, 0xbfe8ff, 0x101418, 1.1);
   for (const [bx, bz, br] of [[30, -127.6, 0.2], [44.5, -110.4, 1.4], [44.8, -131.4, -1.2], [26.8, -124.6, 1.6]] as [number, number, number][]) {
     const b = grp(g, bx, B, bz, br);
-    blk(b, 2.0, 0.08, 0.5, M(0x6a5038, 'planks', 1, 0.5), 0, 0.42, 0);
+    blk(b, 2.0, 0.08, 0.5, T(0x6a5038, TX.wood), 0, 0.42, 0);
     blk(b, 0.08, 0.42, 0.45, M(0x2a2a2a), -0.85, 0, 0);
     blk(b, 0.08, 0.42, 0.45, M(0x2a2a2a), 0.85, 0, 0);
   }
@@ -620,7 +620,7 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
     const len = topY - 4.5 - B;
     bakeInto(p, (h) => {
       cyl(h, 0.012, 0.012, len, M(0x1a1a1a), 0, -len / 2, 0, 3);
-      cyl(h, 0.15, 0.6, 0.45, M(0x2a2e30), 0, -len - 0.2, 0, 10);
+      cyl(h, 0.15, 0.6, 0.45, T(0x2a2e30, TX.paint), 0, -len - 0.2, 0, 10);
       cyl(h, 0.5, 0.5, 0.03, on ? G(0xffe2b0, 1.1) : M(0x3a3a34), 0, -len - 0.42, 0, 10);
     });
     sc.swingers.push({ obj: p, amp: 0.035, rate: 0.5 + rng.next() * 0.3, phase: rng.next() * 6 });
@@ -640,8 +640,8 @@ export function buildCocoon(ctx: ZoneCtx) {
   c.position.set(POOL[0], B, POOL[2]);
   ctx.dyn.add(c);
   bakeInto(c, (g) => {
-    const mats = [M(C.flesh, 'skin', 1, 0.7), M(C.fleshDark), M(0x9a2a26, 'skin', 1.4, 0.6)];
-    cyl(g, 4.9, 5.0, 0.16, M(0x4a0a0a, 'skin', 0.8, 0.6), 0, 0.1, 0, 24);
+    const mats = [T(C.flesh, TX.flesh), T(C.fleshDark, TX.flesh), T(0x9a2a26, TX.skin)];
+    cyl(g, 4.9, 5.0, 0.16, T(0x4a0a0a, TX.flesh), 0, 0.1, 0, 24);
     const lumps: [number, number, number, number][] = [
       [0, 1.2, 0, 2.0],
       [0.3, 2.6, -0.2, 1.4],
@@ -664,8 +664,8 @@ export function buildCocoon(ctx: ZoneCtx) {
       box(g, 0.07, rng.range(0.6, 1.4), 0.07, G(0xff4a24, 1.2), Math.cos(a) * r, y, Math.sin(a) * r, 0, rng.spread(0.6), rng.spread(0.6));
     }
     // An arm and a face pressed against the membrane.
-    box(g, 0.12, 0.7, 0.12, M(0xa8948a), 1.6, 1.8, 1.0, 0, 0.5, -0.8);
-    box(g, 0.24, 0.3, 0.1, M(0xa8948a), 0.2, 2.5, 1.55, 0.2, 0, 0);
+    box(g, 0.12, 0.7, 0.12, T(0xa8948a, TX.skin), 1.6, 1.8, 1.0, 0, 0.5, -0.8);
+    box(g, 0.24, 0.3, 0.1, T(0xa8948a, TX.skin), 0.2, 2.5, 1.55, 0.2, 0, 0);
   });
   ctx.sc.cocoon = c;
 }

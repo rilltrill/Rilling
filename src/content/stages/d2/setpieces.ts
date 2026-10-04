@@ -5,6 +5,7 @@ import { Kit } from '../../kit/ModelKit';
 import { clamp, easeOutCubic } from '../../../core/math';
 import { bake, bakeInto, glow, mat } from './bake';
 import { box, pipe } from './build';
+import { S } from './surf';
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -45,17 +46,20 @@ export class BurstDoor {
     this.root.position.copy(o.hinge);
     this.root.rotation.y = o.yaw;
     this.root.add(this.panel);
-    const body = o.style === 'wood' ? mat(0x6a4a30, 'planks', 1.5) : o.style === 'lab' ? mat(0xd0d6da, 'metal', 1.5, 0.5) : mat(0x8a9098, 'metal', 1.2);
-    const trim = o.style === 'wood' ? mat(0x3a281a) : mat(0x4a5058, 'metal', 2);
+    // Body, trim and window share one recipe per style (one draw call per
+    // door; the lab door adds its hazard kick plate).
+    const surf = o.style === 'wood' ? S.planks : o.style === 'lab' ? S.steel : S.metal;
+    const body = surf(o.style === 'wood' ? 0x6e4c2e : o.style === 'lab' ? 0xd0d6da : 0x8a9098);
+    const trim = surf(o.style === 'wood' ? 0x3a281a : 0x4a5058);
     bakeInto(this.panel, (g) => {
       box(g, body, o.w / 2, o.h / 2, 0, o.w - 0.04, o.h - 0.02, 0.09);
       box(g, trim, o.w - 0.16, o.h * 0.48, 0.07, 0.08, 0.3, 0.06);
       if (o.style === 'lab') {
-        box(g, mat(0x1a2a34), o.w / 2, o.h * 0.68, 0.03, o.w * 0.5, o.h * 0.25, 0.08);
-        box(g, mat(0xffc020, 'hazard', 2), o.w / 2, 0.2, 0.05, o.w - 0.06, 0.28, 0.04);
+        box(g, surf(0x1a2a34), o.w / 2, o.h * 0.68, 0.03, o.w * 0.5, o.h * 0.25, 0.08);
+        box(g, S.hazard(0xffc020), o.w / 2, 0.2, 0.05, o.w - 0.06, 0.28, 0.04);
       } else if (o.style === 'steel') {
         for (let i = 0; i < 3; i++) box(g, trim, o.w / 2, 0.5 + i * (o.h - 1) / 2, 0.06, o.w - 0.1, 0.07, 0.04);
-        box(g, mat(0x9ad0ff, undefined, 1, 1), o.w / 2, o.h * 0.72, 0.05, 0.4, 0.4, 0.04);
+        box(g, surf(0x9ad0ff), o.w / 2, o.h * 0.72, 0.05, 0.4, 0.4, 0.04);
       } else {
         box(g, trim, o.w / 2, o.h * 0.75, 0.05, o.w * 0.7, 0.06, 0.04);
         box(g, trim, o.w / 2, o.h * 0.3, 0.05, o.w * 0.7, 0.06, 0.04);
@@ -168,8 +172,8 @@ export class GlassWall {
     this.pane = Kit.add(this.root, Kit.box(w, h, 0.08), glassMat, 0, h / 2, 0);
     this.pane.renderOrder = 2;
     this.pane.userData.surface = 'metal';
-    // Steel frame.
-    const steel = mat(0x5a6068, 'metal', 1.5);
+    // Steel frame (bolts in the same recipe: one draw call per wall).
+    const steel = S.metal(0x5e646c);
     bakeInto(this.root, (g) => {
       box(g, steel, 0, 0.1, 0, w + 0.3, 0.2, 0.3);
       box(g, steel, 0, h, 0, w + 0.3, 0.24, 0.3);
@@ -178,8 +182,8 @@ export class GlassWall {
       // Bolts.
       for (let i = 0; i < 6; i++) {
         const x = -w / 2 + (i + 0.5) * (w / 6);
-        box(g, mat(0x2a2e34), x, 0.1, 0.16, 0.06, 0.06, 0.04);
-        box(g, mat(0x2a2e34), x, h, 0.16, 0.06, 0.06, 0.04);
+        box(g, S.metal(0x2a2e34), x, 0.1, 0.16, 0.06, 0.06, 0.04);
+        box(g, S.metal(0x2a2e34), x, h, 0.16, 0.06, 0.06, 0.04);
       }
     });
     // Crack lines (hidden until crack()).
@@ -297,12 +301,13 @@ export class GlassWall {
 export function propaneTank(world: World, pos: THREE.Vector3): Destructible {
   const g = new THREE.Group();
   bakeInto(g, (b) => {
-    Kit.add(b, Kit.cyl(0.3, 0.3, 1.05, 10), mat(0xdcdcd4, 'metal', 2, 0.4), 0, 0.62, 0);
-    Kit.add(b, Kit.sphere(0.3, 10, 5), mat(0xdcdcd4, 'metal', 2, 0.4), 0, 1.14, 0, 0, 0, 0, 1, 0.5, 1);
-    Kit.add(b, Kit.cyl(0.32, 0.32, 0.12, 10), mat(0xc02a1e), 0, 0.12, 0);
-    Kit.add(b, Kit.cyl(0.31, 0.31, 0.1, 10), mat(0xc02a1e), 0, 0.92, 0);
-    Kit.add(b, Kit.cyl(0.06, 0.06, 0.18, 6), mat(0x8a8a40), 0, 1.33, 0);
-    Kit.add(b, Kit.box(0.24, 0.05, 0.05), mat(0xc02a1e), 0, 1.43, 0);
+    // Painted steel cylinder (one recipe) + the glowing warning label.
+    Kit.add(b, Kit.cyl(0.3, 0.3, 1.05, 10), S.steel(0xe4e0d4), 0, 0.62, 0);
+    Kit.add(b, Kit.sphere(0.3, 10, 5), S.steel(0xe4e0d4), 0, 1.14, 0, 0, 0, 0, 1, 0.5, 1);
+    Kit.add(b, Kit.cyl(0.32, 0.32, 0.12, 10), S.steel(0xd02a1c), 0, 0.12, 0);
+    Kit.add(b, Kit.cyl(0.31, 0.31, 0.1, 10), S.steel(0xd02a1c), 0, 0.92, 0);
+    Kit.add(b, Kit.cyl(0.06, 0.06, 0.18, 6), S.steel(0x9a9a48), 0, 1.33, 0);
+    Kit.add(b, Kit.box(0.24, 0.05, 0.05), S.steel(0xd02a1c), 0, 1.43, 0);
     box(b, glow(0xffd23a, 0.9), 0, 0.62, 0.3, 0.26, 0.3, 0.02);
   });
   return new Destructible(world, { model: g, pos, hp: 1, points: 250, explode: { radius: 5.5, damage: 12 } });
@@ -345,13 +350,13 @@ export class SkeletonDisplay {
 
   private buildPlinth() {
     const g = new THREE.Group();
-    const granite = mat(0x34343c, 'concrete', 1, 0.5);
+    // Polished granite plinth, brass plaque + stanchions, red velvet rope.
+    const granite = S.rock(0x4a4a56);
     box(g, granite, -0.3, 0.4, 0, 13, 0.8, 5.4);
-    box(g, mat(0x24242a), -0.3, 0.86, 0, 13.3, 0.12, 5.7);
-    box(g, mat(0xb08a3a, 'metal', 2, 0.5), 1.5, 0.45, 2.71, 1.6, 0.5, 0.04);
-    // Rope stanchions around the display.
-    const brass = mat(0xc0a050, 'metal', 2, 0.4);
-    const rope = mat(0x8a1a1e, 'cloth', 2);
+    box(g, S.rock(0x2e2e36), -0.3, 0.86, 0, 13.3, 0.12, 5.7);
+    const brass = S.metal(0xc8a24c);
+    box(g, brass, 1.5, 0.45, 2.71, 1.6, 0.5, 0.04);
+    const rope = S.cloth(0x9a1a22);
     const posts: [number, number][] = [
       [-7.2, 3.3],
       [-3, 3.5],
@@ -400,11 +405,14 @@ export class SkeletonDisplay {
   }
 
   private buildBones() {
-    const bone = mat(0xd8cba8, 'stucco', 2, 0.35);
-    const boneDark = mat(0xb4a684, 'stucco', 2, 0.35);
-    const tooth = mat(0xf2ead8);
-    const socket = mat(0x1a1410);
-    const steel = mat(0x2a2c32, 'metal', 2);
+    // Fossil cast: porous, pitted bone (hide texture, fine) — teeth and
+    // sockets use the same recipe so each falling chunk is one draw call.
+    const boneTex = (c: number) => mat(c, 'hide', 3, 0.55);
+    const bone = boneTex(0xdccca4);
+    const boneDark = boneTex(0xb09c78);
+    const tooth = boneTex(0xf4ecd8);
+    const socket = boneTex(0x241a12);
+    const steel = S.metal(0x2e3036);
     const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
     const rod = (g: THREE.Object3D, a: THREE.Vector3, b: THREE.Vector3, r: number, m = bone) => {
       pipe(g, m, a, b, r, 6);

@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import type { Rng } from '../../../core/Rng';
 import { addText, textWidth, verticalHeight } from './font';
+import { texGlow } from './bake';
+import type { TexName } from '../../kit/Textures';
 
 /**
  * Static prop builders for MAIN STREET. Every builder returns a Group in local
@@ -25,41 +27,71 @@ export const C = {
   tvWin: 0x7fa6ff,
 };
 
+/**
+ * Shared material palette. Surfaces carry Kit retro textures (brick, concrete,
+ * planks, metal…); the zone bake folds them all into one textured draw call.
+ */
 export const M = {
-  get trimDark() { return Kit.mat(0x26262c); },
-  get trimLight() { return Kit.mat(0x77736a); },
-  get winDark() { return Kit.mat(0x121722); },
-  get winFrame() { return Kit.mat(0x1c1d22); },
-  get winWarm() { return Kit.glow(C.warmWin, 0.62); },
-  get winDim() { return Kit.glow(C.dimWin, 0.42); },
+  get trimDark() { return Kit.tex('concrete', 0x34343b, 1.5, 0.8); },
+  get trimLight() { return Kit.tex('concrete', 0x86827a, 1.5, 0.8); },
+  get winDark() { return Kit.mat(0x141a26); },
+  get winFrame() { return Kit.tex('metal', 0x24252c, 1.5, 0.6); },
+  get winWarm() { return texGlow(C.warmWin, 0.62, 'wallpaper', 1, 0.3); },
+  get winDim() { return texGlow(C.dimWin, 0.42, 'wallpaper', 1, 0.3); },
   get winTv() { return Kit.glow(C.tvWin, 0.5); },
-  get door() { return Kit.mat(0x2b1f17); },
-  get metal() { return Kit.mat(0x2a2c31); },
-  get metalLight() { return Kit.mat(0x6a6e75); },
-  get roof() { return Kit.mat(0x1c1d21); },
-  get concrete() { return Kit.mat(0x4f5055); },
-  get sidewalk() { return Kit.mat(0x46474c); },
-  get curb() { return Kit.mat(0x606167); },
-  get tire() { return Kit.mat(0x101012); },
+  get door() { return Kit.tex('planks', 0x45301f, 1.2); },
+  get metal() { return Kit.tex('metal', 0x34363d, 1.2, 0.8); },
+  get metalLight() { return Kit.tex('metal', 0x6a6e75, 1.2, 0.8); },
+  /** Boards nailed over windows. */
+  get boards() { return Kit.tex('planks', 0x6e5440, 1.2); },
+  get boardsDark() { return Kit.tex('planks', 0x4e3a2c, 1.2); },
+  /** Roll-down shop shutters. */
+  get shutter() { return Kit.tex('corrugated', 0x7a7e86, 1.5); },
+  get roof() { return Kit.tex('asphalt', 0x24252b, 1, 0.8); },
+  get concrete() { return Kit.tex('concrete', 0x55565b); },
+  get sidewalk() { return Kit.tex('concrete', 0x4c4d53); },
+  get curb() { return Kit.tex('concrete', 0x6e6f75, 1.5); },
+  get tire() { return Kit.mat(0x121214); },
   get carGlass() { return Kit.mat(0x18202e); },
-  get chrome() { return Kit.mat(0x8c9198); },
+  get chrome() { return Kit.tex('metal', 0x8c9198, 1.5, 0.5); },
   get headlight() { return Kit.glow(0xfff3d6, 1.4); },
   get taillight() { return Kit.glow(0xff2a1a, 1.1); },
   get blood() { return Kit.mat(0x3a0505); },
   get bloodWet() { return Kit.std(0x4a0606, 0.25, 0.1); },
-  get wood() { return Kit.mat(0x4a3628); },
-  get foliage() { return Kit.mat(0x22331f); },
-  get bark() { return Kit.mat(0x2e241c); },
-  get signBack() { return Kit.mat(0x18181c); },
+  get wood() { return Kit.tex('planks', 0x5c4432, 1.5); },
+  get foliage() { return Kit.tex('leaves', 0x2c4424, 0.8); },
+  get bark() { return Kit.tex('bark', 0x3e3024, 1.5); },
+  get signBack() { return Kit.tex('metal', 0x1c1c22, 1.5, 0.5); },
   get orange() { return Kit.mat(0xd9641c); },
+  /** Diagonal hazard stripes (barricade boards). */
+  get hazard() { return Kit.tex('hazard', 0xd9641c, 1.2); },
   get white() { return Kit.mat(0xdedad0); },
-  get yellowPaint() { return Kit.mat(0xb89a3a); },
-  get whitePaint() { return Kit.mat(0x8d8f94); },
+  get yellowPaint() { return Kit.tex('asphalt', 0xb89a3a, 1, 0.55); },
+  get whitePaint() { return Kit.tex('asphalt', 0x8d8f94, 1, 0.55); },
   get sodiumGlow() { return Kit.glow(C.sodium, 1.6); },
 };
 
-export const BUILDING_COLORS = [0x5b3029, 0x4a3426, 0x4d4f57, 0x6a5a45, 0x34404e, 0x3c4a3e, 0x6e6658];
-export const CAR_COLORS = [0x5a1a1a, 0x1d2c4a, 0x8a7c62, 0x5a5d62, 0x1f4f4f, 0x9a9a96, 0x3a2a48, 0x6b5020];
+// Mid-tone albedos: the night lighting + the monitor's tone curve crush anything darker to black.
+export const BUILDING_COLORS = [0x7a3a2c, 0x664632, 0x62656e, 0x8a7454, 0x445670, 0x4e6650, 0x8c8370];
+
+/** Facade texture per building colour: red/brown/painted brick, stucco, concrete block. */
+const FACADE_TEX: Record<number, TexName> = {
+  0x7a3a2c: 'brick',
+  0x664632: 'brick',
+  0x62656e: 'concrete',
+  0x8a7454: 'stucco',
+  0x445670: 'brick',
+  0x4e6650: 'stucco',
+  0x8c8370: 'stucco',
+};
+
+/** Facade material for a building body (brick at 0.7: chunky ~0.3 m courses that survive the 288-line monitor). */
+export function facadeMat(color: number, tex?: TexName): THREE.MeshLambertMaterial {
+  const t = tex ?? FACADE_TEX[color] ?? 'stucco';
+  return Kit.tex(t, color, t === 'brick' ? 0.7 : 1, 1);
+}
+// Saturated-but-dusty paint jobs (sheet-metal texture on top).
+export const CAR_COLORS = [0x7a2020, 0x24386a, 0x9a8a68, 0x666a70, 0x246262, 0xa6a6a0, 0x4a3460, 0x86642a];
 
 // ─── Small helpers ──────────────────────────────────────────────────────────
 
@@ -78,7 +110,7 @@ export function boardSign(text: string, color: number, size = 0.7, opts: { frame
   const g = new THREE.Group();
   const w = textWidth(text, size) + (opts.pad ?? size * 0.9);
   const h = size * 1.7;
-  box(g, w, h, 0.14, opts.back !== undefined ? Kit.mat(opts.back) : M.signBack, 0, 0, -0.07);
+  box(g, w, h, 0.14, opts.back !== undefined ? Kit.tex('metal', opts.back, 1.5, 0.5) : M.signBack, 0, 0, -0.07);
   const glow = Kit.glow(color, 1.5);
   addText(g, text, glow, { size, depth: 0.06 }).position.z = 0.03;
   if (opts.frame !== false) {
@@ -99,7 +131,7 @@ export function bladeSign(text: string, color: number, size = 0.62, back = 0x1a1
   const g = new THREE.Group();
   const h = verticalHeight(text, size) + size * 1.1;
   const out = size * 1.9;
-  box(g, 0.22, h, out, Kit.mat(back), 0, 0, out / 2 + 0.35);
+  box(g, 0.22, h, out, Kit.tex('metal', back, 1.5, 0.5), 0, 0, out / 2 + 0.35);
   // Brackets.
   box(g, 0.08, 0.08, 0.5, M.metal, 0, h / 2 - 0.2, 0.2);
   box(g, 0.08, 0.08, 0.5, M.metal, 0, -h / 2 + 0.2, 0.2);
@@ -133,6 +165,8 @@ export interface ShopSpec {
   shutter?: boolean;
   /** Leave the display window out (a Destructible pane goes there instead). */
   noWindow?: boolean;
+  /** Display window boarded up with planks. */
+  boarded?: boolean;
 }
 
 export interface BuildingSpec {
@@ -147,6 +181,8 @@ export interface BuildingSpec {
   roof?: 'tank' | 'ac' | 'billboard' | 'none';
   /** Silhouettes in lit windows. */
   ghouls?: boolean;
+  /** Facade texture (default: picked from the colour). */
+  tex?: TexName;
 }
 
 export const GROUND_H = 4.6;
@@ -161,7 +197,7 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
   const g = new THREE.Group();
   const { w, d, floors } = s;
   const h = buildingHeight(floors);
-  const body = Kit.mat(s.color);
+  const body = facadeMat(s.color, s.tex);
   const trim = s.trim ?? (rng.chance(0.5) ? M.trimLight : M.trimDark);
   box(g, w, h, d, body, 0, h / 2, -d / 2);
   // Pilasters + cornice + floor band.
@@ -184,13 +220,15 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
       const mat = r < lit * 0.6 ? M.winWarm : r < lit * 0.85 ? M.winDim : r < lit ? M.winTv : M.winDark;
       box(g, 1.12, 1.7, 0.1, mat, x, y, 0.04);
       box(g, 1.5, 0.1, 0.25, trim, x, y - 0.98, 0.1);
+      // Some dark windows are boarded up (reuses the window roll: no extra rng draws).
+      if (mat === M.winDark && r > 0.88) boardUp(g, x, y, 1.3, 1.85, 0.1);
       if (mat !== M.winDark && s.ghouls !== false && rng.chance(0.16)) {
         // Something standing in the window…
         box(g, 0.42, 0.95, 0.02, Kit.mat(0x0b0b0e), x + rng.spread(0.2), y - 0.35, 0.1);
         box(g, 0.24, 0.26, 0.02, Kit.mat(0x0b0b0e), x + rng.spread(0.1), y + 0.28, 0.1);
       } else if (mat !== M.winDark && rng.chance(0.4)) {
         // Half-drawn blind.
-        box(g, 1.12, 0.6, 0.02, Kit.mat(0x5a4a38), x, y + 0.55, 0.1);
+        box(g, 1.12, 0.6, 0.02, Kit.tex('cloth', 0x5a4a38, 0.5), x, y + 0.55, 0.1);
       }
     }
   }
@@ -205,9 +243,11 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
     const wx = -w * 0.12;
     const dx = w / 2 - 1.3;
     if (!shop.noWindow) {
-      const imat = shop.interior ? Kit.glow(shop.interior, shop.interiorIntensity ?? 0.5) : M.winDark;
+      // Lit shop interiors read as tiled walls behind the glass.
+      const imat = shop.interior ? texGlow(shop.interior, shop.interiorIntensity ?? 0.5, 'tiles', 1, 0.3) : M.winDark;
       box(g, ww, 2.4, 0.1, imat, wx, 1.85, 0.04);
       for (let i = 1; i < 3; i++) box(g, 0.09, 2.4, 0.16, M.winFrame, wx - ww / 2 + (ww * i) / 3, 1.85, 0.07);
+      if (shop.boarded) boardUp(g, wx, 1.85, ww + 0.1, 2.5, 0.18);
     }
     box(g, ww + 0.2, 0.65, 0.2, trim, wx, 0.33, 0.1);
     box(g, ww + 0.3, 0.12, 0.2, trim, wx, 3.1, 0.1);
@@ -216,12 +256,12 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
     if (shop.interior) box(g, 0.6, 0.9, 0.04, Kit.glow(shop.interior, (shop.interiorIntensity ?? 0.5) * 0.8), dx, 1.85, 0.11);
     if (shop.shutter) {
       // Half-closed roll-down shutter over the window.
-      box(g, ww + 0.1, 1.3, 0.06, M.metalLight, wx, 2.4, 0.16);
+      box(g, ww + 0.1, 1.3, 0.06, M.shutter, wx, 2.4, 0.16);
       for (let i = 0; i < 4; i++) box(g, ww + 0.1, 0.03, 0.08, M.metal, wx, 1.85 + i * 0.3, 0.18);
     }
     if (shop.awning !== undefined) {
       const aw = w * 0.86;
-      const am = Kit.mat(shop.awning);
+      const am = Kit.tex('cloth', shop.awning, 0.5);
       box(g, aw, 0.08, 1.8, am, 0, 3.55, 0.85, 0.34);
       box(g, aw, 0.36, 0.05, am, 0, 3.1, 1.72);
     }
@@ -258,20 +298,29 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
     Kit.add(g, Kit.cone(1.15, 0.8, 10), M.roof, tx, h + 4.05, tz);
   } else if (roof === 'ac') {
     box(g, 1.4, 0.9, 1.1, M.metalLight, rng.spread(w * 0.3), h + 0.5, -d * 0.4);
-    box(g, 0.7, 1.6, 0.7, Kit.mat(0x3b2a24), rng.spread(w * 0.35), h + 0.8, -d * 0.75);
+    box(g, 0.7, 1.6, 0.7, Kit.tex('brick', 0x5a3a30, 1.2), rng.spread(w * 0.35), h + 0.8, -d * 0.75);
   } else if (roof === 'billboard') {
     const bb = new THREE.Group();
     box(bb, 0.15, 3, 0.15, M.metal, -2.4, 1.5, -0.4);
     box(bb, 0.15, 3, 0.15, M.metal, 2.4, 1.5, -0.4);
-    box(bb, 6.2, 3, 0.15, Kit.mat(0x8a7f62), 0, 4, 0);
-    box(bb, 2.6, 2.4, 0.04, Kit.mat(0x9a3a2a), -1.5, 4, 0.1);
-    box(bb, 2.6, 0.5, 0.04, Kit.mat(0x2a3a5a), 1.5, 4.7, 0.1);
-    box(bb, 2.6, 0.3, 0.04, Kit.mat(0x2a3a5a), 1.5, 4.0, 0.1);
-    box(bb, 2.6, 0.3, 0.04, Kit.mat(0x2a3a5a), 1.5, 3.4, 0.1);
+    const paper = (c: number) => Kit.tex('stucco', c, 1.5, 0.6);
+    box(bb, 6.2, 3, 0.15, paper(0x8a7f62), 0, 4, 0);
+    box(bb, 2.6, 2.4, 0.04, paper(0x9a3a2a), -1.5, 4, 0.1);
+    box(bb, 2.6, 0.5, 0.04, paper(0x2a3a5a), 1.5, 4.7, 0.1);
+    box(bb, 2.6, 0.3, 0.04, paper(0x2a3a5a), 1.5, 4.0, 0.1);
+    box(bb, 2.6, 0.3, 0.04, paper(0x2a3a5a), 1.5, 3.4, 0.1);
     bb.position.set(0, h, -d * 0.3);
     g.add(bb);
   }
   return g;
+}
+
+/** Planks nailed over a window opening (wall facing +Z): a board panel + a diagonal brace. */
+export function boardUp(g: THREE.Object3D, x: number, y: number, w: number, h: number, z: number) {
+  box(g, w, h, 0.04, M.boards, x, y, z);
+  const len = Math.hypot(w, h) * 0.92;
+  const a = Math.atan2(h, w) * (Math.floor(x * 7.3 + y) % 2 ? 1 : -1);
+  box(g, len, 0.17, 0.05, M.boardsDark, x, y, z + 0.04, 0, 0, a);
 }
 
 /** Fire escape (platforms, rails, stairs) on a wall facing +Z, centred on x. */
@@ -304,7 +353,7 @@ export function wallDetails(g: THREE.Object3D, x0: number, x1: number, floors: n
       box(g, 1.1, 1.5, 0.08, M.winFrame, x, y, 0.03);
       const lit = rng.chance(0.18);
       box(g, 0.9, 1.3, 0.1, lit ? M.winDim : M.winDark, x, y, 0.04);
-      if (!lit && rng.chance(0.3)) box(g, 1.0, 1.4, 0.03, Kit.mat(0x3a2e22), x, y, 0.1); // boarded
+      if (!lit && rng.chance(0.3)) boardUp(g, x, y, 1.0, 1.4, 0.1);
     }
   }
   for (const dx of opts.doors ?? []) {
@@ -348,7 +397,7 @@ export function streetLamp(): THREE.Group {
 
 export function hydrant(): THREE.Group {
   const g = new THREE.Group();
-  const red = Kit.mat(0x8a1a14);
+  const red = Kit.tex('metal', 0xa82218, 2, 0.6);
   cyl(g, 0.14, 0.16, 0.6, 8, red, 0, 0.3, 0);
   Kit.add(g, Kit.sphere(0.15, 8, 5), red, 0, 0.62, 0);
   cyl(g, 0.06, 0.06, 0.4, 6, red, 0, 0.42, 0, 0, 0, Math.PI / 2);
@@ -357,14 +406,14 @@ export function hydrant(): THREE.Group {
 
 export function trashCan(): THREE.Group {
   const g = new THREE.Group();
-  cyl(g, 0.3, 0.26, 0.95, 8, Kit.mat(0x2d3a2e), 0, 0.48, 0);
+  cyl(g, 0.3, 0.26, 0.95, 8, Kit.tex('corrugated', 0x3c4c42, 2), 0, 0.48, 0);
   cyl(g, 0.33, 0.33, 0.06, 8, M.metal, 0, 0.98, 0);
   return g;
 }
 
 export function newsBox(color: number): THREE.Group {
   const g = new THREE.Group();
-  box(g, 0.5, 0.95, 0.45, Kit.mat(color), 0, 0.6, 0);
+  box(g, 0.5, 0.95, 0.45, Kit.tex('metal', color, 2, 0.5), 0, 0.6, 0);
   box(g, 0.4, 0.3, 0.02, M.winDark, 0, 0.8, 0.23);
   box(g, 0.08, 0.25, 0.08, M.metal, 0, 0.1, 0);
   return g;
@@ -381,7 +430,7 @@ export function bench(): THREE.Group {
 
 export function mailbox(): THREE.Group {
   const g = new THREE.Group();
-  const blue = Kit.mat(0x1f3566);
+  const blue = Kit.tex('metal', 0x2a4888, 2, 0.5);
   box(g, 0.5, 0.75, 0.5, blue, 0, 0.75, 0);
   cyl(g, 0.25, 0.25, 0.5, 8, blue, 0, 1.12, 0, Math.PI / 2, 0, 0);
   box(g, 0.08, 0.4, 0.08, M.metal, 0, 0.2, 0);
@@ -396,14 +445,15 @@ export function trafficCone(): THREE.Group {
   return g;
 }
 
-/** Striped police sawhorse barrier, ~2.4 m wide, facing +Z. */
+/** Police sawhorse barrier with hazard-striped boards, ~2.4 m wide, facing +Z. */
 export function sawhorse(): THREE.Group {
   const g = new THREE.Group();
-  for (let i = 0; i < 6; i++) box(g, 0.4, 0.26, 0.05, i % 2 ? M.white : M.orange, -1.0 + i * 0.4, 0.95, 0, 0, 0, 0.0);
-  for (let i = 0; i < 6; i++) box(g, 0.4, 0.2, 0.05, i % 2 ? M.orange : M.white, -1.0 + i * 0.4, 0.45, 0);
+  box(g, 2.4, 0.26, 0.05, M.hazard, 0, 0.95, 0);
+  box(g, 2.4, 0.2, 0.05, M.hazard, 0, 0.45, 0);
+  const legs = Kit.tex('planks', 0xc8c4ba, 2, 0.5);
   for (const sx of [-1.1, 1.1]) {
-    box(g, 0.08, 1.15, 0.08, M.white, sx, 0.55, 0.22, -0.32);
-    box(g, 0.08, 1.15, 0.08, M.white, sx, 0.55, -0.22, 0.32);
+    box(g, 0.08, 1.15, 0.08, legs, sx, 0.55, 0.22, -0.32);
+    box(g, 0.08, 1.15, 0.08, legs, sx, 0.55, -0.22, 0.32);
   }
   return g;
 }
@@ -423,24 +473,25 @@ export function streetTree(rng: Rng): THREE.Group {
 /** Utility / telephone pole with a crossbar (wires added separately). */
 export function utilityPole(): THREE.Group {
   const g = new THREE.Group();
-  cyl(g, 0.12, 0.16, 9, 6, Kit.mat(0x3a2c20), 0, 4.5, 0);
-  box(g, 2.2, 0.14, 0.14, Kit.mat(0x3a2c20), 0, 8.4, 0);
+  const wood = Kit.tex('bark', 0x4c3a2e, 1.5);
+  cyl(g, 0.12, 0.16, 9, 6, wood, 0, 4.5, 0);
+  box(g, 2.2, 0.14, 0.14, Kit.tex('planks', 0x4c3a2e, 1.5), 0, 8.4, 0);
   cyl(g, 0.22, 0.22, 0.6, 6, M.metalLight, 0.45, 7.8, 0.2);
   return g;
 }
 
 export function dumpster(color = 0x2a4a32): THREE.Group {
   const g = new THREE.Group();
-  const m = Kit.mat(color);
+  const m = Kit.tex('metal', color, 1);
   box(g, 2.2, 1.25, 1.3, m, 0, 0.75, 0);
-  box(g, 2.3, 0.1, 1.4, Kit.mat(0x1f2a22), 0, 1.42, -0.05, -0.25);
+  box(g, 2.3, 0.1, 1.4, Kit.tex('metal', 0x24302a, 1.2), 0, 1.42, -0.05, -0.25);
   for (const sx of [-0.9, 0.9]) cyl(g, 0.1, 0.1, 0.1, 6, M.tire, sx, 0.1, 0.5, Math.PI / 2);
   return g;
 }
 
 export function trashBags(rng: Rng, n = 4): THREE.Group {
   const g = new THREE.Group();
-  const m = Kit.mat(0x141518);
+  const m = Kit.tex('hide', 0x24262c, 1.5, 0.8);
   for (let i = 0; i < n; i++) {
     const s = rng.range(0.32, 0.45);
     Kit.add(g, Kit.ico(s, 0), m, rng.spread(0.9), s * 0.75, rng.spread(0.6), rng.next(), rng.next(), 0, 1, 0.8, 1);
@@ -451,8 +502,8 @@ export function trashBags(rng: Rng, n = 4): THREE.Group {
 export function crate(s = 0.8): THREE.Group {
   const g = new THREE.Group();
   box(g, s, s, s, M.wood, 0, s / 2, 0);
-  box(g, s + 0.02, 0.08, s + 0.02, Kit.mat(0x3a2a1e), 0, s * 0.85, 0);
-  box(g, s + 0.02, 0.08, s + 0.02, Kit.mat(0x3a2a1e), 0, s * 0.15, 0);
+  box(g, s + 0.02, 0.08, s + 0.02, M.boardsDark, 0, s * 0.85, 0);
+  box(g, s + 0.02, 0.08, s + 0.02, M.boardsDark, 0, s * 0.15, 0);
   return g;
 }
 
@@ -477,7 +528,8 @@ export interface CarOptions {
  */
 export function car(o: CarOptions): THREE.Group {
   const g = new THREE.Group();
-  const paint = o.burnt ? Kit.mat(0x1d1917) : o.police ? Kit.mat(0x111216) : Kit.mat(o.color);
+  // Painted sheet metal: faint panel lines + rust; burnt wrecks are all rust and scorch.
+  const paint = o.burnt ? Kit.tex('metal', 0x2e2622, 1) : o.police ? Kit.tex('metal', 0x18191f, 1, 0.5) : Kit.tex('metal', o.color, 1, 0.55);
   const glass = o.burnt ? Kit.mat(0x050505) : M.carGlass;
   box(g, 1.82, 0.62, 4.5, paint, 0, 0.62, 0);
   box(g, 1.8, 0.1, 1.25, paint, 0, 0.96, 1.55, o.wrecked ? 0.22 : 0.05);
@@ -496,7 +548,7 @@ export function car(o: CarOptions): THREE.Group {
     blue.userData.noMerge = true;
     g.userData.lightbar = [red, blue];
   }
-  const bumper = o.burnt ? Kit.mat(0x2a2522) : M.chrome;
+  const bumper = o.burnt ? Kit.tex('metal', 0x2a2522, 1.5) : M.chrome;
   box(g, 1.86, 0.2, 0.16, bumper, 0, 0.42, 2.27);
   box(g, 1.86, 0.2, 0.16, bumper, 0, 0.42, -2.27);
   box(g, 1.0, 0.22, 0.04, M.winFrame, 0, 0.66, 2.26);
@@ -528,8 +580,8 @@ export function car(o: CarOptions): THREE.Group {
 /** Yellow school bus, front toward +Z, ≈ 11 × 2.5 × 3 m (upright). */
 export function schoolBus(): THREE.Group {
   const g = new THREE.Group();
-  const yellow = Kit.mat(0xd29a16);
-  const black = Kit.mat(0x18181a);
+  const yellow = Kit.tex('metal', 0xd29a16, 1, 0.6);
+  const black = Kit.tex('metal', 0x1c1c1f, 1.5, 0.6);
   box(g, 2.5, 2.1, 9.6, yellow, 0, 1.75, -0.6);
   box(g, 2.3, 1.0, 1.6, yellow, 0, 1.15, 4.9);
   box(g, 2.52, 0.18, 9.6, black, 0, 1.5, -0.6);
@@ -546,17 +598,17 @@ export function schoolBus(): THREE.Group {
     for (const sx of [1.15, -1.15]) Kit.add(g, Kit.cyl(0.5, 0.5, 0.35, 10), M.tire, sx, 0.5, z, 0, 0, Math.PI / 2);
   }
   // Stop sign arm + lights.
-  box(g, 0.06, 0.5, 0.5, Kit.mat(0x8a1a14), 1.3, 1.9, 3.2);
+  box(g, 0.06, 0.5, 0.5, Kit.tex('metal', 0x8a1a14, 2, 0.5), 1.3, 1.9, 3.2);
   box(g, 0.3, 0.2, 0.06, Kit.mat(0x8a2a10), 0.8, 2.75, 4.3);
   box(g, 0.3, 0.2, 0.06, Kit.mat(0x8a2a10), -0.8, 2.75, 4.3);
   // Rear frame around the emergency door (the door itself is a separate animated prop).
   box(g, 2.5, 0.2, 0.1, black, 0, 2.75, -5.42);
   // Underbody: chassis rails, axles, fuel tank, exhaust (it ends up facing the street).
-  const chassis = Kit.mat(0x1a1a1c);
+  const chassis = Kit.tex('metal', 0x1e1e21, 1.5);
   box(g, 2.3, 0.08, 10.6, chassis, 0, 0.68, -0.2);
-  for (const x of [-0.6, 0.6]) box(g, 0.2, 0.25, 10.4, Kit.mat(0x2a2a2c), x, 0.55, -0.2);
+  for (const x of [-0.6, 0.6]) box(g, 0.2, 0.25, 10.4, Kit.tex('metal', 0x2e2e31, 2), x, 0.55, -0.2);
   for (const z of [3.6, -3.4]) cyl(g, 0.1, 0.1, 2.3, 6, M.metal, 0, 0.5, z, 0, 0, Math.PI / 2);
-  box(g, 0.7, 0.4, 1.4, Kit.mat(0x3a3a3e), 0.7, 0.45, 0.6);
+  box(g, 0.7, 0.4, 1.4, Kit.tex('metal', 0x3a3a3e, 2), 0.7, 0.45, 0.6);
   cyl(g, 0.07, 0.07, 6, 6, M.metalLight, -0.85, 0.45, -1.5, Math.PI / 2, 0, 0);
   // SCHOOL BUS lettering on the roof edges front and back.
   for (const z of [4.22, -5.42]) {

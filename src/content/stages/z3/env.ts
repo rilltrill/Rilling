@@ -8,7 +8,7 @@ import { clamp, smoothstep } from '../../../core/math';
 import { Rng } from '../../../core/Rng';
 import { M, bake } from './bake';
 import { D } from './layout';
-import { PAL, car, tankerTank } from './props';
+import { PAL, S, car, tankerTank } from './props';
 import { DuskSky, SKY } from './sky';
 import { FireField, type FireEmitter } from './vfx';
 import {
@@ -437,10 +437,12 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
   root.add(sky.group);
 
   // ─── Ground ───────────────────────────────────────────────────────────────
-  const land = EnvKit.ribbon(curve, 520, M.lam(0x4a3e34, 'dirt', 1, 0.6), { from: 0, to: D.BRIDGE_FROM + 6, step: 12, y: -0.05 });
+  // Dry dusk scrub either side of the interstate.
+  const scrub = M.lam(0x56493a, 'dirt', 0.45, 1);
+  const land = EnvKit.ribbon(curve, 520, scrub, { from: 0, to: D.BRIDGE_FROM + 6, step: 12, y: -0.05 });
   root.add(land);
-  const behind = EnvKit.ground(560, 0x4a3e34, 0, 280, -0.06);
-  behind.material = M.lam(0x4a3e34, 'dirt', 1, 0.6);
+  const behind = EnvKit.ground(560, 0x56493a, 0, 280, -0.06);
+  behind.material = scrub;
   root.add(behind);
 
   // ─── Roads + furniture ────────────────────────────────────────────────────
@@ -511,9 +513,9 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
     // Burnt halves (hidden until the blast).
     for (const s of [-1, 1]) {
       const h = new THREE.Group();
-      const m = M.lam(PAL.burnt, 'metal', 1, 0.6);
-      Kit.add(h, Kit.cyl(1.35, 1.35, 5.2, 10, ), m, 0, 1.35, 0, 0, 0, Math.PI / 2);
-      Kit.add(h, Kit.cyl(1.2, 1.4, 0.4, 10), M.lam(0x8a3a1a), s * -2.7, 1.35, 0, 0, 0, Math.PI / 2);
+      Kit.add(h, Kit.cyl(1.35, 1.35, 5.2, 10, ), S.burnt(PAL.burnt), 0, 1.35, 0, 0, 0, Math.PI / 2);
+      Kit.add(h, Kit.cyl(1.2, 1.4, 0.4, 10), S.burnt(0x8a3a1a), s * -2.7, 1.35, 0, 0, 0, Math.PI / 2);
+      bake(h);
       ctx.put(h, D.TANKER, -3.2 + s * 2.8, 0, 0.12, root);
       h.visible = false;
       z.tankHalves.push(h);
@@ -530,13 +532,17 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
     // Chain-link gate panels.
     for (const s of [-1, 1]) {
       const g = new THREE.Group();
-      const steel = M.lam(PAL.metal);
+      const steel = S.steel(PAL.metal);
       Kit.add(g, Kit.box(2.5, 0.08, 0.08), steel, s * 1.25, 2.3, 0);
       Kit.add(g, Kit.box(2.5, 0.08, 0.08), steel, s * 1.25, 0.15, 0);
       Kit.add(g, Kit.box(0.08, 2.2, 0.08), steel, s * 2.45, 1.2, 0);
       Kit.add(g, Kit.box(0.08, 2.2, 0.08), steel, s * 0.05, 1.2, 0);
       Kit.add(g, Kit.box(2.4, 2.1, 0.03), Kit.mat(0x9a9ea4, { tex: 'grate', transparent: true, opacity: 0.85 }), s * 1.25, 1.22, 0);
-      Kit.add(g, Kit.box(1.0, 0.5, 0.04), M.lam(0xd8b020), s * 1.25, 1.5, 0.05);
+      // Yellow warning plate (painted steel, readable).
+      Kit.add(g, Kit.box(1.0, 0.5, 0.04), S.plate(0xe0b820), s * 1.25, 1.5, 0.05);
+      Kit.add(g, Kit.box(0.7, 0.08, 0.05), S.clean(0x1a1a1a), s * 1.25, 1.5, 0.07);
+      // Panels swing as a whole: bake each one (steel + plate = 1 draw, grate = 1).
+      bake(g);
       ctx.put(g, D.BARRICADE, 0, 0, 0, root);
       z.gate.push(g);
     }

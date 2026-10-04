@@ -46,7 +46,7 @@ interface FogZone {
 }
 
 const FOGS: FogZone[] = [
-  { until: D.erDoor - 1, color: 0x141e2b, near: 10, far: 64, hemi: 1.3 },
+  { until: D.erDoor - 1, color: 0x16202e, near: 12, far: 72, hemi: 1.45 },
   { until: D.stairTop + 3, color: 0x0b1614, near: 5, far: 38, hemi: 1.0 },
   { until: D.morgue - 2, color: 0x0a1110, near: 4, far: 30, hemi: 0.9 },
   { until: D.corrB, color: 0x0a1418, near: 4, far: 32, hemi: 1.0 },
@@ -165,7 +165,10 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     root.add(g);
     zones.push({ g, from, to });
   };
-  addZone(buildBay(ctx), -1, D.corrA + 3);
+  const bay = buildBay(ctx);
+  addZone(bay.near, -1, D.corrA + 3);
+  // The open-air part of the bay is only ever seen from outside / the doorway.
+  addZone(bay.field, -1, D.erDoor + 3);
   addZone(buildER(ctx), -1, D.ward - 8);
   addZone(buildCorrA(ctx), D.erDoor - 4, D.stairDoor);
   addZone(buildWard(ctx), D.corrA - 2, D.stairBot);

@@ -76,7 +76,8 @@ export class Herd {
   giantsRange: [number, number] = [0, 0];
 
   constructor(hadros: { from: THREE.Vector3; to: THREE.Vector3; delay: number; speed: number; scale: number }[], giants: { from: THREE.Vector3; to: THREE.Vector3; speed: number }[]) {
-    const mat = Kit.mat(0xffffff);
+    // Instance colours tint a shared bumpy hide (projected in model space, so it rides along).
+    const mat = Kit.mat(0xffffff, { tex: 'hide', texScale: 1.2, texStrength: 0.85 });
     this.hBody = new THREE.InstancedMesh(hadroBody(), mat, hadros.length);
     this.hLegs = new THREE.InstancedMesh(legGeo(0.36, 2.0, 0.46), mat, hadros.length * 2);
     this.sBody = new THREE.InstancedMesh(sauroBody(), mat, giants.length);

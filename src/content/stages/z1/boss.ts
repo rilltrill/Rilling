@@ -7,7 +7,7 @@ import { clamp, damp } from '../../../core/math';
 import { Kit } from '../../kit/ModelKit';
 import { createEnemy, registerEnemy } from '../../registry';
 import { z1Scene } from './env';
-import { bakeInto } from './bake';
+import { bakeInto, texGlow } from './bake';
 import type { HitPart } from '../../../core/types';
 
 /** Chest pustules [x, y, z, radius, hp] in chest space; belly ones in spine space. */
@@ -25,7 +25,7 @@ const PUS_BELLY: [number, number, number, number, number][] = [
 /**
  * THE BUTCHER — stage 1 boss of DEAD ZONE.
  *
- * A ~3.2 m mutated butcher: chain-mail apron (armour), cleaver grafted to the
+ * A ~3.2 m mutated butcher: steel-banded canvas apron (armour), cleaver grafted to the
  * right arm (armour), a meat hook on a chain in the left hand, an exposed
  * beating heart in the chest and glowing pustules (weak points), glowing eyes
  * (the head is worth much more while he roars).
@@ -40,9 +40,10 @@ const PUS_BELLY: [number, number, number, number, number][] = [
 
 type Part = { mesh: THREE.Mesh; hp: number; popped: boolean };
 
-const SKIN = 0xa08474;
-const SKIN_DARK = 0x6e5048;
-const PANTS = 0x2e2a28;
+// Sallow, rotting skin (the 'skin' texture adds veins and sores): pops against the red-lit shop.
+const SKIN = 0xa69074;
+const SKIN_DARK = 0x725a4a;
+const PANTS = 0x3a3430;
 const BLOOD = 0x4a0808;
 
 /** Charge wind-up (s): not shortened by later phases. */
@@ -140,18 +141,23 @@ export class Butcher extends Boss {
   // ─── Model ────────────────────────────────────────────────────────────────
 
   protected override build() {
-    const skin = Kit.mat(SKIN);
-    const skinDark = Kit.mat(SKIN_DARK);
-    const pants = Kit.mat(PANTS);
-    const boots = Kit.mat(0x1a1614);
+    // Retro textures sized for a 3 m boss filling half the screen (~2 cm per scanline).
+    const skin = Kit.tex('skin', SKIN, 1.2);
+    const skinDark = Kit.tex('skin', SKIN_DARK, 1.2);
+    const pants = Kit.tex('cloth', PANTS, 0.6);
+    const boots = Kit.tex('hide', 0x2c2420, 1.5);
     const blood = Kit.mat(BLOOD);
     const vein = Kit.mat(0x5a2a3a);
     // Self-lit steel: the moon is behind him, so a lit material would read as a
     // dark sliver against the night sky exactly when the raised cleaver matters.
-    const steel = Kit.glow(0x8a95a3, 1.0);
-    const iron = Kit.mat(0x5a5e65);
+    // Brushed, rust-spotted steel ('metal' texture on the self-lit blade).
+    const steel = texGlow(0x8a95a3, 1.0, 'metal', 2, 0.55);
+    const iron = Kit.tex('metal', 0x5e626a, 2, 0.8);
     const bone = Kit.mat(0xd8cdb0);
-    const mail = Kit.mat(0x9aa2aa);
+    // Chain mail (glove, shoulder rivets): a fine ring grid.
+    const mail = Kit.tex('grate', 0x9aa2aa, 4, 0.5);
+    // The apron: heavy, blood-stained canvas riveted to steel bands (still armour).
+    const apronCloth = Kit.tex('cloth', 0xc4beb2, 0.8);
     const m = this.model;
     // Every joint is baked into one mesh per hit-zone (≈30 draw calls instead of ≈90).
     const bake = (parent: THREE.Object3D, part: HitPart | null, fn: (g: THREE.Group) => void) => {
@@ -205,9 +211,9 @@ export class Butcher extends Boss {
         Kit.add(g, Kit.box(0.05, 0.2, 0.05), Kit.glow(0xb01010, 1.2), 0.33 + dx, 0.3 + dy, 0.53, 0, 0, rz);
       }
       // Pustule rims.
-      for (const [x, y, z, r] of PUS_CHEST) Kit.add(g, Kit.sphere(r * 1.25, 8, 6), Kit.mat(0x8a3a2a), x, y, z - r * 0.35, 0, 0, 0, 1, 1, 0.6);
-      // Apron straps.
-      for (const sx of [-1, 1]) Kit.add(g, Kit.box(0.08, 0.6, 0.06), Kit.mat(0x2a2420), sx * 0.66, 0.3, 0.46, 0, 0, -sx * 0.25);
+      for (const [x, y, z, r] of PUS_CHEST) Kit.add(g, Kit.sphere(r * 1.25, 8, 6), Kit.tex('skin', 0x8a3a2a, 1.5), x, y, z - r * 0.35, 0, 0, 0, 1, 1, 0.6);
+      // Leather apron straps.
+      for (const sx of [-1, 1]) Kit.add(g, Kit.box(0.08, 0.6, 0.06), Kit.tex('hide', 0x3a3028, 2), sx * 0.66, 0.3, 0.46, 0, 0, -sx * 0.25);
       // Neck.
       Kit.add(g, Kit.box(0.36, 0.2, 0.36), skin, 0, 0.58, 0.32);
     });
@@ -228,7 +234,7 @@ export class Butcher extends Boss {
     bp.name = 'bellyPustules';
     this.spine.add(bp);
     bake(bp, 'torso', (g) => {
-      for (const [x, y, z, r] of PUS_BELLY) Kit.add(g, Kit.sphere(r * 1.25, 8, 6), Kit.mat(0x8a3a2a), x, y, z - r * 0.35, 0, 0, 0, 1, 1, 0.6);
+      for (const [x, y, z, r] of PUS_BELLY) Kit.add(g, Kit.sphere(r * 1.25, 8, 6), Kit.tex('skin', 0x8a3a2a, 1.5), x, y, z - r * 0.35, 0, 0, 0, 1, 1, 0.6);
     });
     for (const [x, y, z, r, hp] of PUS_BELLY) {
       const mesh = Kit.add(bp, Kit.sphere(r, 8, 6), pus, x, y, z);
@@ -238,12 +244,12 @@ export class Butcher extends Boss {
     bp.visible = false;
     this.allPustules = [...this.pustules, ...this.bellyPustules];
 
-    // Chain-mail apron (armour) hanging from the chest.
+    // Steel-banded apron (armour) hanging from the chest.
     this.apron = Kit.pivot(this.chest, 0, -0.02, 0.6, 'apron');
     this.apron.rotation.x = -0.3;
     this.apronParts = bake(this.apron, 'armor', (g) => {
-      Kit.add(g, Kit.box(1.25, 1.55, 0.07), mail, 0, -0.78, 0);
-      const grid = Kit.mat(0x4a4e56);
+      Kit.add(g, Kit.box(1.25, 1.55, 0.07), apronCloth, 0, -0.78, 0);
+      const grid = Kit.tex('metal', 0x4e525a, 3, 0.6);
       for (let i = 0; i < 6; i++) Kit.add(g, Kit.box(1.25, 0.025, 0.08), grid, 0, -0.1 - i * 0.27, 0.005);
       for (let i = 0; i < 5; i++) Kit.add(g, Kit.box(0.025, 1.55, 0.08), grid, -0.5 + i * 0.25, -0.78, 0.005);
       for (const [x, y, s] of [[-0.3, -0.5, 0.35], [0.25, -1.1, 0.45], [0.35, -0.3, 0.2], [-0.2, -1.35, 0.3]] as const) {
@@ -257,8 +263,9 @@ export class Butcher extends Boss {
     const headMeshes = bake(this.head, 'head', (g) => {
       Kit.add(g, Kit.box(0.48, 0.5, 0.5), skin, 0, 0.2, 0);
       Kit.add(g, Kit.box(0.5, 0.1, 0.12), skinDark, 0, 0.32, 0.22);
-      Kit.add(g, Kit.box(0.52, 0.2, 0.52), Kit.mat(0xd8d0c4), 0, 0.53, -0.02, -0.08);
-      Kit.add(g, Kit.box(0.54, 0.04, 0.54), Kit.mat(0x8a1a1a), 0, 0.45, -0.02, -0.08);
+      // Stained butcher's cap.
+      Kit.add(g, Kit.box(0.52, 0.2, 0.52), Kit.tex('cloth', 0xd8d0c4, 0.8), 0, 0.53, -0.02, -0.08);
+      Kit.add(g, Kit.box(0.54, 0.04, 0.54), Kit.tex('cloth', 0x8a1a1a, 0.8), 0, 0.45, -0.02, -0.08);
       Kit.add(g, Kit.box(0.18, 0.12, 0.02), blood, 0.12, 0.6, 0.24, 0, 0, 0.3);
     });
     this.headAnchor = headMeshes[0];
@@ -290,7 +297,7 @@ export class Butcher extends Boss {
       Kit.add(g, Kit.box(0.5, 0.74, 0.5), skin, 0, -0.34, 0);
       Kit.add(g, Kit.box(0.52, 0.12, 0.52), vein, 0, -0.68, 0);
       Kit.add(g, Kit.box(0.34, 0.22, 0.32), skinDark, 0, -0.8, 0);
-      Kit.add(g, Kit.box(0.1, 0.4, 0.1), Kit.mat(0x3a2418), 0, -0.98, 0);
+      Kit.add(g, Kit.box(0.1, 0.4, 0.1), Kit.tex('bark', 0x4a3020, 3), 0, -0.98, 0);
     });
     // Cleaver blade grafted to the wrist, edge forward.
     bake(this.elR, 'armor', (g) => {
@@ -356,11 +363,11 @@ export class Butcher extends Boss {
   private hookParts(b: THREE.Group, withChain: boolean) {
     // Held hooks are small; thrown ones are chunky (with a hunk of meat) so they read and can be hit mid-air.
     const k = withChain ? 1 : 1.6;
-    const iron = Kit.mat(0xa4a8ae);
+    const iron = Kit.tex('metal', 0xa4a8ae, 3, 0.6);
     if (withChain) for (let i = 0; i < 3; i++) Kit.add(b, Kit.box(0.06, 0.12, 0.03), iron, 0, -i * 0.12, 0, 0, i % 2 ? Math.PI / 2 : 0, 0);
     if (!withChain) {
       // Meat chunk first: it is the solid body the projectile is aimed at.
-      Kit.add(b, Kit.sphere(0.2, 7, 5), Kit.mat(0xb04848), 0.02, -0.12, 0, 0.3, 0, 0.4, 1.15, 0.9, 0.8);
+      Kit.add(b, Kit.sphere(0.2, 7, 5), Kit.tex('skin', 0xb04848, 2), 0.02, -0.12, 0, 0.3, 0, 0.4, 1.15, 0.9, 0.8);
       Kit.add(b, Kit.box(0.3, 0.06, 0.24), Kit.mat(0xe8d8c0), 0.02, -0.1, 0.02, 0, 0, 0.4);
     }
     const hk = new THREE.Mesh(withChain ? this.hookGeo : this.hookGeoBig, iron);
@@ -380,7 +387,7 @@ export class Butcher extends Boss {
   }
 
   private barrelParts(b: THREE.Group) {
-    Kit.add(b, Kit.cyl(0.34, 0.34, 0.95, 10), Kit.mat(0xc22a20), 0, 0, 0);
+    Kit.add(b, Kit.cyl(0.34, 0.34, 0.95, 10), Kit.tex('metal', 0xc22a20, 2, 0.6), 0, 0, 0);
     Kit.add(b, Kit.cyl(0.35, 0.35, 0.06, 10), Kit.mat(0x5a120e), 0, 0.25, 0);
     Kit.add(b, Kit.cyl(0.35, 0.35, 0.06, 10), Kit.mat(0x5a120e), 0, -0.25, 0);
     // Glowing hazard band all the way round + label: reads on a dark sky from any spin angle.
@@ -396,7 +403,7 @@ export class Butcher extends Boss {
 
   /** A police-cruiser door torn off at the hinges: white with a red/blue stripe. */
   private doorParts(b: THREE.Group) {
-    const white = Kit.mat(0xe8e8e0);
+    const white = Kit.tex('metal', 0xe8e8e0, 2, 0.5);
     Kit.add(b, Kit.box(1.15, 0.65, 0.08), white, 0, -0.2, 0);
     Kit.add(b, Kit.box(1.0, 0.42, 0.06), Kit.mat(0x18202e), 0.05, 0.33, 0);
     Kit.add(b, Kit.box(1.0, 0.06, 0.08), white, 0.05, 0.55, 0);

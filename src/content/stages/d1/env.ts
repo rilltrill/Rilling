@@ -23,6 +23,7 @@ import {
   type GateParts,
 } from './props';
 import { D, RIVER, RIVER_WIDTH } from './layout';
+import { flowMat, flowRibbon, tm, waterClock } from './retro';
 
 /**
  * JUNGLE RUN environment: a lush tropical park road by day — dirt road, giant
@@ -253,7 +254,7 @@ export class JungleEnv {
     this.buildBackdrop();
     // Subdivided (a 2-triangle 1.6 km plane loses depth precision and flickers
     // through the road) and sunk well below the road/verge ribbons.
-    const ground = new THREE.Mesh(Kit.plane(1600, 1600, 48, 48), Kit.mat(COL.ground));
+    const ground = new THREE.Mesh(Kit.plane(1600, 1600, 48, 48), tm(COL.ground, 'grass', 0.28));
     ground.rotation.x = -Math.PI / 2;
     ground.position.set(0, GROUND_Y, -340);
     root.add(ground);
@@ -282,18 +283,19 @@ export class JungleEnv {
       const h = rng.range(45, 95);
       const wdt = rng.range(70, 120);
       const col = rng.chance(0.5) ? 0x86a59b : 0x9bb6ae;
-      Kit.add(far, cone, Kit.mat(col, { fog: false }), Math.sin(a) * r, h / 2 - 6, Math.cos(a) * r, 0, rng.next() * 6, 0, wdt, h, wdt * 0.8);
+      // Huge texels (≈ 2 m) of jungle-clad rock: mottled, never noisy at 250 m.
+      Kit.add(far, cone, tm(col, 'leaves', 0.025, 0.4, { fog: false }), Math.sin(a) * r, h / 2 - 6, Math.cos(a) * r, 0, rng.next() * 6, 0, wdt, h, wdt * 0.8);
     }
     // The volcano, ahead and to the left of the road.
     const vx = -95;
     const vz = -250;
-    Kit.add(far, Kit.cyl(14, 105, 92, 12), Kit.mat(0x7c8a86, { fog: false }), vx, 40, vz);
-    Kit.add(far, Kit.cyl(18, 22, 6, 12), Kit.mat(0x5f6664, { fog: false }), vx, 88, vz);
+    Kit.add(far, Kit.cyl(14, 105, 92, 12), tm(0x7c8a86, 'rock', 0.05, 0.55, { fog: false }), vx, 40, vz);
+    Kit.add(far, Kit.cyl(18, 22, 6, 12), tm(0x5f6664, 'rock', 0.08, 0.6, { fog: false }), vx, 88, vz);
     // Clouds.
     for (let i = 0; i < 9; i++) {
       const a = rng.next() * Math.PI * 2;
       const r = rng.range(150, 240);
-      Kit.add(far, this.flora.blob(rng), Kit.mat(0xf4f8f8, { fog: false, emissive: 0xb0c4cc, emissiveIntensity: 0.55 }), Math.sin(a) * r, rng.range(95, 140), Math.cos(a) * r, 0, rng.next() * 6, 0, rng.range(25, 45), rng.range(5, 9), rng.range(14, 22));
+      Kit.add(far, this.flora.blob(rng), tm(0xf4f8f8, 'none', 1, 1, { fog: false, emissive: 0xb0c4cc, emissiveIntensity: 0.55 }), Math.sin(a) * r, rng.range(95, 140), Math.cos(a) * r, 0, rng.next() * 6, 0, rng.range(25, 45), rng.range(5, 9), rng.range(14, 22));
     }
     EnvKit.mergeStatic(far);
     b.add(far);
@@ -302,7 +304,7 @@ export class JungleEnv {
     Kit.add(b, Kit.box(3, 30, 1), Kit.glow(0xc8461a, 1.0), vx + 6, 72, vz + 34, -0.75, 0, 0.1);
     // Smoke plume (instanced puffs that rise and swell).
     this.smokeBase.set(vx, 95, vz);
-    this.smoke = new THREE.InstancedMesh(this.flora.blob(rng), Kit.mat(0xc8c6c0, { fog: false, emissive: 0x707070, emissiveIntensity: 0.6, transparent: true, opacity: 0.75 }), 7);
+    this.smoke = new THREE.InstancedMesh(this.flora.blob(rng), tm(0xc8c6c0, 'none', 1, 1, { fog: false, emissive: 0x707070, emissiveIntensity: 0.6, transparent: true, opacity: 0.75 }), 7);
     this.smoke.frustumCulled = false;
     b.add(this.smoke);
     this.instanced.push(this.smoke);
@@ -313,10 +315,11 @@ export class JungleEnv {
     const c = this.curve;
     const to = this.len;
     // Layers ≥ 1.5 cm apart so they never z-fight: verge 0 < road 0.02 < edges 0.035 < tracks 0.05 < puddles.
-    g.add(EnvKit.ribbon(c, 7.2, Kit.mat(COL.road), { y: 0.02, step: 2, to }));
-    for (const off of [-1.1, 1.1]) g.add(EnvKit.ribbon(c, 0.7, Kit.mat(COL.roadTrack), { y: 0.05, step: 2, offset: off, to }));
-    for (const off of [-3.55, 3.55]) g.add(EnvKit.ribbon(c, 0.5, Kit.mat(0x86704c), { y: 0.035, step: 2, offset: off, to }));
-    for (const off of [-4.4, 4.4]) g.add(EnvKit.ribbon(c, 1.8, Kit.mat(COL.verge), { y: 0.0, step: 2, offset: off, to }));
+    // Packed dirt, darker compacted tyre ruts, pebbly edges, grass verges.
+    g.add(EnvKit.ribbon(c, 7.2, tm(COL.road, 'dirt', 0.6, 0.75), { y: 0.02, step: 2, to }));
+    for (const off of [-1.1, 1.1]) g.add(EnvKit.ribbon(c, 0.7, tm(COL.roadTrack, 'dirt', 0.9, 0.85), { y: 0.05, step: 2, offset: off, to }));
+    for (const off of [-3.55, 3.55]) g.add(EnvKit.ribbon(c, 0.5, tm(0x86704c, 'dirt', 1.1), { y: 0.035, step: 2, offset: off, to }));
+    for (const off of [-4.4, 4.4]) g.add(EnvKit.ribbon(c, 1.8, tm(COL.verge, 'grass', 0.55), { y: 0.0, step: 2, offset: off, to }));
     // Puddles + embedded stones.
     const rng = new Rng(5);
     for (let d = 8; d < this.len; d += rng.range(10, 22)) {
@@ -324,9 +327,9 @@ export class JungleEnv {
       const p = this.P(d, lat, 0.045);
       if (Math.abs(d - D.FORD) < 14) continue;
       if (rng.chance(0.45)) {
-        Kit.add(g, Kit.cyl(1, 1, 0.02, 9), Kit.mat(0x6b7f78, { emissive: 0x1a2a2a, emissiveIntensity: 0.5 }), p.x, 0.06, p.z, 0, rng.next() * 6, 0, rng.range(0.6, 1.3), 1, rng.range(0.4, 0.8));
+        Kit.add(g, Kit.cyl(1, 1, 0.02, 9), tm(0x6b7f78, 'water', 2.5, 0.7, { emissive: 0x1a2a2a, emissiveIntensity: 0.5 }), p.x, 0.06, p.z, 0, rng.next() * 6, 0, rng.range(0.6, 1.3), 1, rng.range(0.4, 0.8));
       } else {
-        Kit.add(g, this.flora.rockGeo(rng), Kit.mat(0x8c8270), p.x, 0.02, p.z, 0, rng.next() * 6, 0, 0.25, 0.1, 0.2);
+        Kit.add(g, this.flora.rockGeo(rng), tm(0x8c8270, 'rock', 2), p.x, 0.02, p.z, 0, rng.next() * 6, 0, 0.25, 0.1, 0.2);
       }
     }
     merged(g);
@@ -336,15 +339,24 @@ export class JungleEnv {
   private buildRiver() {
     const rc = this.riverCurve;
     const g = new THREE.Group();
-    g.add(EnvKit.ribbon(rc, RIVER_WIDTH + 4, Kit.mat(0x5e4e36), { y: 0.03, step: 2 }));
-    g.add(EnvKit.ribbon(rc, RIVER_WIDTH + 1.2, Kit.mat(0x7a8a70), { y: 0.045, step: 2 }));
+    g.add(EnvKit.ribbon(rc, RIVER_WIDTH + 4, tm(0x5e4e36, 'dirt', 0.8), { y: 0.03, step: 2 }));
+    g.add(EnvKit.ribbon(rc, RIVER_WIDTH + 1.2, tm(0x7a8a70, 'sand', 0.9), { y: 0.045, step: 2 }));
     merged(g);
     this.root.add(g);
-    const water = EnvKit.ribbon(rc, RIVER_WIDTH, Kit.mat(0x2f9ab0, { emissive: 0x0c3a44, emissiveIntensity: 0.6, smooth: true }), { y: 0.075, step: 2 });
+    // Ripples are laid along the river (the curve runs from the waterfall pool
+    // downstream) and drift downstream with the foam flecks, around every bend.
+    // Big calm texels and a mid-teal floor: the darkest ripple stays teal after
+    // the CRT's 15-bit quantise instead of crawling as near-black dashes.
+    const water = flowRibbon(
+      rc,
+      RIVER_WIDTH,
+      flowMat({ color: 0x2690ae, emissive: 0x0e3e4c, emissiveIntensity: 0.6, along: true, flow: [0, 1.25], scale: 0.48, strength: 1.3 }),
+      { y: 0.075, step: 2 },
+    );
     this.root.add(water);
     const foamEdge = new THREE.Group();
     for (const off of [-RIVER_WIDTH / 2 + 0.35, RIVER_WIDTH / 2 - 0.35]) {
-      foamEdge.add(EnvKit.ribbon(rc, 0.45, Kit.mat(0xd8eef2), { y: 0.085, step: 2, offset: off }));
+      foamEdge.add(EnvKit.ribbon(rc, 0.45, tm(0xd8eef2, 'water', 3, 0.5), { y: 0.085, step: 2, offset: off }));
     }
     merged(foamEdge);
     this.root.add(foamEdge);
@@ -395,28 +407,29 @@ export class JungleEnv {
     const toward = _w.subVectors(this.P(430, 0), pool).setY(0).normalize();
     this.fallNormal.copy(toward);
     this.fallRight.set(-toward.z, 0, toward.x);
+    // Vertical water streaks pouring down the sheet.
     const fall = new THREE.Mesh(
       Kit.plane(8, 22),
-      Kit.mat(0xcfeef6, { emissive: 0x5a8a9a, emissiveIntensity: 0.7, side: THREE.DoubleSide, transparent: true, opacity: 0.88 }),
+      flowMat({ color: 0xcfeef6, emissive: 0x4a7a8a, emissiveIntensity: 0.6, side: THREE.DoubleSide, opacity: 0.9, flow: [0, -3.2], swap: true, scale: 1.1, strength: 2 }),
     );
     fall.position.set(top.x, 10.6, top.z).addScaledVector(toward, 0.6);
     fall.rotation.y = Math.atan2(toward.x, toward.z);
     fall.rotation.x = -0.08;
     this.root.add(fall);
-    this.streaks = new THREE.InstancedMesh(Kit.box(0.35, 2.6, 0.08), Kit.mat(0xffffff, { emissive: 0x9ab8c4, emissiveIntensity: 0.8 }), 18);
+    this.streaks = new THREE.InstancedMesh(Kit.box(0.35, 2.6, 0.08), tm(0xffffff, 'none', 1, 1, { emissive: 0x9ab8c4, emissiveIntensity: 0.8 }), 18);
     this.streaks.frustumCulled = false;
     this.streaks.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < 18; i++) this.streakPhase.push(rng.next());
     this.root.add(this.streaks);
     this.instanced.push(this.streaks);
     // Mist at the base.
-    const mistMat = Kit.mat(0xf2fafc, { transparent: true, opacity: 0.55, emissive: 0x8aa0a8, emissiveIntensity: 0.6 });
+    const mistMat = tm(0xf2fafc, 'none', 1, 1, { transparent: true, opacity: 0.55, emissive: 0x8aa0a8, emissiveIntensity: 0.6 });
     for (let i = 0; i < 3; i++) {
       const m = Kit.add(this.root, this.flora.blob(rng), mistMat, pool.x + rng.spread(2.5), 1.2, pool.z + rng.spread(2), 0, rng.next() * 6, 0, 3.4, 1.8, 3.0);
       this.mist.push(m);
     }
     // Drifting foam flecks on the river.
-    this.foam = new THREE.InstancedMesh(Kit.cyl(0.5, 0.5, 0.02, 6), Kit.mat(0xf0fafc, { emissive: 0x9ab4bc, emissiveIntensity: 0.6 }), 40);
+    this.foam = new THREE.InstancedMesh(Kit.cyl(0.5, 0.5, 0.02, 6), tm(0xf0fafc, 'none', 1, 1, { emissive: 0x9ab4bc, emissiveIntensity: 0.6 }), 40);
     this.foam.frustumCulled = false;
     this.foam.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     for (let i = 0; i < 40; i++) this.foamU.push(rng.next());
@@ -569,13 +582,13 @@ export class JungleEnv {
     const g = new THREE.Group();
     for (const side of [-1, 1]) {
       for (const z of [4, 9]) {
-        Kit.add(g, Kit.cyl(0.08, 0.1, 7, 6), Kit.mat(0x8a8a86), side * 6.5, 3.5, z);
-        Kit.add(g, Kit.box(1.4, 0.9, 0.04), Kit.mat(side < 0 ? 0xd8401c : 0xf0c040), side * 6.5 + side * 0.72, 6.3, z);
+        Kit.add(g, Kit.cyl(0.08, 0.1, 7, 6), tm(0x8a8a86, 'metal', 4, 0.6), side * 6.5, 3.5, z);
+        Kit.add(g, Kit.box(1.4, 0.9, 0.04), tm(side < 0 ? 0xe0401a : 0xf4c43a, 'cloth', 1.5, 0.7), side * 6.5 + side * 0.72, 6.3, z);
       }
     }
-    Kit.add(g, Kit.box(3.2, 2.6, 2.6), Kit.mat(0x8a6a44), -9, 1.3, 14);
-    Kit.add(g, Kit.box(3.8, 0.3, 3.2), Kit.mat(0x3e5a2c), -9, 2.75, 14, 0, 0, 0.08);
-    Kit.add(g, Kit.box(1.6, 0.9, 0.05), Kit.mat(0x2a2a26), -9, 1.6, 12.68);
+    Kit.add(g, Kit.box(3.2, 2.6, 2.6), tm(0x8a6a44, 'planks', 1), -9, 1.3, 14);
+    Kit.add(g, Kit.box(3.8, 0.3, 3.2), tm(0x3e5a2c, 'corrugated', 1), -9, 2.75, 14, 0, 0, 0.08);
+    Kit.add(g, Kit.box(1.6, 0.9, 0.05), tm(0x2a2a26, 'none'), -9, 1.6, 12.68);
     merged(g);
     this.place(g, D.GATE, 0);
   }
@@ -612,7 +625,7 @@ export class JungleEnv {
         // Old damage: dangling wires in a gap.
         const a = posts[i];
         for (let k = 0; k < 3; k++) {
-          const m = Kit.add(s, Kit.box(0.05, 2.4 - k * 0.5, 0.05), Kit.mat(0x9aa0a4), a.x, 3.6 - k * 0.9, a.z);
+          const m = Kit.add(s, Kit.box(0.05, 2.4 - k * 0.5, 0.05), tm(0xa8aeb2, 'none'), a.x, 3.6 - k * 0.9, a.z);
           m.rotation.set(0.5 + k * 0.2, yaws[i], 0.3);
         }
         this.oldBreakSpark.copy(a).setY(2.4);
@@ -642,9 +655,9 @@ export class JungleEnv {
     this.place(this.tree.root, D.TREE, 0, 0, 0.12);
     // Ranger's abandoned supplies + a toppled signal pole by the trunk.
     const g = new THREE.Group();
-    Kit.add(g, Kit.box(0.9, 0.6, 0.6), Kit.mat(0x5a6a3a), -3.2, 0.3, 1.6, 0, 0.3, 0);
-    Kit.add(g, Kit.box(0.7, 0.5, 0.5), Kit.mat(0x6a5a3a), -2.6, 0.25, 2.4, 0, -0.2, 0);
-    Kit.add(g, Kit.cyl(0.08, 0.08, 6, 6), Kit.mat(0x7a7a76), 4.5, 0.2, 2.4, 0, 0.6, Math.PI / 2 - 0.05);
+    Kit.add(g, Kit.box(0.9, 0.6, 0.6), tm(0x5a6a3a, 'cloth', 1.6, 0.8), -3.2, 0.3, 1.6, 0, 0.3, 0);
+    Kit.add(g, Kit.box(0.7, 0.5, 0.5), tm(0x6a5a3a, 'planks', 3), -2.6, 0.25, 2.4, 0, -0.2, 0);
+    Kit.add(g, Kit.cyl(0.08, 0.08, 6, 6), tm(0x7a7a76, 'metal', 4, 0.6), 4.5, 0.2, 2.4, 0, 0.6, Math.PI / 2 - 0.05);
     merged(g);
     this.place(g, D.TREE, 0);
   }
@@ -667,11 +680,12 @@ export class JungleEnv {
     t2.position.copy(this.P(D.MEADOW_TO - 12, 30));
     g.add(t2);
     const tw = new THREE.Group();
-    const wood = Kit.mat(0x7a5a38);
+    const wood = tm(0x7a5a38, 'planks', 1.2);
     for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) Kit.add(tw, Kit.box(0.2, 7, 0.2), wood, x, 3.5, z);
     Kit.add(tw, Kit.box(2.6, 0.2, 2.6), wood, 0, 6.5, 0);
-    Kit.add(tw, Kit.box(2.8, 0.15, 2.8), Kit.mat(0x4a3a26), 0, 8.6, 0);
-    Kit.add(tw, Kit.cone(2.2, 1.2, 4), Kit.mat(0x6a4a2a), 0, 9.3, 0, 0, Math.PI / 4, 0);
+    Kit.add(tw, Kit.box(2.8, 0.15, 2.8), tm(0x4a3a26, 'planks', 1.2), 0, 8.6, 0);
+    // Palm-thatch roof.
+    Kit.add(tw, Kit.cone(2.2, 1.2, 4), tm(0x8a6a34, 'grass', 0.9), 0, 9.3, 0, 0, Math.PI / 4, 0);
     Kit.add(tw, Kit.box(2.6, 0.9, 0.08), wood, 0, 7.05, 1.3);
     tw.position.copy(this.P(D.STAMPEDE_WAIT - 6, 22));
     g.add(tw);
@@ -705,7 +719,11 @@ export class JungleEnv {
   private buildCliffs() {
     const g = new THREE.Group();
     const rng = new Rng(19);
-    const rockCols = [0x8a8274, 0x77705f, 0x9a9282];
+    // Huge stones: big rock texels so the faces read as strata, not noise.
+    const rockCols = [0x8a8274, 0x77705f, 0x9a9282].map((c) => tm(c, 'rock', 0.32));
+    const topA = tm(COL.canopyA, 'leaves', 0.45, 0.8);
+    const topDark = tm(COL.canopyDark, 'leaves', 0.45, 0.8);
+    const vine = tm(COL.vine, 'leaves', 2, 0.6);
     for (let d = D.CLIFF_FROM; d < D.CLIFF_TO; d += 5) {
       for (let k = 0; k < 3; k++) {
         const lat = -rng.range(17, 30) - k * 8;
@@ -715,12 +733,12 @@ export class JungleEnv {
         if (this.distRiver(p.x, p.z) < RIVER_WIDTH / 2 + 2.5) continue;
         const h = rng.range(9, 15) + k * 4 + Math.max(0, 6 - Math.abs(d - 466) * 0.2);
         const s = rng.range(5, 8);
-        Kit.add(g, this.flora.rockGeo(rng), Kit.mat(rng.pick(rockCols)), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, s, h * 0.55, s * 0.9);
+        Kit.add(g, this.flora.rockGeo(rng), rng.pick(rockCols), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, s, h * 0.55, s * 0.9);
         // Jungle on top + vines hanging down the face.
-        Kit.add(g, this.flora.blob(rng), Kit.mat(rng.chance(0.5) ? COL.canopyA : COL.canopyDark), p.x, h * 0.98, p.z, 0, rng.next() * 6, 0, s * 0.9, 1.6, s * 0.8);
+        Kit.add(g, this.flora.blob(rng), rng.chance(0.5) ? topA : topDark, p.x, h * 0.98, p.z, 0, rng.next() * 6, 0, s * 0.9, 1.6, s * 0.8);
         if (rng.chance(0.6)) {
           const vl = rng.range(3, 7);
-          Kit.add(g, Kit.box(0.5, vl, 0.2), Kit.mat(COL.vine), p.x + 2, h * 0.9 - vl / 2, p.z, 0, rng.next() * 6, 0);
+          Kit.add(g, Kit.box(0.5, vl, 0.2), vine, p.x + 2, h * 0.9 - vl / 2, p.z, 0, rng.next() * 6, 0);
         }
       }
     }
@@ -728,8 +746,8 @@ export class JungleEnv {
     for (let k = 0; k < 8; k++) {
       const p = this.P(457 + k * 3.4, -42 - rng.range(0, 4) - Math.abs(k - 3.5) * 1.2);
       const h = rng.range(22, 27) - Math.abs(k - 3.5) * 1.5;
-      Kit.add(g, this.flora.rockGeo(rng), Kit.mat(rng.pick(rockCols)), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, 5, h * 0.55, 4.5);
-      Kit.add(g, this.flora.blob(rng), Kit.mat(COL.canopyA), p.x, h * 0.96, p.z, 0, 0, 0, 5, 1.8, 4.5);
+      Kit.add(g, this.flora.rockGeo(rng), rng.pick(rockCols), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, 5, h * 0.55, 4.5);
+      Kit.add(g, this.flora.blob(rng), topA, p.x, h * 0.96, p.z, 0, 0, 0, 5, 1.8, 4.5);
     }
     merged(g);
     this.root.add(g);
@@ -834,6 +852,7 @@ export class JungleEnv {
   private update(dt: number, w: World) {
     this.time += dt;
     const t = this.time;
+    waterClock.value = t;
     const d = w.rig.d;
     this.backdrop.position.set(w.camera.position.x, 0, w.camera.position.z);
     if (this.heatTip && (w.weapons.heat > 0.5 || w.weapons.overheated)) {

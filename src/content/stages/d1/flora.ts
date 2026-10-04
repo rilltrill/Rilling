@@ -1,25 +1,31 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import type { Rng } from '../../../core/Rng';
+import { tm } from './retro';
 
 /**
  * Procedural tropical vegetation for JUNGLE RUN. Every builder returns a Group
- * with its origin on the ground; the scenery code positions it and then merges
- * whole chunks with EnvKit.mergeStatic, so only the number of MATERIALS matters
- * for draw calls (keep the palette small) while triangle counts stay modest.
+ * with its origin on the ground; the scenery code positions it and then bakes
+ * whole chunks with `merged()` (one draw call per chunk half, whatever the mix
+ * of colours and retro textures), so triangle counts are what matter here.
+ *
+ * Retro texture densities: big canopy/far blobs use large leaves at low
+ * strength (no shimmer in the distance), close fronds use smaller leaves.
  */
 export const COL = {
   ground: 0x48672a,
   groundDark: 0x3a5622,
   groundLight: 0x5b7a30,
   litter: 0x6a5a34,
-  road: 0x9a7a54,
+  // Light yellow ochre: a clear value/hue step under the tan raptors (0xa47c4a).
+  road: 0xa8885a,
   roadTrack: 0x7a5d3e,
   verge: 0x6b8c34,
   fernA: 0x3d8a2c,
   fernB: 0x67a834,
-  palmTrunk: 0x8f7350,
-  palmRing: 0x6a5238,
+  // Grey-brown, well away from raptor tan so leaping raptors keep their silhouette.
+  palmTrunk: 0x766a58,
+  palmRing: 0x52483a,
   palmFrond: 0x56962e,
   palmFrondDark: 0x3d7a28,
   trunk: 0x5a4632,
@@ -54,8 +60,11 @@ export class Flora {
   /** Jittered low-poly unit rocks. */
   private rocks: THREE.BufferGeometry[] = [];
   private bushes: THREE.BufferGeometry[] = [];
+  /** Flat 7-gon for ground patches (only the top face is ever visible). */
+  private disc: THREE.BufferGeometry;
 
   constructor() {
+    this.disc = Kit.track(new THREE.CircleGeometry(1, 7).rotateX(-Math.PI / 2));
     for (let i = 0; i < 6; i++) this.blobs.push(Kit.jitter(Kit.ico(1, 1), 0.32, 11 + i * 7));
     for (let i = 0; i < 6; i++) this.lowBlobs.push(Kit.jitter(Kit.ico(1, 0), 0.3, 41 + i * 9));
     for (let i = 0; i < 6; i++) this.rocks.push(Kit.jitter(Kit.ico(1, 0), 0.45, 31 + i * 5));
@@ -81,7 +90,7 @@ export class Flora {
     const s = scale * rng.range(0.8, 1.25);
     const a0 = rng.next() * Math.PI * 2;
     for (let i = 0; i < n; i++) {
-      const mat = Kit.mat(rng.chance(0.5) ? COL.fernA : COL.fernB);
+      const mat = tm(rng.chance(0.5) ? COL.fernA : COL.fernB, 'leaves', 0.9, 0.7);
       const yaw = a0 + (i / n) * Math.PI * 2 + rng.spread(0.3);
       const tilt = rng.range(0.55, 1.05);
       const L = rng.range(1.0, 1.5) * s;
@@ -104,13 +113,13 @@ export class Flora {
     let parent: THREE.Object3D = piv(g, 0, 0, 0, 0, rng.next() * Math.PI * 2, 0);
     for (let i = 0; i < segs; i++) {
       const r = 0.22 - i * 0.018;
-      Kit.add(parent, Kit.cyl(r - 0.03, r + 0.02, segH, 5), Kit.mat(i % 2 ? COL.palmRing : COL.palmTrunk), 0, segH / 2, 0);
+      Kit.add(parent, Kit.cyl(r - 0.03, r + 0.02, segH, 5), tm(i % 2 ? COL.palmRing : COL.palmTrunk, 'bark', 1.2, 0.75), 0, segH / 2, 0);
       parent = piv(parent, 0, segH, 0, lean, 0, 0);
     }
     // Crown.
     const nf = rng.int(8, 10);
     for (let i = 0; i < nf; i++) {
-      const mat = Kit.mat(i % 3 === 0 ? COL.palmFrondDark : COL.palmFrond);
+      const mat = tm(i % 3 === 0 ? COL.palmFrondDark : COL.palmFrond, 'leaves', 0.9, 0.7);
       const yaw = (i / nf) * Math.PI * 2 + rng.spread(0.25);
       const p = piv(parent, 0, 0.1, 0, 0, yaw, 0);
       const a = piv(p, 0, 0, 0, rng.range(0.7, 1.15), 0, 0);
@@ -122,7 +131,7 @@ export class Flora {
     }
     for (let i = 0; i < 2; i++) {
       const a = (i / 2) * Math.PI * 2;
-      Kit.add(parent, Kit.ico(0.18, 0), Kit.mat(COL.coconut), Math.cos(a) * 0.22, -0.25, Math.sin(a) * 0.22);
+      Kit.add(parent, Kit.ico(0.18, 0), tm(COL.coconut, 'hide', 4, 0.6), Math.cos(a) * 0.22, -0.25, Math.sin(a) * 0.22);
     }
     return g;
   }
@@ -131,7 +140,7 @@ export class Flora {
   bigTree(rng: Rng, vines = true): THREE.Group {
     const g = new THREE.Group();
     const H = rng.range(10, 14);
-    const bark = Kit.mat(COL.trunk);
+    const bark = tm(COL.trunk, 'bark', 0.7);
     Kit.add(g, Kit.cyl(0.55, 0.85, H, 7), bark, 0, H / 2, 0);
     // Buttress roots.
     const nr = rng.int(3, 5);
@@ -141,7 +150,7 @@ export class Flora {
       Kit.add(r, Kit.box(1.6, 1.8, 0.22), bark, 0.4, 0.7, 0, 0, 0, -0.5);
     }
     // Moss band.
-    Kit.add(g, Kit.cyl(0.66, 0.74, 1.4, 7), Kit.mat(COL.moss), 0, H * 0.45, 0);
+    Kit.add(g, Kit.cyl(0.66, 0.74, 1.4, 7), tm(COL.moss, 'grass', 1.2, 0.9), 0, H * 0.45, 0);
     // Branches + canopy.
     const nb = rng.int(3, 5);
     for (let i = 0; i < nb; i++) {
@@ -150,14 +159,14 @@ export class Flora {
       const rad = rng.range(2.2, 3.6);
       const b = piv(g, 0, H * 0.78, 0, 0, a, 0);
       Kit.add(b, Kit.cyl(0.18, 0.3, rad * 1.2, 5), bark, 0, rad * 0.45, rad * 0.35, 0.9, 0, 0);
-      const cm = Kit.mat(rng.pick([COL.canopyA, COL.canopyB, COL.canopyDark]));
+      const cm = tm(rng.pick([COL.canopyA, COL.canopyB, COL.canopyDark]), 'leaves', 0.55, 0.85);
       const s = rng.range(2.6, 3.8);
       Kit.add(g, this.lowBlob(rng), cm, Math.sin(a) * rad, y + rng.range(0, 1.5), Math.cos(a) * rad, 0, rng.next() * 6, 0, s, s * 0.6, s);
     }
-    Kit.add(g, this.blob(rng), Kit.mat(COL.canopyA), 0, H + 1.2, 0, 0, rng.next() * 6, 0, 3.4, 2.2, 3.4);
+    Kit.add(g, this.blob(rng), tm(COL.canopyA, 'leaves', 0.55, 0.85), 0, H + 1.2, 0, 0, rng.next() * 6, 0, 3.4, 2.2, 3.4);
     if (vines) {
       const nv = rng.int(2, 4);
-      const vm = Kit.mat(COL.vine);
+      const vm = tm(COL.vine, 'leaves', 2, 0.6);
       for (let i = 0; i < nv; i++) {
         const a = rng.next() * Math.PI * 2;
         const rad = rng.range(1.5, 3.2);
@@ -176,14 +185,14 @@ export class Flora {
   canopy(rng: Rng): THREE.Group {
     const g = new THREE.Group();
     const H = rng.range(7, 12);
-    Kit.add(g, Kit.cyl(0.4, 0.6, H, 5), Kit.mat(COL.trunk), 0, H / 2, 0);
+    Kit.add(g, Kit.cyl(0.4, 0.6, H, 5), tm(COL.trunk, 'bark', 0.6, 0.85), 0, H / 2, 0);
     const n = rng.int(2, 3);
     for (let i = 0; i < n; i++) {
       const s = rng.range(3.5, 5.5);
       Kit.add(
         g,
         this.lowBlob(rng),
-        Kit.mat(rng.pick([COL.canopyDark, COL.canopyA, COL.canopyDark])),
+        tm(rng.pick([COL.canopyDark, COL.canopyA, COL.canopyDark]), 'leaves', 0.4, 0.7),
         rng.spread(2.5),
         H + rng.range(-1.5, 2),
         rng.spread(2.5),
@@ -202,9 +211,9 @@ export class Flora {
   cycad(rng: Rng): THREE.Group {
     const g = new THREE.Group();
     const h = rng.range(0.6, 1.6);
-    Kit.add(g, Kit.cyl(0.26, 0.34, h, 6), Kit.mat(COL.cycadTrunk), 0, h / 2, 0);
+    Kit.add(g, Kit.cyl(0.26, 0.34, h, 6), tm(COL.cycadTrunk, 'scales', 0.9), 0, h / 2, 0);
     const n = rng.int(9, 12);
-    const m = Kit.mat(COL.cycad);
+    const m = tm(COL.cycad, 'leaves', 1, 0.7);
     for (let i = 0; i < n; i++) {
       const p = piv(g, 0, h, 0, 0, (i / n) * Math.PI * 2 + rng.spread(0.2), 0);
       const t = piv(p, 0, 0, 0, rng.range(0.6, 1.1), 0, 0);
@@ -223,7 +232,7 @@ export class Flora {
       Kit.add(
         g,
         rng.pick(this.bushes),
-        Kit.mat(rng.pick([COL.canopyB, COL.canopyA, COL.fernA])),
+        tm(rng.pick([COL.canopyB, COL.canopyA, COL.fernA]), 'leaves', 0.8, 0.85),
         rng.spread(0.9) * scale,
         s * 0.55,
         rng.spread(0.9) * scale,
@@ -236,7 +245,7 @@ export class Flora {
       );
     }
     if (flowers && rng.chance(0.35)) {
-      const fm = Kit.mat(rng.pick([COL.flowerR, COL.flowerY, COL.flowerP]), { emissive: 0x401008, emissiveIntensity: 0.3 });
+      const fm = tm(rng.pick([COL.flowerR, COL.flowerY, COL.flowerP]), 'none', 1, 1, { emissive: 0x401008, emissiveIntensity: 0.3 });
       for (let i = 0; i < 3; i++) {
         Kit.add(g, Kit.ico(0.08, 0), fm, rng.spread(0.9) * scale, rng.range(0.7, 1.15) * scale, rng.spread(0.9) * scale);
       }
@@ -244,13 +253,18 @@ export class Flora {
     return g;
   }
 
+  /** Boulder / cliff stone (light or dark grey); `scale` < 1 for huge cliff faces. */
+  rockMat(light: boolean, scale = 0.8): THREE.MeshLambertMaterial {
+    return tm(light ? COL.rock : COL.rockDark, 'rock', scale);
+  }
+
   /** Mossy boulder. */
   rock(rng: Rng, s = 1): THREE.Group {
     const g = new THREE.Group();
     const geo = this.rockGeo(rng);
-    Kit.add(g, geo, Kit.mat(rng.chance(0.5) ? COL.rock : COL.rockDark), 0, s * 0.35, 0, 0, rng.next() * 6, 0, s * rng.range(0.9, 1.4), s * rng.range(0.6, 0.9), s);
+    Kit.add(g, geo, this.rockMat(rng.chance(0.5)), 0, s * 0.35, 0, 0, rng.next() * 6, 0, s * rng.range(0.9, 1.4), s * rng.range(0.6, 0.9), s);
     if (s > 0.8 && rng.chance(0.6)) {
-      Kit.add(g, geo, Kit.mat(COL.moss), 0, s * 0.62, 0, 0, rng.next() * 6, 0, s * 0.8, s * 0.25, s * 0.75);
+      Kit.add(g, geo, tm(COL.moss, 'grass', 1.2, 0.9), 0, s * 0.62, 0, 0, rng.next() * 6, 0, s * 0.8, s * 0.25, s * 0.75);
     }
     return g;
   }
@@ -258,7 +272,7 @@ export class Flora {
   /** Tall grass tuft. */
   grass(rng: Rng): THREE.Group {
     const g = new THREE.Group();
-    const m = Kit.mat(rng.chance(0.5) ? COL.verge : COL.fernB);
+    const m = tm(rng.chance(0.5) ? COL.verge : COL.fernB, 'grass', 1.2, 0.6);
     const n = rng.int(4, 6);
     for (let i = 0; i < n; i++) {
       const h = rng.range(0.6, 1.2);
@@ -267,12 +281,13 @@ export class Flora {
     return g;
   }
 
-  /** Flat ground-cover patch (moss, leaf litter) to break up the floor. */
-  /** Flat ground-colour patch, sunk just below the road/verge ribbons (top at y ≈ -0.03). */
+  /** Flat ground-cover patch (moss, leaf litter), sunk just below the road/verge ribbons (top at y ≈ -0.03). */
   patch(rng: Rng): THREE.Group {
     const g = new THREE.Group();
     const s = rng.range(1.5, 4);
-    Kit.add(g, Kit.cyl(1, 1, 0.04, 7), Kit.mat(rng.pick([COL.groundDark, COL.groundLight, COL.litter])), 0, -0.05, 0, 0, rng.next() * 6, 0, s, 1, s * rng.range(0.5, 1));
+    const k = rng.int(0, 2);
+    const mat = k === 2 ? tm(COL.litter, 'leaves', 0.7) : tm(k ? COL.groundLight : COL.groundDark, 'grass', 0.4);
+    Kit.add(g, this.disc, mat, 0, -0.03, 0, 0, rng.next() * 6, 0, s, 1, s * rng.range(0.5, 1));
     return g;
   }
 }

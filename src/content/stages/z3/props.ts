@@ -14,7 +14,7 @@ import { addText, textWidth } from './font';
 // ─── Palette ─────────────────────────────────────────────────────────────────
 
 export const PAL = {
-  asphalt: 0x3b3a42,
+  asphalt: 0x4c4854,
   asphaltDark: 0x2c2b32,
   shoulder: 0x4a4650,
   concrete: 0x9a948c,
@@ -22,7 +22,7 @@ export const PAL = {
   metal: 0x8e9298,
   metalDark: 0x45484e,
   rust: 0x6a3a22,
-  glass: 0x1a2030,
+  glass: 0x36425c,
   glassLit: 0x2c3a4c,
   tyre: 0x18181a,
   burnt: 0x262224,
@@ -40,7 +40,36 @@ export const PAL = {
   rock: 0x5a5058,
 } as const;
 
-export const CAR_COLORS = [0x7a1c1c, 0x1c3a6a, 0x9a9a9a, 0xd8d4c8, 0x2a2a2e, 0x3a5a3a, 0x8a6a2a, 0x5a2a5a, 0x3a6a7a, 0xb06a20];
+export const CAR_COLORS = [0x8e1e1a, 0x1e4480, 0xa4a4a8, 0xdcd8cc, 0x2e2e34, 0x3a6a3a, 0xa4782a, 0x642a6a, 0x2e7484, 0xc0701c];
+
+/**
+ * Retro surface palette (texture, density, strength). Everything bakes per
+ * texture, so keeping the scenery on a handful of textures keeps draw calls low:
+ * asphalt (road + paint), concrete (barriers, decks, walls), metal (vehicles,
+ * poles, rails, signs) plus a few local ones (stucco, brick, corrugated, rock…).
+ * Densities are tuned for the ~288-line arcade target: texels should land at
+ * 1–3 screen pixels where the surface is usually seen.
+ */
+export const S = {
+  /** Car / truck body paint: panel seams + a little rust. */
+  paint: (c: number) => M.lam(c, 'metal', 0.55, 0.85),
+  /** Burnt-out shells: rust everywhere. */
+  burnt: (c: number) => M.lam(c, 'metal', 0.55, 1),
+  /** Structural / bare steel. */
+  steel: (c: number) => M.lam(c, 'metal', 0.7, 0.9),
+  /** Small dark parts: trim, bumpers, tyres, housings (barely textured). */
+  trim: (c: number) => M.lam(c, 'metal', 1, 0.4),
+  /** Painted sign plates. */
+  plate: (c: number) => M.lam(c, 'metal', 0.6, 0.3),
+  /** Cast concrete. */
+  conc: (c: number) => M.lam(c, 'concrete', 0.65, 0.85),
+  /** Clean: lettering, glass, lamps off, decals. */
+  clean: (c: number) => M.lam(c, 'none'),
+  /** Canvas, sandbags. */
+  canvas: (c: number) => M.lam(c, 'cloth', 0.25, 0.9),
+  /** Yellow/black warning stripes. */
+  hazard: (c: number = 0xe8b420) => M.lam(c, 'hazard', 0.8, 1),
+};
 
 export interface CarOpts {
   color?: number;
@@ -53,8 +82,8 @@ export interface CarOpts {
 }
 
 function wheel(g: THREE.Object3D, x: number, y: number, z: number, r: number, burnt: boolean) {
-  Kit.add(g, Kit.cyl(r, r, 0.26, 8), M.lam(burnt ? 0x141414 : PAL.tyre), x, y, z, 0, 0, Math.PI / 2);
-  Kit.add(g, Kit.cyl(r * 0.55, r * 0.55, 0.28, 6), M.lam(burnt ? PAL.burntRust : 0x8a8a8a), x, y, z, 0, 0, Math.PI / 2);
+  Kit.add(g, Kit.cyl(r, r, 0.26, 8), S.trim(burnt ? 0x141414 : PAL.tyre), x, y, z, 0, 0, Math.PI / 2);
+  Kit.add(g, Kit.cyl(r * 0.55, r * 0.55, 0.28, 6), burnt ? S.burnt(PAL.burntRust) : S.steel(0x9a9a9a), x, y, z, 0, 0, Math.PI / 2);
 }
 
 /** A passenger vehicle. ~4.4 m long, facing +Z. */
@@ -63,9 +92,9 @@ export function car(rng: Rng, o: CarOpts = {}): THREE.Group {
   const kind = o.kind ?? rng.int(0, 2);
   const burnt = !!o.burnt;
   const color = burnt ? PAL.burnt : o.color ?? rng.pick(CAR_COLORS);
-  const body = M.lam(color, burnt ? 'metal' : undefined, 1, 0.6);
-  const glass = M.lam(burnt ? 0x0c0c0e : PAL.glass);
-  const trim = M.lam(burnt ? PAL.burntRust : 0x1e1e22);
+  const body = burnt ? S.burnt(color) : S.paint(color);
+  const glass = S.clean(burnt ? 0x0c0c0e : PAL.glass);
+  const trim = burnt ? S.burnt(PAL.burntRust) : S.trim(0x1e1e22);
   let len = 4.4;
   let w = 1.82;
   let bodyH = 0.62;
@@ -99,7 +128,7 @@ export function car(rng: Rng, o: CarOpts = {}): THREE.Group {
     Kit.add(g, Kit.box(w * 0.92, 0.6, 0.06), glass, 0, baseY + bodyH - 0.45, len / 2 + 0.01);
     for (const s of [-1, 1]) Kit.add(g, Kit.box(0.04, 0.5, 1.2), glass, s * (w / 2 + 0.01), baseY + bodyH - 0.45, len / 2 - 1.0);
     // Courier stripe.
-    if (!burnt) Kit.add(g, Kit.box(w + 0.02, 0.22, len * 0.6), M.lam(rng.pick([0xd04020, 0x2050a0, 0xe0b020])), 0, baseY + bodyH * 0.45, -0.5);
+    if (!burnt) Kit.add(g, Kit.box(w + 0.02, 0.22, len * 0.6), S.paint(rng.pick([0xd04020, 0x2050a0, 0xe0b020])), 0, baseY + bodyH * 0.45, -0.5);
   } else {
     // Cabin: glass block + roof.
     Kit.add(g, Kit.box(w * 0.86, cabH, cabLen), glass, 0, baseY + bodyH + cabH / 2, cabZ);
@@ -116,8 +145,8 @@ export function car(rng: Rng, o: CarOpts = {}): THREE.Group {
   // Lights.
   const lit = !!o.lights && !burnt;
   for (const s of [-1, 1]) {
-    Kit.add(g, Kit.box(0.34, 0.12, 0.06), lit ? M.glow(PAL.head, 1.2) : M.lam(burnt ? 0x222222 : 0x9a9a90), s * (w / 2 - 0.26), baseY + bodyH * 0.72, len / 2 + 0.02);
-    Kit.add(g, Kit.box(0.3, 0.12, 0.06), lit ? M.glow(PAL.tail, 1.1) : M.lam(burnt ? 0x221010 : 0x6a1010), s * (w / 2 - 0.22), baseY + bodyH * 0.75, -len / 2 - 0.02);
+    Kit.add(g, Kit.box(0.34, 0.12, 0.06), lit ? M.glow(PAL.head, 1.2) : S.clean(burnt ? 0x222222 : 0x9a9a90), s * (w / 2 - 0.26), baseY + bodyH * 0.72, len / 2 + 0.02);
+    Kit.add(g, Kit.box(0.3, 0.12, 0.06), lit ? M.glow(PAL.tail, 1.1) : S.clean(burnt ? 0x221010 : 0x6a1010), s * (w / 2 - 0.22), baseY + bodyH * 0.75, -len / 2 - 0.02);
   }
   // Wheels.
   const wz = len / 2 - 0.85;
@@ -127,7 +156,7 @@ export function car(rng: Rng, o: CarOpts = {}): THREE.Group {
     Kit.add(g, Kit.box(1.2, 0.12, 0.3), trim, 0, baseY + bodyH + cabH + 0.1, cabZ);
     Kit.add(g, Kit.box(0.5, 0.12, 0.28), M.glow(0xff2020, 1.4), -0.32, baseY + bodyH + cabH + 0.17, cabZ);
     Kit.add(g, Kit.box(0.5, 0.12, 0.28), M.glow(0x2050ff, 1.4), 0.32, baseY + bodyH + cabH + 0.17, cabZ);
-    Kit.add(g, Kit.box(w + 0.01, 0.2, 1.6), M.lam(0x1a1a1e), 0, baseY + bodyH * 0.55, -0.3);
+    Kit.add(g, Kit.box(w + 0.01, 0.2, 1.6), S.paint(0x1a1a1e), 0, baseY + bodyH * 0.55, -0.3);
   }
   if (o.doorOpen && kind !== 3) {
     const s = rng.chance(0.5) ? 1 : -1;
@@ -135,7 +164,7 @@ export function car(rng: Rng, o: CarOpts = {}): THREE.Group {
   }
   if (burnt) {
     // Scorch + rust patches.
-    Kit.add(g, Kit.box(w * 0.7, 0.04, len * 0.35), M.lam(PAL.burntRust), 0, baseY + bodyH + 0.01, len * 0.28);
+    Kit.add(g, Kit.box(w * 0.7, 0.04, len * 0.35), S.burnt(PAL.burntRust), 0, baseY + bodyH + 0.01, len * 0.28);
   }
   return g;
 }
@@ -143,16 +172,16 @@ export function car(rng: Rng, o: CarOpts = {}): THREE.Group {
 /** Long school bus (11 m), facing +Z. */
 export function bus(burnt = false): THREE.Group {
   const g = new THREE.Group();
-  const yel = M.lam(burnt ? PAL.burnt : 0xd8a018, burnt ? 'metal' : undefined, 1, 0.5);
-  const black = M.lam(0x16161a);
+  const yel = burnt ? S.burnt(PAL.burnt) : S.paint(0xe0a818);
+  const black = S.trim(0x16161a);
   Kit.add(g, Kit.box(2.5, 2.3, 10.4), yel, 0, 1.75, -0.4);
   Kit.add(g, Kit.box(2.4, 1.2, 1.6), yel, 0, 1.2, 5.6);
   for (const s of [-1, 1]) {
-    Kit.add(g, Kit.box(0.04, 0.75, 8.6), M.lam(burnt ? 0x0a0a0a : PAL.glass), s * 1.26, 2.3, -0.6);
+    Kit.add(g, Kit.box(0.04, 0.75, 8.6), S.clean(burnt ? 0x0a0a0a : PAL.glass), s * 1.26, 2.3, -0.6);
     Kit.add(g, Kit.box(0.05, 0.1, 10.4), black, s * 1.26, 1.4, -0.4);
     Kit.add(g, Kit.box(0.05, 0.1, 10.4), black, s * 1.26, 1.1, -0.4);
   }
-  Kit.add(g, Kit.box(2.2, 0.9, 0.06), M.lam(PAL.glass), 0, 2.3, 4.82);
+  Kit.add(g, Kit.box(2.2, 0.9, 0.06), S.clean(PAL.glass), 0, 2.3, 4.82);
   for (const s of [-1, 1]) for (const z of [4.6, -3.8]) wheel(g, s * 1.15, 0.5, z, 0.5, burnt);
   if (!burnt) for (const s of [-1, 1]) Kit.add(g, Kit.box(0.22, 0.22, 0.06), M.glow(0xff4020, 1.3), s * 0.9, 2.75, -5.62);
   return g;
@@ -161,13 +190,13 @@ export function bus(burnt = false): THREE.Group {
 /** Semi tractor cab (no trailer), facing +Z. ~6 m long. */
 export function semiCab(color: number, burnt = false): THREE.Group {
   const g = new THREE.Group();
-  const body = M.lam(burnt ? PAL.burnt : color);
-  const chrome = M.lam(burnt ? PAL.burntRust : 0xb8bcc4);
+  const body = burnt ? S.burnt(PAL.burnt) : S.paint(color);
+  const chrome = burnt ? S.burnt(PAL.burntRust) : S.steel(0xc4c8d0);
   Kit.add(g, Kit.box(2.5, 2.6, 2.6), body, 0, 2.2, 0.6);
   Kit.add(g, Kit.box(2.4, 1.2, 1.6), body, 0, 1.4, 2.6);
-  Kit.add(g, Kit.box(2.3, 0.9, 0.06), M.lam(burnt ? 0x0a0a0a : PAL.glass), 0, 2.8, 1.92);
+  Kit.add(g, Kit.box(2.3, 0.9, 0.06), S.clean(burnt ? 0x0a0a0a : PAL.glass), 0, 2.8, 1.92);
   Kit.add(g, Kit.box(1.6, 1.0, 0.1), chrome, 0, 1.4, 3.42);
-  Kit.add(g, Kit.box(2.6, 0.3, 6.0), M.lam(0x1c1c20), 0, 0.9, -0.4);
+  Kit.add(g, Kit.box(2.6, 0.3, 6.0), S.trim(0x1c1c20), 0, 0.9, -0.4);
   for (const s of [-1, 1]) {
     Kit.add(g, Kit.cyl(0.1, 0.1, 2.2, 6), chrome, s * 1.1, 3.6, -0.8);
     Kit.add(g, Kit.cyl(0.32, 0.32, 1.1, 8), chrome, s * 1.25, 0.9, 0.0, Math.PI / 2, 0, 0);
@@ -181,18 +210,18 @@ export function semiCab(color: number, burnt = false): THREE.Group {
 /** Box trailer (13 m), facing +Z, hitch end at +Z. */
 export function trailer(color = 0xd8d4cc, text = ''): THREE.Group {
   const g = new THREE.Group();
-  Kit.add(g, Kit.box(2.6, 2.9, 12.8), M.lam(color, 'corrugated', 1, 0.5), 0, 2.75, 0);
-  Kit.add(g, Kit.box(2.5, 0.25, 12.8), M.lam(0x1c1c20), 0, 1.15, 0);
+  Kit.add(g, Kit.box(2.6, 2.9, 12.8), M.lam(color, 'corrugated', 0.45, 0.85), 0, 2.75, 0);
+  Kit.add(g, Kit.box(2.5, 0.25, 12.8), S.trim(0x1c1c20), 0, 1.15, 0);
   for (const s of [-1, 1]) {
     for (const z of [-4.6, -5.8]) wheel(g, s * 1.1, 0.52, z, 0.52, false);
-    Kit.add(g, Kit.box(0.08, 0.8, 0.08), M.lam(0x2a2a2e), s * 0.9, 0.6, 4.2);
+    Kit.add(g, Kit.box(0.08, 0.8, 0.08), S.trim(0x2a2a2e), s * 0.9, 0.6, 4.2);
     if (text) {
       const tw = textWidth(text, 0.2);
       void tw;
       const side = new THREE.Group();
       side.position.set(s * 1.32, 3.0, 0);
       side.rotation.y = (s * Math.PI) / 2;
-      addText(side, text, M.lam(0xb02020), 0, 0, 0, 0.2, 0.03);
+      addText(side, text, S.clean(0xc02020), 0, 0, 0, 0.2, 0.03);
       g.add(side);
     }
   }
@@ -205,17 +234,17 @@ export function trailer(color = 0xd8d4cc, text = ''): THREE.Group {
  */
 export function tankerTank(): THREE.Group {
   const g = new THREE.Group();
-  const steel = M.lam(0xc8ccd0, 'metal', 1, 0.5);
-  const band = M.lam(0x6a6e74);
+  const steel = M.lam(0xd4d8dc, 'metal', 0.6, 0.75);
+  const band = S.steel(0x6a6e74);
   // Tank lying on its side, axis along X (across the road).
   Kit.add(g, Kit.cyl(1.35, 1.35, 11, 12), steel, 0, 1.35, 0, 0, 0, Math.PI / 2);
   for (const x of [-4.5, -1.5, 1.5, 4.5]) Kit.add(g, Kit.cyl(1.4, 1.4, 0.18, 12), band, x, 1.35, 0, 0, 0, Math.PI / 2);
   for (const s of [-1, 1]) Kit.add(g, Kit.sphere(1.35, 12, 6), steel, s * 5.5, 1.35, 0, 0, 0, 0, 0.35, 1, 1);
   // Hazard placards + FLAMMABLE stripe.
-  Kit.add(g, Kit.box(6, 0.42, 0.06), M.lam(0xc02018), 0, 1.6, 1.36);
-  addText(g, 'FLAMMABLE', M.lam(0xf0f0e8), 0, 1.6, 1.4, 0.06, 0.02);
+  Kit.add(g, Kit.box(6, 0.42, 0.06), S.plate(0xd02018), 0, 1.6, 1.36);
+  addText(g, 'FLAMMABLE', S.clean(0xf4f4ec), 0, 1.6, 1.4, 0.06, 0.02);
   for (const x of [-3.6, 3.6]) {
-    const p = Kit.add(g, Kit.box(0.6, 0.6, 0.05), M.lam(0xd02a1a), x, 2.1, 1.25);
+    const p = Kit.add(g, Kit.box(0.6, 0.6, 0.05), S.clean(0xe02a1a), x, 2.1, 1.25);
     p.rotation.z = Math.PI / 4;
     p.rotation.x = -0.35;
   }
@@ -226,7 +255,7 @@ export function tankerTank(): THREE.Group {
 
 /** Jersey barrier segment of length `len` along Z. */
 export function jersey(g: THREE.Object3D, x: number, z: number, len: number, ry = 0, color: number = PAL.concrete) {
-  const m = M.lam(color, 'concrete', 1, 0.7);
+  const m = S.conc(color);
   const seg = new THREE.Group();
   seg.position.set(x, 0, z);
   seg.rotation.y = ry;
@@ -239,10 +268,10 @@ export function jersey(g: THREE.Object3D, x: number, z: number, len: number, ry 
 /** Highway light pole with one or two arms. `lit` false = dead lamp. */
 export function lightPole(two: boolean, lit: boolean): THREE.Group {
   const g = new THREE.Group();
-  const pole = M.lam(PAL.metalDark);
+  const pole = S.steel(PAL.metalDark);
   Kit.add(g, Kit.cyl(0.11, 0.16, 10, 6), pole, 0, 5, 0);
-  Kit.add(g, Kit.box(0.5, 0.5, 0.5), M.lam(PAL.concreteDark), 0, 0.25, 0);
-  const lamp = lit ? M.glow(PAL.sodium, 1.4) : M.lam(0x3a3a3a);
+  Kit.add(g, Kit.box(0.5, 0.5, 0.5), S.conc(PAL.concreteDark), 0, 0.25, 0);
+  const lamp = lit ? M.glow(PAL.sodium, 1.4) : S.clean(0x3a3a3a);
   for (const s of two ? [-1, 1] : [1]) {
     Kit.add(g, Kit.box(0.1, 0.1, 2.6), pole, 0, 9.9, s * 1.3, 0.12 * s, 0, 0);
     Kit.add(g, Kit.box(0.42, 0.16, 0.9), pole, 0, 10.05, s * 2.65);
@@ -254,15 +283,15 @@ export function lightPole(two: boolean, lit: boolean): THREE.Group {
 /** A green overhead sign panel with text lines. Panel faces +Z. */
 export function signPanel(lines: string[], width: number, height: number, color: number = PAL.signGreen): THREE.Group {
   const g = new THREE.Group();
-  Kit.add(g, Kit.box(width, height, 0.12), M.lam(color), 0, 0, 0);
-  Kit.add(g, Kit.box(width - 0.2, height - 0.2, 0.02), M.lam(PAL.signText), 0, 0, 0.065);
-  Kit.add(g, Kit.box(width - 0.34, height - 0.34, 0.02), M.lam(color), 0, 0, 0.075);
+  Kit.add(g, Kit.box(width, height, 0.12), S.steel(color), 0, 0, 0);
+  Kit.add(g, Kit.box(width - 0.2, height - 0.2, 0.02), S.clean(PAL.signText), 0, 0, 0.065);
+  Kit.add(g, Kit.box(width - 0.34, height - 0.34, 0.02), S.plate(color), 0, 0, 0.075);
   // Text size: fit the line count to the height AND the longest line to the width.
   const longest = lines.reduce((n, t) => Math.max(n, t.length), 1);
   const px = Math.min(0.13, (height - 0.5) / (lines.length * 9), (width - 0.6) / Math.max(1, longest * 6 - 1));
   const lh = px * 9.5;
   lines.forEach((t, i) => {
-    addText(g, t, M.lam(PAL.signText), 0, ((lines.length - 1) / 2 - i) * lh, 0.1, px, 0.03);
+    addText(g, t, S.clean(PAL.signText), 0, ((lines.length - 1) / 2 - i) * lh, 0.1, px, 0.03);
   });
   return g;
 }
@@ -270,13 +299,15 @@ export function signPanel(lines: string[], width: number, height: number, color:
 /** Billboard on two legs facing +Z. `art` paints the 12×5 m face. */
 export function billboard(art: (face: THREE.Group) => void, lit = true): THREE.Group {
   const g = new THREE.Group();
-  const steel = M.lam(PAL.metalDark);
+  const steel = S.steel(PAL.metalDark);
   for (const x of [-3.5, 3.5]) {
     Kit.add(g, Kit.cyl(0.25, 0.3, 9, 8), steel, x, 4.5, -0.4);
     Kit.add(g, Kit.box(0.2, 0.2, 1.4), steel, x, 8.6, 0.2);
   }
-  Kit.add(g, Kit.box(12.4, 5.4, 0.3), M.lam(0x2a2a2e), 0, 11.5, -0.2);
-  Kit.add(g, Kit.box(12.6, 0.12, 1.2), steel, 0, 8.7, 0.4);
+  // Timber backing behind the paper face, steel frame, grating catwalk.
+  Kit.add(g, Kit.box(12.4, 5.4, 0.3), M.lam(0x5a4434, 'planks', 0.5, 1), 0, 11.5, -0.2);
+  for (const y of [8.8, 14.2]) Kit.add(g, Kit.box(12.6, 0.16, 0.36), steel, 0, y, -0.05);
+  Kit.add(g, Kit.box(12.6, 0.12, 1.2), M.lam(0x6a6c70, 'grate', 0.6, 1), 0, 8.7, 0.4);
   const face = new THREE.Group();
   face.position.set(0, 11.5, 0);
   g.add(face);
@@ -290,7 +321,7 @@ export function sandbags(g: THREE.Object3D, x: number, z: number, len: number, r
   const seg = new THREE.Group();
   seg.position.set(x, 0, z);
   seg.rotation.y = ry;
-  const m = [M.lam(0x8a7a52, 'cloth', 1, 0.6), M.lam(0x7a6c48, 'cloth', 1, 0.6)];
+  const m = [S.canvas(0x9a8858), S.canvas(0x847450)];
   const n = Math.max(1, Math.round(len / 0.62));
   for (let r = 0; r < rows; r++) {
     for (let i = 0; i < n - (r % 2); i++) {
@@ -304,7 +335,7 @@ export function sandbags(g: THREE.Object3D, x: number, z: number, len: number, r
 /** Dead roadside tree. */
 export function deadTree(rng: Rng): THREE.Group {
   const g = new THREE.Group();
-  const bark = M.lam(0x2e2622, 'bark');
+  const bark = M.lam(0x3a2e28, 'bark', 0.6, 1);
   const h = rng.range(4, 7);
   Kit.add(g, Kit.cyl(0.1, 0.22, h, 5), bark, 0, h / 2, 0, rng.spread(0.08), 0, rng.spread(0.08));
   for (let i = 0; i < 4; i++) {
@@ -320,7 +351,7 @@ export function deadTree(rng: Rng): THREE.Group {
 /** Low scrubby bush (dusk-dark). */
 export function bush(rng: Rng): THREE.Group {
   const g = new THREE.Group();
-  const m = M.lam(rng.pick([0x3a3a24, 0x34361e, 0x403820]), 'leaves', 1, 0.6);
+  const m = M.lam(rng.pick([0x46462a, 0x3c4024, 0x4a4026]), 'leaves', 0.5, 1);
   for (let i = 0; i < 3; i++) {
     const s = rng.range(0.5, 1.0);
     Kit.add(g, Kit.ico(1, 0), m, rng.spread(0.6), s * 0.6, rng.spread(0.6), rng.next(), rng.next(), 0, s, s * 0.75, s);

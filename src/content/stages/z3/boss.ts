@@ -50,8 +50,8 @@ type BState =
   | 'swipe'
   | 'reel';
 
-const SKIN = 0x8e9a80;
-const SKIN_DARK = 0x6a7660;
+const SKIN = 0x84a872;
+const SKIN_DARK = 0x5e7a52;
 const VEST = 0xe8661a;
 const STRIPE = 0xd8d8b8;
 const JEANS = 0x34465e;
@@ -230,17 +230,21 @@ export class Behemoth extends Boss {
   }
 
   protected override build(): void {
-    const skin = M.lam(SKIN, 'skin', 1, 0.5);
-    const skinDark = M.lam(SKIN_DARK, 'skin', 1, 0.5);
-    const vest = M.lam(VEST, 'cloth', 1, 0.5);
-    const stripe = M.lam(STRIPE);
-    const jeans = M.lam(JEANS, 'cloth', 1, 0.6);
-    const boot = M.lam(BOOT, 'hide', 1, 0.5);
-    const rust = M.lam(RUST, 'metal', 1, 0.6);
-    const gore = M.lam(GORE);
-    const bone = M.lam(0xd8cfb0);
-    const shirt = M.lam(0x5a5a4a, 'cloth', 1, 0.6);
-    const conc = M.lam(0x8a847c, 'concrete', 1, 0.7);
+    // Retro surfaces, sized for a 7.6 m giant seen from 9–16 m (≈4–6 cm per arcade
+    // pixel): rotting skin with veins and sores, coarse work cloth, leather boots,
+    // rusted rebar. One bake bucket per texture, so each body part stays at 1–2 draws.
+    const skin = M.lam(SKIN, 'skin', 0.28, 0.9);
+    const skinDark = M.lam(SKIN_DARK, 'skin', 0.28, 0.9);
+    const vest = M.lam(VEST, 'cloth', 0.3, 0.7);
+    const stripe = M.lam(STRIPE, 'none');
+    const jeans = M.lam(JEANS, 'cloth', 0.3, 0.9);
+    const boot = M.lam(BOOT, 'hide', 0.9, 1);
+    const rust = M.lam(RUST, 'metal', 1.4, 1);
+    const gore = M.lam(GORE, 'skin', 0.28, 0.7);
+    const bone = M.lam(0xd8cfb0, 'skin', 0.28, 0.35);
+    const shirt = M.lam(0x5e5e4c, 'cloth', 0.3, 0.9);
+    const conc = M.lam(0x8a847c, 'concrete', 0.8, 0.9);
+    const leather = M.lam(0x2a1e16, 'hide', 0.9, 1);
     // Weak points glow yellow (reads against the orange hi-vis vest); white-hot once enraged.
     this.weakMat = Kit.glow(0xffe25a, 1.9);
     this.weakHot = Kit.glow(0xfff8e0, 2.6);
@@ -251,9 +255,9 @@ export class Behemoth extends Boss {
     this.hips = Kit.pivot(m, 0, this.hipsY, 0, 'hips');
     this.skin(this.hips, 'torso', (g) => {
       Kit.add(g, Kit.box(2.1, 0.95, 1.35), jeans, 0, 0, 0);
-      Kit.add(g, Kit.box(2.16, 0.22, 1.4), M.lam(0x2a1e16, 'hide'), 0, 0.42, 0);
-      Kit.add(g, Kit.box(0.5, 0.45, 0.3), M.lam(0x5a3a22, 'hide'), 0.75, 0.2, 0.72);
-      Kit.add(g, Kit.box(0.12, 0.5, 0.1), M.lam(0x8a8a8a), 0.95, 0.15, 0.84, 0, 0, 0.3);
+      Kit.add(g, Kit.box(2.16, 0.22, 1.4), leather, 0, 0.42, 0);
+      Kit.add(g, Kit.box(0.5, 0.45, 0.3), M.lam(0x6a4426, 'hide', 0.9, 1), 0.75, 0.2, 0.72);
+      Kit.add(g, Kit.box(0.12, 0.5, 0.1), M.lam(0x9a9a9a, 'none'), 0.95, 0.15, 0.84, 0, 0, 0.3);
     });
 
     // Legs.
@@ -269,7 +273,7 @@ export class Behemoth extends Boss {
       this.skin(knee, 'limb', (g) => {
         Kit.add(g, Kit.box(0.74, 1.2, 0.8), jeans, 0, -0.6, 0);
         Kit.add(g, Kit.box(0.92, 0.52, 1.38), boot, 0, -1.2, 0.24);
-        Kit.add(g, Kit.box(0.94, 0.12, 1.42), M.lam(0x1a1410), 0, -1.4, 0.24);
+        Kit.add(g, Kit.box(0.94, 0.12, 1.42), M.lam(0x1a1410, 'hide', 0.9, 0.6), 0, -1.4, 0.24);
       });
       return { hip, knee };
     };
@@ -310,7 +314,7 @@ export class Behemoth extends Boss {
       for (let i = 0; i < 3; i++) for (const s of [-1, 1]) Kit.add(g, Kit.box(0.5, 0.1, 0.1), bone, s * 0.38, 0.95 - i * 0.28, 1.0, 0, 0, s * 0.35);
       Kit.add(g, Kit.box(1.1, 1.2, 0.08), gore, 0, 0.55, 0.93);
       // Blood-soaked vest edges: a dark frame so the glowing wound pops off the hi-vis orange.
-      const soak = M.lam(0x2e0806);
+      const soak = M.lam(0x2e0806, 'skin', 0.28, 0.6);
       for (const s of [-1, 1]) Kit.add(g, Kit.box(0.34, 1.55, 0.14), soak, s * 0.77, 0.52, 1.0);
       Kit.add(g, Kit.box(1.6, 0.24, 0.14), soak, 0, -0.22, 1.0);
       Kit.add(g, Kit.box(1.4, 0.2, 0.14), soak, 0, 1.3, 1.0);
@@ -371,11 +375,12 @@ export class Behemoth extends Boss {
     Kit.add(this.head, Kit.box(0.7, 0.2, 0.2), Kit.glow(0x3a0606, 1), 0, 0.12, 0.45);
     // Hard hat (ARMOUR).
     this.skin(this.head, 'armor', (g) => {
-      const hat = M.lam(HAT, undefined);
+      // Scuffed, grimy plastic.
+      const hat = M.lam(HAT, 'stucco', 1.1, 0.75);
       Kit.add(g, Kit.sphere(0.62, 10, 6), hat, 0, 0.95, -0.02, 0, 0, 0, 1, 0.62, 1.05);
       Kit.add(g, Kit.cyl(0.78, 0.8, 0.07, 12), hat, 0, 0.94, 0.08);
-      Kit.add(g, Kit.box(0.14, 0.12, 1.1), M.lam(0xc89a10), 0, 1.32, 0);
-      Kit.add(g, Kit.box(0.4, 0.2, 0.05), M.lam(0x2a2a2a), 0, 1.1, 0.6);
+      Kit.add(g, Kit.box(0.14, 0.12, 1.1), M.lam(0xc89a10, 'stucco', 1.1, 0.75), 0, 1.32, 0);
+      Kit.add(g, Kit.box(0.4, 0.2, 0.05), M.lam(0x2a2a2a, 'stucco', 1.1, 0.4), 0, 1.1, 0.6);
     });
 
     // Arms.
@@ -395,9 +400,9 @@ export class Behemoth extends Boss {
       if (side > 0) {
         // Steel sheet strapped to the left forearm (armour).
         this.skin(el, 'armor', (g) => {
-          Kit.add(g, Kit.box(0.86, 1.3, 0.9), M.lam(0x6a6e74, 'metal', 1, 0.7), 0, -1.0, 0);
-          Kit.add(g, Kit.box(0.9, 0.1, 0.94), M.lam(0x3a2a1c), 0, -0.6, 0);
-          Kit.add(g, Kit.box(0.9, 0.1, 0.94), M.lam(0x3a2a1c), 0, -1.4, 0);
+          Kit.add(g, Kit.box(0.86, 1.3, 0.9), M.lam(0x767a82, 'metal', 1.2, 0.9), 0, -1.0, 0);
+          Kit.add(g, Kit.box(0.9, 0.1, 0.94), M.lam(0x3a2a1c, 'metal', 1.2, 0.3), 0, -0.6, 0);
+          Kit.add(g, Kit.box(0.9, 0.1, 0.94), M.lam(0x3a2a1c, 'metal', 1.2, 0.3), 0, -1.4, 0);
         });
       }
       const hand = Kit.pivot(el, 0, -1.85, 0);
@@ -441,11 +446,12 @@ export class Behemoth extends Boss {
 
     this.club = new THREE.Group();
     this.skin(this.club, 'armor', (g) => {
-      Kit.add(g, Kit.cyl(0.13, 0.17, 7.6, 6), M.lam(0x3a3c40, 'metal', 1, 0.6), 0, -3.4, 0);
-      Kit.add(g, Kit.box(0.14, 0.14, 1.9), M.lam(0x3a3c40), 0, -7.15, 0.85);
-      Kit.add(g, Kit.box(0.4, 0.2, 0.7), M.lam(0x222226), 0, -7.15, 1.75);
+      const pole = M.lam(0x464a50, 'metal', 1.2, 0.8);
+      Kit.add(g, Kit.cyl(0.13, 0.17, 7.6, 6), pole, 0, -3.4, 0);
+      Kit.add(g, Kit.box(0.14, 0.14, 1.9), pole, 0, -7.15, 0.85);
+      Kit.add(g, Kit.box(0.4, 0.2, 0.7), M.lam(0x222226, 'metal', 1.2, 0.4), 0, -7.15, 1.75);
       Kit.add(g, Kit.box(0.32, 0.06, 0.55), M.glow(0xffb050, 1.4), 0, -7.27, 1.75);
-      Kit.add(g, Kit.box(0.5, 0.4, 0.5), M.lam(0x5a5a5a, 'concrete'), 0, 0.3, 0);
+      Kit.add(g, Kit.box(0.5, 0.4, 0.5), conc, 0, 0.3, 0);
     });
     this.clubTip = Kit.pivot(this.club, 0, -7.0, 0.6, 'clubTip');
     this.club.position.set(0, -0.8, 0.3);
@@ -660,8 +666,8 @@ export class Behemoth extends Boss {
       c.position.y = -0.7;
       mesh.add(c);
     } else {
-      Kit.add(mesh, Kit.box(2.2, 0.6, 1.6), M.lam(0x8a847c, 'concrete', 1, 0.7), 0, 0, 0);
-      Kit.add(mesh, Kit.cyl(0.05, 0.05, 1.2, 5), M.lam(RUST), 0.8, 0.3, 0.5, 0.6, 0, 0.3);
+      Kit.add(mesh, Kit.box(2.2, 0.6, 1.6), M.lam(0x8a847c, 'concrete', 0.8, 0.9), 0, 0, 0);
+      Kit.add(mesh, Kit.cyl(0.05, 0.05, 1.2, 5), M.lam(RUST, 'metal', 1.4, 1), 0.8, 0.3, 0.5, 0.6, 0, 0.3);
     }
     bake(mesh);
     const fast = this.phase >= 2;

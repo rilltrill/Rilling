@@ -55,7 +55,7 @@ export class TruckViewModel {
     this.root.add(this.body, this.mount);
     this.buildBody();
     this.buildGun();
-    this.coolMat = Kit.mat(0x2a2c30, { tex: 'metal', texStrength: 0.5 });
+    this.coolMat = Kit.mat(0x34373e, { tex: 'metal', texScale: 2, texStrength: 0.7 });
     this.heatMats = [Kit.glow(0x8a2010, 1), Kit.glow(0xd04a14, 1.2), Kit.glow(0xff8a2a, 1.4), Kit.glow(0xffd070, 1.6)];
     this.offShot = world.events.on('shot', () => this.onShot());
     // Track where the player taps so the gun can swing toward it.
@@ -79,13 +79,16 @@ export class TruckViewModel {
 
   private buildBody() {
     const b = new THREE.Group();
-    const paint = M.lam(0x8a2a22, 'metal', 1, 0.35);
-    const primer = M.lam(0x6a6862, 'metal', 1, 0.5);
-    const rust = M.lam(0x6a3a22, 'metal', 1, 0.6);
-    const dark = M.lam(0x1e1f22);
-    const steel = M.lam(0x5a5e64, 'metal', 1, 0.6);
-    const blood = M.lam(0x4a0a08);
-    const glass = M.lam(0x1a2230);
+    // Seen 1–5 m from the eye: chunky texels at full density read clearly.
+    const paint = M.lam(0x962a20, 'metal', 1.2, 0.6);
+    const primer = M.lam(0x74726a, 'metal', 1.2, 0.75);
+    const rust = M.lam(0x7a4024, 'metal', 1.2, 1);
+    const dark = M.lam(0x26272c, 'metal', 1.6, 0.6);
+    const steel = M.lam(0x6a6e74, 'metal', 1.2, 0.85);
+    const blood = M.lam(0x5a0c08, 'metal', 1.2, 0.5);
+    const glass = M.lam(0x1a2230, 'none');
+    const hazard = M.lam(0xe8b420, 'hazard', 2.2, 1);
+    const hazardBig = M.lam(0xe8b420, 'hazard', 1.5, 1);
     // Cab roof (its front edge and the light bar frame the bottom of the screen).
     Kit.add(b, Kit.box(1.8, 0.1, 1.45), paint, 0, -1.17, -1.62);
     Kit.add(b, Kit.box(1.6, 0.06, 1.2), paint, 0, -1.1, -1.62);
@@ -105,43 +108,48 @@ export class TruckViewModel {
       // Mirrors.
       Kit.add(b, Kit.box(0.26, 0.04, 0.04), dark, s * 1.0, -1.45, -2.45);
       Kit.add(b, Kit.box(0.08, 0.24, 0.16), dark, s * 1.16, -1.4, -2.42);
-      Kit.add(b, Kit.box(0.02, 0.18, 0.12), Kit.glow(0x9ab0d0, 0.5), s * 1.16, -1.4, -2.33);
-      // Bed rails + bed walls (seen when looking sideways / back).
+      Kit.add(b, Kit.box(0.02, 0.18, 0.12), M.glow(0x9ab0d0, 0.5), s * 1.16, -1.4, -2.33);
+      // Bed rails + bed walls (seen when looking sideways / back); hazard-taped rail caps frame the view.
       Kit.add(b, Kit.box(0.1, 0.42, 2.7), paint, s * 0.95, -1.68, 0.55);
-      Kit.add(b, Kit.box(0.16, 0.06, 2.7), rust, s * 0.95, -1.46, 0.55);
+      Kit.add(b, Kit.box(0.16, 0.06, 2.7), hazard, s * 0.95, -1.46, 0.55);
       // Roll bar uprights.
-      Kit.add(b, Kit.cyl(0.04, 0.04, 0.5, 8), dark, s * 0.82, -1.22, -0.84);
+      Kit.add(b, Kit.cyl(0.04, 0.04, 0.5, 8), steel, s * 0.82, -1.22, -0.84);
     }
-    Kit.add(b, Kit.cyl(0.04, 0.04, 1.66, 8), dark, 0, -0.97, -0.84, 0, 0, Math.PI / 2);
+    Kit.add(b, Kit.cyl(0.04, 0.04, 1.66, 8), steel, 0, -0.97, -0.84, 0, 0, Math.PI / 2);
     // Off-road light bar on the cab roof front (amber).
     Kit.add(b, Kit.box(1.2, 0.08, 0.1), dark, 0, -1.04, -2.26);
-    for (const x of [-0.42, -0.14, 0.14, 0.42]) Kit.add(b, Kit.box(0.2, 0.055, 0.03), Kit.glow(0xffc060, 1.4), x, -1.04, -2.32);
+    // Hazard tape on the back of the light bar: the one stripe always in view.
+    Kit.add(b, Kit.box(1.16, 0.056, 0.012), hazardBig, 0, -1.04, -2.204);
+    for (const x of [-0.42, -0.14, 0.14, 0.42]) Kit.add(b, Kit.box(0.2, 0.055, 0.03), M.glow(0xffc060, 1.4), x, -1.04, -2.32);
     // Zombie plow welded to the bumper.
     Kit.add(b, Kit.box(2.2, 0.4, 0.12), steel, 0, -2.15, -4.72, -0.5, 0, 0);
     for (const s of [-1, 1]) Kit.add(b, Kit.box(1.15, 0.4, 0.12), steel, s * 1.0, -2.15, -4.6, -0.5, s * 0.35, 0);
+    // Hazard-striped top edge on the plow.
+    Kit.add(b, Kit.box(2.24, 0.12, 0.14), hazard, 0, -1.99, -4.8, -0.5, 0, 0);
     for (let i = -3; i <= 3; i++) Kit.add(b, Kit.cone(0.05, 0.3, 4), rust, i * 0.3, -1.95, -4.86, -1.1, 0, 0);
     // Spray-painted hood text, readable from the bed.
     const txt = new THREE.Group();
     txt.position.set(0, -1.835, -4.25);
     txt.rotation.x = -Math.PI / 2;
-    addText(txt, 'NOT TODAY', M.lam(0xe8e0d0), 0, 0, 0, 0.045, 0.01);
+    addText(txt, 'NOT TODAY', M.lam(0xece4d4, 'none'), 0, 0, 0, 0.045, 0.01);
     b.add(txt);
     // Bed floor, tailgate and cargo (only seen when looking back).
-    Kit.add(b, Kit.box(1.8, 0.06, 2.7), M.lam(0x3a3a3c, 'grate', 1, 0.6), 0, -1.88, 0.55);
+    Kit.add(b, Kit.box(1.8, 0.06, 2.7), M.lam(0x56585c, 'corrugated', 1.6, 0.9), 0, -1.88, 0.55);
     Kit.add(b, Kit.box(1.9, 0.45, 0.1), paint, 0, -1.66, 1.92);
-    Kit.add(b, Kit.box(0.4, 0.5, 0.25), M.lam(0xa82a1a), -0.65, -1.6, 1.4);
-    Kit.add(b, Kit.box(0.4, 0.5, 0.25), M.lam(0x3a5a2a), -0.65, -1.6, 1.1);
-    Kit.add(b, Kit.box(0.55, 0.3, 0.32), M.lam(0x4a5a34, 'cloth', 1, 0.5), 0.55, -1.7, 1.35);
+    Kit.add(b, Kit.box(1.92, 0.08, 0.12), hazard, 0, -1.42, 1.92);
+    Kit.add(b, Kit.box(0.4, 0.5, 0.25), M.lam(0xb82a1a, 'metal', 1.6, 0.7), -0.65, -1.6, 1.4);
+    Kit.add(b, Kit.box(0.4, 0.5, 0.25), M.lam(0x3e622c, 'metal', 1.6, 0.7), -0.65, -1.6, 1.1);
+    Kit.add(b, Kit.box(0.55, 0.3, 0.32), M.lam(0x56663a, 'metal', 1.6, 0.5), 0.55, -1.7, 1.35);
     Kit.add(b, Kit.cyl(0.32, 0.32, 0.2, 10), dark, 0.5, -1.76, 0.4, 0, 0, 0);
     bake(b);
     this.body.add(b);
   }
 
   private buildGun() {
-    const metal = M.lam(0x34373c, 'metal', 1, 0.5);
-    const dark = M.lam(0x18191c);
-    const olive = M.lam(0x4a5a34, 'cloth', 1, 0.4);
-    const brass = M.lam(0xc8a040);
+    const metal = M.lam(0x3a3d44, 'metal', 2, 0.7);
+    const dark = M.lam(0x1c1d22, 'metal', 2, 0.5);
+    const olive = M.lam(0x56663a, 'metal', 2, 0.6);
+    const brass = M.lam(0xd8aa44, 'none');
     // Pedestal from the bed floor (only its top shows when looking down).
     this.mount.position.set(0.32, -0.74, -0.55);
     Kit.add(this.mount, Kit.cyl(0.06, 0.08, 1.0, 8), metal, 0, -0.55, 0);
@@ -177,11 +185,11 @@ export class TruckViewModel {
       const flash = new THREE.Group();
       flash.position.set(0, 0, -1.24);
       bg.add(flash);
-      const fm = Kit.glow(0xffd27a, 2.2);
+      const fm = M.glow(0xffd27a, 2.2);
       Kit.add(flash, Kit.cone(0.07, 0.34, 5), fm, 0, 0, -0.14, -Math.PI / 2, 0, 0);
       Kit.add(flash, Kit.box(0.34, 0.035, 0.02), fm, 0, 0, -0.04);
       Kit.add(flash, Kit.box(0.035, 0.34, 0.02), fm, 0, 0, -0.04);
-      Kit.add(flash, Kit.sphere(0.05, 6, 4), Kit.glow(0xffffff, 2.5), 0, 0, -0.03);
+      Kit.add(flash, Kit.sphere(0.05, 6, 4), M.glow(0xffffff, 2.5), 0, 0, -0.03);
       bake(flash);
       flash.visible = false;
       this.barrels.push(bg);

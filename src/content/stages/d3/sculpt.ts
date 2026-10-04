@@ -1,11 +1,14 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
+import { packTex, type TexSpec } from './retro';
 
 /**
  * Minimal painted-geometry builder for the Tyrant: primitives are transformed,
  * flattened to non-indexed triangles and coloured per face by a paint function
  * that receives the face centroid + normal in final space. One Sculpt = one
- * vertex-coloured BufferGeometry = one draw call.
+ * vertex-coloured BufferGeometry = one draw call. `build(texFor)` also maps
+ * each face's paint colour to a retro texture (per-vertex `aTex`, retro.ts),
+ * so hide, belly scales and clean teeth share that single draw call.
  */
 export type Paint = number | ((x: number, y: number, z: number, nx: number, ny: number, nz: number) => number);
 
@@ -33,6 +36,8 @@ function hash(x: number, y: number, z: number): number {
 export class Sculpt {
   private pos: number[] = [];
   private col: number[] = [];
+  /** Paint colour of every face (for the texture lookup in build). */
+  private hex: number[] = [];
 
   constructor(private noise = 0.08) {}
 
@@ -51,7 +56,9 @@ export class Sculpt {
       const cx = (_a.x + _b.x + _c.x) / 3;
       const cy = (_a.y + _b.y + _c.y) / 3;
       const cz = (_a.z + _b.z + _c.z) / 3;
-      _col.setHex(typeof paint === 'number' ? paint : paint(cx, cy, cz, _n.x, _n.y, _n.z));
+      const hex = typeof paint === 'number' ? paint : paint(cx, cy, cz, _n.x, _n.y, _n.z);
+      _col.setHex(hex);
+      this.hex.push(hex);
       const k = 1 + (hash(cx * 3.1, cy * 3.1, cz * 3.1) - 0.5) * 2 * this.noise;
       for (const v of [_a, _b, _c]) {
         this.pos.push(v.x, v.y, v.z);
@@ -104,10 +111,23 @@ export class Sculpt {
     return this;
   }
 
-  build(): THREE.BufferGeometry {
+  build(texFor?: (paint: number) => TexSpec): THREE.BufferGeometry {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    if (texFor) {
+      const a = new Float32Array(this.hex.length * 12);
+      const packed = new Map<number, number[]>();
+      for (let f = 0; f < this.hex.length; f++) {
+        let p = packed.get(this.hex[f]);
+        if (!p) {
+          p = packTex(texFor(this.hex[f])) as number[];
+          packed.set(this.hex[f], p);
+        }
+        for (let k = 0; k < 3; k++) a.set(p, (f * 3 + k) * 4);
+      }
+      g.setAttribute('aTex', new THREE.Float32BufferAttribute(a, 4));
+    }
     g.computeVertexNormals();
     g.computeBoundingSphere();
     return Kit.track(g);

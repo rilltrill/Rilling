@@ -40,6 +40,9 @@ export const TEX_NAMES = [
   'grate',
   'hazard',
   'feathers',
+  'clouds',
+  'marble',
+  'cardboard',
 ] as const;
 
 export type TexName = (typeof TEX_NAMES)[number];
@@ -362,6 +365,33 @@ const DEFS: Record<TexName, TexDef> = {
   hazard: {
     size: 32, metres: 1, levels: 3,
     gen: (x, y) => (Math.floor((x + y) / 8) % 2 === 0 ? 1 : 0.18),
+  },
+  clouds: {
+    size: 64, metres: 6, levels: 5,
+    gen: (x, y, n, s) => {
+      const f = n.fbm(x, y, s, 4, 4);
+      const t = clamp01((f - 0.35) / 0.4);
+      return 0.55 + 0.45 * t * t * (3 - 2 * t);
+    },
+  },
+  marble: {
+    size: 64, metres: 2, levels: 6,
+    gen: (x, y, n, s) => {
+      let v = 0.84 + 0.08 * (n.fbm(x, y, s, 4, 3) - 0.5);
+      const vein = Math.abs(Math.sin((x / s) * Math.PI * 2 * 1.5 + n.fbm(x, y, s, 3, 3, 5) * 7));
+      if (vein > 0.94) v -= (0.3 * (vein - 0.94)) / 0.06;
+      return [v, v * 0.98, v * 0.95];
+    },
+  },
+  cardboard: {
+    size: 32, metres: 0.8, levels: 5,
+    gen: (x, y, n, s) => {
+      let v = 0.82 + (n.hash(x, y) - 0.5) * 0.08 + (n.value(x, y, s, 4) - 0.5) * 0.1;
+      const ly = y % 32;
+      if (ly >= 14 && ly <= 17) v -= 0.18; // packing tape
+      if (x % 32 === 0) v -= 0.2; // crease
+      return [v, v * 0.92, v * 0.78];
+    },
   },
   feathers: {
     size: 32, metres: 0.5, levels: 5,

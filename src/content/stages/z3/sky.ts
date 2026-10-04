@@ -113,14 +113,20 @@ function hills(rng: Rng, r: number, a0: number, a1: number, hMin: number, hMax: 
   const g = Kit.track(new THREE.BufferGeometry());
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.computeVertexNormals();
-  return new THREE.Mesh(g, M.glow(color, 1));
+  return new THREE.Mesh(g, M.glow(color, 1, ...SIL_TEX));
 }
+
+/**
+ * Silhouette texture: big soft noise blobs (≈1.5 m texels at ~280 m, about one
+ * arcade pixel) at low strength — breaks up the flat cut-outs without shimmering.
+ */
+const SIL_TEX = ['stucco', 0.026, 0.5] as const;
 
 /** Burning city skyline (silhouettes + lit windows + rooftop fires). */
 function skyline(rng: Rng): THREE.Group {
   const g = new THREE.Group();
   const cityAz = azOf(CITY_DIR);
-  const sil = [M.glow(0x170f1c, 1), M.glow(0x1d1322, 1), M.glow(0x24172a, 1)];
+  const sil = [M.glow(0x1a1120, 1, ...SIL_TEX), M.glow(0x211526, 1, ...SIL_TEX), M.glow(0x2a1a30, 1, ...SIL_TEX)];
   const win = [M.glow(0xffc070, 1), M.glow(0xffa050, 1), M.glow(0xe8e0c0, 0.8)];
   const fire = [M.glow(0xff7a20, 1.4), M.glow(0xffb040, 1.5), M.glow(0xff4a10, 1.3)];
   for (let i = 0; i < 64; i++) {
@@ -143,13 +149,14 @@ function skyline(rng: Rng): THREE.Group {
     for (let r = 1; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         if (!rng.chance(0.12)) continue;
-        Kit.add(b, Kit.box(1.1, 1.2, 0.2), rng.pick(win), -w / 2 + 1.3 + c * 2.6, r * 3.2, -5.05);
+        // Windows/fires are single quads facing the camera (−Z side of the block).
+        Kit.add(b, Kit.plane(1.1, 1.2), rng.pick(win), -w / 2 + 1.3 + c * 2.6, r * 3.2, -5.05, 0, Math.PI, 0);
       }
     }
     if (rng.chance(0.4)) {
       const fh = rng.range(2, 6);
       const fy = h * rng.range(0.5, 1);
-      Kit.add(b, Kit.box(w * rng.range(0.3, 0.8), fh, 0.3), rng.pick(fire), rng.spread(w * 0.2), fy, -5.1);
+      Kit.add(b, Kit.plane(w * rng.range(0.3, 0.8), fh), rng.pick(fire), rng.spread(w * 0.2), fy, -5.1, 0, Math.PI, 0);
     }
   }
   // Glowing fire line along the base of the city.
@@ -160,7 +167,7 @@ function skyline(rng: Rng): THREE.Group {
     fb.position.set(Math.sin(az) * dist, -2, Math.cos(az) * dist);
     fb.rotation.y = az;
     g.add(fb);
-    Kit.add(fb, Kit.box(rng.range(12, 30), rng.range(3, 8), 0.5), rng.pick(fire), 0, 0, 0);
+    Kit.add(fb, Kit.plane(rng.range(12, 30), rng.range(3, 8)), rng.pick(fire), 0, 0, 0, 0, Math.PI, 0);
   }
   return g;
 }
@@ -175,6 +182,10 @@ export class DuskSky {
     const g = this.group;
     g.name = 'z3-sky';
     const dome = EnvKit.sky(SKY.top, SKY.horizon, SKY.bottom, 330);
+    // Painted-sky streaks: huge soft blobs at low strength (the dome follows the
+    // camera, so they never swim). The dome's material is its own tracked instance.
+    const domeMat = dome.material as THREE.MeshBasicMaterial;
+    if (!domeMat.userData.shared) Kit.applyTexture(domeMat, 'stucco', 0.014, 0.3);
     g.add(dome);
     g.add(glowRing());
 

@@ -3,6 +3,7 @@ import { Kit } from '../../kit/ModelKit';
 import type { World } from '../../../gameplay/World';
 import { angleDelta } from '../../../core/math';
 import { merged } from './props';
+import { tm } from './retro';
 
 const _v = new THREE.Vector3();
 
@@ -46,19 +47,24 @@ export class JeepViewModel {
     this.root.add(this.body, this.gun);
     this.buildBody();
     this.flash = this.buildGun();
-    this.coolMat = Kit.mat(0x2a2c2e);
+    this.coolMat = tm(0x2e3134, 'metal', 5, 0.6);
     this.heatMats = [Kit.glow(0x8a2010, 1), Kit.glow(0xd04a14, 1.2), Kit.glow(0xff8a2a, 1.4), Kit.glow(0xffd070, 1.6)];
     this.offShot = world.events.on('shot', () => this.onShot());
   }
 
   private buildBody() {
     const b = new THREE.Group();
-    const olive = Kit.mat(0x4c6640);
-    const khaki = Kit.mat(0xc4ab72);
-    const dark = Kit.mat(0x2a2e2c);
-    const metal = Kit.mat(0x5a5e60);
-    const mud = Kit.mat(0x8a6e48);
-    const hoop = Kit.mat(0x5a6a48);
+    // Weathered park-jeep paint over riveted panels (the metal texture's rust
+    // blotches read as chipped paint), mud splashes, ribbed tyres and bed.
+    const olive = tm(0x4e6a40, 'metal', 1.3, 0.8);
+    const khaki = tm(0xc8ac70, 'metal', 1.3, 0.75);
+    const fender = tm(0x5a5c3a, 'dirt', 2.2, 0.9);
+    const dark = tm(0x2a2e2c, 'metal', 4, 0.5);
+    const tyre = tm(0x262826, 'corrugated', 4, 0.75);
+    const grille = tm(0x2a2e2c, 'grate', 3);
+    const metal = tm(0x5e6264, 'metal', 4, 0.6);
+    const mud = tm(0x8a6e48, 'dirt', 2.6);
+    const hoop = tm(0x5a6a48, 'metal', 4, 0.5);
     // The gunner stands mid-vehicle at z = 0 (ground at y = 0, eye ≈ 2.15 m above
     // the body after BODY_DROP). Everything ahead is kept short and low so the
     // front edge (bull bar) sits ≥ 26° below the eye: a compy 4 m in front of the
@@ -68,14 +74,15 @@ export class JeepViewModel {
     Kit.add(b, Kit.box(0.26, 0.05, 1.05), olive, 0, 0.93, -1.72, 0.04, 0, 0);
     Kit.add(b, Kit.box(0.42, 0.03, 0.3), mud, -0.48, 0.93, -2.0, 0.04, 0.3, 0);
     Kit.add(b, Kit.box(0.28, 0.03, 0.22), mud, 0.58, 0.93, -1.5, 0.04, -0.2, 0);
-    // Park emblem on the hood.
-    Kit.add(b, Kit.cyl(0.2, 0.2, 0.04, 14), Kit.mat(0xf0c040), 0.42, 0.93, -1.95, 0.04, 0, 0);
-    Kit.add(b, Kit.cyl(0.15, 0.15, 0.05, 14), Kit.mat(0xd8401c), 0.42, 0.935, -1.95, 0.04, 0, 0);
+    Kit.add(b, Kit.box(0.2, 0.03, 0.14), mud, -0.2, 0.925, -1.3, 0.04, 0.6, 0);
+    // Park emblem on the hood (clean decal).
+    Kit.add(b, Kit.cyl(0.2, 0.2, 0.04, 14), tm(0xf4c43a, 'none'), 0.42, 0.93, -1.95, 0.04, 0, 0);
+    Kit.add(b, Kit.cyl(0.15, 0.15, 0.05, 14), tm(0xe0401a, 'none'), 0.42, 0.935, -1.95, 0.04, 0, 0);
     for (const sx of [-1, 1]) {
       // Fenders + wheels.
-      Kit.add(b, Kit.box(0.34, 0.16, 1.0), olive, sx * 0.9, 0.84, -1.75, 0, 0, sx * -0.18);
-      Kit.add(b, Kit.cyl(0.44, 0.44, 0.34, 12), dark, sx * 0.86, 0.44, -1.75, 0, 0, Math.PI / 2);
-      Kit.add(b, Kit.cyl(0.44, 0.44, 0.34, 12), dark, sx * 0.86, 0.44, 0.75, 0, 0, Math.PI / 2);
+      Kit.add(b, Kit.box(0.34, 0.16, 1.0), fender, sx * 0.9, 0.84, -1.75, 0, 0, sx * -0.18);
+      Kit.add(b, Kit.cyl(0.44, 0.44, 0.34, 12), tyre, sx * 0.86, 0.44, -1.75, 0, 0, Math.PI / 2);
+      Kit.add(b, Kit.cyl(0.44, 0.44, 0.34, 12), tyre, sx * 0.86, 0.44, 0.75, 0, 0, Math.PI / 2);
       // Headlights (glow, kept separate by the merge).
       Kit.add(b, Kit.cyl(0.11, 0.11, 0.1, 10), metal, sx * 0.62, 0.7, -2.28, Math.PI / 2, 0, 0);
       Kit.add(b, Kit.cyl(0.08, 0.08, 0.11, 10), Kit.glow(0xfff2c8, 1.1), sx * 0.62, 0.7, -2.29, Math.PI / 2, 0, 0);
@@ -93,9 +100,9 @@ export class JeepViewModel {
     Kit.add(b, Kit.cyl(0.032, 0.032, 1.62, 8), dark, 0, 1.44, -0.76, 0, 0, Math.PI / 2);
     Kit.add(b, Kit.cyl(0.035, 0.035, 1.6, 8), hoop, 0, 1.74, 1.0, 0, 0, Math.PI / 2);
     // Tied-down jerry can.
-    Kit.add(b, Kit.box(0.34, 0.46, 0.18), Kit.mat(0x8a2a1a), 0.55, 1.14, 1.08);
+    Kit.add(b, Kit.box(0.34, 0.46, 0.18), tm(0x9a2c1a, 'metal', 4, 0.7), 0.55, 1.14, 1.08);
     // Grille + bull bar (the front-most, highest-on-screen part of the jeep).
-    Kit.add(b, Kit.box(1.4, 0.38, 0.1), dark, 0, 0.62, -2.28);
+    Kit.add(b, Kit.box(1.4, 0.38, 0.1), grille, 0, 0.62, -2.28);
     Kit.add(b, Kit.cyl(0.05, 0.05, 1.7, 6), metal, 0, 0.86, -2.46, 0, 0, Math.PI / 2);
     Kit.add(b, Kit.cyl(0.05, 0.05, 1.7, 6), metal, 0, 0.5, -2.5, 0, 0, Math.PI / 2);
     for (const sx of [-0.55, 0.55]) Kit.add(b, Kit.cyl(0.045, 0.045, 0.42, 6), metal, sx, 0.68, -2.47);
@@ -103,17 +110,17 @@ export class JeepViewModel {
     Kit.add(b, Kit.box(1.5, 0.05, 0.05), metal, 0, 0.93, -1.08);
     Kit.add(b, Kit.box(1.5, 0.05, 0.05), metal, 0, 0.95, -1.46);
     for (const sx of [-0.72, 0.72]) Kit.add(b, Kit.box(0.05, 0.05, 0.4), metal, sx, 0.94, -1.27);
-    Kit.add(b, Kit.box(1.36, 0.02, 0.32), Kit.mat(0x7a9aa8, { emissive: 0x18303a, emissiveIntensity: 0.5 }), 0, 0.93, -1.27);
+    Kit.add(b, Kit.box(1.36, 0.02, 0.32), tm(0x7a9aa8, 'none', 1, 1, { emissive: 0x18303a, emissiveIntensity: 0.5 }), 0, 0.93, -1.27);
     // Front seats (below the view).
-    for (const sx of [-0.45, 0.45]) Kit.add(b, Kit.box(0.6, 0.6, 0.16), Kit.mat(0x7a5a3c), sx, 0.98, -0.75, -0.15, 0, 0);
+    for (const sx of [-0.45, 0.45]) Kit.add(b, Kit.box(0.6, 0.6, 0.16), tm(0x7a5a3c, 'cloth', 3), sx, 0.98, -0.75, -0.15, 0, 0);
     // Tailgate + spare wheel (its top arc and the roll hoop frame the bottom of the
     // screen when looking back at the boss, like the hood does ahead).
     Kit.add(b, Kit.box(1.84, 0.5, 0.08), olive, 0, 0.95, 1.26);
-    Kit.add(b, Kit.cyl(0.42, 0.42, 0.26, 14), dark, 0, 1.27, 1.42, Math.PI / 2, 0, 0);
+    Kit.add(b, Kit.cyl(0.42, 0.42, 0.26, 14), tyre, 0, 1.27, 1.42, Math.PI / 2, 0, 0);
     Kit.add(b, Kit.cyl(0.2, 0.2, 0.28, 10), khaki, 0, 1.27, 1.42, Math.PI / 2, 0, 0);
     // Floor of the rear bed + ammo crate.
-    Kit.add(b, Kit.box(1.76, 0.06, 2.4), Kit.mat(0x4a4a40), 0, 0.88, 0.05);
-    Kit.add(b, Kit.box(0.5, 0.35, 0.35), Kit.mat(0x4a5a34), -0.55, 1.08, 0.8);
+    Kit.add(b, Kit.box(1.76, 0.06, 2.4), tm(0x4a4a40, 'corrugated', 2.5, 0.8), 0, 0.88, 0.05);
+    Kit.add(b, Kit.box(0.5, 0.35, 0.35), tm(0x4a5a34, 'planks', 4), -0.55, 1.08, 0.8);
     merged(b);
     this.body.add(b);
   }
@@ -121,9 +128,9 @@ export class JeepViewModel {
   /** Returns the muzzle-flash group. */
   private buildGun(): THREE.Group {
     const mount = this.gun;
-    const metal = Kit.mat(0x2e3134);
-    const dark = Kit.mat(0x1a1b1d);
-    const olive = Kit.mat(0x4a5a34);
+    const metal = tm(0x30343a, 'metal', 5, 0.6);
+    const dark = tm(0x1c1d20, 'metal', 6, 0.5);
+    const olive = tm(0x4a5a34, 'metal', 5, 0.6);
     // Pedestal rising from the bed floor. The gun sits low and to the right with a
     // short barrel so it never covers the centre-right of the view.
     Kit.add(mount, Kit.cyl(0.05, 0.07, 0.75, 8), metal, GUN_X, GUN_Y - 0.4, GUN_Z);

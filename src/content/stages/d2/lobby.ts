@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import { bake, glow, mat } from './bake';
-import { beacon, bush, box, cyl, frameZ, lightPanel, palm, pipe, railing, sign, slab, vent, wallX, wallZ } from './build';
+import { beacon, bush, box, cyl, decal, floorQuad, frameZ, lightPanel, palm, pipe, railing, sign, slab, vent, wallX, wallZ } from './build';
 import type { Ctx, RoomOut } from './ctx';
 import { pixelText } from './font';
 import { ROOMS, railXAtZ } from './layout';
 import { BurstDoor, SkeletonDisplay } from './setpieces';
+import { S } from './surf';
 
 /** Glass used across the building (transparent, shared). */
 export function glassMat(tint = 0x9fd0ea, opacity = 0.2): THREE.Material {
@@ -29,21 +30,27 @@ export function buildLobby(ctx: Ctx): LobbyOut {
   const shellG = new THREE.Group();
   const am = ctx.am;
 
-  const stucco = mat(0x8e8272, 'stucco', 1, 0.7);
-  const wood = mat(0x5e3e26, 'planks', 1.2, 0.8);
-  const trim = mat(0x3a2a1c);
-  const stone = mat(0xa49a88, 'concrete', 0.8, 0.5);
-  const ceil = mat(0x24262c, 'concrete', 1, 0.4);
-  const metal = mat(0x6a6e76, 'metal', 1.5);
+  // Visitor-centre palette: warm rendered walls, timber, sandstone pillars.
+  // Walls + ceiling bake into the shell; everything else into a handful of
+  // `S` recipes (see surf.ts).
+  const stucco = mat(0x9a8a74, 'stucco', 1, 0.9);
+  const wood = S.planks(0x6a4428);
+  const trim = S.planks(0x3e2a1a);
+  const stone = mat(0xb0a48e, 'concrete', 0.8, 0.65);
+  const ceil = mat(0x4a3a2c, 'planks', 0.7, 0.9);
+  const metal = S.metal(0x6a6e76);
+  const terrazzo = S.terrazzo(0xc8c0b0);
+  const floor = mat(0x948a7a, 'tiles', 0.6, 0.85);
   const doorH = 3.3;
   const shopX = railXAtZ(R.z1);
 
   // Floor: polished tiles + inlaid park emblem.
-  slab(stat, mat(0x8a8276, 'tiles', 0.55, 0.75), R.x0, R.x1, -0.1, 0, R.z1, R.z0);
+  floorQuad(stat, floor, R.x0, R.x1, R.z1, R.z0, 0);
+  // Park emblem inlaid in the same tiles (a mosaic, one draw call with the floor).
   const em = new THREE.Vector3(1.4, 0, -19);
-  Kit.add(stat, Kit.cyl(3.5, 3.5, 0.02, 28), mat(0xc87a1a), em.x, 0.008, em.z);
-  Kit.add(stat, Kit.cyl(3.1, 3.1, 0.02, 28), mat(0x1c4628), em.x, 0.014, em.z);
-  const print = mat(0xd8b060);
+  Kit.add(stat, Kit.cyl(3.5, 3.5, 0.02, 28), mat(0xd08420, 'tiles', 0.6, 0.85), em.x, 0.008, em.z);
+  Kit.add(stat, Kit.cyl(3.1, 3.1, 0.02, 28), mat(0x24563a, 'tiles', 0.6, 0.85), em.x, 0.014, em.z);
+  const print = mat(0xe0bc68, 'tiles', 0.6, 0.85);
   Kit.add(stat, Kit.cyl(0.7, 0.8, 0.02, 10), print, em.x, 0.02, em.z + 0.6);
   for (const a of [-0.45, 0, 0.45]) {
     Kit.add(stat, Kit.box(0.34, 0.02, 1.5), print, em.x + Math.sin(a) * 1.1, 0.02, em.z - 0.4 - Math.cos(a) * 0.7, 0, a, 0);
@@ -74,14 +81,14 @@ export function buildLobby(ctx: Ctx): LobbyOut {
 
   // Mural on the far wall: jungle ridge + volcano silhouette.
   const muralZ = R.z1 + 0.24;
-  slab(stat, mat(0x24384a), -11, 11, 5.6, 12.5, muralZ - 0.02, muralZ + 0.02);
-  const ridge = mat(0x16261c);
+  slab(stat, S.stucco(0x2e4860), -11, 11, 5.6, 12.5, muralZ - 0.02, muralZ + 0.02);
+  const ridge = S.stucco(0x1c3424);
   for (let i = 0; i < 9; i++) {
     const x = -10 + i * 2.5;
     const h = 1.2 + Math.abs(Math.sin(i * 1.7)) * 1.6;
     Kit.add(stat, Kit.cone(1.9, h, 3), ridge, x, 5.6 + h / 2, muralZ + 0.05, 0, 0, 0, 1, 1, 0.05);
   }
-  Kit.add(stat, Kit.cone(4.2, 4.6, 4), mat(0x2c2a2e), 3.5, 5.6 + 2.3, muralZ + 0.04, 0, Math.PI / 4, 0, 1, 1, 0.04);
+  Kit.add(stat, Kit.cone(4.2, 4.6, 4), S.stucco(0x3c3640), 3.5, 5.6 + 2.3, muralZ + 0.04, 0, Math.PI / 4, 0, 1, 1, 0.04);
   Kit.add(stat, Kit.box(1.2, 0.4, 0.05), glow(0xff6a20, 0.8), 3.5, 10.0, muralZ + 0.09);
   Kit.add(stat, Kit.sphere(0.9, 12, 6), glow(0xf0e0b0, 0.7), -6.5, 9.4, muralZ + 0.05, 0, 0, 0, 1, 1, 0.05);
 
@@ -102,12 +109,12 @@ export function buildLobby(ctx: Ctx): LobbyOut {
       box(stat, stone, xe, R.h - 0.3, z, 1.3, 0.6, 1.3);
       beacon(stat, am.strobe, xe - side * 0.5, 3.5, z, side > 0 ? -Math.PI / 2 : Math.PI / 2);
       // Hanging fabric banners on the pillars.
-      const col = (z / 12) % 2 === 0 ? 0xc8601a : 0x2a6a3a;
-      box(stat, mat(col, 'cloth', 2, 0.6, true), xe - side * 0.52, 8.2, z, 0.04, 3.4, 1.0);
-      box(stat, mat(0xe8d8a0, 'cloth', 2, 0.6, true), xe - side * 0.54, 8.4, z, 0.03, 0.7, 0.6);
+      const col = (z / 12) % 2 === 0 ? 0xd06a1c : 0x2a7040;
+      box(stat, S.cloth(col), xe - side * 0.52, 8.2, z, 0.04, 3.4, 1.0);
+      box(stat, S.cloth(0xe8d8a0), xe - side * 0.54, 8.4, z, 0.03, 0.7, 0.6);
     }
     // Dark gallery doorways upstairs.
-    for (const z of [-4, -16, -28, -40]) slab(stat, mat(0x0c0c10), xw - side * 0.22, xw - side * 0.18, 5.2, 7.6, z - 0.9, z + 0.9);
+    for (const z of [-4, -16, -28, -40]) slab(stat, S.plain(0x0c0c10), xw - side * 0.22, xw - side * 0.18, 5.2, 7.6, z - 0.9, z + 0.9);
   }
 
   // Skylight: glass, steel grid, a moonlit sky and a soft moon shaft.
@@ -132,37 +139,37 @@ export function buildLobby(ctx: Ctx): LobbyOut {
     [-6, -44, true],
     [6, -44, true],
   ] as [number, number, boolean][]) {
-    pipe(stat, mat(0x111114), new THREE.Vector3(x, R.h, z), new THREE.Vector3(x, 8.6, z), 0.02, 4);
-    Kit.add(stat, Kit.cone(0.75, 0.6, 10), mat(0x2e3238, 'metal'), x, 8.4, z);
-    Kit.add(stat, Kit.cyl(0.5, 0.5, 0.05, 10), lit ? glow(0xffe0a8, 1.1) : mat(0x3a3a3a), x, 8.1, z);
+    pipe(stat, S.plain(0x111114), new THREE.Vector3(x, R.h, z), new THREE.Vector3(x, 8.6, z), 0.02, 4);
+    Kit.add(stat, Kit.cone(0.75, 0.6, 10), S.metal(0x3a4048), x, 8.4, z);
+    Kit.add(stat, Kit.cyl(0.5, 0.5, 0.05, 10), lit ? glow(0xffe0a8, 1.1) : S.metal(0x3a3a3a), x, 8.1, z);
   }
 
   // Reception desk (right).
   const desk = { x: 6.8, z0: -11, z1: -19 };
   slab(stat, wood, desk.x, desk.x + 0.7, 0, 1.1, desk.z1, desk.z0);
-  slab(stat, mat(0xc8c0b0, 'concrete', 2, 0.4), desk.x - 0.1, desk.x + 0.9, 1.1, 1.18, desk.z1 - 0.1, desk.z0 + 0.1);
+  slab(stat, terrazzo, desk.x - 0.1, desk.x + 0.9, 1.1, 1.18, desk.z1 - 0.1, desk.z0 + 0.1);
   slab(stat, wood, desk.x, desk.x + 3.2, 0, 1.1, desk.z1 - 0.7, desk.z1);
-  slab(stat, mat(0xc8c0b0, 'concrete', 2, 0.4), desk.x - 0.1, desk.x + 3.3, 1.1, 1.18, desk.z1 - 0.8, desk.z1 + 0.1);
-  box(stat, mat(0xc87a1a), desk.x - 0.02, 0.62, (desk.z0 + desk.z1) / 2, 0.04, 0.5, 5.4);
-  pixelText(stat, 'INFORMATION', mat(0xf0e0b0), desk.x - 0.05, 0.62, (desk.z0 + desk.z1) / 2, 0.055, -Math.PI / 2, 0.03);
+  slab(stat, terrazzo, desk.x - 0.1, desk.x + 3.3, 1.1, 1.18, desk.z1 - 0.8, desk.z1 + 0.1);
+  box(stat, S.plain(0xc87a1a), desk.x - 0.02, 0.62, (desk.z0 + desk.z1) / 2, 0.04, 0.5, 5.4);
+  pixelText(stat, 'INFORMATION', S.plain(0xf0e0b0), desk.x - 0.05, 0.62, (desk.z0 + desk.z1) / 2, 0.055, -Math.PI / 2, 0.03);
   for (const z of [-13, -16.5]) {
-    box(stat, mat(0x1a1a1e), desk.x + 0.45, 1.42, z, 0.08, 0.42, 0.62, 0.3);
+    box(stat, S.plain(0x1a1a1e), desk.x + 0.45, 1.42, z, 0.08, 0.42, 0.62, 0.3);
     box(stat, am.screen, desk.x + 0.39, 1.42, z, 0.02, 0.34, 0.54, 0.3);
-    box(stat, mat(0x1a1a1e), desk.x + 0.5, 1.2, z, 0.2, 0.04, 0.3);
+    box(stat, S.plain(0x1a1a1e), desk.x + 0.5, 1.2, z, 0.2, 0.04, 0.3);
   }
   // Papers and a knocked-over chair.
-  for (let i = 0; i < 12; i++) box(stat, mat(0xe8e4dc), 4 + rnd() * 4, 0.006, -12 - rnd() * 12, 0.22, 0.004, 0.3, rnd() * 3);
-  box(stat, mat(0x2a2a30), 5.6, 0.25, -21, 0.5, 0.08, 0.5, 0.4, 1.2);
-  box(stat, mat(0x2a2a30), 5.9, 0.45, -21.3, 0.5, 0.5, 0.08, 0.4, 1.2);
+  for (let i = 0; i < 12; i++) decal(stat, S.plain(0xe8e4dc), 4 + rnd() * 4, 0.006, -12 - rnd() * 12, 0.22, 0.3, rnd() * 3);
+  box(stat, S.metal(0x3a3a44), 5.6, 0.25, -21, 0.5, 0.08, 0.5, 0.4, 1.2);
+  box(stat, S.metal(0x3a3a44), 5.9, 0.45, -21.3, 0.5, 0.5, 0.08, 0.4, 1.2);
   // Drag marks… something happened at the desk.
-  box(stat, mat(0x3a0806), 6.2, 0.006, -20.4, 0.9, 0.004, 2.2, 0.35);
-  for (let i = 0; i < 3; i++) box(stat, mat(0x1e1c1a), 7.6, 1.6 + i * 0.12, -20.2 - i * 0.08, 0.03, 0.04, 1.1, 0, 0, 0.5);
+  decal(stat, S.plain(0x3a0806), 6.2, 0.006, -20.4, 0.9, 2.2, 0.35);
+  for (let i = 0; i < 3; i++) box(stat, S.plain(0x1e1c1a), 7.6, 1.6 + i * 0.12, -20.2 - i * 0.08, 0.03, 0.04, 1.1, 0, 0, 0.5);
 
   // Info kiosk + directory board.
-  box(stat, mat(0x2a2e34, 'metal'), 6.0, 0.8, -31, 0.6, 1.6, 0.5);
+  box(stat, S.metal(0x3a4048), 6.0, 0.8, -31, 0.6, 1.6, 0.5);
   box(stat, am.screen, 6.0, 1.3, -30.74, 0.5, 0.42, 0.02, 0, -0.3);
-  sign(stat, 'HATCHERY TOUR', -14.6, 3.0, -8, Math.PI / 2, 0.07, 0x1c3a24, mat(0xf0e0b0));
-  sign(stat, 'EXHIBIT HALL', 14.6, 3.0, -8, -Math.PI / 2, 0.07, 0x1c3a24, mat(0xf0e0b0));
+  sign(stat, 'HATCHERY TOUR', -14.6, 3.0, -8, Math.PI / 2, 0.07, 0x1c3a24, S.plain(0xf0e0b0));
+  sign(stat, 'EXHIBIT HALL', 14.6, 3.0, -8, -Math.PI / 2, 0.07, 0x1c3a24, S.plain(0xf0e0b0));
 
   // Wall posters (framed dinosaur silhouettes).
   const poster = (x: number, z: number, ry: number, col: number) => {
@@ -171,8 +178,8 @@ export function buildLobby(ctx: Ctx): LobbyOut {
     p.rotation.y = ry;
     stat.add(p);
     box(p, trim, 0, 0, 0, 1.6, 2.1, 0.06);
-    box(p, mat(col), 0, 0, 0.04, 1.4, 1.9, 0.02);
-    const ink = mat(0x18120c);
+    box(p, S.plain(col), 0, 0, 0.04, 1.4, 1.9, 0.02);
+    const ink = S.plain(0x18120c);
     box(p, ink, -0.05, -0.1, 0.06, 0.7, 0.3, 0.02, 0, 0, 0.1);
     box(p, ink, 0.3, 0.15, 0.06, 0.4, 0.22, 0.02, 0, 0, -0.5);
     box(p, ink, -0.45, -0.25, 0.06, 0.5, 0.1, 0.02, 0, 0, 0.3);
@@ -220,15 +227,15 @@ export function buildLobby(ctx: Ctx): LobbyOut {
   {
     const inner = new THREE.Group();
     banner.add(inner);
-    const cloth = mat(0x1e5030, 'cloth', 1.5, 0.6, true);
+    const cloth = S.cloth(0x1e5a34);
     box(inner, cloth, 0, -1.45, 0, 12.6, 2.9, 0.05);
-    box(inner, mat(0xd89a20, 'cloth', 2, 0.5, true), 0, -0.08, 0, 12.6, 0.16, 0.06);
-    box(inner, mat(0xd89a20, 'cloth', 2, 0.5, true), 0, -2.82, 0, 12.6, 0.16, 0.06);
+    box(inner, S.cloth(0xe0a020), 0, -0.08, 0, 12.6, 0.16, 0.06);
+    box(inner, S.cloth(0xe0a020), 0, -2.82, 0, 12.6, 0.16, 0.06);
     pixelText(inner, 'WELCOME', glow(0xffc23a, 1.0), 0, -1.12, 0.04, 0.24, 0, 0.04);
     pixelText(inner, 'TO PRIMAL ISLAND', glow(0xf0e8c8, 0.75), 0, -2.42, 0.04, 0.085, 0, 0.03);
     // Torn corner flap.
     box(inner, cloth, 6.0, -3.1, 0.04, 0.6, 0.7, 0.05, 0, 0, 0.6);
-    for (const x of [-5.8, 5.8]) pipe(inner, mat(0x111114), new THREE.Vector3(x, 0, 0), new THREE.Vector3(x * 0.95, 1.6, 0), 0.015, 4);
+    for (const x of [-5.8, 5.8]) pipe(inner, S.cloth(0x111114), new THREE.Vector3(x, 0, 0), new THREE.Vector3(x * 0.95, 1.6, 0), 0.015, 4);
     bake(inner);
   }
   banner.rotation.z = 0.04;
@@ -237,9 +244,9 @@ export function buildLobby(ctx: Ctx): LobbyOut {
   const staffDoor = new BurstDoor({ hinge: new THREE.Vector3(R.x1 - 0.05, 0, -36.1), w: 1.8, h: 2.45, yaw: Math.PI / 2, swing: 1, kind: 'swing', style: 'wood' });
   root.add(staffDoor.root);
   // Dark corridor behind it.
-  slab(stat, mat(0x0a0a0c), R.x1 + 0.2, R.x1 + 3, 0, 2.6, -39, -35);
-  slab(stat, mat(0x0a0a0c), R.x1 + 0.2, R.x1 + 3, 2.6, 2.7, -39, -35);
-  sign(stat, 'STAFF ONLY', R.x1 - 0.25, 2.85, -37, -Math.PI / 2, 0.05, 0x5a1010, mat(0xf0f0f0));
+  slab(stat, S.plain(0x0a0a0c), R.x1 + 0.2, R.x1 + 3, 0, 2.6, -39, -35);
+  slab(stat, S.plain(0x0a0a0c), R.x1 + 0.2, R.x1 + 3, 2.6, 2.7, -39, -35);
+  sign(stat, 'STAFF ONLY', R.x1 - 0.25, 2.85, -37, -Math.PI / 2, 0.05, 0x5a1010, S.plain(0xf0f0f0));
 
   bake(stat);
   bake(shellG);
@@ -263,18 +270,19 @@ export function buildShop(ctx: Ctx): ShopOut {
   const am = ctx.am;
   const exitX = railXAtZ(R.z1);
 
-  const paint = mat(0xcab089, 'stucco', 1.2, 0.6);
-  const shelfWood = mat(0x8a6038, 'planks', 2, 0.6);
-  const metal = mat(0x6a6e76, 'metal', 1.5);
+  // Souvenir-shop palette: striped wallpaper, blue carpet, timber shelving.
+  const paint = mat(0xc8a87e, 'wallpaper', 1.2, 0.7);
+  const shelfWood = S.planks(0x8a6038);
+  const metal = S.metal(0x6a6e76);
 
-  slab(stat, mat(0x2e4468, 'carpet', 1, 0.8), R.x0, R.x1, -0.1, 0.005, R.z1, R.z0);
+  floorQuad(stat, mat(0x32508a, 'carpet', 1.2, 0.9), R.x0, R.x1, R.z1, R.z0, 0.005);
   wallX(shellG, paint, R.x0, R.z0, R.z1, R.h, [{ c: -74.3, w: 1.6, h: 2.3 }]);
   wallX(shellG, paint, R.x1, R.z0, R.z1, R.h);
   wallZ(shellG, paint, R.z1, R.x0, R.x1, R.h, [{ c: exitX, w: 3.6, h: 3.1 }]);
-  slab(shellG, mat(0xaaa69c, 'tiles', 0.9, 0.5), R.x0, R.x1, R.h, R.h + 0.3, R.z1, R.z0);
+  slab(shellG, mat(0xb4b0a4, 'tiles', 0.7, 0.7), R.x0, R.x1, R.h, R.h + 0.3, R.z1, R.z0);
   // Shop-side skin of the shared lobby wall.
   wallZ(stat, paint, R.z0 - 0.25, R.x0, R.x1, R.h, [{ c: railXAtZ(R.z0), w: 3.6, h: 3.3 }], 0.08);
-  for (const x of [R.x0 + 0.22, R.x1 - 0.22]) slab(stat, mat(0x2a5a3a), x - 0.04, x + 0.04, 2.6, 2.9, R.z1, R.z0);
+  for (const x of [R.x0 + 0.22, R.x1 - 0.22]) slab(stat, S.planks(0x2a5a3a), x - 0.04, x + 0.04, 2.6, 2.9, R.z1, R.z0);
 
   // Ceiling panels (one flickering) + vents the compys use.
   for (const z of [-60, -66, -72, -78]) {
@@ -288,7 +296,7 @@ export function buildShop(ctx: Ctx): ShopOut {
   // Merchandise palette.
   const toyCols = [0x3aa04a, 0xe07a20, 0x8a4ac0, 0x2a8ad0, 0xd0402a, 0xe0c030];
   const toy = (x: number, y: number, z: number, s: number, ry: number) => {
-    const c = mat(toyCols[Math.floor(rnd() * toyCols.length)], 'cloth', 3, 0.4);
+    const c = S.cloth(toyCols[Math.floor(rnd() * toyCols.length)]);
     const t = new THREE.Group();
     t.position.set(x, y, z);
     t.rotation.y = ry;
@@ -296,8 +304,8 @@ export function buildShop(ctx: Ctx): ShopOut {
     Kit.add(t, Kit.sphere(0.13 * s, 7, 5), c, 0, 0.12 * s, 0, 0, 0, 0, 1, 0.9, 1.25);
     Kit.add(t, Kit.sphere(0.09 * s, 7, 5), c, 0, 0.26 * s, 0.12 * s);
     Kit.add(t, Kit.cone(0.06 * s, 0.22 * s, 5), c, 0, 0.1 * s, -0.17 * s, -Math.PI / 2 - 0.4, 0, 0);
-    box(t, mat(0x101010), 0.05 * s, 0.29 * s, 0.19 * s, 0.025 * s, 0.025 * s, 0.01);
-    box(t, mat(0x101010), -0.05 * s, 0.29 * s, 0.19 * s, 0.025 * s, 0.025 * s, 0.01);
+    box(t, S.cloth(0x101010), 0.05 * s, 0.29 * s, 0.19 * s, 0.025 * s, 0.025 * s, 0.01);
+    box(t, S.cloth(0x101010), -0.05 * s, 0.29 * s, 0.19 * s, 0.025 * s, 0.025 * s, 0.01);
   };
   // Wall shelving.
   for (const side of [-1, 1]) {
@@ -307,10 +315,10 @@ export function buildShop(ctx: Ctx): ShopOut {
       slab(stat, shelfWood, x - 0.4, x + 0.4, 0, 2.4, z1, z0).scale.set(1, 1, 1);
       for (let k = 0; k < 4; k++) {
         const y = 0.35 + k * 0.55;
-        slab(stat, mat(0xd8c8a8), x - side * 0.42, x - side * 0.4, y - 0.02, y + 0.03, z1, z0);
+        slab(stat, S.planks(0xc8a878), x - side * 0.42, x - side * 0.4, y - 0.02, y + 0.03, z1, z0);
         for (let z = z0 - 0.35; z > z1 + 0.2; z -= 0.42 + rnd() * 0.3) {
           if (rnd() < 0.55) toy(x - side * 0.25, y + 0.03, z, 1 + rnd() * 0.5, side > 0 ? -Math.PI / 2 : Math.PI / 2);
-          else box(stat, mat(toyCols[Math.floor(rnd() * toyCols.length)]), x - side * 0.25, y + 0.03 + 0.17, z, 0.3, 0.34, 0.24);
+          else box(stat, S.cloth(toyCols[Math.floor(rnd() * toyCols.length)]), x - side * 0.25, y + 0.03 + 0.17, z, 0.3, 0.34, 0.24);
         }
       }
     }
@@ -324,11 +332,11 @@ export function buildShop(ctx: Ctx): ShopOut {
       const xa = side * 2.9;
       const xb = side * 4.6;
       slab(stat, shelfWood, Math.min(xa, xb), Math.max(xa, xb), 0, 0.82, z1, z0);
-      slab(stat, mat(0xe8dcc0), Math.min(xa, xb) - 0.05, Math.max(xa, xb) + 0.05, 0.82, 0.86, z1 - 0.05, z0 + 0.05);
+      slab(stat, S.cloth(0xe8dcc0), Math.min(xa, xb) - 0.05, Math.max(xa, xb) + 0.05, 0.82, 0.86, z1 - 0.05, z0 + 0.05);
       for (let i = 0; i < 5; i++) {
         const z = z0 - 0.5 - i * 0.75;
         if (i % 2) toy((xa + xb) / 2 + rnd() * 0.4 - 0.2, 0.86, z, 1.4, rnd() * 6);
-        else for (let k = 0; k < 3; k++) box(stat, mat(toyCols[(i + k) % toyCols.length], 'cloth', 3, 0.4), (xa + xb) / 2, 0.9 + k * 0.08, z, 0.55, 0.07, 0.45);
+        else for (let k = 0; k < 3; k++) box(stat, S.cloth(toyCols[(i + k) % toyCols.length]), (xa + xb) / 2, 0.9 + k * 0.08, z, 0.55, 0.07, 0.45);
       }
     }
   }
@@ -337,10 +345,10 @@ export function buildShop(ctx: Ctx): ShopOut {
 
   // Register counter (a scientist hides behind it).
   slab(stat, shelfWood, 2.6, 7.0, 0, 1.0, -75.3, -74.3);
-  slab(stat, mat(0xd8d0c0, 'concrete', 2, 0.4), 2.5, 7.1, 1.0, 1.06, -75.4, -74.2);
-  box(stat, mat(0x2a2a30), 4.2, 1.18, -74.8, 0.45, 0.24, 0.4);
+  slab(stat, S.terrazzo(0xd8d0c0), 2.5, 7.1, 1.0, 1.06, -75.4, -74.2);
+  box(stat, S.metal(0x3a3a44), 4.2, 1.18, -74.8, 0.45, 0.24, 0.4);
   box(stat, am.screen, 4.2, 1.42, -74.68, 0.32, 0.2, 0.02, -0.2);
-  box(stat, mat(0xc04020), 5.6, 1.2, -74.7, 0.5, 0.28, 0.3);
+  box(stat, S.cloth(0xc04020), 5.6, 1.2, -74.7, 0.5, 0.28, 0.3);
   // Back shelf behind the counter.
   slab(stat, shelfWood, 2.6, 6.8, 0, 2.2, -79.6, -79.0);
 
@@ -350,15 +358,15 @@ export function buildShop(ctx: Ctx): ShopOut {
     t.position.set(-5.0, 0, -77.4);
     t.rotation.y = 0.5;
     stat.add(t);
-    const g = mat(0x4a9a3a, 'cloth', 1.5, 0.5);
-    const belly = mat(0xe8d890, 'cloth', 1.5, 0.5);
+    const g = S.cloth(0x4aa03a);
+    const belly = S.cloth(0xe8d890);
     Kit.add(t, Kit.sphere(0.75, 10, 8), g, 0, 1.15, 0, 0, 0, 0, 1, 1.15, 0.95);
     Kit.add(t, Kit.sphere(0.55, 10, 8), belly, 0, 1.05, 0.32, 0, 0, 0, 0.9, 1.1, 0.7);
     Kit.add(t, Kit.sphere(0.6, 10, 8), g, 0, 2.15, 0.35, 0, 0, 0, 1, 0.9, 1.1);
     Kit.add(t, Kit.box(0.7, 0.18, 0.5), belly, 0, 1.92, 0.75);
     for (const sx of [-1, 1]) {
-      Kit.add(t, Kit.sphere(0.13, 8, 6), mat(0xf8f8f8), sx * 0.25, 2.35, 0.82);
-      Kit.add(t, Kit.sphere(0.06, 6, 4), mat(0x101010), sx * 0.25, 2.35, 0.94);
+      Kit.add(t, Kit.sphere(0.13, 8, 6), S.cloth(0xf8f8f8), sx * 0.25, 2.35, 0.82);
+      Kit.add(t, Kit.sphere(0.06, 6, 4), S.cloth(0x101010), sx * 0.25, 2.35, 0.94);
       Kit.add(t, Kit.capsule(0.22, 0.4, 2, 8), g, sx * 0.42, 0.35, 0.1);
       Kit.add(t, Kit.capsule(0.08, 0.2, 2, 6), g, sx * 0.45, 1.45, 0.55, -1.2, 0, 0);
     }
@@ -367,19 +375,19 @@ export function buildShop(ctx: Ctx): ShopOut {
 
   // Spinner rack + exit framing.
   cyl(stat, metal, -2.4, 0.9, -78.2, 0.04, 1.8, 6);
-  for (let k = 0; k < 4; k++) for (let a = 0; a < 4; a++) box(stat, mat(toyCols[(k + a) % 6]), -2.4 + Math.sin(a * 1.57) * 0.22, 0.6 + k * 0.32, -78.2 + Math.cos(a * 1.57) * 0.22, 0.2, 0.28, 0.02, a * 1.57);
+  for (let k = 0; k < 4; k++) for (let a = 0; a < 4; a++) box(stat, S.cloth(toyCols[(k + a) % 6]), -2.4 + Math.sin(a * 1.57) * 0.22, 0.6 + k * 0.32, -78.2 + Math.cos(a * 1.57) * 0.22, 0.2, 0.28, 0.02, a * 1.57);
   frameZ(stat, metal, R.z1 + 0.1, exitX, 3.6, 3.1);
-  sign(stat, 'BOTANICAL ATRIUM', exitX, 3.6, R.z1 + 0.3, 0, 0.055, 0x1c3a24, mat(0xe8f0d0));
+  sign(stat, 'BOTANICAL ATRIUM', exitX, 3.6, R.z1 + 0.3, 0, 0.055, 0x1c3a24, S.plain(0xe8f0d0));
   beacon(stat, am.strobe, exitX - 2.6, 3.2, R.z1 + 0.25, 0);
   beacon(stat, am.strobe, exitX + 2.6, 3.2, R.z1 + 0.25, 0);
 
   // Stockroom behind the burst door.
-  slab(stat, mat(0x16161a), -11.5, R.x0 - 0.2, 0, 2.6, -77.5, -71.5);
-  slab(stat, mat(0x0e0e10), -11.5, R.x0 - 0.2, 2.5, 2.6, -77.5, -71.5);
-  for (let i = 0; i < 4; i++) box(stat, mat(0x5a4a34, 'planks', 1.5), -10.2 + (i % 2) * 0.7, 0.3 + Math.floor(i / 2) * 0.6, -76.5, 0.6, 0.6, 0.6, i * 0.3);
+  slab(stat, S.plain(0x16161a), -11.5, R.x0 - 0.2, 0, 2.6, -77.5, -71.5);
+  slab(stat, S.plain(0x0e0e10), -11.5, R.x0 - 0.2, 2.5, 2.6, -77.5, -71.5);
+  for (let i = 0; i < 4; i++) box(stat, S.planks(0x5a4a34), -10.2 + (i % 2) * 0.7, 0.3 + Math.floor(i / 2) * 0.6, -76.5, 0.6, 0.6, 0.6, i * 0.3);
   const stockDoor = new BurstDoor({ hinge: new THREE.Vector3(R.x0 + 0.05, 0, -73.5), w: 1.6, h: 2.3, yaw: Math.PI / 2, swing: -1, kind: 'swing', style: 'wood' });
   root.add(stockDoor.root);
-  sign(stat, 'STOCK', R.x0 + 0.25, 2.6, -74.3, Math.PI / 2, 0.045, 0x2a2a2a, mat(0xe0e0e0));
+  sign(stat, 'STOCK', R.x0 + 0.25, 2.6, -74.3, Math.PI / 2, 0.045, 0x2a2a2a, S.plain(0xe0e0e0));
 
   bake(stat);
   bake(shellG);

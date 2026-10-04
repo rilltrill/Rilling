@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import type { Environment } from '../../../gameplay/StageTypes';
 import type { World } from '../../../gameplay/World';
 import { EnvKit } from '../../kit/EnvKit';
-import { ROOF_PADS } from './layout';
+import { Kit } from '../../kit/ModelKit';
+import { GAS_Z0, GAS_Z1, ROOF_PADS, SECOND_W, SQ_Z0 } from './layout';
 import { buildTown, type Town, type ZoneId } from './town';
-import { bakeMerge } from './bake';
+import { bakeMerge, retroParams, type RetroParams } from './bake';
 import { FirePlume, Rain, nightSky } from './vfx';
 
 /** Per-world handles the stage script needs (set pieces, lights). */
@@ -57,8 +58,8 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   // ─── Lights: moonlit fill, moon key, flashlight, two local accents ───────
   const { hemi, sun: moon } = EnvKit.lights(root, {
     sky: 0x8a9cd8,
-    ground: 0x3a3236,
-    hemi: 1.55,
+    ground: 0x4a4248,
+    hemi: 1.65,
     sun: 0xb4c4ff,
     sunIntensity: 1.25,
     sunDir: [LIGHT_DIR.x, LIGHT_DIR.y, LIGHT_DIR.z],
@@ -80,7 +81,12 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   root.add(sky);
 
   // ─── Base ground ──────────────────────────────────────────────────────────
-  root.add(EnvKit.ground(520, 0x1d1f25, -40, -150, -0.03));
+  {
+    const ground = new THREE.Mesh(Kit.plane(520, 520), Kit.tex('asphalt', 0x1d1f25, 1, 0.6));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(-40, -0.03, -150);
+    root.add(ground);
+  }
 
   // ─── Town ─────────────────────────────────────────────────────────────────
   const town = buildTown();
@@ -96,7 +102,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     zoneBoxes.push({ id, groups: [g, d], box });
   }
   root.add(town.dynamic);
-  const pools = town.pools.build();
+  const pools = town.pools.build(poolSurface);
   const beams = town.beams.build();
   root.add(pools, beams);
   const rain = new Rain(420);
@@ -259,6 +265,14 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       SCENES.delete(world);
     },
   };
+}
+
+/** Retro texture under a light pool — must match the surface it lands on (see town.ts). */
+function poolSurface(x: number, z: number, wall: boolean): RetroParams {
+  if (wall) return retroParams('stucco', 1, 0.5);
+  if (z < SQ_Z0 + 1) return retroParams('tiles', 0.5, 0.9);
+  if (x < SECOND_W && z < GAS_Z0 && z > GAS_Z1) return retroParams('concrete', 0.9, 1);
+  return retroParams('asphalt', 1, 0.85);
 }
 
 /** Ground zombies keep this far from a newsstand's walls (more than one frame's step). */

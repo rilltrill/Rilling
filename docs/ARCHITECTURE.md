@@ -154,6 +154,13 @@ id from the stage folder (e.g. `registerEnemy('butcher', …)`).
   units (also inside `EnvKit.mergeStatic` groups). `texScale` > 1 = smaller texels
   (characters typically 2–4). `Kit.retro.grain` adds a subtle grit to every
   untextured `Kit.mat`.
+- Texel density guidance (58° vertical FOV at 288 lines ≈ 0.385 cm per pixel per
+  metre of distance): for chunky, readable texels use texScale ≈ 0.3–0.7 for
+  environment surfaces (road 0.6, ground 0.3, cliffs 0.3, canopy 0.4–0.55), ≈ 0.9
+  with strength ≈ 0.7 for close fast-moving foliage, 1.5–2 for big creatures and
+  2–4 for human-sized characters. `Kit.mat` stores `userData.retroTex/retroScale/
+  retroStrength` so bakers can carry them into merged vertex-coloured batches.
+- Screenshots of the CRT look: `node scripts/snap.mjs --url "…&retro=crt" --retroScale 1`.
 - `core/RetroPass.ts` renders the scene into a ~288-line target (by quality:
   224/288/360) and upscales it with 15-bit-style dithered colour quantisation and,
   in 'crt' mode, scanlines, curvature, convergence error, phosphor bloom and

@@ -5,7 +5,7 @@ import type { ShotHit } from '../../../gameplay/Entity';
 import type { World } from '../../../gameplay/World';
 import { createEnemy, registerEnemy } from '../../registry';
 import { Kit } from '../../kit/ModelKit';
-import { M, Sculpt, buildTheropod, dgeo, poseTheroLeg, ARM_REST, type Palette, type TheroRig, type TheroSpec } from '../../enemies/dinoKit';
+import { M, SURF, Sculpt, buildTheropod, dgeo, poseTheroLeg, ARM_REST, type Palette, type TheroRig, type TheroSpec } from '../../enemies/dinoKit';
 import { angleDelta, clamp, damp, lerp, TAU } from '../../../core/math';
 import { HALL } from './containment';
 import { labs } from './env';
@@ -54,9 +54,10 @@ const S = 1.8;
 const PAL: Palette = {
   key: 'albino',
   base: 0xd6d0c2,
-  back: 0xb2aca0,
+  back: 0xa89f92,
   belly: 0xf2eee4,
-  stripe: 0x8e98a8,
+  // Warm taupe tiger bands: the only blue on the beast is the glowing weak points.
+  stripe: 0x9a8a7a,
   accent: 0xe8e2d4,
   accent2: 0x7a746c,
   claw: 0x24262c,
@@ -227,9 +228,17 @@ export class SpecimenX extends Boss {
     this.stripeMat = Kit.track(new THREE.MeshBasicMaterial({ color: STRIPE.clone(), toneMapped: false, fog: false }));
     this.eyeMat = Kit.track(new THREE.MeshBasicMaterial({ color: EYE.clone().multiplyScalar(1.6), toneMapped: false, fog: false }));
     this.haloMat = Kit.track(new THREE.MeshBasicMaterial({ color: 0x40c8ff, transparent: true, opacity: 0.32, depthWrite: false, toneMapped: false, fog: false }));
-    this.cloakMat = Kit.track(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
     this.flashMat = Kit.glow(0xffffff, 1.2);
     this.skinMatRef = r.torso.material as THREE.Material;
+    // Cloak: a private copy of the shared skin material (same shader hook, so the
+    // pixel scales, painted stripes and rim light survive) whose colour fades
+    // the hide into the dark while the bioluminescent stripes keep glowing.
+    const skin = r.torso.material as THREE.MeshLambertMaterial;
+    const cloak = skin.clone();
+    cloak.onBeforeCompile = skin.onBeforeCompile;
+    cloak.customProgramCacheKey = skin.customProgramCacheKey;
+    cloak.userData.shared = false;
+    this.cloakMat = Kit.track(cloak);
 
     // Eyes first: the autoplayer (and players) aim for these.
     const sk = SPEC.skull;
@@ -300,7 +309,8 @@ export class SpecimenX extends Boss {
     // Dorsal quills (armour) on neck, chest, hips and tail base.
     const quillGeo = (key: string, n: number, len: number, spread: number, z0: number, z1: number, y: number) =>
       dgeo(`specx|quills|${key}`, () => {
-        const sc = new Sculpt(0.05, 9);
+        // Keratin quills: fibrous streaks (horn surface), not scales.
+        const sc = new Sculpt(0.05, 9).as(SURF.horn);
         for (let i = 0; i < n; i++) {
           const t = n > 1 ? i / (n - 1) : 0;
           const z = lerp(z0, z1, t);
@@ -328,7 +338,7 @@ export class SpecimenX extends Boss {
     // Scythe claws on the hands.
     for (const a of r.arms) {
       const g = dgeo('specx|scythes', () => {
-        const sc = new Sculpt(0.04, 12);
+        const sc = new Sculpt(0.04, 12).as(SURF.claw);
         for (const dx of [-0.03, 0, 0.03]) sc.cone(0.022, 0.3, PAL.claw, M(dx, -SPEC.arm.fore - 0.02, 0.03, Math.PI - 0.5, 0, dx * 3), 4);
         return sc.build();
       });

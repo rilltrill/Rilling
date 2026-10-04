@@ -2,13 +2,14 @@ import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import { Rng } from '../../../core/Rng';
 import {
-  BUILDING_COLORS, C, CAR_COLORS, GROUND_H, M, bench, boardSign, bladeSign, building, buildingHeight,
+  BUILDING_COLORS, C, CAR_COLORS, GROUND_H, M, bench, facadeMat, boardSign, bladeSign, building, buildingHeight,
   car, crate, dumpster, hydrant, mailbox, newsBox, paintedText, sawhorse, schoolBus, streetLamp, streetTree, trafficCone,
   trashBags, trashCan, utilityPole, wallDetails, type BuildingSpec,
 } from './props';
 import { addText } from './font';
 import { FirePlume, LightBeams, LightPools } from './vfx';
 import { BurstDoors, BusWreck, GasStation, mergedGroup } from './setpieces';
+import { texGlow, texStd } from './bake';
 import {
   ROOF_PADS, ALLEY_N, ALLEY_S, BUS_POS, BUS_YAW, CROSS_Z0, CROSS_Z1, GAS_Z0, GAS_Z1, MAIN_FACADE, SECOND_E, SECOND_W, SECOND_X, SQ_X0, SQ_X1, SQ_Z0, SQ_Z1,
 } from './layout';
@@ -113,8 +114,9 @@ export function buildTown(): Town {
   };
 
   // ─── Ground, roads, sidewalks ─────────────────────────────────────────────
-  const asphalt = Kit.std(0x1c1f26, 0.42, 0.1);
-  const asphaltB = Kit.std(0x22252c, 0.5, 0.05);
+  // Wet asphalt: glossy PBR (reflects lamps and neon) with the pixel asphalt texture.
+  const asphalt = texStd(0x23262e, 0.42, 0.1, 'asphalt', 1, 0.85);
+  const asphaltB = texStd(0x272a31, 0.5, 0.05, 'asphalt', 1.3, 0.9);
   const plane = (w: number, d: number, mat: THREE.Material, x: number, z: number, y: number, zone: ZoneId) => {
     const m = Kit.mesh(Kit.plane(w, d), mat);
     m.rotation.x = -Math.PI / 2;
@@ -129,8 +131,9 @@ export function buildTown(): Town {
   plane(39, 7, asphaltB, -29, (ALLEY_S + ALLEY_N) / 2, 0.01, 'C');
   plane(12, 90, asphalt, SECOND_X, -155, 0.01, 'C');
   plane(12, 62, asphalt, SECOND_X, -231, 0.01, 'D');
-  plane(26, 36, Kit.mat(0x3c3d41), -80.5, (GAS_Z0 + GAS_Z1) / 2, 0.012, 'D');
-  plane(SQ_X1 - SQ_X0 + 20, SQ_Z0 - SQ_Z1, Kit.mat(0x46443f), (SQ_X0 + SQ_X1) / 2 - 10, (SQ_Z0 + SQ_Z1) / 2, 0.01, 'E');
+  plane(26, 36, Kit.tex('concrete', 0x45464b, 0.9), -80.5, (GAS_Z0 + GAS_Z1) / 2, 0.012, 'D');
+  // Town square: big stone flags.
+  plane(SQ_X1 - SQ_X0 + 20, SQ_Z0 - SQ_Z1, Kit.tex('tiles', 0x4c4943, 0.5, 0.9), (SQ_X0 + SQ_X1) / 2 - 10, (SQ_Z0 + SQ_Z1) / 2, 0.01, 'E');
 
   const sidewalk = (x0: number, x1: number, z0: number, z1: number, curbSide: 'x0' | 'x1' | 'z0' | 'z1') => {
     const w = Math.abs(x1 - x0);
@@ -140,8 +143,7 @@ export function buildTown(): Town {
     boxAt(w, 0.15, d, M.sidewalk, cx, 0.075, cz);
     if (curbSide === 'x0' || curbSide === 'x1') boxAt(0.2, 0.17, d, M.curb, curbSide === 'x0' ? Math.min(x0, x1) + 0.1 : Math.max(x0, x1) - 0.1, 0.085, cz);
     else boxAt(w, 0.17, 0.2, M.curb, cx, 0.085, curbSide === 'z0' ? Math.max(z0, z1) - 0.1 : Math.min(z0, z1) + 0.1);
-    // Expansion joints.
-    if (d > w) for (let z = Math.min(z0, z1) + 2; z < Math.max(z0, z1); z += 3) boxAt(w, 0.01, 0.04, M.trimDark, cx, 0.152, z);
+    // (Expansion joints come from the concrete texture.)
   };
   // Main Street.
   sidewalk(6, MAIN_FACADE, 40, -60, 'x0');
@@ -181,7 +183,7 @@ export function buildTown(): Town {
   crosswalk(0, CROSS_Z1 + 1.8);
   crosswalk(SECOND_X, SQ_Z0 + 1.8);
   // Puddles (glossy) and manholes.
-  const puddle = Kit.std(0x2a3546, 0.05, 0.25);
+  const puddle = texStd(0x2a3546, 0.05, 0.25, 'water', 1.5, 0.35);
   const puddleSpots: [number, number, number][] = [
     [-2.4, -6, 1.6], [2.8, -27, 2.2], [-1.2, -52, 1.4], [3.5, -80, 1.8], [-3.6, -110, 2.4], [1.2, -133, 1.5],
     [-30, -155, 1.6], [-41, -156, 1.2], [-59.5, -185, 2.0], [-55.5, -214, 1.8], [-61, -238, 1.5], [-56, -276, 2.2], [-62, -290, 1.6],
@@ -192,7 +194,7 @@ export function buildTown(): Town {
     p.rotation.y = rng.next() * 3;
   }
   for (const [x, z] of [[1.8, -15], [-1.5, -70], [1.5, -120], [SECOND_X + 1.5, -205]] as const) {
-    put(Kit.mesh(Kit.cyl(0.4, 0.4, 0.02, 10), Kit.mat(0x111215)), x, z, 0, 0.02);
+    put(Kit.mesh(Kit.cyl(0.4, 0.4, 0.02, 10), Kit.tex('grate', 0x34353b, 2, 0.8)), x, z, 0, 0.02);
   }
 
   // ─── Blood, debris and signs of panic ────────────────────────────────────
@@ -240,10 +242,10 @@ export function buildTown(): Town {
   {
     const a = -22;
     const b = -42;
-    const g = bld({ w: 0, d: 16, floors: 3, color: 0x5a2a30, trim: M.trimLight, shop: { interior: 0xffc68a, interiorIntensity: 0.55 } }, a, b, MAIN_FACADE, 'W');
+    const g = bld({ w: 0, d: 16, floors: 3, color: 0x70323a, tex: 'brick', trim: M.trimLight, shop: { interior: 0xffc68a, interiorIntensity: 0.55 } }, a, b, MAIN_FACADE, 'W');
     // Marquee box over the sidewalk.
     const mq = new THREE.Group();
-    Kit.add(mq, Kit.box(14, 1.7, 3.2), Kit.mat(0x2a1a1e), 0, 0, 1.6);
+    Kit.add(mq, Kit.box(14, 1.7, 3.2), Kit.tex('metal', 0x2e1c21, 1.2, 0.6), 0, 0, 1.6);
     const board = Kit.glow(0xfff2d8, 0.85);
     Kit.add(mq, Kit.box(12.6, 1.15, 0.06), board, 0, 0, 3.22);
     const letters = Kit.mat(0x1a1214);
@@ -279,7 +281,7 @@ export function buildTown(): Town {
       Kit.add(g, Kit.box(1.1, 1.6, 0.06), Kit.glow(c, 0.45), lx, 1.7, 0.08);
     }
     // Ticket booth.
-    Kit.add(g, Kit.box(1.6, 2.4, 1.2), Kit.mat(0x6a2a30), 0, 1.2, 0.7);
+    Kit.add(g, Kit.box(1.6, 2.4, 1.2), Kit.tex('planks', 0x6a2a30, 1.5), 0, 1.2, 0.7);
     Kit.add(g, Kit.box(1.2, 0.9, 0.05), Kit.glow(0xffd8a0, 0.6), 0, 1.6, 1.32);
     // Chase sets go into the dynamic group (positioned like g).
     for (const s of [setA, setB]) {
@@ -292,7 +294,7 @@ export function buildTown(): Town {
     pools.add(MAIN_FACADE - 3, (a + b) / 2, 6, 0xffb862, 0.55);
     pools.addWall(MAIN_FACADE - 0.05, 2.5, (a + b) / 2, 5, 0xffb862, -Math.PI / 2, 0.3);
   }
-  bld({ w: 0, d: 14, floors: 3, color: col(5), shop: { interior: 0, awning: 0x5a1f1f } }, -42, -58, MAIN_FACADE, 'W');
+  bld({ w: 0, d: 14, floors: 3, color: col(5), shop: { interior: 0, awning: 0x5a1f1f, boarded: true } }, -42, -58, MAIN_FACADE, 'W');
   bld({ w: 0, d: 14, floors: 2, color: col(1), shop: { interior: 0xffa080, interiorIntensity: 0.3, board: { text: 'LIQUOR', color: C.neonRed, size: 0.5 } } }, -58, -74, MAIN_FACADE, 'W');
   pools.add(MAIN_FACADE - 2, -66, 3, C.neonRed, 0.45);
   bld({ w: 0, d: 14, floors: 3, color: col(4), fireEscape: true, roof: 'billboard', shop: null }, -74, CROSS_Z0, MAIN_FACADE, 'W');
@@ -352,7 +354,7 @@ export function buildTown(): Town {
   bld({ w: 0, d: 14, floors: 3, color: col(5), shop: null, roof: 'tank' }, CROSS_Z1, -118, -MAIN_FACADE, 'E');
   bld({ w: 0, d: 14, floors: 2, color: col(6), shop: { interior: 0, shutter: true, blade: { text: 'GUNS', color: C.neonOrange, size: 0.6 } } }, -118, -134, -MAIN_FACADE, 'E');
   bld({ w: 0, d: 14, floors: 3, color: col(0), shop: null, roof: 'tank' }, -134, ALLEY_S, -MAIN_FACADE, 'E');
-  bld({ w: 0, d: 14, floors: 3, color: col(4), shop: { interior: 0, awning: 0x2a2a3a } }, ALLEY_N, -178, -MAIN_FACADE, 'E');
+  bld({ w: 0, d: 14, floors: 3, color: col(4), shop: { interior: 0, awning: 0x2a2a3a, boarded: true } }, ALLEY_N, -178, -MAIN_FACADE, 'E');
   bld({ w: 0, d: 14, floors: 2, color: col(2), shop: null }, -178, -205, -MAIN_FACADE, 'E');
 
   // Cross-street side buildings (seen when glancing down the intersection).
@@ -448,7 +450,7 @@ export function buildTown(): Town {
     }
     boxAt(15.2, 0.05, 0.05, Kit.mat(0x101114), 0, 7.1, CROSS_Z0 - 0.5);
     const tl = new THREE.Group();
-    Kit.add(tl, Kit.box(0.45, 1.3, 0.4), Kit.mat(0x2a2a1e), 0, 0, 0);
+    Kit.add(tl, Kit.box(0.45, 1.3, 0.4), Kit.tex('metal', 0x34341f, 2, 0.6), 0, 0, 0);
     Kit.add(tl, Kit.cyl(0.12, 0.12, 0.05, 8), Kit.mat(0x3a0a0a), 0, 0.4, 0.21, Math.PI / 2);
     Kit.add(tl, Kit.cyl(0.12, 0.12, 0.05, 8), Kit.mat(0x0a2a12), 0, -0.4, 0.21, Math.PI / 2);
     Kit.add(tl, Kit.cyl(0.12, 0.12, 0.05, 8), Kit.mat(0x3a2a0a), 0, 0, 0.21, Math.PI / 2);
@@ -561,13 +563,14 @@ export function buildTown(): Town {
   // ─── Alley ───────────────────────────────────────────────────────────────
   {
     // Deep warehouse blocks forming the alley walls beyond Main Street's buildings.
-    const wh = (x0: number, x1: number, z0: number, z1: number, floors: number, color: number) => {
+    const wh = (x0: number, x1: number, z0: number, z1: number, floors: number, mat: THREE.Material) => {
       const h = buildingHeight(floors);
-      boxAt(Math.abs(x1 - x0), h, Math.abs(z1 - z0), Kit.mat(color), (x0 + x1) / 2, h / 2, (z0 + z1) / 2);
+      boxAt(Math.abs(x1 - x0), h, Math.abs(z1 - z0), mat, (x0 + x1) / 2, h / 2, (z0 + z1) / 2);
       boxAt(Math.abs(x1 - x0) + 0.2, 0.4, Math.abs(z1 - z0) + 0.2, M.trimDark, (x0 + x1) / 2, h - 0.1, (z0 + z1) / 2);
     };
-    wh(-48.5, -23.5, ALLEY_S, -128, 3, 0x4a3426);
-    wh(-45, -23.5, ALLEY_N, -178, 3, 0x3a3a40);
+    // Brick on one side, a corrugated-metal warehouse on the other.
+    wh(-48.5, -23.5, ALLEY_S, -128, 3, facadeMat(0x664632, 'brick'));
+    wh(-45, -23.5, ALLEY_N, -178, 3, Kit.tex('corrugated', 0x50535d, 1));
     // Wall details on the alley-facing sides.
     const south = new THREE.Group(); // faces -Z (N)
     wallDetails(south, -19.5, 19.5, 3, rng, { fireEscapes: [-8, 9], doors: [-2, 13] });
@@ -628,14 +631,14 @@ export function buildTown(): Town {
       const g = bld({ w: 0, d: 14, floors: 2, color: col(2), shop: { interior: 0, noWindow: true } }, -240, SQ_Z0, SECOND_E, 'W');
       Kit.add(g, Kit.box(8, 2.6, 0.2), Kit.mat(0x0a0a0c), -2, 1.5, -0.05);
       for (let i = 0; i < 10; i++) {
-        Kit.add(g, Kit.box(rng.range(0.3, 0.9), rng.range(0.2, 0.5), rng.range(0.3, 0.8)), i % 2 ? M.concrete : Kit.mat(col(2)), rng.range(-6, 2), 0.2, rng.range(0.2, 2.2), rng.next(), rng.next(), 0);
+        Kit.add(g, Kit.box(rng.range(0.3, 0.9), rng.range(0.2, 0.5), rng.range(0.3, 0.8)), i % 2 ? M.concrete : facadeMat(col(2)), rng.range(-6, 2), 0.2, rng.range(0.2, 2.2), rng.next(), rng.next(), 0);
       }
     }
     // West side (facing +X).
     bld({ w: 0, d: 14, floors: 3, color: col(5), shop: null }, -110, -146, SECOND_W, 'E');
     // Police station at the T-junction.
     {
-      const g = bld({ w: 0, d: 16, floors: 3, color: 0x4a4e58, trim: M.trimLight, shop: { interior: 0xe0ecff, interiorIntensity: 0.5, board: { text: 'POLICE', color: 0x9fc8ff, size: 0.7 } } }, -146, -170, SECOND_W, 'E');
+      const g = bld({ w: 0, d: 16, floors: 3, color: 0x5a6070, tex: 'brick', trim: M.trimLight, shop: { interior: 0xe0ecff, interiorIntensity: 0.5, board: { text: 'POLICE', color: 0x9fc8ff, size: 0.7 } } }, -146, -170, SECOND_W, 'E');
       // Blue lamps either side of the door.
       for (const lx of [-1.5, 1.5]) {
         Kit.add(g, Kit.box(0.3, 0.4, 0.3), Kit.glow(0x3a6aff, 1.8), 12 - 1.3 + lx, 2.9, 0.4);
@@ -646,7 +649,7 @@ export function buildTown(): Town {
       pools.addWall(SECOND_W + 0.05, 2.9, -168.7, 3.5, 0x3a6aff, Math.PI / 2, 0.35);
       pools.add(SECOND_W + 2.5, -158, 5, 0x9fc8ff, 0.35);
     }
-    bld({ w: 0, d: 14, floors: 2, color: col(3), shop: { interior: 0, awning: 0x5a1f1f } }, -170, GAS_Z0, SECOND_W, 'E');
+    bld({ w: 0, d: 14, floors: 2, color: col(3), shop: { interior: 0, awning: 0x5a1f1f, boarded: true } }, -170, GAS_Z0, SECOND_W, 'E');
     bld({ w: 0, d: 14, floors: 3, color: col(1), shop: { interior: 0, shutter: true } }, GAS_Z1, -246, SECOND_W, 'E');
     bld({ w: 0, d: 14, floors: 2, color: col(4), shop: null }, -246, SQ_Z0, SECOND_W, 'E');
     occ(SECOND_W - 14, SECOND_W, -110, GAS_Z0);
@@ -699,8 +702,8 @@ export function buildTown(): Town {
     const pivot = new THREE.Vector3(-82, 5.2, cz);
     cg.position.copy(pivot);
     const can = new THREE.Group();
-    Kit.add(can, Kit.box(12, 0.75, 18), Kit.mat(0xdedad0), 0, 0, 0);
-    Kit.add(can, Kit.box(12.05, 0.32, 18.05), Kit.mat(0xa82a22), 0, -0.05, 0);
+    Kit.add(can, Kit.box(12, 0.75, 18), Kit.tex('metal', 0xd2cec4, 1, 0.5), 0, 0, 0);
+    Kit.add(can, Kit.box(12.05, 0.32, 18.05), Kit.tex('metal', 0xa82a22, 2, 0.4), 0, -0.05, 0);
     // Under-canopy lights: baked into their own mesh so they can go dark after the blast.
     const under = Kit.glow(0xf2f6ff, 1.25);
     const ug = new THREE.Group();
@@ -724,7 +727,7 @@ export function buildTown(): Town {
       pg.name = 'gasPillars';
       for (const x of [-79, -73]) {
         for (const z of [cz - 6, cz + 6]) {
-          const m = Kit.mesh(Kit.box(0.45, 5.2, 0.45), M.white);
+          const m = Kit.mesh(Kit.box(0.45, 5.2, 0.45), Kit.tex('metal', 0xd2cec4, 2, 0.5));
           m.position.set(x, 2.6, z);
           pg.add(m);
           // Marker just under the canopy roof above the pillar (canopy-local).
@@ -740,12 +743,12 @@ export function buildTown(): Town {
     for (const x of [-79, -73]) boxAt(1.4, 0.22, 7, M.concrete, x, 0.11, cz, 0, 'D');
     // Store.
     {
-      const g = bld({ w: 0, d: 10, floors: 1, color: 0x6e6658, trim: M.trimLight, shop: { interior: 0xe8fff0, interiorIntensity: 0.6, board: { text: 'GAS & GO', color: C.neonRed, size: 0.5 } } }, GAS_Z0 - 4, GAS_Z1 + 4, -88, 'E');
+      const g = bld({ w: 0, d: 10, floors: 1, color: 0x8c8370, trim: M.trimLight, shop: { interior: 0xe8fff0, interiorIntensity: 0.6, board: { text: 'GAS & GO', color: C.neonRed, size: 0.5 } } }, GAS_Z0 - 4, GAS_Z1 + 4, -88, 'E');
       const open = boardSign('OPEN', C.neonRed, 0.32, { pad: 0.3 });
       open.position.set(-2.5, 2.6, 0.12);
       g.add(open);
       // Ice chest + tyre stack.
-      Kit.add(g, Kit.box(1.6, 1.1, 0.8), Kit.mat(0xd8e0e8), 6, 0.55, 0.6);
+      Kit.add(g, Kit.box(1.6, 1.1, 0.8), Kit.tex('metal', 0xd0d8e0, 2, 0.4), 6, 0.55, 0.6);
       Kit.add(g, Kit.box(1.5, 0.3, 0.05), Kit.glow(0x6ab8ff, 0.8), 6, 0.8, 1.01);
       for (let i = 0; i < 4; i++) Kit.add(g, Kit.cyl(0.4, 0.4, 0.25, 10), M.tire, -7, 0.13 + i * 0.26, 1.2);
     }
@@ -753,7 +756,7 @@ export function buildTown(): Town {
     {
       const g = new THREE.Group();
       Kit.add(g, Kit.cyl(0.15, 0.15, 7, 6), M.metal, 0, 3.5, 0);
-      Kit.add(g, Kit.box(0.4, 3, 2.4), Kit.mat(0x1a1a1e), 0, 7.6, 0);
+      Kit.add(g, Kit.box(0.4, 3, 2.4), Kit.tex('metal', 0x1e1e23, 1.5, 0.6), 0, 7.6, 0);
       put(g, -69.5, GAS_Z0 - 1.5, 0, 0, 'D');
       for (const side of [1, -1]) {
         const brand = new THREE.Group();
@@ -811,14 +814,14 @@ export function buildTown(): Town {
     roofText.position.set(0.05, 3.02, -0.7);
     body.add(roofText);
     for (const z of [2.75, -4.2]) {
-      Kit.add(body, Kit.box(0.95, 0.07, 0.95), Kit.mat(0xb8b4a8), 0, 3.03, z);
-      Kit.add(body, Kit.box(0.75, 0.08, 0.75), Kit.mat(0x8a8678), 0, 3.04, z);
+      Kit.add(body, Kit.box(0.95, 0.07, 0.95), Kit.tex('metal', 0xb8b4a8, 2, 0.6), 0, 3.03, z);
+      Kit.add(body, Kit.box(0.75, 0.08, 0.75), Kit.tex('grate', 0x8a8678, 2.5, 0.5), 0, 3.04, z);
     }
     Kit.add(body, Kit.box(2.42, 0.04, 0.12), Kit.mat(0x18181a), 0, 3.01, 4.0);
     Kit.add(body, Kit.box(2.42, 0.04, 0.12), Kit.mat(0x18181a), 0, 3.01, -5.2);
     mergedGroup(body);
     const door = new THREE.Group();
-    Kit.add(door, Kit.box(1.9, 1.9, 0.12), Kit.mat(0xd29a16), 0, 0, 0);
+    Kit.add(door, Kit.box(1.9, 1.9, 0.12), Kit.tex('metal', 0xd29a16, 1.5, 0.6), 0, 0, 0);
     Kit.add(door, Kit.box(1.3, 0.7, 0.14), M.carGlass, 0, 0.4, 0);
     Kit.add(door, Kit.box(1.5, 0.12, 0.16), Kit.mat(0x18181a), 0, -0.45, 0);
     Kit.add(door, Kit.box(0.3, 0.2, 0.18), Kit.glow(0xff2a1a, 1), 0.7, 0.75, 0);
@@ -862,7 +865,7 @@ export function buildTown(): Town {
         boxAt(0.22, 0.008, 2.2, skid, x, 0.022, z, -0.32 - t * 0.25);
       }
     }
-    for (let i = 0; i < 12; i++) boxAt(rng.range(0.15, 0.5), rng.range(0.05, 0.2), rng.range(0.15, 0.5), i % 3 ? M.carGlass : Kit.mat(0xd29a16), BUS_POS[0] + rng.spread(6), 0.08, BUS_POS[2] + rng.range(1.5, 4.5), rng.next() * 3);
+    for (let i = 0; i < 12; i++) boxAt(rng.range(0.15, 0.5), rng.range(0.05, 0.2), rng.range(0.15, 0.5), i % 3 ? M.carGlass : Kit.tex('metal', 0xd29a16, 1.5, 0.6), BUS_POS[0] + rng.spread(6), 0.08, BUS_POS[2] + rng.range(1.5, 4.5), rng.next() * 3);
     // Bullets stop on the bus body (enemies only climb out of it toward the camera).
     const bocc = new THREE.Mesh(Kit.box(11.4, 2.4, 2.8), Kit.mat(0x000000));
     bocc.position.set(BUS_POS[0], 1.25, BUS_POS[2]).addScaledVector(roofDir, 1.45);
@@ -875,14 +878,12 @@ export function buildTown(): Town {
   // ─── Town square ─────────────────────────────────────────────────────────
   const doors = new BurstDoors();
   {
-    // Paving pattern.
-    for (let x = SQ_X0 + 4; x < SQ_X1; x += 4) boxAt(0.08, 0.012, SQ_Z0 - SQ_Z1, M.trimDark, x, 0.018, (SQ_Z0 + SQ_Z1) / 2, 0, 'E');
-    for (let z = SQ_Z0 - 4; z > SQ_Z1; z -= 4) boxAt(SQ_X1 - SQ_X0, 0.012, 0.08, M.trimDark, (SQ_X0 + SQ_X1) / 2, 0.018, z, 0, 'E');
+    // (Paving: the stone-flag texture on the square's ground plane.)
     // West: low shop row (spitter rooftop) + 3-storey.
     {
       const h = 4.3;
       const g = new THREE.Group();
-      Kit.add(g, Kit.box(20, h, 16), Kit.mat(0x5a4a3c), 0, h / 2, -8);
+      Kit.add(g, Kit.box(20, h, 16), facadeMat(0x6e5a48, 'brick'), 0, h / 2, -8);
       Kit.add(g, Kit.box(20.2, 0.12, 16.2), M.roof, 0, h + 0.04, -8);
       Kit.add(g, Kit.box(20.3, 0.5, 0.35), M.trimLight, 0, h + 0.25, 0.05);
       for (const [lx, c, txt] of [[-5, 0xffd8a0, 'BOOKS'], [5, 0, 'TOYS']] as const) {
@@ -896,7 +897,7 @@ export function buildTown(): Town {
       put(g, SQ_X0 + 1.5, -274, ROT.E, 0, 'E');
       // Rooftop clutter (behind where the spitters stand).
       boxAt(1.4, 0.9, 1.1, M.metalLight, -74, h + 0.45, -268, 0, 'E');
-      boxAt(0.7, 1.5, 0.7, Kit.mat(0x3b2a24), -77, h + 0.75, -280, 0, 'E');
+      boxAt(0.7, 1.5, 0.7, Kit.tex('brick', 0x5a3a30, 1.2), -77, h + 0.75, -280, 0, 'E');
     }
     bld({ w: 0, d: 16, floors: 3, color: col(3), shop: { interior: 0, awning: 0x2a4a3a } }, -284, SQ_Z1, SQ_X0, 'E');
     // Two newsstand kiosks (flat roofs at 3 m: the rooftop spitters' perches).
@@ -905,7 +906,7 @@ export function buildTown(): Town {
       const w = pad.x1 - pad.x0;
       const d = pad.z1 - pad.z0;
       const green = pad.x0 < -58;
-      const body = Kit.mat(green ? 0x2a4a3a : 0x5a2a2a);
+      const body = Kit.tex('planks', green ? 0x2e5040 : 0x602e2e, 1.2);
       Kit.add(g, Kit.box(w - 0.3, 2.6, d - 0.3), body, 0, 1.3, 0);
       Kit.add(g, Kit.box(w + 0.2, 0.25, d + 0.2), M.trimDark, 0, pad.y - 0.12, 0);
       // Serving hatch facing the rail, lit, with magazines / cups.
@@ -931,7 +932,7 @@ export function buildTown(): Town {
       // PRIME MEATS — the Butcher's lair.
       const x0 = -66;
       const x1 = -50;
-      const g = bld({ w: 0, d: 16, floors: 2, color: 0x5a4a44, trim: M.trimLight, shop: { interior: 0, noWindow: true } }, x0, x1, SQ_Z1, 'S');
+      const g = bld({ w: 0, d: 16, floors: 2, color: 0x6e5a52, tex: 'brick', trim: M.trimLight, shop: { interior: 0, noWindow: true } }, x0, x1, SQ_Z1, 'S');
       const red = Kit.glow(0xff3a2a, 0.55);
       // Display windows either side of the doors with hanging carcasses.
       for (const lx of [-5, 5]) {
@@ -939,7 +940,7 @@ export function buildTown(): Town {
         Kit.add(g, Kit.box(4.2, 0.06, 0.06), M.metal, lx, 2.85, 0.12);
         for (let i = 0; i < 3; i++) {
           const cx = lx - 1.3 + i * 1.3;
-          Kit.add(g, Kit.capsule(0.28, 0.9, 2, 6), Kit.mat(0x2a0a0a), cx, 2.0, 0.12);
+          Kit.add(g, Kit.capsule(0.28, 0.9, 2, 6), Kit.tex('skin', 0x4a140e, 1), cx, 2.0, 0.12);
           Kit.add(g, Kit.box(0.03, 0.4, 0.03), M.metal, cx, 2.75, 0.12);
         }
         for (let i = 1; i < 3; i++) Kit.add(g, Kit.box(0.08, 2.4, 0.16), M.winFrame, lx - 2.1 + i * 1.4, 1.85, 0.07);
@@ -951,7 +952,7 @@ export function buildTown(): Town {
       Kit.add(g, Kit.box(3.9, 0.4, 0.5), M.trimLight, 0, 3.6, 0.25);
       // Striped awning.
       for (let i = 0; i < 10; i++) {
-        Kit.add(g, Kit.box(1.4, 0.08, 1.8), Kit.mat(i % 2 ? 0xe8e0d8 : 0x9a1a1a), -6.3 + i * 1.4, 3.85, 0.85, 0.34);
+        Kit.add(g, Kit.box(1.4, 0.08, 1.8), Kit.tex('cloth', i % 2 ? 0xe8e0d8 : 0x9a1a1a, 0.5), -6.3 + i * 1.4, 3.85, 0.85, 0.34);
       }
       const sign = boardSign('PRIME MEATS', C.neonRed, 0.62, { pad: 0.8 });
       sign.position.set(0, 5.05, 0.25);
@@ -967,7 +968,7 @@ export function buildTown(): Town {
       cl.position.set(6.8, 7.5, 0);
       g.add(cl);
       // Door panels (world space, animated).
-      const dm = Kit.mat(0x3a2418);
+      const dm = Kit.tex('planks', 0x4a301f, 1.2);
       const dg = Kit.glow(0xff5a3a, 0.5);
       for (const sx of [-1, 1]) {
         const p = new THREE.Group();
@@ -988,14 +989,15 @@ export function buildTown(): Town {
     {
       const fx = SQ_X1;
       const g = new THREE.Group();
-      const stone = Kit.mat(0x7a7468);
+      // Big ashlar stone blocks.
+      const stone = Kit.tex('brick', 0x7a7468, 0.45);
       const h = 11;
       Kit.add(g, Kit.box(36, h, 18), stone, 0, h / 2, -9);
       Kit.add(g, Kit.box(36.5, 0.8, 18.5), M.trimLight, 0, h, -9);
       // Portico.
       Kit.add(g, Kit.box(14, 0.8, 4), M.trimLight, 0, 7.2, 2);
       Kit.add(g, Kit.cone(8.2, 2.2, 3), M.trimLight, 0, 8.7, 2, 0, Math.PI / 2, 0, 1, 1, 0.3);
-      for (let i = 0; i < 6; i++) Kit.add(g, Kit.cyl(0.38, 0.45, 6.8, 8), Kit.mat(0x8a847a), -6 + i * 2.4, 3.4, 3.4);
+      for (let i = 0; i < 6; i++) Kit.add(g, Kit.cyl(0.38, 0.45, 6.8, 8), Kit.tex('stucco', 0x8a847a, 1.5), -6 + i * 2.4, 3.4, 3.4);
       for (let i = 0; i < 3; i++) Kit.add(g, Kit.box(14 - i * 0.6, 0.2, 1.2), M.concrete, 0, 0.1 + i * 0.2, 4.8 - i * 0.4);
       // Windows.
       for (let f = 0; f < 2; f++) {
@@ -1010,7 +1012,7 @@ export function buildTown(): Town {
       const tw = new THREE.Group();
       Kit.add(tw, Kit.box(6, 14, 6), stone, 0, 7, 0);
       Kit.add(tw, Kit.box(6.6, 0.6, 6.6), M.trimLight, 0, 14, 0);
-      Kit.add(tw, Kit.box(5.2, 4, 5.2), Kit.mat(0x6a645a), 0, 16.3, 0);
+      Kit.add(tw, Kit.box(5.2, 4, 5.2), Kit.tex('brick', 0x6a645a, 0.45), 0, 16.3, 0);
       Kit.add(tw, Kit.cone(4.4, 5, 4), M.roof, 0, 20.8, 0, 0, Math.PI / 4, 0);
       const face = Kit.glow(0xfff0c8, 0.9);
       const hands = Kit.mat(0x1a1612);
@@ -1037,9 +1039,10 @@ export function buildTown(): Town {
         Kit.add(g, Kit.cyl(0.1, 0.1, 2.8, 6), M.white, Math.cos(a) * 3.3, 2.2, Math.sin(a) * 3.3);
         Kit.add(g, Kit.box(2.4, 0.06, 0.06), M.white, Math.cos(a + Math.PI / 8) * 3.2, 1.6, Math.sin(a + Math.PI / 8) * 3.2, 0, -(a + Math.PI / 8) + Math.PI / 2, 0);
       }
-      Kit.add(g, Kit.cyl(3.9, 3.9, 0.3, 8), Kit.mat(0x5a3a2e), 0, 3.6, 0);
+      const shingles = Kit.tex('planks', 0x5e3e30, 1.2);
+      Kit.add(g, Kit.cyl(3.9, 3.9, 0.3, 8), shingles, 0, 3.6, 0);
       Kit.add(g, Kit.cyl(3.7, 3.95, 0.12, 8), M.white, 0, 3.4, 0);
-      Kit.add(g, Kit.cone(0.9, 1.0, 8), Kit.mat(0x5a3a2e), 0, 4.25, 0);
+      Kit.add(g, Kit.cone(0.9, 1.0, 8), shingles, 0, 4.25, 0);
       // String lights around the eave.
       const bulbs = Kit.glow(0xffe2a0, 1.5);
       for (let i = 0; i < 24; i++) {
@@ -1053,17 +1056,18 @@ export function buildTown(): Town {
     {
       const g = new THREE.Group();
       Kit.add(g, Kit.cyl(3.2, 3.3, 0.7, 12), M.concrete, 0, 0.35, 0);
-      Kit.add(g, Kit.cyl(2.9, 2.9, 0.1, 12), Kit.std(0x101c28, 0.1, 0.4), 0, 0.62, 0);
+      Kit.add(g, Kit.cyl(2.9, 2.9, 0.1, 12), texStd(0x142232, 0.1, 0.4, 'water', 1.5, 0.5), 0, 0.62, 0);
       Kit.add(g, Kit.cyl(0.5, 0.7, 1.6, 8), M.concrete, 0, 1.4, 0);
       Kit.add(g, Kit.cyl(1.4, 1.2, 0.3, 10), M.concrete, 0, 2.2, 0);
       Kit.add(g, Kit.cyl(0.2, 0.3, 1.0, 6), M.concrete, 0, 2.8, 0);
       put(g, -36, -293, 0, 0, 'E');
       const st = new THREE.Group();
-      Kit.add(st, Kit.box(2, 2.2, 2), Kit.mat(0x6a665e), 0, 1.1, 0);
-      Kit.add(st, Kit.box(1.4, 0.4, 1.4), Kit.mat(0x3a5a4a), 0, 2.4, 0);
-      Kit.add(st, Kit.capsule(0.32, 0.9, 2, 6), Kit.mat(0x3a5a4a), 0, 3.3, 0);
-      Kit.add(st, Kit.box(0.3, 0.3, 0.3), Kit.mat(0x3a5a4a), 0, 4.1, 0);
-      Kit.add(st, Kit.box(0.12, 1.2, 0.12), Kit.mat(0x3a5a4a), 0.4, 3.8, 0, 0, 0, -0.5);
+      const bronze = Kit.tex('metal', 0x3e6050, 2, 0.6);
+      Kit.add(st, Kit.box(2, 2.2, 2), Kit.tex('brick', 0x6a665e, 1), 0, 1.1, 0);
+      Kit.add(st, Kit.box(1.4, 0.4, 1.4), bronze, 0, 2.4, 0);
+      Kit.add(st, Kit.capsule(0.32, 0.9, 2, 6), bronze, 0, 3.3, 0);
+      Kit.add(st, Kit.box(0.3, 0.3, 0.3), bronze, 0, 4.1, 0);
+      Kit.add(st, Kit.box(0.12, 1.2, 0.12), bronze, 0.4, 3.8, 0, 0, 0, -0.5);
       put(st, -70, -296, 0.4, 0, 'E');
     }
     // Ornate lamp posts with globes + string lights across the square.
@@ -1134,46 +1138,48 @@ function buildDiner(zone: THREE.Group, pools: LightPools, addDyn: (o: THREE.Obje
   const W = 18;
   const D = 11;
   const H = 4.4;
-  const steel = Kit.mat(0x9aa4ae);
-  const redStripe = Kit.mat(0x9a1f2a);
+  // Fluted stainless bands and riveted steel shell: the classic chrome diner.
+  const steel = Kit.tex('corrugated', 0x9aa4ae, 2, 0.55);
+  const redStripe = Kit.mat(0xa82230);
+  const shell = Kit.tex('metal', 0x8a8f96, 1, 0.6);
   // Shell: back wall, side walls, roof, floor (open front).
-  Kit.add(g, Kit.box(W, H, 0.3), Kit.mat(0x8a8f96), 0, H / 2, -D);
-  Kit.add(g, Kit.box(0.3, H, D), Kit.mat(0x8a8f96), -W / 2, H / 2, -D / 2);
-  Kit.add(g, Kit.box(0.3, H, D), Kit.mat(0x8a8f96), W / 2, H / 2, -D / 2);
-  Kit.add(g, Kit.box(W + 0.4, 0.4, D + 0.6), Kit.mat(0x5a5e66), 0, H + 0.2, -D / 2 + 0.2);
+  Kit.add(g, Kit.box(W, H, 0.3), shell, 0, H / 2, -D);
+  Kit.add(g, Kit.box(0.3, H, D), shell, -W / 2, H / 2, -D / 2);
+  Kit.add(g, Kit.box(0.3, H, D), shell, W / 2, H / 2, -D / 2);
+  Kit.add(g, Kit.box(W + 0.4, 0.4, D + 0.6), Kit.tex('metal', 0x5a5e66, 1, 0.7), 0, H + 0.2, -D / 2 + 0.2);
   // Front: kick panel and header with steel/red bands.
   Kit.add(g, Kit.box(W, 1.0, 0.3), steel, 0, 0.5, 0);
   Kit.add(g, Kit.box(W + 0.05, 0.18, 0.34), redStripe, 0, 0.75, 0);
   Kit.add(g, Kit.box(W, 1.15, 0.3), steel, 0, H - 0.58, 0);
   Kit.add(g, Kit.box(W + 0.05, 0.2, 0.34), redStripe, 0, H - 0.5, 0);
+  // Black-and-white checker bands (0.25 m squares, aligned to the texture rows).
+  const checker = Kit.tex('checker', 0x9a9a9a, 1.2);
+  Kit.add(g, Kit.box(W + 0.06, 0.25, 0.33), checker, 0, 0.375, 0);
+  Kit.add(g, Kit.box(W + 0.06, 0.25, 0.33), checker, 0, 4.125, 0);
   // Interior (unlit glow surfaces = warm fluorescent light).
-  const wall = Kit.glow(0xe8c890, 0.4);
+  const wall = texGlow(0xe8c890, 0.4, 'tiles', 1, 0.45);
   Kit.add(g, Kit.box(W - 0.6, H - 0.4, 0.05), wall, 0, H / 2, -D + 0.2);
   Kit.add(g, Kit.box(0.05, H - 0.4, D - 0.4), wall, -W / 2 + 0.2, H / 2, -D / 2);
   Kit.add(g, Kit.box(0.05, H - 0.4, D - 0.4), wall, W / 2 - 0.2, H / 2, -D / 2);
-  Kit.add(g, Kit.box(W - 0.4, 0.05, D - 0.4), Kit.glow(0x6a5a48, 0.45), 0, H - 0.05, -D / 2);
-  const tA = Kit.glow(0xd8d0c0, 0.32);
-  const tB = Kit.mat(0x202022);
-  for (let ix = 0; ix < 12; ix++) {
-    for (let iz = 0; iz < 7; iz++) {
-      Kit.add(g, Kit.box(1.5, 0.04, 1.5), (ix + iz) % 2 ? tA : tB, -W / 2 + 0.75 + ix * 1.5, 0.03, -0.75 - iz * 1.5);
-    }
-  }
+  Kit.add(g, Kit.box(W - 0.4, 0.05, D - 0.4), texGlow(0x6a5a48, 0.45, 'tiles', 0.6, 0.5), 0, H - 0.05, -D / 2);
+  // Black-and-white checker floor (one self-lit textured slab; texture gain ≈ 1.9 on the light squares).
+  Kit.add(g, Kit.box(W - 0.3, 0.04, D - 0.3), texGlow(0xd8d0c0, 0.19, 'checker', 0.5, 1), 0, 0.03, -D / 2);
   // Counter, stools, booths, pendant lamps.
-  Kit.add(g, Kit.box(12, 1.1, 0.8), Kit.glow(0x8a2a2a, 0.45), -1, 0.55, -7);
+  Kit.add(g, Kit.box(12, 1.1, 0.8), texGlow(0x8a2a2a, 0.45, 'corrugated', 2, 0.35), -1, 0.55, -7);
   Kit.add(g, Kit.box(12.2, 0.08, 1.0), steel, -1, 1.12, -7);
   for (let i = 0; i < 8; i++) {
     Kit.add(g, Kit.cyl(0.25, 0.25, 0.1, 8), Kit.glow(0xc83030, 0.6), -6.2 + i * 1.5, 0.75, -5.9);
     Kit.add(g, Kit.cyl(0.04, 0.04, 0.7, 5), steel, -6.2 + i * 1.5, 0.35, -5.9);
   }
   for (const bx of [-6.5, -2.5, 1.5, 5.5]) {
-    Kit.add(g, Kit.box(2.6, 0.5, 0.7), Kit.glow(0xb02a2a, 0.5), bx, 0.45, -1.2);
-    Kit.add(g, Kit.box(2.6, 1.0, 0.2), Kit.glow(0xb02a2a, 0.5), bx, 0.95, -1.6);
+    const vinyl = texGlow(0xb02a2a, 0.5, 'hide', 1.5, 0.45);
+    Kit.add(g, Kit.box(2.6, 0.5, 0.7), vinyl, bx, 0.45, -1.2);
+    Kit.add(g, Kit.box(2.6, 1.0, 0.2), vinyl, bx, 0.95, -1.6);
     Kit.add(g, Kit.box(1.2, 0.06, 0.7), Kit.glow(0xe8e0d0, 0.4), bx, 0.75, -0.6);
   }
   for (let i = 0; i < 6; i++) Kit.add(g, Kit.sphere(0.22, 8, 6), Kit.glow(0xffe0a0, 1.5), -7 + i * 2.8, H - 0.9, -3.5);
   // Pie case / coffee machine silhouettes on the back counter.
-  Kit.add(g, Kit.box(10, 1.4, 0.5), Kit.mat(0x3a3a3e), -1, 1.6, -10.4);
+  Kit.add(g, Kit.box(10, 1.4, 0.5), Kit.tex('metal', 0x3a3a3e, 2, 0.6), -1, 1.6, -10.4);
   // Window mullions and static glass (two panes are destructible, placed by the stage).
   const glass = Kit.mat(0x9fc8e8, { transparent: true, opacity: 0.22, smooth: true });
   const paneXs = [-6.6, -3.3, 0, 3.3];

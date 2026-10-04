@@ -57,6 +57,12 @@ export interface HumanoidOptions {
   sleeves?: number;
 }
 
+/** Retro pixel surfaces for un-baked humanoids (baked zombies/civilians re-texture per part in zombieKit). */
+const SKIN_TEX = { tex: 'skin', texScale: 0.8, texStrength: 0.3 } as const;
+const CLOTH_TEX = { tex: 'cloth', texScale: 0.8, texStrength: 0.6 } as const;
+const SHOE_TEX = { tex: 'hide', texScale: 3, texStrength: 0.65 } as const;
+const HAIR_TEX = { tex: 'bark', texScale: 2.5 } as const;
+
 /**
  * Builds a jointed low-poly human (≈1.78 m by default) from boxes.
  * Joint conventions (model faces +Z, character's LEFT is +X):
@@ -68,11 +74,11 @@ export function buildHumanoid(o: HumanoidOptions = {}): HumanoidRig {
   const height = o.height ?? 1.78;
   const s = height / 1.78;
   const bulk = o.bulk ?? 1;
-  const skin = Kit.mat(o.skin ?? 0xd8a888);
-  const shirt = Kit.mat(o.shirt ?? 0x556677);
-  const sleeves = Kit.mat(o.sleeves ?? o.shirt ?? 0x556677);
-  const pants = Kit.mat(o.pants ?? 0x333844);
-  const shoes = Kit.mat(o.shoes ?? 0x1c1c1c);
+  const skin = Kit.mat(o.skin ?? 0xd8a888, SKIN_TEX);
+  const shirt = Kit.mat(o.shirt ?? 0x556677, CLOTH_TEX);
+  const sleeves = Kit.mat(o.sleeves ?? o.shirt ?? 0x556677, CLOTH_TEX);
+  const pants = Kit.mat(o.pants ?? 0x333844, CLOTH_TEX);
+  const shoes = Kit.mat(o.shoes ?? 0x1c1c1c, SHOE_TEX);
   const armLen = o.armLength ?? 1;
   const hs = o.headSize ?? 1;
 
@@ -102,7 +108,7 @@ export function buildHumanoid(o: HumanoidOptions = {}): HumanoidRig {
   const headMesh = Kit.add(head, Kit.box(0.22 * hs, 0.26 * hs, 0.24 * hs), skin, 0, 0.13 * hs, 0.01);
   const headMeshes = [headMesh];
   if (o.hair !== null) {
-    const hair = Kit.add(head, Kit.box(0.235 * hs, 0.09 * hs, 0.25 * hs), Kit.mat(o.hair ?? 0x2a1d12), 0, 0.245 * hs, -0.005);
+    const hair = Kit.add(head, Kit.box(0.235 * hs, 0.09 * hs, 0.25 * hs), Kit.mat(o.hair ?? 0x2a1d12, HAIR_TEX), 0, 0.245 * hs, -0.005);
     headMeshes.push(hair);
   }
 

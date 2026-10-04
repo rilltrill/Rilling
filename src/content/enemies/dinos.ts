@@ -8,18 +8,20 @@ import {
   ARM_REST,
   Dino,
   PTERO_PAL,
-  Sculpt,
+  SURF,
   TRIKE_PAL,
   buildPtero,
   buildTheropod,
   buildTrike,
   dgeo,
+  dsculpt,
   hash3,
   poseTheroLeg,
   skinMat,
   type Palette,
   type PaintFn,
   type PteroRig,
+  type Surf,
   type TheroRig,
   type TheroSpec,
   type TrikeRig,
@@ -597,13 +599,14 @@ export class Compy extends Theropod {
       jaw: { len: 0.095, r0: [0.028, 0.015], r1: [0.012, 0.008] },
       tail: { lens: [0.24, 0.26], r0: [0.058, 0.064], taper: 0.45, rest: [0.05, 0.03] },
       arm: { upper: 0.05, fore: 0.05, r: 0.012, claw: 0.02 },
-      stripes: 16,
+      // Few bold bands: per-pixel stripes must stay resolvable at 288 lines.
+      stripes: 9,
       teeth: 0,
       sickle: false,
       quills: 0,
       eyeSize: 0.034,
       compact: true,
-      texDensity: 4,
+      texDensity: 3,
     };
   }
 
@@ -679,10 +682,10 @@ const RAPTOR_PALS: Record<string, Palette> = {
   },
   green: {
     key: 'green',
-    base: 0x6a7c4c,
-    back: 0x3c4a2c,
-    belly: 0xc8c89e,
-    stripe: 0x334028,
+    base: 0x7a8c4e,
+    back: 0x46542e,
+    belly: 0xd2d0a2,
+    stripe: 0x2c381e,
     accent: 0x9aa040,
     accent2: 0x4a5a22,
     claw: 0x1e1a14,
@@ -783,6 +786,8 @@ export class Raptor extends Theropod {
       sickle: true,
       quills: alpha ? 1.35 : 0.5,
       eyeSize: 0.038,
+      // Chunky scales that still read at mid-range through the arcade monitor.
+      texDensity: 1.3,
     };
   }
 
@@ -808,10 +813,12 @@ export class Raptor extends Theropod {
 
 const DILO_PAL: Palette = {
   key: 'dilo',
-  base: 0x6c7c3e,
-  back: 0x3c4a22,
-  belly: 0xdacd92,
-  stripe: 0x2a3414,
+  // Yellow-olive with bold dark dapples: reads against jungle greens and stays
+  // above black in the night storm.
+  base: 0x8c9a42,
+  back: 0x56622a,
+  belly: 0xe8dc9c,
+  stripe: 0x2c3414,
   accent: 0xe0461c,
   accent2: 0x8a2410,
   claw: 0x221c14,
@@ -887,6 +894,7 @@ export class Dilo extends Theropod {
       quills: 0,
       crests: true,
       eyeSize: 0.038,
+      texDensity: 1.5,
     };
   }
 
@@ -894,7 +902,7 @@ export class Dilo extends Theropod {
     super.build();
     // Collapsible neck frill: two fans around the upper neck, folded back along it.
     const head = this.r.head;
-    const mat = skinMat(2);
+    const mat = skinMat(this.spec.texDensity);
     const fp: PaintFn = (x, y, _z, _nx, _ny, nz) => {
       const rr = Math.hypot(x, y) / 0.46;
       if (nz < -0.3) return rr > 0.8 ? DILO_PAL.back : DILO_PAL.base;
@@ -910,7 +918,13 @@ export class Dilo extends Theropod {
         // Each half covers its side from below the jaw to just past the top.
         const a0 = side > 0 ? -1.35 : Math.PI - 1.75;
         const a1 = side > 0 ? 1.75 : Math.PI + 1.35;
-        return new Sculpt(0.04, 70)
+        // Display membrane: clean, bright paint with a faint wrinkle; the scaly back
+        // (folded side) keeps the body's scales.
+        const keys = new Map<number, Surf>([
+          [DILO_PAL.back, SURF.back],
+          [DILO_PAL.base, SURF.scales],
+        ]);
+        return dsculpt(0.04, 70, keys, SURF.frill)
           .fan(0.46, a0, a1, 9, [0.32, 0.66, 1], (i) => (i % 2 === 0 ? 1 : 0.86), 0.016, fp)
           .build();
       });

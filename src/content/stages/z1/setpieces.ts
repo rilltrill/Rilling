@@ -104,10 +104,10 @@ export class GasStation {
   spawn(world: World, pumps: THREE.Vector3[], barrels: THREE.Vector3[], propane: THREE.Vector3) {
     for (const p of pumps) {
       const g = new THREE.Group();
-      Kit.add(g, Kit.box(0.85, 1.75, 0.55), Kit.mat(0xb02a22), 0, 0.875, 0);
+      Kit.add(g, Kit.box(0.85, 1.75, 0.55), Kit.tex('metal', 0xb82c22, 2, 0.6), 0, 0.875, 0);
       Kit.add(g, Kit.box(0.7, 0.42, 0.05), Kit.glow(0x9fe8ff, 0.9), 0, 1.35, 0.29);
       Kit.add(g, Kit.box(0.7, 0.42, 0.05), Kit.glow(0x9fe8ff, 0.9), 0, 1.35, -0.29);
-      Kit.add(g, Kit.box(0.9, 0.18, 0.6), Kit.mat(0xdedad0), 0, 1.84, 0);
+      Kit.add(g, Kit.box(0.9, 0.18, 0.6), Kit.tex('metal', 0xdedad0, 2, 0.5), 0, 1.84, 0);
       Kit.add(g, Kit.box(0.12, 0.5, 0.12), Kit.mat(0x18181a), 0.5, 0.95, 0.1);
       Kit.add(g, Kit.cyl(0.03, 0.03, 0.9, 5), Kit.mat(0x18181a), 0.56, 0.5, 0.25, 0.5, 0, 0);
       bakeMerge(g);
@@ -130,10 +130,10 @@ export class GasStation {
     }
     {
       const g = new THREE.Group();
-      const cage = Kit.mat(0x3a3d42);
-      Kit.add(g, Kit.box(1.6, 1.7, 0.9), Kit.mat(0x22262c), 0, 0.85, 0);
+      const cage = Kit.tex('metal', 0x44474e, 2, 0.6);
+      Kit.add(g, Kit.box(1.6, 1.7, 0.9), Kit.tex('grate', 0x30343c, 2, 0.8), 0, 0.85, 0);
       for (let i = 0; i < 3; i++) {
-        Kit.add(g, Kit.cyl(0.2, 0.2, 1.1, 8), Kit.mat(0xd8d8d0), -0.5 + i * 0.5, 0.65, 0.05);
+        Kit.add(g, Kit.cyl(0.2, 0.2, 1.1, 8), Kit.tex('metal', 0xd8d8d0, 2, 0.5), -0.5 + i * 0.5, 0.65, 0.05);
       }
       for (let i = 0; i < 6; i++) Kit.add(g, Kit.box(0.04, 1.7, 0.04), cage, -0.78 + i * 0.31, 0.85, 0.47);
       Kit.add(g, Kit.box(1.0, 0.3, 0.03), Kit.glow(0xff5030, 1.1), 0, 1.5, 0.47);

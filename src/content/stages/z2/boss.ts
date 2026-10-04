@@ -7,7 +7,7 @@ import type { Enemy } from '../../../gameplay/Enemy';
 import { clamp, damp, smoothstep } from '../../../core/math';
 import { Kit } from '../../kit/ModelKit';
 import { createEnemy, registerEnemy } from '../../registry';
-import { M } from './mats';
+import { M, T, TX } from './mats';
 import { bakeInto } from './bake';
 import { z2Scene } from './scene';
 
@@ -35,6 +35,9 @@ const SKIN = 0xa8948a;
 const BONE = 0xd8cdb0;
 const EYE = 0xffd84a;
 const BILE = 0xa6ff2a;
+
+/** Tentacle-tip pustule at rest (cached Kit material, so identity is stable). */
+const pusMat = () => M(0x8e2e1e, 'skin', 2.4, 0.55);
 
 /** The body is modelled at full size and scaled to fit the atrium framing. */
 const BODY_SCALE = 0.86;
@@ -278,11 +281,13 @@ export class PatientZero extends Boss {
 
   protected override build() {
     const rng = this.world.rng;
-    const flesh = M(FLESH, 'skin', 1, 0.7);
-    const raw = M(FLESH_RAW, 'skin', 1.4, 0.6);
-    const dark = M(FLESH_DARK);
-    const skin = M(SKIN, 'skin', 1, 0.6);
-    const bone = M(BONE);
+    // Retro detail maps: bumpy wrinkled hide on the fused mass, veiny skin with
+    // rot sores on the raw meat and the victims, porous bone.
+    const flesh = M(FLESH, 'hide', 1.0, 0.9);
+    const raw = M(FLESH_RAW, 'skin', 0.8, 0.75);
+    const dark = M(FLESH_DARK, 'hide', 1.3, 0.8);
+    const skin = M(SKIN, 'skin', 1.1, 0.7);
+    const bone = M(BONE, 'hide', 2.6, 0.45);
     const vein = Kit.glow(0xff4a24, 1.2);
     const jit = (r: number, amt: number, seed: number) => Kit.jitter(Kit.ico(r, 1), amt, seed);
 
@@ -292,7 +297,7 @@ export class PatientZero extends Boss {
     const pool = new THREE.Group();
     this.model.add(pool);
     bakeInto(pool, (g) => {
-      const disc = new THREE.Mesh(Kit.cyl(4.9, 5.0, 0.16, 24), M(0x4a0a0a, 'skin', 0.8, 0.6));
+      const disc = new THREE.Mesh(Kit.cyl(4.9, 5.0, 0.16, 24), T(0x4a0a0a, TX.flesh));
       disc.position.y = 0.1;
       g.add(disc);
       for (let i = 0; i < 16; i++) {
@@ -358,7 +363,7 @@ export class PatientZero extends Boss {
     const chestMass = this.part(this.chest, jit(1.45, 0.25, 16), flesh, 0, 0.1, -0.25, 'torso');
     chestMass.scale.set(1.35, 1.0, 0.85);
     // Recessed cavity behind the heart.
-    const cav = this.part(this.chest, Kit.sphere(0.85, 10, 8), Kit.mat(0x1a0303), 0, -0.05, 0.62, 'torso');
+    const cav = this.part(this.chest, Kit.sphere(0.85, 10, 8), M(0x240505, 'hide', 2.4, 0.8), 0, -0.05, 0.62, 'torso');
     cav.scale.set(1, 1.1, 0.55);
     this.heartRig = Kit.pivot(this.chest, 0, -0.05, 0.78);
     this.heart = new THREE.Mesh(Kit.ico(0.44, 1), Kit.glow(0xff2a2a, 1.5));
@@ -471,7 +476,9 @@ export class PatientZero extends Boss {
     eye(this.torso, 0.95, 1.35, 1.34, 0.24);
 
     // ── Tentacles ──
-    const tentMat = M(FLESH, 'skin', 1.2, 0.7);
+    // (The tube is rebuilt every frame in body space, so the map slides along it
+    // as it moves — keep it gentle.)
+    const tentMat = M(FLESH, 'hide', 1.2, 0.55);
     const mkTent = (side: 1 | -1, upper: boolean) => {
       const tube = new Tube(upper ? 0.5 : 0.42, 0.11, tentMat);
       this.body.add(tube.mesh);
@@ -491,7 +498,7 @@ export class PatientZero extends Boss {
         c3.rotation.z = 0.8;
         g.add(c3);
       });
-      const pustule = new THREE.Mesh(Kit.ico(0.24, 1), Kit.mat(0x7a2a1a));
+      const pustule = new THREE.Mesh(Kit.ico(0.24, 1), pusMat());
       pustule.position.y = -0.05;
       tip.add(pustule);
       const t: Tentacle = {
@@ -735,7 +742,7 @@ export class PatientZero extends Boss {
   }
 
   private armTip(t: Tentacle, on: boolean) {
-    const mat = on ? Kit.glow(0xffa030, 1.8) : Kit.mat(0x7a2a1a);
+    const mat = on ? Kit.glow(0xffa030, 1.8) : pusMat();
     if (this.flashObj === t.pustule) this.flashMat = mat;
     else t.pustule.material = mat;
     // (Never re-register hit zones once the boss is dead.)

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import { Rng } from '../../../core/Rng';
 import { EnvKit } from '../../kit/EnvKit';
-import { bakeMerge } from './bake';
+import { applyRetroArray, bakeMerge, texGlow, type RetroParams } from './bake';
 
 /**
  * Cheap atmospheric effects for MAIN STREET: fake light pools and volumetric
@@ -80,7 +80,12 @@ export class LightPools {
     this.defs.push({ x, y, z, r, color, k, wallYaw: yaw });
   }
 
-  build(): THREE.InstancedMesh {
+  /**
+   * `surface` gives the retro texture of whatever each pool lands on: the pool is
+   * multiplied by the same world-space pixel texture, so lit asphalt / stone keeps
+   * its pattern instead of washing out under a flat additive splash.
+   */
+  build(surface?: (x: number, z: number, wall: boolean) => RetroParams): THREE.InstancedMesh {
     const mat = Kit.track(
       new THREE.MeshBasicMaterial({
         map: radialTexture(),
@@ -92,7 +97,14 @@ export class LightPools {
       }),
     );
     const geo = Kit.track(new THREE.PlaneGeometry(1, 1));
-    const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, this.defs.length));
+    const n = Math.max(1, this.defs.length);
+    if (surface) {
+      const ret = new Float32Array(n * 4);
+      this.defs.forEach((d, i) => ret.set(surface(d.x, d.z, d.wallYaw !== undefined), i * 4));
+      geo.setAttribute('retro', new THREE.InstancedBufferAttribute(ret, 4));
+      applyRetroArray(mat);
+    }
+    const mesh = new THREE.InstancedMesh(geo, mat, n);
     this.defs.forEach((d, i) => {
       if (d.wallYaw !== undefined) _e.set(0, d.wallYaw, 0);
       else _e.set(-Math.PI / 2, 0, 0);
@@ -441,7 +453,8 @@ export function nightSky(moonDir: THREE.Vector3, horizon: number, top: number): 
 
   // Moon disc + halo.
   const moonPos = md.clone().multiplyScalar(250);
-  const moon = Kit.add(g, Kit.sphere(5.5, 16, 10), Kit.glow(0xe6ecff, 1.05), moonPos.x, moonPos.y, moonPos.z);
+  // Mottled 'rock' maria on the self-lit disc.
+  const moon = Kit.add(g, Kit.sphere(5.5, 16, 10), texGlow(0xe6ecff, 1.05, 'rock', 0.35, 0.4), moonPos.x, moonPos.y, moonPos.z);
   moon.renderOrder = -1;
   // Craters.
   const crater = Kit.glow(0xb9c2dc, 1.0);

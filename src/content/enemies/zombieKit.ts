@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Rng } from '../../core/Rng';
 import type { HitPart } from '../../core/types';
 import { Kit } from '../kit/ModelKit';
+import { Textures, type TexName } from '../kit/Textures';
 import { buildHumanoid, type HumanoidRig, type Limb, type LegLimb } from '../kit/humanoid';
 
 /**
@@ -14,6 +15,12 @@ import { buildHumanoid, type HumanoidRig, type Limb, type LegLimb } from '../kit
  * and share a zone into ONE vertex-coloured mesh. A dressed walker ends up at
  * ~13 draw calls instead of ~30, and every zombie shares a single material.
  *
+ * Retro surfaces: that one material carries SEVERAL pixel textures (rotting
+ * skin, cloth, riot-armour metal, wet gore, hair, leather, camo…). Each baked
+ * part stores its surface class (`ZT`) plus a random texture offset in a
+ * per-vertex attribute, so a cop's shirt, his face and his duty belt are all
+ * textured differently without a single extra draw call. See `ZSURF`.
+ *
  * Animated sub-parts (spitter throat sac, bloater belly) get their own pivot;
  * meshes flagged `userData.keep` (individually poppable pustules) are left alone.
  */
@@ -24,7 +31,7 @@ export type Zone = HitPart | 'none';
 
 /** Sickly zombie skin tones (pale so they read at night). */
 export const SKIN_TONES = [0xa9b79a, 0x93a77e, 0xa3ab9e, 0x96a2ae, 0xb4ae84, 0x86926f, 0x8a8c78, 0x7a7660] as const;
-export const BLOOD = 0x5c0b0b;
+export const BLOOD = 0x6a0c0c;
 export const BLOOD_DARK = 0x3a0606;
 export const GORE = 0x7a1612;
 export const BONE = 0xd8cfb0;
@@ -34,6 +41,129 @@ export const GOO = 0x7dff3a;
 /** Emission of skin (fraction of its own colour) — pale highlights at night. */
 const SKIN_E = 0.26;
 const CLOTH_E = 0.03;
+const TEETH = 0xd8d0b0;
+const MOUTH = 0x1a0606;
+/** Exposed muscle (brutes). */
+export const MUSCLE = 0x6a1a16;
+
+// ─── Retro surfaces ─────────────────────────────────────────────────────────
+
+/**
+ * Surface classes of baked parts. Set `mesh.userData.t` to force one;
+ * otherwise it is inferred at bake time (armour zone → METAL, blood/gore
+ * colours → GORE, bone → BONE, skin → SKIN, everything else CLOTH).
+ * BONE doubles as a subtle grit for hard plastics (hard hats); FLESH is clean,
+ * living skin for civilians (same texture, faint and without the purple veins).
+ */
+export const ZT = { SKIN: 0, CLOTH: 1, METAL: 2, GORE: 3, HAIR: 4, LEATHER: 5, BONE: 6, CAMO: 7, GOWN: 8, FLAT: 9, FLESH: 10, PLAID: 11 } as const;
+export type ZSurface = (typeof ZT)[keyof typeof ZT];
+
+/**
+ * Pixel texture per surface class (indexed by `ZT`). `scale` multiplies the
+ * texture's own density (< 1 = chunkier texels): zombies are mostly seen from
+ * 3–12 m at ~288 lines, so texels are kept around 2 cm — one or two screen
+ * pixels — instead of dissolving into mip-mapped mush.
+ *
+ * CLOTH stays soft (the 'cloth' weave turns into knit rows on big bright
+ * garments) and SKIN veins are mostly desaturated (the raw texture's tinted
+ * veins quantise into magenta speckle on large pale bodies). PLAID is the
+ * living worker's buffalo-check flannel — a pattern no zombie wears.
+ */
+const ZSURF: { tex: TexName | null; scale: number; strength: number; sat?: number }[] = [
+  /* SKIN    */ { tex: 'skin', scale: 0.8, strength: 0.75, sat: 0.25 },
+  /* CLOTH   */ { tex: 'cloth', scale: 0.8, strength: 0.6 },
+  /* METAL   */ { tex: 'metal', scale: 2, strength: 0.9 },
+  /* GORE    */ { tex: 'hide', scale: 2.5, strength: 1 },
+  /* HAIR    */ { tex: 'bark', scale: 2.5, strength: 1 },
+  /* LEATHER */ { tex: 'hide', scale: 3, strength: 0.65 },
+  /* BONE    */ { tex: 'hide', scale: 4, strength: 0.35 },
+  /* CAMO    */ { tex: 'leaves', scale: 2, strength: 1 },
+  /* GOWN    */ { tex: 'wallpaper', scale: 2.2, strength: 0.6 },
+  /* FLAT    */ { tex: null, scale: 1, strength: 0 },
+  /* FLESH   */ { tex: 'skin', scale: 0.8, strength: 0.3, sat: 0 },
+  /* PLAID   */ { tex: 'checker', scale: 4, strength: 0.42 },
+];
+
+/**
+ * Added to a part's surface class when its texture must stick to the surface
+ * (parts under a pivot whose SCALE is animated — the bloater's swelling belly):
+ * the shader then projects in the mesh's own unscaled space, so the pattern
+ * stretches with the skin instead of crawling across it.
+ */
+const ZT_LOCAL = 16;
+
+const GORE_COLORS = new Set<number>([BLOOD, BLOOD_DARK, GORE, GUTS, MUSCLE, MOUTH, 0x2a1a1a]);
+
+/** Per-part texture offsets so no two zombies (or limbs) show the same pattern in the same spot. */
+let texSeed = 1;
+function texOffset(): number {
+  texSeed = (Math.imul(texSeed, 1103515245) + 12345) & 0x7fffffff;
+  return (texSeed / 0x7fffffff) * 4;
+}
+
+/** Surface class of a part about to be baked. */
+function surfaceOf(m: THREE.Mesh, color: number): number {
+  const t = m.userData.t as number | undefined;
+  if (t !== undefined) return t;
+  if (m.userData.z === 'armor') return ZT.METAL;
+  if (GORE_COLORS.has(color)) return ZT.GORE;
+  if (color === BONE || color === TEETH) return ZT.BONE;
+  if (m.userData.e === SKIN_E) return ZT.SKIN;
+  return ZT.CLOTH;
+}
+
+/**
+ * GLSL for the multi-surface texture lookup. The projection plane comes from
+ * the screen-space derivative face normal (smooth-normal parts such as the
+ * bloater belly still get one crisp plane per triangle). Position derivatives
+ * are taken once, in uniform control flow, and swizzled to the chosen plane;
+ * the part's class then does ONE explicit-gradient fetch (`textureGrad`) from
+ * its own texture — one fetch per fragment instead of one per texture, correct
+ * mip selection, and the per-part texture offsets never feed the gradients (no
+ * mip seam where two parts meet).
+ */
+function surfaceShader() {
+  const names: TexName[] = [];
+  for (const s of ZSURF) if (s.tex && !names.includes(s.tex)) names.push(s.tex);
+  const f = (n: number) => n.toFixed(5);
+  const samplers = names.map((_, i) => `uniform sampler2D uZTex${i};`).join('\n');
+  let select = '';
+  ZSURF.forEach((s, i) => {
+    const ti = s.tex ? names.indexOf(s.tex) : -1;
+    const rt = s.tex ? Textures.get(s.tex) : null;
+    const scale = rt ? rt.density * s.scale : 1;
+    const gain = rt ? rt.gain : 1;
+    select += `${i ? 'else ' : ''}if (zc < ${i}.5) { zi = ${ti}; zs = ${f(scale)}; zg = ${f(gain)}; zk = ${f(s.strength)}; zsat = ${f(s.sat ?? 1)}; }\n`;
+  });
+  let fetch = '';
+  names.forEach((_, i) => {
+    fetch += `${i ? 'else ' : ''}if (zi == ${i}) zp = textureGrad(uZTex${i}, zuv, zgx, zgy).rgb;\n`;
+  });
+  return {
+    names,
+    pars: `${samplers}\nvarying vec3 vZPos;\nvarying vec3 vZTex;`,
+    main: `{
+      vec3 zdx = dFdx(vZPos);
+      vec3 zdy = dFdy(vZPos);
+      vec3 an = abs(cross(zdx * 64.0, zdy * 64.0));
+      vec2 ruv; vec2 zgx; vec2 zgy;
+      if (an.x > an.y && an.x > an.z) { ruv = vZPos.zy; zgx = zdx.zy; zgy = zdy.zy; }
+      else if (an.y > an.z) { ruv = vZPos.xz; zgx = zdx.xz; zgy = zdy.xz; }
+      else { ruv = vZPos.xy; zgx = zdx.xy; zgy = zdy.xy; }
+      float zc = floor(vZTex.x + 0.5);
+      int zi = -1; float zs = 1.0; float zg = 1.0; float zk = 0.0; float zsat = 1.0;
+      ${select}
+      vec2 zuv = (ruv + vZTex.yz) * zs;
+      zgx *= zs; zgy *= zs;
+      vec3 zp = vec3(1.0);
+      ${fetch}
+      zp = mix(vec3(dot(zp, vec3(0.299, 0.587, 0.114))), zp, zsat);
+      vec3 zf = mix(vec3(1.0), zp * zg, zk);
+      diffuseColor.rgb *= zf;
+      totalEmissiveRadiance *= zf;
+    }`,
+  };
+}
 
 const CASUAL_SHIRTS = [0x4b5a6b, 0x6b4545, 0x56663f, 0x7a6a50, 0x3d3d4d, 0x8a8a86, 0x9a7a34, 0x34587a, 0x7a3a4a, 0xc8c2b2, 0x2f5f56];
 const CASUAL_PANTS = [0x2e3d5c, 0x3a4a6a, 0x8a7a5a, 0x262626, 0x4a4a4a, 0x3b4252, 0x4a3a2a];
@@ -50,6 +180,8 @@ const _col = new THREE.Color();
 const liveGeos = new Set<THREE.BufferGeometry>();
 let guardLive = false;
 let zMat: THREE.MeshLambertMaterial | null = null;
+let zUniforms: Record<string, { value: THREE.Texture }> = {};
+let zTexNames: TexName[] = [];
 
 /** Register a sentinel with Kit so any still-live baked geometry is freed when the stage's GPU resources are disposed. */
 function stageGuard() {
@@ -80,15 +212,36 @@ export function releaseGeos(list: THREE.BufferGeometry[]) {
  */
 export function zombieMaterial(): THREE.MeshLambertMaterial {
   if (!zMat) {
-    zMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-    zMat.emissive.setHex(0xffffff);
-    zMat.onBeforeCompile = (sh) => {
-      sh.fragmentShader = sh.fragmentShader.replace(
-        'vec3 totalEmissiveRadiance = emissive;',
-        'vec3 totalEmissiveRadiance = emissive * vColor.rgb * ( 1.0 - vColor.a );',
-      );
+    const m = (zMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+    m.emissive.setHex(0xffffff);
+    const surf = surfaceShader();
+    zTexNames = surf.names;
+    zUniforms = {};
+    for (let i = 0; i < surf.names.length; i++) zUniforms[`uZTex${i}`] = { value: Textures.get(surf.names[i]).texture };
+    const uniforms = zUniforms;
+    m.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, uniforms);
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute vec3 zTex;\nvarying vec3 vZPos;\nvarying vec3 vZTex;')
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          // World-sized texels; surface-locked parts (class + ${ZT_LOCAL}) use their unscaled local space.
+          bool zLoc = zTex.x > ${ZT_LOCAL - 0.5};
+          vZPos = zLoc ? position : position * vec3(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz), length(modelMatrix[2].xyz));
+          vZTex = vec3(zLoc ? zTex.x - ${ZT_LOCAL}.0 : zTex.x, zTex.yz);`,
+        );
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', `#include <common>\n${surf.pars}`)
+        .replace('vec3 totalEmissiveRadiance = emissive;', 'vec3 totalEmissiveRadiance = emissive * vColor.rgb * ( 1.0 - vColor.a );')
+        .replace('#include <color_fragment>', `#include <color_fragment>\n${surf.main}`);
     };
-    zMat.customProgramCacheKey = () => 'overrun-zombie-emask';
+    m.customProgramCacheKey = () => 'overrun-zombie-emask-surf3';
+    // Already textured: a later Kit.applyTexture() must not stack a second projection.
+    m.userData.retroTex = 'skin';
+  } else {
+    // Textures are regenerated after a stage's GPU resources were disposed — follow them.
+    for (let i = 0; i < zTexNames.length; i++) zUniforms[`uZTex${i}`].value = Textures.get(zTexNames[i]).texture;
   }
   Kit.track(zMat);
   return zMat;
@@ -105,8 +258,9 @@ const _nm = new THREE.Matrix3();
  * single pass (no intermediate clones). Lambert parts get an RGBA colour
  * attribute (alpha = 1 − emission). Palettes and gore are random per zombie,
  * so the result is owned by that zombie (see `releaseGeos`) rather than cached.
+ * `local` = surface-locked texture projection (see `ZT_LOCAL`).
  */
-function mergedGeo(list: THREE.Mesh[], colored: boolean): THREE.BufferGeometry {
+function mergedGeo(list: THREE.Mesh[], colored: boolean, local = false): THREE.BufferGeometry {
   stageGuard();
   let count = 0;
   for (const m of list) {
@@ -117,6 +271,7 @@ function mergedGeo(list: THREE.Mesh[], colored: boolean): THREE.BufferGeometry {
   const pos = new Float32Array(count * 3);
   const nor = new Float32Array(count * 3);
   const col = colored ? new Float32Array(count * 4) : null;
+  const zt = colored ? new Float32Array(count * 3) : null;
   let o = 0;
   for (const m of list) {
     const g = m.geometry;
@@ -129,12 +284,19 @@ function mergedGeo(list: THREE.Mesh[], colored: boolean): THREE.BufferGeometry {
     let cg = 0;
     let cb = 0;
     let ca = 1;
+    let ts = 0;
+    let tu = 0;
+    let tv = 0;
     if (col) {
-      _col.setHex(colorOf(m));
+      const hex = colorOf(m);
+      _col.setHex(hex);
       cr = _col.r;
       cg = _col.g;
       cb = _col.b;
       ca = 1 - Math.min(1, Math.max(0, (m.userData.e as number | undefined) ?? 0));
+      ts = surfaceOf(m, hex) + (local ? ZT_LOCAL : 0);
+      tu = texOffset();
+      tv = texOffset();
     }
     const n = idx ? idx.length : P.length / 3;
     for (let i = 0; i < n; i++) {
@@ -158,12 +320,15 @@ function mergedGeo(list: THREE.Mesh[], colored: boolean): THREE.BufferGeometry {
         nor[o3 + 1] = ty / l;
         nor[o3 + 2] = tz / l;
       }
-      if (col) {
+      if (col && zt) {
         const o4 = o * 4;
         col[o4] = cr;
         col[o4 + 1] = cg;
         col[o4 + 2] = cb;
         col[o4 + 3] = ca;
+        zt[o3] = ts;
+        zt[o3 + 1] = tu;
+        zt[o3 + 2] = tv;
       }
       o++;
     }
@@ -172,6 +337,7 @@ function mergedGeo(list: THREE.Mesh[], colored: boolean): THREE.BufferGeometry {
   merged.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   merged.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   if (col) merged.setAttribute('color', new THREE.BufferAttribute(col, 4));
+  if (zt) merged.setAttribute('zTex', new THREE.BufferAttribute(zt, 3));
   merged.computeBoundingSphere();
   merged.computeBoundingBox();
   // 'shared' keeps World.dispose() from touching it; the owning zombie frees it.
@@ -185,6 +351,8 @@ function mergedGeo(list: THREE.Mesh[], colored: boolean): THREE.BufferGeometry {
  * zone into one mesh (Lambert parts → shared vertex-colour material; other
  * materials, e.g. glowing eyes, merge per material). Hidden meshes, meshes
  * with children and `userData.keep` meshes are left untouched.
+ * Set `userData.texLocal` on a pivot whose scale is animated (swelling bellies)
+ * so its parts' textures stretch with it instead of swimming.
  */
 export function bakeTree(root: THREE.Object3D, out: THREE.BufferGeometry[] = []) {
   const nodes: THREE.Object3D[] = [];
@@ -206,7 +374,7 @@ export function bakeTree(root: THREE.Object3D, out: THREE.BufferGeometry[] = [])
     for (const [key, list] of groups) {
       const lam = key.endsWith('|lam');
       if (!lam && list.length < 2) continue;
-      const geo = mergedGeo(list, lam);
+      const geo = mergedGeo(list, lam, p.userData.texLocal === true);
       out.push(geo);
       const mesh = new THREE.Mesh(geo, lam ? zombieMaterial() : (list[0].material as THREE.Material));
       mesh.userData.z = list[0].userData.z ?? 'none';
@@ -215,6 +383,69 @@ export function bakeTree(root: THREE.Object3D, out: THREE.BufferGeometry[] = [])
       p.add(mesh);
     }
   }
+}
+
+/** Sort every visible mesh under `root` into hit-zone lists (by `userData.z`). */
+export function collectZones(root: THREE.Object3D, zones: Record<Zone, THREE.Mesh[]>) {
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const z = (m.userData.z as Zone | undefined) ?? 'none';
+    // Skip parts already hidden at build time (e.g. a missing arm).
+    let n: THREE.Object3D | null = m;
+    while (n && n !== root) {
+      if (!n.visible) return;
+      n = n.parent;
+    }
+    zones[z].push(m);
+  });
+  return zones;
+}
+
+/** A baked plain humanoid (see `bakeHumanoid`). */
+export interface BakedHumanoid {
+  zones: Record<Zone, THREE.Mesh[]>;
+  /** Baked geometry owned by the caller — free with `releaseGeos` when it is removed. */
+  geos: THREE.BufferGeometry[];
+}
+
+/**
+ * Bake a living (civilian) humanoid with the same shared surface material as
+ * the zombies: clean FLESH skin, cloth clothes, leather shoes, textured hair.
+ * Parts added under the rig's joints before baking (faces, hats, vests) merge
+ * for free; pre-set `userData.t` / `userData.e` on them to pick a surface or a
+ * self-lit glow, and `userData.z = 'none'` on props that stick out past the
+ * body (hat brims) so they bake into a mesh that is never registered as a
+ * target. `skinGlow` / `clothGlow` = emission of skin / clothes so the
+ * innocent stays readable in dark stages. Returns the hit-zone lists to register.
+ */
+export function bakeHumanoid(rig: HumanoidRig, o: { skin: number; skinGlow?: number; clothGlow?: number }): BakedHumanoid {
+  const skinE = o.skinGlow ?? 0.14;
+  const clothE = o.clothGlow ?? 0.07;
+  const joints = new Map<THREE.Object3D, Zone>();
+  joints.set(rig.head, 'head');
+  for (const p of [rig.hips, rig.spine, rig.chest, rig.neck]) joints.set(p, 'torso');
+  for (const a of [rig.armL, rig.armR]) joints.set(a.shoulder, 'limb').set(a.elbow, 'limb');
+  for (const l of [rig.legL, rig.legR]) joints.set(l.hip, 'limb').set(l.knee, 'limb');
+  const hair = new Set<THREE.Object3D>(rig.meshes.head.filter((m) => m !== rig.headMesh));
+  rig.root.traverse((obj) => {
+    const m = obj as THREE.Mesh;
+    if (!m.isMesh) return;
+    if (m.userData.z === undefined) {
+      let p: THREE.Object3D | null = m.parent;
+      while (p && !joints.has(p)) p = p.parent;
+      m.userData.z = (p && joints.get(p)) ?? 'torso';
+    }
+    const skin = colorOf(m) === o.skin;
+    if (m.userData.t === undefined) {
+      m.userData.t = skin ? ZT.FLESH : hair.has(m) ? ZT.HAIR : m === rig.legL.foot || m === rig.legR.foot ? ZT.LEATHER : ZT.CLOTH;
+    }
+    if (m.userData.e === undefined) m.userData.e = skin ? skinE : clothE;
+  });
+  const geos: THREE.BufferGeometry[] = [];
+  bakeTree(rig.root, geos);
+  const zones: Record<Zone, THREE.Mesh[]> = { head: [], torso: [], limb: [], weak: [], armor: [], tail: [], body: [], none: [] };
+  return { zones: collectZones(rig.root, zones), geos };
 }
 
 // ─── Body builder ────────────────────────────────────────────────────────────
@@ -247,7 +478,6 @@ export class ZBody {
   /** Geometry created by the bake (owned by this body). */
   readonly geos: THREE.BufferGeometry[] = [];
   private zoneOf = new Map<THREE.Object3D, Zone>();
-  private skinMat: THREE.Material;
 
   constructor(o: ZBodyOptions) {
     this.skin = o.skin;
@@ -262,7 +492,6 @@ export class ZBody {
       armLength: this.al,
       hair: o.hair === undefined ? null : o.hair,
     }));
-    this.skinMat = Kit.mat(o.skin);
     this.pelvis = r.meshes.torso[1];
     this.neckMesh = r.neck.children.find((c) => (c as THREE.Mesh).isMesh) as THREE.Mesh;
     const z = this.zoneOf;
@@ -274,11 +503,16 @@ export class ZBody {
     for (const m of r.meshes.torso) this.tag(m, 'torso');
     for (const m of r.meshes.limbs) this.tag(m, 'limb');
     this.tag(this.neckMesh, 'torso');
+    // Hair (the humanoid's scalp block) and shoes get their own surfaces.
+    for (const m of r.meshes.head) if (m !== r.headMesh) m.userData.t = ZT.HAIR;
+    for (const l of [r.legL, r.legR]) l.foot.userData.t = ZT.LEATHER;
   }
 
   private tag(m: THREE.Mesh, zone: Zone) {
     m.userData.z = zone;
-    m.userData.e = m.material === this.skinMat ? SKIN_E : CLOTH_E;
+    const skin = colorOf(m) === this.skin;
+    m.userData.e = skin ? SKIN_E : CLOTH_E;
+    if (skin) m.userData.t = ZT.SKIN;
   }
 
   zoneFor(parent: THREE.Object3D): Zone {
@@ -303,11 +537,15 @@ export class ZBody {
     return 0.01 + 0.12 * this.hs;
   }
 
-  /** Add a coloured box. `e` = emission (0..1). Zone defaults to the joint's zone. */
+  /**
+   * Add a coloured box. `e` = emission (0..1). Zone defaults to the joint's zone.
+   * Body-skin coloured parts get the skin surface (+ its night glow); set
+   * `userData.t` on the result to pick another surface (see `ZT`).
+   */
   box(parent: THREE.Object3D, w: number, h: number, d: number, color: number, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, e = 0, zone?: Zone): THREE.Mesh {
     const m = Kit.add(parent, Kit.box(w, h, d), Kit.mat(color), x, y, z, rx, ry, rz);
     m.userData.z = zone ?? this.zoneFor(parent);
-    if (e) m.userData.e = e;
+    this.skinAware(m, color, e);
     return m;
   }
 
@@ -315,7 +553,21 @@ export class ZBody {
   part(parent: THREE.Object3D, geo: THREE.BufferGeometry, color: number, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx, e = 0, zone?: Zone): THREE.Mesh {
     const m = Kit.add(parent, geo, Kit.mat(color), x, y, z, rx, ry, rz, sx, sy, sz);
     m.userData.z = zone ?? this.zoneFor(parent);
-    if (e) m.userData.e = e;
+    this.skinAware(m, color, e);
+    return m;
+  }
+
+  private skinAware(m: THREE.Mesh, color: number, e: number) {
+    if (color === this.skin) {
+      m.userData.t = ZT.SKIN;
+      m.userData.e = e || SKIN_E;
+    } else if (e) m.userData.e = e;
+  }
+
+  /** Same as `box`, with an explicit surface class. */
+  sbox(t: ZSurface, parent: THREE.Object3D, w: number, h: number, d: number, color: number, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, e = 0, zone?: Zone): THREE.Mesh {
+    const m = this.box(parent, w, h, d, color, x, y, z, rx, ry, rz, e, zone);
+    m.userData.t = t;
     return m;
   }
 
@@ -326,50 +578,40 @@ export class ZBody {
     return m;
   }
 
-  recolor(m: THREE.Mesh, color: number, e = CLOTH_E) {
+  recolor(m: THREE.Mesh, color: number, e = CLOTH_E, t: ZSurface = ZT.CLOTH) {
     m.material = Kit.mat(color);
-    m.userData.e = color === this.skin ? SKIN_E : e;
+    const skin = color === this.skin;
+    m.userData.e = skin ? SKIN_E : e;
+    m.userData.t = skin ? ZT.SKIN : t;
   }
 
-  /** Recolour the standard clothing slots. */
-  clothes(o: { shirt?: number; sleeves?: 'none' | 'short' | 'long'; sleeveColor?: number; pants?: number; shins?: 'pants' | 'skin'; thighs?: 'pants' | 'skin'; shoes?: number; e?: number }) {
+  /** Recolour the standard clothing slots (`t` = their surface; shoes are leather). */
+  clothes(o: { shirt?: number; sleeves?: 'none' | 'short' | 'long'; sleeveColor?: number; pants?: number; shins?: 'pants' | 'skin'; thighs?: 'pants' | 'skin'; shoes?: number; e?: number }, t: ZSurface = ZT.CLOTH) {
     const r = this.rig;
     const e = o.e ?? CLOTH_E;
-    if (o.shirt !== undefined) this.recolor(r.torsoMesh, o.shirt, e);
+    if (o.shirt !== undefined) this.recolor(r.torsoMesh, o.shirt, e, t);
     const sleeve = o.sleeveColor ?? o.shirt;
     if (o.sleeves && sleeve !== undefined) {
       for (const a of [r.armL, r.armR]) {
-        this.recolor(a.upper, o.sleeves === 'none' ? this.skin : sleeve, e);
-        this.recolor(a.lower, o.sleeves === 'long' ? sleeve : this.skin, e);
+        this.recolor(a.upper, o.sleeves === 'none' ? this.skin : sleeve, e, t);
+        this.recolor(a.lower, o.sleeves === 'long' ? sleeve : this.skin, e, t);
       }
     }
     if (o.pants !== undefined) {
-      this.recolor(this.pelvis, o.pants);
+      this.recolor(this.pelvis, o.pants, CLOTH_E, t);
       for (const l of [r.legL, r.legR]) {
-        this.recolor(l.thigh, o.thighs === 'skin' ? this.skin : o.pants);
-        this.recolor(l.shin, o.shins === 'skin' ? this.skin : o.pants);
+        this.recolor(l.thigh, o.thighs === 'skin' ? this.skin : o.pants, CLOTH_E, t);
+        this.recolor(l.shin, o.shins === 'skin' ? this.skin : o.pants, CLOTH_E, t);
       }
     }
-    if (o.shoes !== undefined) for (const l of [r.legL, r.legR]) this.recolor(l.foot, o.shoes);
+    if (o.shoes !== undefined) for (const l of [r.legL, r.legR]) this.recolor(l.foot, o.shoes, CLOTH_E, ZT.LEATHER);
   }
 
   /** Bake static meshes and collect hit-zone lists. Call once, after all dressing. */
   finish() {
     bakeTree(this.rig.root, this.geos);
     const zones = this.zones;
-    const root = this.rig.root;
-    root.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (!m.isMesh) return;
-      const z = (m.userData.z as Zone | undefined) ?? 'none';
-      // Skip parts already hidden at build time (e.g. a missing arm).
-      let n: THREE.Object3D | null = m;
-      while (n && n !== root) {
-        if (!n.visible) return;
-        n = n.parent;
-      }
-      zones[z].push(m);
-    });
+    collectZones(this.rig.root, zones);
     this.headMesh =
       (this.rig.head.children.find((c) => (c as THREE.Mesh).isMesh && c.userData.z === 'head' && c.userData.baked && (c as THREE.Mesh).material === zombieMaterial()) as THREE.Mesh | undefined) ??
       zones.head[0] ??
@@ -397,11 +639,11 @@ export function addFace(b: ZBody, rng: Rng, eyeColor: number, eyeGlow = 1.6) {
   }
   // Brow ridge (darker skin) makes the eyes look sunken.
   _col.setHex(b.skin).multiplyScalar(0.62);
-  b.box(h, 0.2 * hs, 0.028 * hs, 0.03, _col.getHex(), 0, 0.182 * hs, fz - 0.004);
+  b.sbox(ZT.SKIN, h, 0.2 * hs, 0.028 * hs, 0.03, _col.getHex(), 0, 0.182 * hs, fz - 0.004);
   // Mouth: dark gash, sometimes a hanging jaw with teeth.
   const open = rng.chance(0.55);
-  b.box(h, 0.11 * hs, (open ? 0.05 : 0.03) * hs, 0.014, 0x1a0606, 0, 0.065 * hs, fz + 0.002);
-  if (open) b.box(h, 0.08 * hs, 0.014 * hs, 0.016, 0xd8d0b0, 0, 0.082 * hs, fz + 0.004);
+  b.box(h, 0.11 * hs, (open ? 0.05 : 0.03) * hs, 0.014, MOUTH, 0, 0.065 * hs, fz + 0.002);
+  if (open) b.box(h, 0.08 * hs, 0.014 * hs, 0.016, TEETH, 0, 0.082 * hs, fz + 0.004);
   // Blood drool down the chin.
   if (rng.chance(0.6)) b.box(h, 0.03 * hs, 0.06 * hs, 0.012, BLOOD, rng.spread(0.03) * hs, 0.03 * hs, fz + 0.003);
   // Face wound.
@@ -456,7 +698,7 @@ export function addGore(b: ZBody, rng: Rng, shirt: number, amount = 1) {
 /** Optional long hair at the back of the head. */
 function longHair(b: ZBody, color: number) {
   const hs = b.hs;
-  b.box(b.rig.head, 0.235 * hs, 0.22 * hs, 0.05, color, 0, 0.12 * hs, -0.125 * hs - 0.005);
+  b.sbox(ZT.HAIR, b.rig.head, 0.235 * hs, 0.22 * hs, 0.05, color, 0, 0.12 * hs, -0.125 * hs - 0.005);
 }
 
 /**
@@ -473,26 +715,26 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
   const top = 0.26 * hs;
   switch (variant as ZombieVariant) {
     case 'cop': {
-      const navy = rng.pick([0x22324f, 0x1d2a44]);
-      b.clothes({ shirt: navy, sleeves: 'long', pants: 0x1a2236, shoes: 0x111111 });
-      b.box(r.hips, 0.35 * b.bulk, 0.05, 0.21 * Math.sqrt(b.bulk), 0x111111, 0, 0.055, 0); // duty belt
-      b.box(r.hips, 0.05, 0.035, 0.012, 0xc8a840, 0, 0.055, 0.105 * Math.sqrt(b.bulk) + 0.004);
-      b.box(r.hips, 0.06, 0.1, 0.07, 0x161616, -0.17 * b.bulk, -0.01, 0); // holster
-      b.box(sp, 0.05, 0.06, 0.012, 0xd4af37, 0.09 * b.bulk, 0.34, fz + 0.004, 0, 0, 0, 0.35); // badge
-      b.box(sp, 0.05, 0.08, 0.04, 0x111111, -0.12 * b.bulk, 0.42, fz - 0.01); // radio
+      const navy = rng.pick([0x2a3f6a, 0x263860]);
+      b.clothes({ shirt: navy, sleeves: 'long', pants: 0x222c48, shoes: 0x1a1a1c });
+      b.sbox(ZT.LEATHER, r.hips, 0.35 * b.bulk, 0.05, 0.21 * Math.sqrt(b.bulk), 0x1e1a18, 0, 0.055, 0); // duty belt
+      b.sbox(ZT.FLAT, r.hips, 0.05, 0.035, 0.012, 0xc8a840, 0, 0.055, 0.105 * Math.sqrt(b.bulk) + 0.004);
+      b.sbox(ZT.LEATHER, r.hips, 0.06, 0.1, 0.07, 0x221c1a, -0.17 * b.bulk, -0.01, 0); // holster
+      b.sbox(ZT.FLAT, sp, 0.05, 0.06, 0.012, 0xd4af37, 0.09 * b.bulk, 0.34, fz + 0.004, 0, 0, 0, 0.35); // badge
+      b.sbox(ZT.LEATHER, sp, 0.05, 0.08, 0.04, 0x161618, -0.12 * b.bulk, 0.42, fz - 0.01); // radio
       if (rng.chance(0.6)) {
         b.box(head, 0.245 * hs, 0.07 * hs, 0.255 * hs, navy, 0, top + 0.025 * hs, 0);
-        b.box(head, 0.23 * hs, 0.018, 0.1 * hs, 0x0c0c0c, 0, top - 0.005, 0.15 * hs, 0.15, 0, 0);
-        b.box(head, 0.04 * hs, 0.035 * hs, 0.01, 0xd4af37, 0, top + 0.03 * hs, 0.128 * hs + 0.006, 0, 0, 0, 0.35);
+        b.sbox(ZT.LEATHER, head, 0.23 * hs, 0.018, 0.1 * hs, 0x141416, 0, top - 0.005, 0.15 * hs, 0.15, 0, 0);
+        b.sbox(ZT.FLAT, head, 0.04 * hs, 0.035 * hs, 0.01, 0xd4af37, 0, top + 0.03 * hs, 0.128 * hs + 0.006, 0, 0, 0, 0.35);
       }
       return navy;
     }
     case 'nurse': {
       const scrubs = rng.pick([0x6fb8ac, 0xd48aac, 0x6a8fd0]);
       b.clothes({ shirt: scrubs, sleeves: 'short', pants: scrubs, shoes: 0xd8d8d8 });
-      b.box(sp, 0.04, 0.055, 0.012, 0xf0f0f0, 0.08 * b.bulk, 0.3, fz + 0.004, 0, 0, 0, 0.1); // ID card
-      b.box(sp, 0.012, 0.12, 0.012, 0x2a5aa0, 0.06 * b.bulk, 0.38, fz + 0.004, 0, 0, 0.35);
-      if (rng.chance(0.6)) b.box(head, 0.1 * hs, 0.1 * hs, 0.08 * hs, 0x4a2a14, 0, 0.22 * hs, -0.14 * hs); // bun
+      b.sbox(ZT.FLAT, sp, 0.04, 0.055, 0.012, 0xf0f0f0, 0.08 * b.bulk, 0.3, fz + 0.004, 0, 0, 0, 0.1); // ID card
+      b.sbox(ZT.FLAT, sp, 0.012, 0.12, 0.012, 0x2a5aa0, 0.06 * b.bulk, 0.38, fz + 0.004, 0, 0, 0.35);
+      if (rng.chance(0.6)) b.sbox(ZT.HAIR, head, 0.1 * hs, 0.1 * hs, 0.08 * hs, 0x4a2a14, 0, 0.22 * hs, -0.14 * hs); // bun
       return scrubs;
     }
     case 'doctor': {
@@ -500,8 +742,8 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
       b.clothes({ shirt: coat, sleeves: 'long', pants: rng.pick([0x3a3f4a, 0x2a2a30]), shoes: 0x1c1c1c });
       b.box(sp, 0.1, 0.36, 0.012, rng.pick([0x9ab8d8, 0xd8d0b8]), 0, 0.28, fz + 0.004); // shirt
       b.box(sp, 0.035, 0.26, 0.014, rng.pick([0x8a1a1a, 0x1a2a5a, 0x2a4a2a]), 0, 0.26, fz + 0.008); // tie
-      b.box(sp, 0.13, 0.016, 0.03, 0x404448, 0, 0.45, fz - 0.005, -0.3); // stethoscope
-      b.box(sp, 0.016, 0.14, 0.016, 0x404448, 0.06, 0.37, fz + 0.004);
+      b.sbox(ZT.LEATHER, sp, 0.13, 0.016, 0.03, 0x404448, 0, 0.45, fz - 0.005, -0.3); // stethoscope
+      b.sbox(ZT.LEATHER, sp, 0.016, 0.14, 0.016, 0x404448, 0.06, 0.37, fz + 0.004);
       // Coat tails hanging over the hips (front + back panels).
       const sb = Math.sqrt(b.bulk);
       b.box(r.hips, 0.4 * b.bulk, 0.34, 0.03, coat, 0, -0.14, 0.11 * sb + 0.01, 0, 0, 0, 0, 'torso');
@@ -515,12 +757,12 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
       const sb = Math.sqrt(b.bulk);
       b.box(sp, w + 0.025, 0.36, 0.22 * sb + 0.025, vest, 0, 0.27, 0, 0, 0, 0, 0.32);
       for (const y of [0.18, 0.3]) {
-        b.box(sp, w + 0.03, 0.03, 0.22 * sb + 0.03, 0xd8d8d8, 0, y, 0, 0, 0, 0, 0.55);
+        b.sbox(ZT.FLAT, sp, w + 0.03, 0.03, 0.22 * sb + 0.03, 0xd8d8d8, 0, y, 0, 0, 0, 0, 0.55);
       }
       if (rng.chance(0.75)) {
         const hat = rng.pick([0xf0c020, 0xf2f2f2, 0xe06a10]);
-        b.part(head, Kit.cyl(0.13 * hs, 0.145 * hs, 0.1 * hs, 8), hat, 0, top + 0.03 * hs, 0, 0, 0, 0, 1, 1, 1.05, 0.12);
-        b.box(head, 0.3 * hs, 0.018, 0.32 * hs, hat, 0, top - 0.015 * hs, 0.02, 0, 0, 0, 0.12);
+        b.part(head, Kit.cyl(0.13 * hs, 0.145 * hs, 0.1 * hs, 8), hat, 0, top + 0.03 * hs, 0, 0, 0, 0, 1, 1, 1.05, 0.12).userData.t = ZT.BONE;
+        b.sbox(ZT.BONE, head, 0.3 * hs, 0.018, 0.32 * hs, hat, 0, top - 0.015 * hs, 0.02, 0, 0, 0, 0.12);
       }
       return shirt;
     }
@@ -537,42 +779,45 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
     }
     case 'patient': {
       const gown = rng.pick([0xa8c8d0, 0xc0d4b8, 0xb8c0d8]);
-      b.clothes({ shirt: gown, sleeves: 'short', pants: gown, thighs: 'skin', shins: 'skin', shoes: b.skin });
+      b.clothes({ shirt: gown, sleeves: 'short', pants: gown, thighs: 'skin', shins: 'skin', shoes: b.skin }, ZT.GOWN);
       const sb = Math.sqrt(b.bulk);
       // Gown skirt over the hips.
-      b.box(r.hips, 0.4 * b.bulk, 0.3, 0.025, gown, 0, -0.12, 0.105 * sb + 0.01, 0, 0, 0, 0, 'torso');
-      b.box(r.hips, 0.4 * b.bulk, 0.3, 0.025, gown, 0, -0.12, -0.105 * sb - 0.01, 0, 0, 0, 0, 'torso');
-      b.box(r.hips, 0.025, 0.3, 0.2 * sb, gown, 0.2 * b.bulk, -0.12, 0, 0, 0, 0, 0, 'torso');
-      b.box(r.hips, 0.025, 0.3, 0.2 * sb, gown, -0.2 * b.bulk, -0.12, 0, 0, 0, 0, 0, 'torso');
-      b.box(r.armL.elbow, 0.096, 0.03, 0.106, 0xf0f0f0, 0, -0.22 * b.al, 0); // wristband
+      b.sbox(ZT.GOWN, r.hips, 0.4 * b.bulk, 0.3, 0.025, gown, 0, -0.12, 0.105 * sb + 0.01, 0, 0, 0, 0, 'torso');
+      b.sbox(ZT.GOWN, r.hips, 0.4 * b.bulk, 0.3, 0.025, gown, 0, -0.12, -0.105 * sb - 0.01, 0, 0, 0, 0, 'torso');
+      b.sbox(ZT.GOWN, r.hips, 0.025, 0.3, 0.2 * sb, gown, 0.2 * b.bulk, -0.12, 0, 0, 0, 0, 0, 'torso');
+      b.sbox(ZT.GOWN, r.hips, 0.025, 0.3, 0.2 * sb, gown, -0.2 * b.bulk, -0.12, 0, 0, 0, 0, 0, 'torso');
+      b.sbox(ZT.FLAT, r.armL.elbow, 0.096, 0.03, 0.106, 0xf0f0f0, 0, -0.22 * b.al, 0); // wristband
       if (rng.chance(0.5)) b.box(head, 0.235 * hs, 0.05 * hs, 0.25 * hs, 0xe8e8e0, 0, 0.22 * hs, 0.002, 0, 0, 0.12, 0.15); // bandage
       // Bloody gown stains.
       b.box(sp, 0.14, 0.12, 0.012, BLOOD, rng.pick([-0.08, 0.06]), 0.12, fz + 0.004);
       return gown;
     }
     case 'soldier': {
-      const camo = rng.pick([0x4a5a32, 0x7a6e4c]);
-      b.clothes({ shirt: camo, sleeves: 'long', pants: camo, shoes: 0x2a2016 });
+      const camo = rng.pick([0x56683a, 0x857852]);
+      b.clothes({ shirt: camo, sleeves: 'long', pants: camo, shoes: 0x2e2418 }, ZT.CAMO);
       const sb = Math.sqrt(b.bulk);
-      const vest = camo === 0x4a5a32 ? 0x343d24 : 0x5e5438;
+      const vest = camo === 0x56683a ? 0x3c4629 : 0x665c3e;
       b.box(sp, w + 0.04, 0.3, 0.22 * sb + 0.05, vest, 0, 0.29, 0);
       b.box(sp, 0.08, 0.08, 0.04, vest, -0.08, 0.2, 0.11 * sb + 0.04);
       b.box(sp, 0.08, 0.08, 0.04, vest, 0.08, 0.2, 0.11 * sb + 0.04);
       // Helmet — armour: shots to the top of the head spark off.
-      const helm = camo === 0x4a5a32 ? 0x3e4a2a : 0x6a6040;
+      const helm = camo === 0x56683a ? 0x48553a : 0x726848;
       b.box(head, 0.27 * hs, 0.1 * hs, 0.29 * hs, helm, 0, top + 0.02 * hs, -0.005, 0, 0, 0, 0, 'armor');
       b.box(head, 0.3 * hs, 0.03 * hs, 0.32 * hs, helm, 0, top - 0.03 * hs, -0.01, 0, 0, 0, 0, 'armor');
       return camo;
     }
     case 'biker': {
       const tee = rng.pick([0x8a8a8a, 0xd0ccc0, 0x7a2a2a]);
-      b.clothes({ shirt: 0x1c1c1e, sleeves: 'long', pants: 0x2a3348, shoes: 0x141414 });
+      const leather = 0x2c2624;
+      b.clothes({ shirt: leather, sleeves: 'long', pants: 0x2e3a52, shoes: 0x181616 }, ZT.LEATHER);
+      // Jeans are cloth, not leather.
+      for (const m of [b.pelvis, r.legL.thigh, r.legR.thigh, r.legL.shin, r.legR.shin]) m.userData.t = ZT.CLOTH;
       b.box(sp, 0.12, 0.42, 0.012, tee, 0, 0.23, fz + 0.004); // open jacket
-      b.box(sp, 0.04, 0.42, 0.016, 0x2a2a2c, 0.08, 0.23, fz + 0.006);
-      b.box(sp, 0.04, 0.42, 0.016, 0x2a2a2c, -0.08, 0.23, fz + 0.006);
-      if (rng.chance(0.6)) b.box(head, 0.2 * hs, 0.08 * hs, 0.04, 0x3a2a1a, 0, 0.05 * hs, b.faceZ - 0.006); // beard
-      if (rng.chance(0.35)) b.box(head, 0.24 * hs, 0.06 * hs, 0.26 * hs, rng.pick([0x8a1a1a, 0x111111]), 0, top - 0.005, 0, 0, 0, 0, 0.05);
-      return 0x1c1c1e;
+      b.sbox(ZT.LEATHER, sp, 0.04, 0.42, 0.016, 0x3a3432, 0.08, 0.23, fz + 0.006);
+      b.sbox(ZT.LEATHER, sp, 0.04, 0.42, 0.016, 0x3a3432, -0.08, 0.23, fz + 0.006);
+      if (rng.chance(0.6)) b.sbox(ZT.HAIR, head, 0.2 * hs, 0.08 * hs, 0.04, 0x3a2a1a, 0, 0.05 * hs, b.faceZ - 0.006); // beard
+      if (rng.chance(0.35)) b.box(head, 0.24 * hs, 0.06 * hs, 0.26 * hs, rng.pick([0x8a1a1a, 0x1c1c22]), 0, top - 0.005, 0, 0, 0, 0, 0.05);
+      return leather;
     }
     case 'civilian':
     default: {

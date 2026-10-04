@@ -53,6 +53,17 @@ if (args.save) {
 const errors = [];
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+// --retroScale n: pin the retro pass line multiplier (software rendering here would
+// otherwise drop it to 0.7 via dynamic resolution and make CRT captures blurrier than a phone).
+if (args.retroScale) {
+  const n = Number(args.retroScale);
+  await page.addInitScript((n) => {
+    setInterval(() => {
+      const g = window.__game;
+      if (g?.engine?.retro) g.engine.retro.scale = n;
+    }, 50);
+  }, n);
+}
 await page.goto(url, { waitUntil: 'load' });
 if (args.tap) {
   const [x, y] = args.tap.split(',').map(Number);

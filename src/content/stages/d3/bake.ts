@@ -1,14 +1,17 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Kit, type TexName } from '../../kit/ModelKit';
+import { Kit } from '../../kit/ModelKit';
+import { bakedLambert, packTex, retroHook, texOf } from './retro';
 
 /**
  * Static-scenery baking for TYRANT CHASE.
  *
  * `Baker.bake(group)` merges every opaque Lambert/Basic mesh under `group` into
- * ONE vertex-coloured mesh per (retro texture × side × sway) bucket. Colours
- * come from each source material (so dozens of Kit.mat colours collapse into a
- * single draw call) and glow (unlit) materials are baked into one unlit mesh.
+ * ONE vertex-coloured mesh per (side × sway) bucket. Colours come from each
+ * source material and so does its retro texture: name, texScale and
+ * texStrength travel per vertex (`aTex`, see retro.ts), so dozens of textured
+ * Kit materials collapse into a single draw call. Glow (unlit) materials are
+ * baked into one unlit mesh.
  *
  * Swaying foliage: put `userData.sway = { amp, h }` on a plant's root group
  * (amp = metres of sway at the top, h = plant height). Its meshes are baked
@@ -29,7 +32,6 @@ const _o = new THREE.Vector3();
 
 interface BucketMeta {
   key: string;
-  tex: string;
   side: THREE.Side;
   sway: boolean;
   glow: boolean;
@@ -41,7 +43,7 @@ interface Bucket extends BucketMeta {
 
 /** A baked plant/prop variant: raw per-bucket vertex data in its own local space. */
 export interface Prefab {
-  buckets: { meta: BucketMeta; pos: Float32Array; nrm: Float32Array; col: Float32Array; w: Float32Array | null }[];
+  buckets: { meta: BucketMeta; pos: Float32Array; nrm: Float32Array; col: Float32Array; tex: Float32Array | null; w: Float32Array | null }[];
 }
 
 const _nm = new THREE.Matrix3();
@@ -53,7 +55,7 @@ export class Baker {
     uTime: { value: 0 },
     uWind: { value: new THREE.Vector3(0.8, 0, 0.6) },
   };
-  private swayMats = new Map<string, THREE.Material>();
+  private mats = new Map<string, THREE.Material>();
   private glowMat: THREE.MeshBasicMaterial | null = null;
 
   /** Advance the wind (call every frame). `gust` is an extra push in metres-ish. */
@@ -69,18 +71,14 @@ export class Baker {
     return this.glowMat;
   }
 
-  /** Lambert material bending vertices by their `aSway` weight. */
-  swayMaterial(tex: string, side: THREE.Side): THREE.Material {
-    const key = `${tex}|${side}`;
-    let m = this.swayMats.get(key);
+  /** Per-vertex-textured Lambert bending vertices by their `aSway` weight. */
+  swayMaterial(side: THREE.Side): THREE.Material {
+    const key = `sway|${side}`;
+    let m = this.mats.get(key);
     if (m) return m;
-    const base = tex
-      ? Kit.mat(0xffffff, { vertexColors: true, tex: tex as TexName, side })
-      : Kit.mat(0xffffff, { vertexColors: true, side });
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side });
+    const mat = Kit.track(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side }));
     const uniforms = this.uniforms;
-    mat.onBeforeCompile = (shader, renderer) => {
-      base.onBeforeCompile(shader, renderer);
+    mat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = uniforms.uTime;
       shader.uniforms.uWind = uniforms.uWind;
       shader.vertexShader = shader.vertexShader
@@ -97,10 +95,20 @@ export class Baker {
           }`,
         );
     };
-    const baseKey = base.customProgramCacheKey();
-    mat.customProgramCacheKey = () => `${baseKey}|d3sway`;
-    m = Kit.track(mat);
-    this.swayMats.set(key, m);
+    mat.customProgramCacheKey = () => 'd3sway';
+    m = retroHook(mat, { mode: 'bake' });
+    this.mats.set(key, m);
+    return m;
+  }
+
+  /** Per-vertex-textured static Lambert for one face side. */
+  litMaterial(side: THREE.Side): THREE.Material {
+    const key = `lit|${side}`;
+    let m = this.mats.get(key);
+    if (!m) {
+      m = bakedLambert({ side });
+      this.mats.set(key, m);
+    }
     return m;
   }
 
@@ -141,6 +149,12 @@ export class Baker {
             cols[i * 3 + 2] = _col.b;
           }
           geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+          if (lambert) {
+            const p = packTex(texOf(mat));
+            const ta = new Float32Array(n * 4);
+            for (let i = 0; i < n; i++) ta.set(p, i * 4);
+            geo.setAttribute('aTex', new THREE.BufferAttribute(ta, 4));
+          }
           const swaying = lambert && !!sw;
           if (swaying) {
             const pos = geo.attributes.position as THREE.BufferAttribute;
@@ -152,12 +166,11 @@ export class Baker {
             }
             geo.setAttribute('aSway', new THREE.BufferAttribute(w, 1));
           }
-          const tex = basic ? '' : ((mat.userData.retroTex as string | undefined) ?? '');
           const side = mat.side;
-          const key = `${basic ? 'glow' : tex}|${side}|${swaying ? 1 : 0}`;
+          const key = `${basic ? 'glow' : 'lit'}|${side}|${swaying ? 1 : 0}`;
           let b = buckets.get(key);
           if (!b) {
-            b = { key, geos: [], tex: tex === 'grain' ? '' : tex, side, sway: swaying, glow: basic };
+            b = { key, geos: [], side, sway: swaying, glow: basic };
             buckets.set(key, b);
           }
           b.geos.push(geo);
@@ -182,7 +195,7 @@ export class Baker {
       if (!geo) continue;
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(Kit.track(geo), this.materialFor(b));
-      mesh.userData.bucket = { key: b.key, tex: b.tex, side: b.side, sway: b.sway, glow: b.glow } satisfies BucketMeta;
+      mesh.userData.bucket = { key: b.key, side: b.side, sway: b.sway, glow: b.glow } satisfies BucketMeta;
       mesh.matrixAutoUpdate = false;
       mesh.updateMatrix();
       group.add(mesh);
@@ -193,10 +206,8 @@ export class Baker {
 
   materialFor(b: BucketMeta): THREE.Material {
     if (b.glow) return this.glowMaterial();
-    if (b.sway) return this.swayMaterial(b.tex, b.side);
-    return b.tex
-      ? Kit.mat(0xffffff, { vertexColors: true, tex: b.tex as TexName, side: b.side })
-      : Kit.mat(0xffffff, { vertexColors: true, side: b.side });
+    if (b.sway) return this.swayMaterial(b.side);
+    return this.litMaterial(b.side);
   }
 
   /** Bake a plant/prop (built at the origin) into a reusable vertex-data prefab. */
@@ -207,11 +218,13 @@ export class Baker {
     for (const m of meshes) {
       const g = m.geometry;
       const sw = g.getAttribute('aSway') as THREE.BufferAttribute | undefined;
+      const tx = g.getAttribute('aTex') as THREE.BufferAttribute | undefined;
       buckets.push({
         meta: m.userData.bucket as BucketMeta,
         pos: (g.getAttribute('position') as THREE.BufferAttribute).array as Float32Array,
         nrm: (g.getAttribute('normal') as THREE.BufferAttribute).array as Float32Array,
         col: (g.getAttribute('color') as THREE.BufferAttribute).array as Float32Array,
+        tex: tx ? (tx.array as Float32Array) : null,
         w: sw ? (sw.array as Float32Array) : null,
       });
     }
@@ -252,6 +265,7 @@ export class Sink {
       const pos = new Float32Array(g.n * 3);
       const nrm = new Float32Array(g.n * 3);
       const col = new Float32Array(g.n * 3);
+      const tex = g.meta.glow ? null : new Float32Array(g.n * 4);
       const w = g.meta.sway ? new Float32Array(g.n) : null;
       let o = 0;
       for (const { b, m } of g.parts) {
@@ -279,12 +293,14 @@ export class Sink {
           col[j + 2] = b.col[i * 3 + 2];
           if (w) w[o + i] = b.w ? b.w[i] : 0;
         }
+        if (tex && b.tex) tex.set(b.tex, o * 4);
         o += cnt;
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
       geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      if (tex) geo.setAttribute('aTex', new THREE.BufferAttribute(tex, 4));
       if (w) geo.setAttribute('aSway', new THREE.BufferAttribute(w, 1));
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(Kit.track(geo), baker.materialFor(g.meta));

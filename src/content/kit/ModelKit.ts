@@ -82,6 +82,9 @@ function applyRetroTexture(
     uRetroGain: { value: rt.gain },
   };
   m.userData.retroTex = name;
+  // Bakers that merge Kit materials into vertex-coloured batches read these.
+  m.userData.retroScale = scale;
+  m.userData.retroStrength = strength;
   // Chain any hook the material already had (e.g. custom emission masks).
   const prev = m.onBeforeCompile;
   const prevKey = m.customProgramCacheKey?.();
@@ -89,13 +92,12 @@ function applyRetroTexture(
     prev?.call(m, shader, renderer);
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vRetroPos;\nvarying vec3 vRetroNrm;')
+      .replace('#include <common>', '#include <common>\nvarying vec3 vRetroPos;')
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
         vec3 retroScale = vec3(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz), length(modelMatrix[2].xyz));
-        vRetroPos = position * retroScale;
-        vRetroNrm = normal;`,
+        vRetroPos = position * retroScale;`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace(
@@ -105,21 +107,21 @@ function applyRetroTexture(
         uniform float uRetroScale;
         uniform float uRetroStrength;
         uniform float uRetroGain;
-        varying vec3 vRetroPos;
-        varying vec3 vRetroNrm;`,
+        varying vec3 vRetroPos;`,
       )
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
         {
-          vec3 an = abs(vRetroNrm);
+          // Face normal from screen-space derivatives: no mid-face seams on smooth-shaded cylinders.
+          vec3 an = abs(cross(dFdx(vRetroPos), dFdy(vRetroPos)));
           vec2 ruv = (an.x > an.y && an.x > an.z) ? vRetroPos.zy : ((an.y > an.z) ? vRetroPos.xz : vRetroPos.xy);
           vec3 rtex = texture2D(uRetroMap, ruv * uRetroScale).rgb * uRetroGain;
           diffuseColor.rgb *= mix(vec3(1.0), rtex, uRetroStrength);
         }`,
       );
   };
-  m.customProgramCacheKey = () => `retroTex1|${prevKey ?? ''}`;
+  m.customProgramCacheKey = () => `retroTex2|${prevKey ?? ''}`;
   m.needsUpdate = true;
 }
 

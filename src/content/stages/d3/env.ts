@@ -12,6 +12,8 @@ import { Flora } from './flora';
 import { Storm, STORM } from './weather';
 import { Fire } from './fire';
 import * as P from './props';
+import { ditherPool, radialGeometry, retroHook, tx, type TexSpec } from './retro';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { D, GORGE_DEPTH, ROAD_HALF, railHeading, railLength, railPoint } from './layout';
 
 /**
@@ -125,6 +127,8 @@ export class ParkEnv {
   private sStep = 1;
   private puddleMat: THREE.MeshLambertMaterial;
   private poolMat: THREE.MeshBasicMaterial;
+  /** Lamp light-pool disc with the radial `aR` attribute (dithered falloff). */
+  private poolGeo: THREE.BufferGeometry;
   private blinkers: Blinker[] = [];
   private flickers: { obj: THREE.Mesh; seed: number }[] = [];
   // Paddock.
@@ -201,12 +205,19 @@ export class ParkEnv {
     this.storm.groundAt = (x, z) => this.groundAt(x, z);
     this.root.add(this.storm.group);
 
-    this.puddleMat = Kit.track(
-      new THREE.MeshLambertMaterial({ color: 0x1a2232, emissive: new THREE.Color(0x0c1426), flatShading: true }),
+    // Rain-rippled water: the ripple texture modulates the sky-sheen emissive
+    // too (it flashes with the lightning), so puddles never read as flat decals.
+    this.puddleMat = retroHook(
+      Kit.track(new THREE.MeshLambertMaterial({ color: 0x2a3850, emissive: new THREE.Color(0x0c1426), flatShading: true })),
+      // (strength > 1 over-drives the ripple contrast so it survives the CRT's colour quantisation)
+      { mode: 'uniform', spec: { name: 'water', scale: 1.6, strength: 1.8 }, emissive: true },
     );
-    this.poolMat = Kit.track(
-      new THREE.MeshBasicMaterial({ color: 0xffb860, transparent: true, opacity: 0.13, depthWrite: false, fog: true, blending: THREE.AdditiveBlending }),
+    this.poolMat = ditherPool(
+      Kit.track(
+        new THREE.MeshBasicMaterial({ color: 0xffb860, transparent: true, opacity: 0.15, depthWrite: false, fog: true, blending: THREE.AdditiveBlending }),
+      ),
     );
+    this.poolGeo = radialGeometry(Kit.cyl(3.4, 3.4, 0.02, 14), 3.4);
 
     // Rail samples.
     const n = Math.ceil((this.len + 160) / this.sStep);
@@ -377,6 +388,32 @@ export class ParkEnv {
     return meshes;
   }
 
+  /** Merge the lamp light pools (keeps the radial `aR` attribute) and register them for culling. */
+  private commitPools(g: THREE.Group) {
+    g.updateMatrixWorld(true);
+    const geos: THREE.BufferGeometry[] = [];
+    for (const c of [...g.children]) {
+      const m = c as THREE.Mesh;
+      if (!m.isMesh || m.userData.noMerge) continue;
+      geos.push(m.geometry.clone().applyMatrix4(m.matrixWorld));
+      g.remove(m);
+    }
+    this.root.add(g);
+    for (const c of g.children) {
+      const m = c as THREE.Mesh;
+      m.geometry.computeBoundingSphere();
+    }
+    if (!geos.length) return;
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((x) => x.dispose());
+    if (!merged) return;
+    merged.computeBoundingSphere();
+    const mesh = new THREE.Mesh(Kit.track(merged), this.poolMat);
+    mesh.matrixAutoUpdate = false;
+    g.add(mesh);
+    this.culled.push(mesh);
+  }
+
   /** Merge a single-material group (puddles, light pools) and register it for culling. */
   private commitMerged(g: THREE.Group) {
     EnvKit.mergeStatic(g);
@@ -397,11 +434,23 @@ export class ParkEnv {
       const nearGorge = (d > D.GORGE_FROM - 7 && d < D.GORGE_FROM + 3) || (d > D.GORGE_TO - 3 && d < D.GORGE_TO + 7);
       d += nearGorge ? 1 : 3;
     }
-    const mat = Kit.mat(0xffffff, { vertexColors: true, tex: 'grass', texScale: 0.6, texStrength: 0.55 });
-    const mud = new THREE.Color(0x45392b);
-    const grass = new THREE.Color(0x2f4229);
-    const hill = new THREE.Color(0x223a24);
-    const rock = new THREE.Color(0x4a4842);
+    // Grass / mud / rock picked per texel from per-vertex coverage through an
+    // ordered dither (chunky 90s terrain blend) — still one draw call per chunk.
+    const layers: [TexSpec, TexSpec, TexSpec] = [
+      { name: 'grass', scale: 0.8, strength: 0.85 },
+      { name: 'dirt', scale: 0.8, strength: 0.9 },
+      { name: 'rock', scale: 0.55, strength: 0.95 },
+    ];
+    const mat = retroHook(Kit.track(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })), {
+      mode: 'terrain',
+      layers,
+      ditherCells: 4,
+    });
+    // Textured mid-tones (lifted a touch so the verges never crush to black through the CRT pass).
+    const mud = new THREE.Color(0x4a3d2e);
+    const grass = new THREE.Color(0x34492d);
+    const hill = new THREE.Color(0x263f28);
+    const rock = new THREE.Color(0x54524a);
     const bed = new THREE.Color(0x2c3632);
     const plaza = new THREE.Color(0x3a3a34);
     const mudDeep = new THREE.Color(0x33281c);
@@ -410,6 +459,7 @@ export class ParkEnv {
       const r1 = Math.min(rows.length - 1, r0 + perChunk);
       const pos: number[] = [];
       const col: number[] = [];
+      const tw: number[] = [];
       const idx: number[] = [];
       const nc = cols.length;
       for (let r = r0; r <= r1; r++) {
@@ -426,6 +476,15 @@ export class ParkEnv {
           if (lat < -4 && lat > -26 && d > 160 && d < 208) _c.lerp(plaza, 0.5);
           const k = 0.9 + 0.2 * Math.sin(d * 1.37 + lat * 2.11) * Math.cos(d * 0.71 - lat * 1.3);
           col.push(_c.r * k, _c.g * k, _c.b * k);
+          // Texture coverage: churned mud along the verges / mud stretch / plaza, rock in the gorge.
+          let dirt = 1 - smoothstep(6.5, 13, a);
+          if (d > D.MUD_FROM - 6 && d < D.MUD_TO + 6) dirt = Math.max(dirt, 1 - smoothstep(9, 15, a));
+          if (lat < -4 && lat > -26 && d > 160 && d < 208) dirt = Math.max(dirt, 0.65);
+          const blot = Math.sin(d * 0.37 + lat * 0.53) * Math.sin(d * 0.21 - lat * 0.41);
+          dirt = clamp(dirt + blot * 0.25 * (1 - smoothstep(14, 30, a)), 0, 1);
+          let rockW = y < -0.6 ? clamp((-y - 0.6) / 3.5, 0, 1) : 0;
+          rockW = Math.max(rockW, smoothstep(0.55, 0.85, blot) * smoothstep(26, 50, a) * 0.8);
+          tw.push(dirt, rockW);
         }
       }
       for (let r = 0; r < r1 - r0; r++) {
@@ -441,6 +500,7 @@ export class ParkEnv {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
       g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      g.setAttribute('aTexW', new THREE.Float32BufferAttribute(tw, 2));
       g.setIndex(idx);
       g.computeVertexNormals();
       // Ensure upward facing (flip if the winding came out downward).
@@ -500,8 +560,9 @@ export class ParkEnv {
   }
 
   private buildRoad() {
-    const asphalt = Kit.tex('asphalt', 0x3a3c40, 0.7, 0.85);
-    const mudMat = Kit.tex('dirt', 0x3e3022, 0.8, 0.8);
+    // Wet night asphalt: dark, cool, with a strong speckle so the road reads at speed.
+    const asphalt = tx('asphalt', 0x3a3d44, 0.9, 1);
+    const mudMat = tx('dirt', 0x433426, 1, 1);
     const segs: [number, number, THREE.Material][] = [];
     const pushRange = (a: number, b: number) => {
       for (let d = a; d < b; d += 60) segs.push([d, Math.min(b, d + 60), asphalt]);
@@ -518,9 +579,10 @@ export class ParkEnv {
 
     // Markings, cracks, puddles — baked per chunk.
     const rng = new Rng(901);
-    const line = Kit.mat(0x8a7c3e, { emissive: 0x1a160a, emissiveIntensity: 1 });
-    const edge = Kit.mat(0x8c8c86, { emissive: 0x161616, emissiveIntensity: 1 });
-    const patch = Kit.tex('asphalt', 0x2a2b2e, 0.7, 0.85);
+    // Paint shares the road's asphalt projection: worn into the surface.
+    const line = tx('asphalt', 0x9a8a40, 0.9, 0.7, { emissive: 0x1a160a, emissiveIntensity: 1 });
+    const edge = tx('asphalt', 0x96968e, 0.9, 0.7, { emissive: 0x161616, emissiveIntensity: 1 });
+    const patch = tx('asphalt', 0x2c2e32, 1.4, 1);
     const roadOk = (d: number) =>
       d < D.MUD_FROM - 1 || (d > D.MUD_TO + 1 && d < D.BRIDGE_FROM - 2) || (d > D.BRIDGE_TO + 2 && d < D.PAD - D.PAD_HALF - 1);
     for (let c0 = -60; c0 < D.PAD; c0 += CHUNK) {
@@ -655,7 +717,7 @@ export class ParkEnv {
   private buildPaddock() {
     const g = this.propChunk(D.FENCE_FROM + 40);
     const S = D.FENCE_SIDE;
-    const cableMat = Kit.mat(0x2a2c2e);
+    const cableMat = tx('metal', 0x303236, 4, 0.5);
     const step = 6;
     const pylonAt: THREE.Vector3[] = [];
     const inGap = (d: number) => d > D.GAP_FROM && d < D.GAP_TO;
@@ -751,18 +813,18 @@ export class ParkEnv {
         }
         g.add(lp.root);
         if (kind !== 'off') {
-          const pool = Kit.add(pools, Kit.cyl(3.4, 3.4, 0.02, 14), this.poolMat);
+          const pool = Kit.add(pools, this.poolGeo, this.poolMat);
           this.at(d, lat - Math.sign(lat) * 1.5, 0.06, pool.position);
           pool.scale.set(1, 1, 1.25);
           pool.rotation.y = this.heading(d);
           if (kind === 'flicker') {
-            pool.material = Kit.track(this.poolMat.clone());
+            pool.material = ditherPool(Kit.track(this.poolMat.clone()));
             this.flickers.push({ obj: pool, seed: this.flickers[this.flickers.length - 1].seed });
             pool.userData.noMerge = true;
           }
         }
       }
-      this.commitMerged(pools);
+      this.commitPools(pools);
     }
     // Direction signs.
     const s1 = P.roadSign('< VISITOR CENTER');
@@ -783,22 +845,22 @@ export class ParkEnv {
     v.root.position.y = 0;
     // Plaza paving between the road and the steps.
     const plaza = new THREE.Group();
-    Kit.add(plaza, Kit.box(46, 0.08, 21), Kit.tex('tiles', 0x5c5a54, 0.5, 0.7), 0, 0.04, 15.4);
+    Kit.add(plaza, Kit.box(46, 0.08, 21), tx('tiles', 0x626058, 0.55, 0.85), 0, 0.04, 15.4);
     for (const sx of [-21, 21]) {
-      Kit.add(plaza, Kit.box(2.2, 0.8, 2.2), Kit.tex('concrete', 0x7c786c, 1, 0.8), sx, 0.4, 20);
+      Kit.add(plaza, Kit.box(2.2, 0.8, 2.2), tx('brick', 0x7a5a48, 1.4, 0.9), sx, 0.4, 20);
     }
     // Tilted floodlight mast (lights dead) and a ticket kiosk.
     const mast = new THREE.Group();
     mast.position.set(15, 0, 12);
     mast.rotation.z = 0.32;
     plaza.add(mast);
-    Kit.add(mast, Kit.cyl(0.14, 0.2, 10, 6), Kit.mat(0x44484c), 0, 5, 0);
-    Kit.add(mast, Kit.box(2, 0.8, 0.5), Kit.mat(0x24262a), 0, 10, 0);
+    Kit.add(mast, Kit.cyl(0.14, 0.2, 10, 6), tx('metal', 0x44484c, 2.5, 0.7), 0, 5, 0);
+    Kit.add(mast, Kit.box(2, 0.8, 0.5), tx('metal', 0x2a2c30, 2.5, 0.7), 0, 10, 0);
     const kiosk = new THREE.Group();
     kiosk.position.set(-15, 0, 13);
     plaza.add(kiosk);
-    Kit.add(kiosk, Kit.box(3, 2.6, 2.4), Kit.tex('planks', 0x6a5038, 1, 0.8), 0, 1.3, 0);
-    Kit.add(kiosk, Kit.cone(2.6, 1.6, 4), Kit.tex('planks', P.PAL.thatch, 1, 0.6), 0, 3.4, 0, 0, Math.PI / 4, 0);
+    Kit.add(kiosk, Kit.box(3, 2.6, 2.4), tx('planks', 0x6e543a, 1.4, 0.9), 0, 1.3, 0);
+    Kit.add(kiosk, Kit.cone(2.6, 1.6, 4), tx('bark', P.PAL.thatch, 0.9, 1), 0, 3.4, 0, 0, Math.PI / 4, 0);
     Kit.add(kiosk, Kit.box(1.6, 0.8, 0.06), Kit.glow(0xffc070, 0.6), 0, 1.6, 1.22);
     plaza.add(v.plaza);
     v.root.add(plaza);
@@ -919,7 +981,7 @@ export class ParkEnv {
 
   private buildMud() {
     const g = this.propChunk(D.HOLD_MUD);
-    const rut = Kit.mat(0x24190f);
+    const rut = tx('dirt', 0x2a1e12, 2, 1);
     for (let d = D.MUD_FROM + 1; d < D.MUD_TO - 1; d += 1.5) {
       for (const lat of [-1.0, 1.0]) {
         const m = Kit.add(g, Kit.box(0.42, 0.02, 1.7), rut);
@@ -972,7 +1034,7 @@ export class ParkEnv {
     this.commit(whole);
     // Concrete abutments + river.
     const g = new THREE.Group();
-    const conc = Kit.tex('concrete', 0x6c6a64, 0.8, 0.9);
+    const conc = tx('concrete', 0x6c6a64, 1, 1);
     for (const [d, dir] of [[D.BRIDGE_FROM, 1], [D.BRIDGE_TO, -1]] as const) {
       const a = Kit.add(g, Kit.box(width + 2, 6, 4), conc);
       this.place(a, d - dir * 1.5, 0, 0, 0);
@@ -983,13 +1045,13 @@ export class ParkEnv {
         post.position.y = 0.8;
       }
     }
-    const water = Kit.mat(0x22405c, { emissive: 0x0a1a2a, emissiveIntensity: 1, tex: 'water', texScale: 0.5, texStrength: 0.6 });
+    const water = tx('water', 0x264868, 0.7, 0.85, { emissive: 0x0a1a2a, emissiveIntensity: 1 });
     const mid = (D.GORGE_FROM + D.GORGE_TO) / 2;
     const river = Kit.add(g, Kit.box(240, 0.1, 14), water);
     this.place(river, mid, 0, Math.PI / 2, 0);
     river.position.y = -GORGE_DEPTH + 1.0;
     river.rotation.y = this.heading(mid);
-    const foam = Kit.mat(0x8a9aa8, { emissive: 0x1a2028, emissiveIntensity: 1 });
+    const foam = tx('water', 0x8a9aa8, 2.2, 0.6, { emissive: 0x1a2028, emissiveIntensity: 1 });
     const rng = new Rng(17);
     for (let i = 0; i < 22; i++) {
       const lat = rng.spread(80);
@@ -1184,7 +1246,7 @@ export class ParkEnv {
     this.storm.update(dt, w);
     this.baker.wind(dt, this.storm.gust);
     const flash = this.storm.flash;
-    this.puddleMat.emissive.setRGB(0.047 + flash * 0.3, 0.078 + flash * 0.34, 0.15 + flash * 0.42);
+    this.puddleMat.emissive.setRGB(0.03 + flash * 0.3, 0.052 + flash * 0.34, 0.105 + flash * 0.42);
 
     // Bullet-impact surface follows the terrain under the camera.
     this.environment.surface =
@@ -1438,8 +1500,8 @@ export class ParkEnv {
 /** Yellow-and-black fuel drum (roadblock / pad barrels). */
 export function fuelDrum(red = false): THREE.Group {
   const g = new THREE.Group();
-  const body = red ? Kit.mat(0xb3261e) : Kit.mat(0xc8a028);
-  const band = Kit.mat(0x2a2620);
+  const body = tx('metal', red ? 0xb3261e : 0xc8a028, 2, 0.6);
+  const band = tx('metal', 0x2e2a22, 2, 0.7);
   Kit.add(g, Kit.cyl(0.34, 0.34, 0.95, 10), body, 0, 0.48, 0);
   Kit.add(g, Kit.cyl(0.35, 0.35, 0.07, 10), band, 0, 0.22, 0);
   Kit.add(g, Kit.cyl(0.35, 0.35, 0.07, 10), band, 0, 0.74, 0);

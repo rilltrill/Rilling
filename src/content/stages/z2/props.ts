@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import type { Rng } from '../../../core/Rng';
-import { C, G, M, MD } from './mats';
+import { C, G, M, MD, T, TX } from './mats';
 
 /**
  * Procedural hospital props. Everything is built from cached Kit primitives in
@@ -41,9 +41,9 @@ export function grp(g: O, x: number, y: number, z: number, ry = 0): THREE.Group 
   return s;
 }
 
-const steel = () => M(C.steel, 'metal', 2, 0.5);
+const steel = () => T(C.steel, TX.steel);
 const rubber = () => M(0x1c1e1e);
-const white = () => M(0xd6dcd6);
+const white = () => T(0xd6dcd6, TX.cloth);
 
 // ─── Medical furniture ──────────────────────────────────────────────────────
 
@@ -75,7 +75,7 @@ export function gurney(g: O, x: number, y: number, z: number, ry: number, o: Gur
   box(root, 0.03, 0.2, 1.2, st, -0.31, 0.95, 0);
   // Mattress + sheet.
   blk(root, 0.58, 0.1, 1.9, M(0x2e4f63), 0, 0.84, 0);
-  const sheet = M(o.sheet ?? C.sheet, 'cloth', 1, 0.6);
+  const sheet = T(o.sheet ?? C.sheet, TX.cloth);
   blk(root, 0.6, 0.03, 1.6, sheet, 0, 0.94, 0.12);
   blk(root, 0.4, 0.1, 0.32, white(), 0, 0.94, -0.75);
   if (o.body) {
@@ -85,7 +85,7 @@ export function gurney(g: O, x: number, y: number, z: number, ry: number, o: Gur
     box(root, 0.14, 0.18, 0.16, sheet, 0.1, 1.04, 0.86);
     box(root, 0.14, 0.18, 0.16, sheet, -0.1, 1.04, 0.86);
     // A grey arm slipping out.
-    box(root, 0.08, 0.06, 0.5, M(0x8a9488), 0.32, 0.95, 0.1, 0.2, 0, -0.5);
+    box(root, 0.08, 0.06, 0.5, T(0x8a9488, TX.skin), 0.32, 0.95, 0.1, 0.2, 0, -0.5);
   }
   if (o.blood) {
     blk(root, 0.42, 0.012, 0.5, M(C.blood), 0.04, 0.965, 0.2);
@@ -99,7 +99,7 @@ export function wheelchair(g: O, x: number, y: number, z: number, ry: number, ti
   const r = tipped ? grp(s, 0, 0.32, 0, 0) : s;
   if (tipped) r.rotation.z = 1.45;
   const st = steel();
-  const seat = M(0x1f2a30);
+  const seat = T(0x24323a, TX.cloth);
   blk(r, 0.46, 0.05, 0.44, seat, 0, 0.48, 0);
   box(r, 0.46, 0.46, 0.05, seat, 0, 0.78, -0.22, 0, -0.12);
   for (const sx of [-0.27, 0.27]) {
@@ -139,7 +139,7 @@ export interface BedOpts {
 export function bed(g: O, x: number, y: number, z: number, ry: number, rng: Rng, o: BedOpts = {}): THREE.Group {
   const s = grp(g, x, y, z, ry);
   const st = steel();
-  const frame = M(0xb8beb8, 'metal', 2, 0.35);
+  const frame = T(0xb8beb8, TX.paint);
   blk(s, 0.96, 0.1, 2.05, st, 0, 0.42, 0);
   for (const sx of [-0.42, 0.42]) {
     for (const sz of [-0.92, 0.92]) {
@@ -156,8 +156,8 @@ export function bed(g: O, x: number, y: number, z: number, ry: number, rng: Rng,
     box(s, 0.03, 0.03, 1.0, st, sx, 0.82, -0.2);
     box(s, 0.03, 0.03, 1.0, st, sx, 0.66, -0.2);
   }
-  const sheet = M(o.sheet ?? C.sheet, 'cloth', 1, 0.6);
-  blk(s, 0.9, 0.16, 1.95, M(0x6a8a94), 0, 0.52, 0);
+  const sheet = T(o.sheet ?? C.sheet, TX.cloth);
+  blk(s, 0.9, 0.16, 1.95, T(0x6a8a94, TX.cloth), 0, 0.52, 0);
   if (o.messy) {
     box(s, 0.95, 0.06, 1.0, sheet, 0.05, 0.71, 0.45, 0.25, 0.12, 0.06);
     box(s, 0.6, 0.05, 0.6, sheet, -0.35, 0.36, 0.7, 0.4, 0, 1.2);
@@ -180,7 +180,7 @@ export function bed(g: O, x: number, y: number, z: number, ry: number, rng: Rng,
 /** Wall-mounted vitals monitor with a glowing trace. */
 export function monitor(g: O, x: number, y: number, z: number, ry: number, on = true, color: number = C.screen): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  blk(s, 0.42, 0.32, 0.12, M(0x2a2e30), 0, 0, 0);
+  blk(s, 0.42, 0.32, 0.12, T(0x2a2e30, TX.paint), 0, 0, 0);
   box(s, 0.36, 0.25, 0.01, on ? G(0x0a2418, 1) : M(0x101414), 0, 0.16, 0.062);
   if (on) {
     // Jagged trace.
@@ -193,7 +193,7 @@ export function monitor(g: O, x: number, y: number, z: number, ry: number, on = 
 
 export function bedside(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  blk(s, 0.45, 0.75, 0.42, M(0xa8b0aa), 0, 0, 0);
+  blk(s, 0.45, 0.75, 0.42, T(0xa8b0aa, TX.paint), 0, 0, 0);
   box(s, 0.4, 0.01, 0.01, M(0x5a605c), 0, 0.5, 0.215);
   box(s, 0.08, 0.02, 0.02, steel(), 0, 0.6, 0.22);
   blk(s, 0.08, 0.12, 0.08, M(0xc8d8e0), -0.1, 0.75, 0.05);
@@ -204,7 +204,7 @@ export function bedside(g: O, x: number, y: number, z: number, ry: number): THRE
 export function chairRow(g: O, x: number, y: number, z: number, ry: number, n: number, color = 0x2f5a8a, missing: number[] = []): THREE.Group {
   const s = grp(g, x, y, z, ry);
   const st = steel();
-  const mat = M(color);
+  const mat = T(color, TX.cloth);
   const w = 0.56;
   const x0 = (-(n - 1) * w) / 2;
   blk(s, n * w, 0.05, 0.08, st, 0, 0.36, 0);
@@ -224,7 +224,7 @@ export function chairRow(g: O, x: number, y: number, z: number, ry: number, n: n
 
 export function vending(g: O, x: number, y: number, z: number, ry: number, color: number, lit = true, rng?: Rng): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  blk(s, 1.0, 1.95, 0.85, M(color), 0, 0, 0);
+  blk(s, 1.0, 1.95, 0.85, T(color, TX.paint), 0, 0, 0);
   blk(s, 0.06, 1.8, 0.04, M(0x1a1a1a), 0.22, 0.08, 0.43);
   // Product window.
   box(s, 0.62, 1.2, 0.02, lit ? G(0x8fb8c8, 0.55) : M(0x1c2428), -0.12, 1.15, 0.43);
@@ -244,11 +244,11 @@ export function vending(g: O, x: number, y: number, z: number, ry: number, color
 /** Reception / nurse-station counter (front faces +Z), `w` wide. */
 export function counter(g: O, x: number, y: number, z: number, ry: number, w: number, rng: Rng, screens = 2): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  const front = M(0x5c7a74, 'planks', 1.5, 0.35);
+  const front = T(0x5c7a74, TX.wood);
   const top = M(0xb9b3a2);
   blk(s, w, 1.1, 0.12, front, 0, 0, 0.4);
   blk(s, w + 0.1, 0.05, 0.38, top, 0, 1.1, 0.42);
-  blk(s, w, 0.75, 0.7, M(0x7a7a70), 0, 0, -0.2);
+  blk(s, w, 0.75, 0.7, T(0x7a7a70, TX.paint), 0, 0, -0.2);
   blk(s, w, 0.04, 0.75, top, 0, 0.75, -0.2);
   box(s, w, 0.05, 0.02, G(0x48c8b0, 0.7), 0, 0.95, 0.465);
   for (let i = 0; i < screens; i++) {
@@ -268,7 +268,7 @@ export function counter(g: O, x: number, y: number, z: number, ry: number, w: nu
 
 export function crashCart(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  blk(s, 0.7, 0.95, 0.5, M(0xb02828), 0, 0.08, 0);
+  blk(s, 0.7, 0.95, 0.5, T(0xb02828, TX.paint), 0, 0.08, 0);
   for (let i = 0; i < 4; i++) box(s, 0.66, 0.01, 0.01, M(0x5a1010), 0, 0.3 + i * 0.2, 0.255);
   for (let i = 0; i < 4; i++) box(s, 0.2, 0.025, 0.03, steel(), 0, 0.22 + i * 0.2, 0.26);
   blk(s, 0.42, 0.22, 0.3, M(0xe0d040), -0.08, 1.03, 0);
@@ -280,8 +280,8 @@ export function crashCart(g: O, x: number, y: number, z: number, ry: number): TH
 export function laundryCart(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
   const s = grp(g, x, y, z, ry);
   blk(s, 0.9, 0.06, 0.55, steel(), 0, 0.12, 0);
-  blk(s, 0.86, 0.7, 0.5, M(0x3a5a8a, 'cloth', 1, 0.6), 0, 0.18, 0);
-  box(s, 0.6, 0.18, 0.45, M(C.sheet, 'cloth', 1, 0.5), 0.05, 0.92, 0.02, 0, 0.2, 0.1);
+  blk(s, 0.86, 0.7, 0.5, T(0x3a5a8a, TX.cloth), 0, 0.18, 0);
+  box(s, 0.6, 0.18, 0.45, T(C.sheet, TX.cloth), 0.05, 0.92, 0.02, 0, 0.2, 0.1);
   box(s, 0.3, 0.1, 0.3, M(C.blood), -0.2, 0.98, 0.0);
   for (const sx of [-0.38, 0.38]) for (const sz of [-0.2, 0.2]) cyl(s, 0.05, 0.05, 0.04, rubber(), sx, 0.05, sz, 6, 0, 0, Math.PI / 2);
   return s;
@@ -289,7 +289,7 @@ export function laundryCart(g: O, x: number, y: number, z: number, ry: number): 
 
 export function fireExt(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  cyl(s, 0.09, 0.09, 0.5, M(0xc81e1e), 0, 0.25, 0.1, 8);
+  cyl(s, 0.09, 0.09, 0.5, T(0xc81e1e, TX.paint), 0, 0.25, 0.1, 8);
   cyl(s, 0.03, 0.04, 0.1, M(0x222222), 0, 0.55, 0.1, 6);
   box(s, 0.3, 0.18, 0.02, G(0xff3020, 0.9), 0, 0.85, 0.01);
   return s;
@@ -307,10 +307,10 @@ export function wallClock(g: O, x: number, y: number, z: number, ry: number): TH
 export function trashBin(g: O, x: number, y: number, z: number, tipped = false): THREE.Group {
   const s = grp(g, x, y, z, 0);
   if (tipped) {
-    cyl(s, 0.2, 0.17, 0.55, M(0x3a5a4a), 0, 0.2, 0, 8, Math.PI / 2 - 0.1);
+    cyl(s, 0.2, 0.17, 0.55, T(0x3a5a4a, TX.paint), 0, 0.2, 0, 8, Math.PI / 2 - 0.1);
     box(s, 0.4, 0.04, 0.5, M(0xd8d8d0), 0.1, 0.02, 0.45, 0.4);
   } else {
-    cyl(s, 0.2, 0.17, 0.6, M(0x3a5a4a), 0, 0.3, 0, 8);
+    cyl(s, 0.2, 0.17, 0.6, T(0x3a5a4a, TX.paint), 0, 0.3, 0, 8);
     cyl(s, 0.21, 0.21, 0.04, M(0x2a3a30), 0, 0.62, 0, 8);
   }
   return s;
@@ -331,7 +331,7 @@ export function plant(g: O, x: number, y: number, z: number, rng: Rng): THREE.Gr
 
 export function whiteboard(g: O, x: number, y: number, z: number, ry: number, rng: Rng): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  box(s, 1.6, 1.0, 0.04, M(0x8a8f90), 0, 0, 0);
+  box(s, 1.6, 1.0, 0.04, T(0x8a8f90, TX.steel), 0, 0, 0);
   box(s, 1.5, 0.9, 0.01, M(0xd8dcd8), 0, 0, 0.025);
   const ink = [M(0x203a8a), M(0xa02020), M(0x205a30)];
   for (let r = 0; r < 6; r++) {
@@ -433,7 +433,7 @@ export function papers(g: O, cx: number, cz: number, rx: number, rz: number, n: 
 
 export function bodyBag(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  const mat = M(0x1c2a26, 'cloth', 1, 0.5);
+  const mat = T(0x22322c, TX.cloth);
   box(s, 0.55, 0.26, 1.7, mat, 0, 0.13, 0);
   box(s, 0.4, 0.24, 0.35, mat, 0, 0.14, -0.95);
   box(s, 0.02, 0.01, 1.9, M(0x7a7a6a), 0.08, 0.265, -0.1);
@@ -443,14 +443,14 @@ export function bodyBag(g: O, x: number, y: number, z: number, ry: number): THRE
 /** A corpse lying on the floor (simple humanoid boxes). */
 export function corpse(g: O, x: number, y: number, z: number, ry: number, rng: Rng, shirt = 0x8fb4c4): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  const skin = M(rng.pick([0x8a9a80, 0x9aa08a, 0x7a8a7a]));
-  const cloth = M(shirt, 'cloth', 1, 0.5);
+  const skin = T(rng.pick([0x8a9a80, 0x9aa08a, 0x7a8a7a]), TX.skin);
+  const cloth = T(shirt, TX.cloth);
   box(s, 0.42, 0.18, 0.62, cloth, 0, 0.09, 0);
   box(s, 0.22, 0.2, 0.24, skin, 0.03, 0.1, 0.48, 0.3);
   box(s, 0.12, 0.1, 0.6, cloth, 0.3, 0.06, 0.1, -0.5);
   box(s, 0.12, 0.1, 0.55, skin, -0.32, 0.06, 0.25, 0.7);
-  box(s, 0.16, 0.12, 0.8, M(0x3a3f4a), 0.1, 0.06, -0.68, 0.1);
-  box(s, 0.16, 0.12, 0.8, M(0x3a3f4a), -0.12, 0.06, -0.7, -0.15);
+  box(s, 0.16, 0.12, 0.8, T(0x3a3f4a, TX.cloth), 0.1, 0.06, -0.68, 0.1);
+  box(s, 0.16, 0.12, 0.8, T(0x3a3f4a, TX.cloth), -0.12, 0.06, -0.7, -0.15);
   bloodPool(s, 0.1, 0, 0.3, 0.55, rng);
   return s;
 }
@@ -461,8 +461,8 @@ export function corpse(g: O, x: number, y: number, z: number, ry: number, rng: R
 export function morgueWall(g: O, x: number, y: number, z: number, ry: number, cols: number, rows: number, skip: Set<string>): THREE.Group {
   const s = grp(g, x, y, z, ry);
   const w = cols * 0.78;
-  const st = M(C.steel, 'metal', 3, 0.6);
-  blk(s, w + 0.2, rows * 0.72 + 0.35, 0.4, M(0x6a7476, 'metal', 2, 0.5), 0, 0, -0.2);
+  const st = T(C.steel, TX.steel);
+  blk(s, w + 0.2, rows * 0.72 + 0.35, 0.4, T(0x6a7476, TX.steel), 0, 0, -0.2);
   for (let c = 0; c < cols; c++) {
     for (let r = 0; r < rows; r++) {
       const cx = -w / 2 + 0.39 + c * 0.78;
@@ -482,8 +482,8 @@ export function morgueWall(g: O, x: number, y: number, z: number, ry: number, co
 /** Steel autopsy table (long axis along local Z). */
 export function autopsyTable(g: O, x: number, y: number, z: number, ry: number, rng: Rng, o: { body?: boolean; open?: boolean } = {}): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  const st = M(C.steel, 'metal', 3, 0.5);
-  blk(s, 0.32, 0.8, 0.32, M(C.steelDark), 0, 0, 0);
+  const st = T(C.steel, TX.steel);
+  blk(s, 0.32, 0.8, 0.32, T(C.steelDark, TX.steel), 0, 0, 0);
   blk(s, 0.9, 0.06, 2.1, st, 0, 0.82, 0);
   box(s, 0.9, 0.08, 0.04, st, 0, 0.92, 1.03);
   box(s, 0.9, 0.08, 0.04, st, 0, 0.92, -1.03);
@@ -491,7 +491,7 @@ export function autopsyTable(g: O, x: number, y: number, z: number, ry: number, 
   box(s, 0.04, 0.08, 2.1, st, -0.45, 0.92, 0);
   blk(s, 0.12, 0.05, 0.12, M(0x1a1a1a), 0, 0.86, 0.85);
   if (o.body) {
-    const sheet = M(0xb8c4c0, 'cloth', 1, 0.5);
+    const sheet = T(0xb8c4c0, TX.cloth);
     box(s, 0.55, 0.26, 1.2, sheet, 0, 1.0, 0.1);
     box(s, 0.3, 0.24, 0.3, sheet, 0, 1.0, -0.72);
     box(s, 0.12, 0.2, 0.14, sheet, 0.1, 0.98, 0.82);
@@ -512,7 +512,7 @@ export function autopsyTable(g: O, x: number, y: number, z: number, ry: number, 
 /** Big round surgical lamp hanging from the ceiling at `yCeil`. */
 export function surgicalLamp(g: O, x: number, yCeil: number, z: number, lampY: number): THREE.Group {
   const s = grp(g, x, 0, z, 0);
-  const arm = M(0xd8dcd8);
+  const arm = T(0xd8dcd8, TX.paint);
   cyl(s, 0.12, 0.12, 0.1, arm, 0, yCeil - 0.05, 0, 8);
   cyl(s, 0.05, 0.05, yCeil - lampY - 0.3, arm, 0, (yCeil + lampY + 0.3) / 2, 0, 6);
   for (const sx of [-0.55, 0.55]) {
@@ -530,9 +530,9 @@ export function surgicalLamp(g: O, x: number, yCeil: number, z: number, lampY: n
 
 export function opTable(g: O, x: number, y: number, z: number, ry: number, rng: Rng): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  blk(s, 0.4, 0.75, 0.6, M(0x5a6266), 0, 0, 0);
-  blk(s, 0.7, 0.12, 2.1, M(0x2a4a5a), 0, 0.78, 0);
-  blk(s, 0.72, 0.03, 2.0, M(0x6a9a8a, 'cloth', 1, 0.5), 0, 0.9, 0.05);
+  blk(s, 0.4, 0.75, 0.6, T(0x5a6266, TX.steel), 0, 0, 0);
+  blk(s, 0.7, 0.12, 2.1, T(0x2a4a5a, TX.cloth), 0, 0.78, 0);
+  blk(s, 0.72, 0.03, 2.0, T(0x6a9a8a, TX.cloth), 0, 0.9, 0.05);
   blk(s, 0.8, 0.012, 0.9, M(C.bloodFresh), rng.spread(0.05), 0.93, 0.1);
   blk(s, 0.3, 0.012, 0.5, M(C.bloodDark), 0.25, 0.935, -0.4);
   // Straps (snapped).
@@ -543,13 +543,13 @@ export function opTable(g: O, x: number, y: number, z: number, ry: number, rng: 
 
 export function anesthesia(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  blk(s, 0.7, 1.2, 0.6, M(0xc8ccc4), 0, 0.1, 0);
+  blk(s, 0.7, 1.2, 0.6, T(0xc8ccc4, TX.paint), 0, 0.1, 0);
   blk(s, 0.5, 0.4, 0.06, M(0x202428), 0, 1.35, 0.1);
   box(s, 0.44, 0.32, 0.01, G(0x082a2a, 1), 0, 1.55, 0.135);
   box(s, 0.35, 0.02, 0.01, G(C.screen, 1.4), 0, 1.6, 0.14);
   box(s, 0.3, 0.02, 0.01, G(0xffd040, 1.2), 0, 1.5, 0.14);
-  cyl(s, 0.08, 0.08, 0.5, M(0x2a7a3a), -0.25, 0.4, 0.33, 8);
-  cyl(s, 0.08, 0.08, 0.5, M(0x2a4aa8), 0.0, 0.4, 0.33, 8);
+  cyl(s, 0.08, 0.08, 0.5, T(0x2a7a3a, TX.paint), -0.25, 0.4, 0.33, 8);
+  cyl(s, 0.08, 0.08, 0.5, T(0x2a4aa8, TX.paint), 0.0, 0.4, 0.33, 8);
   for (const sx of [-0.28, 0.28]) for (const sz of [-0.22, 0.22]) cyl(s, 0.05, 0.05, 0.04, rubber(), sx, 0.05, sz, 6, 0, 0, Math.PI / 2);
   return s;
 }
@@ -561,7 +561,7 @@ export function trolley(g: O, x: number, y: number, z: number, ry: number, rng: 
   blk(s, 0.8, 0.03, 0.5, st, 0, 0.85, 0);
   blk(s, 0.8, 0.03, 0.5, st, 0, 0.3, 0);
   for (const sx of [-0.38, 0.38]) for (const sz of [-0.23, 0.23]) cyl(s, 0.015, 0.015, 0.85, st, sx, 0.45, sz, 4);
-  blk(s, 0.6, 0.012, 0.35, MD(0x3a7a6a), 0, 0.88, 0);
+  blk(s, 0.6, 0.012, 0.35, T(0x3a7a6a, TX.cloth), 0, 0.88, 0);
   for (let i = 0; i < 6; i++) box(s, 0.02, 0.012, rng.range(0.12, 0.2), M(0xd0d8dc), -0.22 + i * 0.09, 0.9, 0, rng.spread(0.3));
   blk(s, 0.15, 0.06, 0.1, M(C.bloodFresh), 0.2, 0.89, 0.1);
   return s;
@@ -570,19 +570,19 @@ export function trolley(g: O, x: number, y: number, z: number, ry: number, rng: 
 /** Green oxygen cylinder model (for an explosive Destructible). Base at y = 0. */
 export function oxygenModel(): THREE.Group {
   const g = new THREE.Group();
-  cyl(g, 0.17, 0.17, 1.15, M(0x1f7a3a), 0, 0.6, 0, 10);
-  cyl(g, 0.1, 0.17, 0.18, M(0xe8e8e0), 0, 1.25, 0, 10);
+  cyl(g, 0.17, 0.17, 1.15, T(0x1f8a3c, TX.paint), 0, 0.6, 0, 10);
+  cyl(g, 0.1, 0.17, 0.18, T(0xe8e8e0, TX.paint), 0, 1.25, 0, 10);
   cyl(g, 0.035, 0.035, 0.14, M(0x6a6a5a), 0, 1.4, 0, 6);
   box(g, 0.2, 0.16, 0.02, G(0xffd23a, 1), 0, 0.75, 0.17);
-  box(g, 0.36, 0.04, 0.36, M(0x3a3a3a), 0, 0.02, 0);
+  box(g, 0.36, 0.04, 0.36, T(0x3a3a3a, TX.paint), 0, 0.02, 0);
   return g;
 }
 
 /** Red flammable gas cylinder model. */
 export function gasModel(): THREE.Group {
   const g = new THREE.Group();
-  cyl(g, 0.2, 0.2, 1.2, M(0xb3261e), 0, 0.62, 0, 10);
-  cyl(g, 0.12, 0.2, 0.16, M(0x8a1a14), 0, 1.3, 0, 10);
+  cyl(g, 0.2, 0.2, 1.2, T(0xc22a1e, TX.paint), 0, 0.62, 0, 10);
+  cyl(g, 0.12, 0.2, 0.16, T(0x8a1a14, TX.paint), 0, 1.3, 0, 10);
   cyl(g, 0.04, 0.04, 0.12, M(0x3a3a3a), 0, 1.44, 0, 6);
   box(g, 0.26, 0.2, 0.02, G(0xffd23a, 1), 0, 0.8, 0.2);
   return g;
@@ -591,8 +591,8 @@ export function gasModel(): THREE.Group {
 /** Hospital door panel (local: hinge at x=0, door spans +X, front faces +Z, bottom at 0). */
 export function doorPanel(w: number, h: number, color: number = C.door, windowGlow = false): THREE.Group {
   const g = new THREE.Group();
-  box(g, w, h, 0.06, M(color, 'planks', 1.2, 0.25), w / 2, h / 2, 0);
-  box(g, w - 0.08, 0.3, 0.07, M(C.kick, 'metal', 3, 0.5), w / 2, 0.17, 0);
+  box(g, w, h, 0.06, T(color, TX.wood), w / 2, h / 2, 0);
+  box(g, w - 0.08, 0.3, 0.07, T(C.kick, TX.steel), w / 2, 0.17, 0);
   box(g, 0.28, 0.5, 0.07, windowGlow ? G(0x2a4a4a, 1) : M(0x0d1414), w / 2, h * 0.7, 0);
   box(g, 0.05, 0.22, 0.12, M(0x3a3e40), w - 0.12, h * 0.48, 0);
   box(g, 0.24, 0.06, 0.075, M(0xe8e4d0), w / 2, h * 0.55, 0);
@@ -616,9 +616,9 @@ export function ambulance(): Ambulance {
   const root = new THREE.Group();
   const body = new THREE.Group();
   root.add(body);
-  const white = M(0xd8dcd6, 'metal', 1, 0.25);
-  const red = M(0xc42020);
-  const dark = M(0x111416);
+  const white = T(0xd8dcd6, TX.panel);
+  const red = T(0xc42020, TX.panel);
+  const dark = M(0x16191b);
   const glass = M(0x1a2a34);
   // Box body (rear) + cab.
   blk(body, 2.3, 2.3, 4.0, white, 0, 0.45, -0.95);
@@ -682,7 +682,7 @@ export function ambulance(): Ambulance {
 /** Parked car silhouette (front at +Z). */
 export function car(g: O, x: number, y: number, z: number, ry: number, color: number): THREE.Group {
   const s = grp(g, x, y, z, ry);
-  const paint = M(color, 'metal', 1, 0.2);
+  const paint = T(color, TX.panel);
   blk(s, 1.8, 0.7, 4.3, paint, 0, 0.3, 0);
   blk(s, 1.6, 0.6, 2.2, paint, 0, 1.0, -0.3);
   box(s, 1.62, 0.5, 0.05, M(0x141c22), 0, 1.25, 0.82, 0, 0.5);

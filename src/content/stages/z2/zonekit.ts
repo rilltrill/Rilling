@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import type { Rng } from '../../../core/Rng';
-import { C, G, M, MB } from './mats';
+import { C, G, M, type Preset, T, TB, TX } from './mats';
 import { box, ceilingPanel, grp } from './props';
 import type { WallStyle } from './shell';
 import type { Z2Scene } from './scene';
@@ -20,59 +20,59 @@ export interface ZoneCtx {
 
 export const styles = {
   clinic: (): WallStyle => ({
-    low: M(C.wallLow, 'tiles', 1, 0.55),
-    high: M(C.wallHigh, 'stucco', 1, 0.45),
+    low: T(C.wallLow, TX.wallTile),
+    high: T(C.wallHigh, TX.plaster),
     lowH: 1.3,
-    rail: M(C.wallRail),
+    rail: T(C.wallRail, TX.wood),
     base: M(0x232826),
-    trim: M(C.doorFrame),
+    trim: T(C.doorFrame, TX.paint),
   }),
   ward: (): WallStyle => ({
-    low: M(0x35625a, 'tiles', 1, 0.5),
-    high: M(0x8a9a8e, 'stucco', 1, 0.4),
+    low: T(0x2e6a5e, TX.wallTile),
+    high: T(0x94a690, TX.plaster),
     lowH: 1.1,
-    rail: M(0xb9a07a),
+    rail: T(0xb9a07a, TX.wood),
     base: M(0x232826),
-    trim: M(C.doorFrame),
+    trim: T(C.doorFrame, TX.paint),
   }),
   concrete: (): WallStyle => ({
-    low: M(0x3d4a44, 'concrete', 1.5, 0.7),
-    high: M(C.concrete, 'concrete', 1, 0.8),
+    low: T(0x3f5a4e, TX.block),
+    high: T(C.concrete, TX.block),
     lowH: 1.2,
     base: M(0x1e2220),
-    trim: M(0x5a5e58),
+    trim: T(0x5a5e58, TX.paint),
   }),
   morgue: (): WallStyle => ({
-    low: M(C.tileLow, 'tiles', 1.2, 0.8),
-    high: M(C.tileWhite, 'tiles', 1.2, 0.7),
+    low: T(C.tileLow, TX.wallTile),
+    high: T(C.tileWhite, TX.wallTile),
     lowH: 1.5,
     base: M(0x2a3436),
-    trim: M(C.steel),
+    trim: T(C.steel, TX.steel),
   }),
   or: (): WallStyle => ({
-    low: M(0x2f6252, 'tiles', 1.2, 0.7),
-    high: M(C.orGreen, 'tiles', 1.2, 0.6),
+    low: T(0x2a6a56, TX.wallTile),
+    high: T(C.orGreen, TX.wallTile),
     lowH: 1.6,
     base: M(0x1e2a26),
-    trim: M(C.steel),
+    trim: T(C.steel, TX.steel),
   }),
   atrium: (): WallStyle => ({
-    low: M(C.marbleDark, 'concrete', 2, 0.5),
-    high: M(0x8a8a80, 'stucco', 1, 0.4),
+    low: T(C.marbleDark, TX.concrete),
+    high: T(0x8e8670, TX.paper),
     lowH: 2.2,
     base: M(0x1e1e1c),
-    trim: M(0x6a6a62),
+    trim: T(0x6a6a62, TX.paint),
   }),
   facade: (): WallStyle => ({
-    low: M(0x3a3c3e, 'concrete', 2, 0.6),
-    high: M(0x8a8478, 'concrete', 1, 0.8),
+    low: T(0x4a4c4c, TX.concrete),
+    high: T(0x8a5442, TX.brick),
     lowH: 1.0,
-    trim: M(0x4a4e52),
+    trim: T(0x5a5e62, TX.concrete),
   }),
 };
 
-export const floorMat = () => M(C.floor, 'checker', 0.55, 0.28);
-export const ceilMat = () => M(C.ceiling, 'tiles', 0.5, 0.85);
+export const floorMat = () => T(C.floor, TX.lino);
+export const ceilMat = () => T(C.ceiling, TX.ceiling);
 
 /** Static (baked) ceiling panel. */
 export function panel(g: THREE.Object3D, x: number, y: number, z: number, ry = 0, on = true, warm = false) {
@@ -126,7 +126,7 @@ export function vent(ctx: ZoneCtx, g: THREE.Object3D, x: number, y: number, z: n
   box(g, 0.74, 0.02, 0.74, M(0x08090a), x, y - 0.004, z);
   box(g, 0.82, 0.03, 0.06, M(0x8a908c), x, y - 0.015, z - 0.4);
   box(g, 0.82, 0.03, 0.06, M(0x8a908c), x, y - 0.015, z + 0.4);
-  const grate = new THREE.Mesh(Kit.box(0.7, 0.03, 0.7), M(0x9aa09c, 'grate', 1.5, 0.9));
+  const grate = new THREE.Mesh(Kit.box(0.7, 0.03, 0.7), T(0x9aa09c, TX.grate));
   grate.position.set(x, y - 0.03, z);
   ctx.dyn.add(grate);
   ctx.sc.vents.push({ grate, pos: new THREE.Vector3(x, y, z), floor, vy: 0, spin: 0, dropped: false, landed: false });
@@ -136,10 +136,21 @@ export function vent(ctx: ZoneCtx, g: THREE.Object3D, x: number, y: number, z: n
  * Dark side room seen through a doorway: a back-faced box (interior visible
  * from outside through the opening) with a little set dressing.
  */
-export function sideRoom(g: THREE.Object3D, x0: number, x1: number, z0: number, z1: number, y: number, h: number, color = 0x1a2220, extras?: (s: THREE.Object3D) => void) {
+export function sideRoom(
+  g: THREE.Object3D,
+  x0: number,
+  x1: number,
+  z0: number,
+  z1: number,
+  y: number,
+  h: number,
+  color = 0x1a2220,
+  extras?: (s: THREE.Object3D) => void,
+  tex: Preset = TX.plaster,
+) {
   const w = x1 - x0;
   const d = z1 - z0;
-  box(g, w, h, d, MB(color, 'stucco', 1, 0.5), (x0 + x1) / 2, y + h / 2, (z0 + z1) / 2);
+  box(g, w, h, d, TB(color, tex), (x0 + x1) / 2, y + h / 2, (z0 + z1) / 2);
   if (extras) extras(g);
 }
 

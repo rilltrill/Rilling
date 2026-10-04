@@ -4,6 +4,7 @@ import type { ShotHit } from '../../../gameplay/Entity';
 import { registerEnemy, createEnemy } from '../../registry';
 import { Kit } from '../../kit/ModelKit';
 import { mergedMeshes } from './props';
+import { tm } from './retro';
 import { angleDelta, clamp, damp, easeInOutSine } from '../../../core/math';
 import { Projectile } from '../../../gameplay/Projectile';
 import { D, RIVER_WIDTH, riverLatAt } from './layout';
@@ -166,14 +167,16 @@ export class Carnotaur extends Boss {
   }
 
   protected override build(): void {
-    const skin = Kit.mat(SKIN);
-    const skinDark = Kit.mat(SKIN_DARK);
-    const belly = Kit.mat(BELLY);
-    const plate = Kit.mat(PLATE);
-    const horn = Kit.mat(HORN);
-    const hornTip = Kit.mat(HORN_TIP);
-    const teeth = Kit.mat(0xf2ead2);
-    const claw = Kit.mat(0x2a2420);
+    // Pebbly hide over the body, finer scales on the belly, bony osteoderms;
+    // horns, teeth and claws stay clean so they read as bone/keratin.
+    const skin = tm(SKIN, 'hide', 1.7);
+    const skinDark = tm(SKIN_DARK, 'hide', 1.7);
+    const belly = tm(BELLY, 'scales', 2.2, 0.7);
+    const plate = tm(PLATE, 'rock', 4, 0.7);
+    const horn = tm(HORN, 'grain', 3, 0.45);
+    const hornTip = tm(HORN_TIP, 'none');
+    const teeth = tm(0xf2ead2, 'none');
+    const claw = tm(0x2a2420, 'none');
     this.flashMat = Kit.glow(0xffffff, 1.2);
     this.eyeMat = Kit.glow(0xff3010, 2.2);
     this.eyeFrenzyMat = Kit.glow(0xffb020, 2.6);
@@ -245,7 +248,7 @@ export class Carnotaur extends Boss {
         Kit.add(g, bump, skinDark, sx * 0.4, 0.35, 0.08, 0, 0, 0, 0.18, 0.2, 0.2);
         for (let i = 0; i < 4; i++) Kit.add(g, bump, skinDark, sx * (0.2 - i * 0.02), 0.28 - i * 0.02, 0.85 + i * 0.2, 0, i, 0, 0.08, 0.06, 0.1);
         Kit.add(g, bump, skin, sx * 0.34, -0.12, 0.6, 0, 0, 0, 0.16, 0.14, 0.24);
-        Kit.add(g, Kit.box(0.08, 0.07, 0.06), Kit.mat(0x1a0c08), sx * 0.13, 0.08, 1.52);
+        Kit.add(g, Kit.box(0.08, 0.07, 0.06), tm(0x1a0c08, 'none'), sx * 0.13, 0.08, 1.52);
       }
     });
     for (const m of skull) {
@@ -296,8 +299,8 @@ export class Carnotaur extends Boss {
     const mouthG = this.mouth;
     mouthG.position.set(0, -0.34, 0.62);
     this.head.add(mouthG);
-    const gullet = Kit.add(mouthG, Kit.box(0.52, 0.36, 0.95), Kit.mat(0x5a0c0c), 0, 0, 0.1);
-    const tongue = Kit.add(mouthG, Kit.box(0.3, 0.08, 0.7), Kit.mat(0xb04050), 0, -0.14, 0.25);
+    const gullet = Kit.add(mouthG, Kit.box(0.52, 0.36, 0.95), tm(0x5a0c0c, 'skin', 3, 0.7), 0, 0, 0.1);
+    const tongue = Kit.add(mouthG, Kit.box(0.3, 0.08, 0.7), tm(0xb04050, 'skin', 4, 0.6), 0, -0.14, 0.25);
     const throat = Kit.add(mouthG, Kit.sphere(0.24, 8, 6), Kit.glow(0xff4a1a, 1.6), 0, 0.02, -0.28, 0, 0, 0, 1, 0.8, 0.6);
     for (const m of [gullet, tongue, throat]) {
       m.userData.baseMat = m.material;
@@ -555,8 +558,8 @@ export class Carnotaur extends Boss {
 
   private thrownRock() {
     const g = new THREE.Group();
-    Kit.add(g, Kit.jitter(Kit.ico(0.45, 0), 0.2, 3 + this.raptorsCalled), Kit.mat(0x7d7262));
-    Kit.add(g, Kit.ico(0.22, 0), Kit.mat(0x5f8a30), 0.15, 0.25, 0);
+    Kit.add(g, Kit.jitter(Kit.ico(0.45, 0), 0.2, 3 + this.raptorsCalled), tm(0x7d7262, 'rock', 3));
+    Kit.add(g, Kit.ico(0.22, 0), tm(0x5f8a30, 'grass', 4, 0.8), 0.15, 0.25, 0);
     return g;
   }
 

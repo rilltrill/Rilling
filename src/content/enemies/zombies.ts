@@ -27,6 +27,7 @@ import {
   poseRun,
   poseShamble,
   restPose,
+  ZT,
 } from './zombieKit';
 
 /**
@@ -80,6 +81,12 @@ interface Flyer {
 }
 
 const STOMP_OPTS = { volume: 0.4, vary: 0.12, pitch: 1.25 };
+
+/** Wet, lumpy flesh for stumps and neck wounds added after the bake. */
+const STUMP_MAT = () => Kit.mat(GORE, { tex: 'hide', texScale: 2.5 });
+const BONE_MAT = () => Kit.mat(BONE, { tex: 'hide', texScale: 4, texStrength: 0.35 });
+/** Blood pool: rippled, glossy-looking dark red. */
+const POOL_MAT = () => Kit.mat(0x340606, { tex: 'water', texScale: 2.5, texStrength: 0.8 });
 
 /**
  * Stand-off distance when the player rides a vehicle (eye 2.05 m, cab/hood in
@@ -590,8 +597,8 @@ export abstract class Zombie extends Enemy {
     fx.gibs(hit.point, BLOOD, 6, 0.08);
     fx.blood(hit.point, hit.dir, { color: this.bloodColor, amount: 1.1 });
     this.world.audio.play('gib', { volume: 0.75, vary: 0.15 });
-    Kit.add(r.neck, Kit.box(0.1, 0.05, 0.1), Kit.mat(GORE), 0, 0.075, 0);
-    Kit.add(r.neck, Kit.box(0.035, 0.05, 0.035), Kit.mat(BONE), 0, 0.09, -0.01);
+    Kit.add(r.neck, Kit.box(0.1, 0.05, 0.1), STUMP_MAT(), 0, 0.075, 0);
+    Kit.add(r.neck, Kit.box(0.035, 0.05, 0.035), BONE_MAT(), 0, 0.09, -0.01);
     this.refreshMeshes();
     for (let i = 0; i < 3; i++) {
       this.world.later(0.12 + i * 0.22, () => {
@@ -617,7 +624,7 @@ export abstract class Zombie extends Enemy {
       if (o.userData.shot) this.world.shootables.remove(o);
     });
     // Bloody stump left on the body.
-    Kit.add(parent, Kit.box(0.11, 0.05, 0.12), Kit.mat(GORE), pivot.position.x, pivot.position.y + (whole ? 0 : 0.01), pivot.position.z);
+    Kit.add(parent, Kit.box(0.11, 0.05, 0.12), STUMP_MAT(), pivot.position.x, pivot.position.y + (whole ? 0 : 0.01), pivot.position.z);
     this.severed[idx] = whole ? 2 : 1;
     this.launchLimb(pivot, hit.dir, side);
     this.unrig(arm, whole);
@@ -795,7 +802,7 @@ export abstract class Zombie extends Enemy {
     this.deathSpin = this.deathSide * rng.range(5, 8);
     // Blood pool on the ground.
     if (this.deathBaseY > -0.5) {
-      this.pool = Kit.add(this.root, Kit.cyl(0.55, 0.55, 0.01, 10), Kit.mat(0x2a0404), 0, 0.012, 0, 0, rng.next() * 3, 0, 0.01, 1, 0.01);
+      this.pool = Kit.add(this.root, Kit.cyl(0.55, 0.55, 0.01, 10), POOL_MAT(), 0, 0.012, 0, 0, rng.next() * 3, 0, 0.01, 1, 0.01);
       this.pool.userData.noFlash = true;
     }
   }
@@ -1836,9 +1843,10 @@ export class Brute extends Zombie {
     });
     const r = this.r;
     // Shirtless, riot trousers and boots.
-    b.clothes({ shirt: skin, sleeves: 'none', pants: 0x1e2638, shoes: 0x111111 });
-    const ARM = 0x1b1e26;
-    const EDGE = 0x3a4252;
+    b.clothes({ shirt: skin, sleeves: 'none', pants: 0x28324a, shoes: 0x1a1a1c });
+    // Riot armour: blued steel mid-tones (pure black crushes on the CRT and hides the plating).
+    const ARM = 0x343c4e;
+    const EDGE = 0x5c6882;
     const MUSCLE = 0x6a1a16;
     const sb = Math.sqrt(b.bulk);
     const w = b.chestW;
@@ -1878,14 +1886,14 @@ export class Brute extends Zombie {
     // Riot armour (sparks, no damage): chest plate, shoulder pads, bracer, knee pads.
     b.box(r.spine, w * 0.9, 0.22, 0.03, ARM, 0, 0.34, bz + 0.018, 0, 0, 0, 0.04, 'armor');
     b.box(r.spine, w * 0.92, 0.035, 0.035, EDGE, 0, 0.455, bz + 0.02, 0, 0, 0, 0.08, 'armor');
-    b.box(r.spine, 0.18, 0.045, 0.012, 0xd0d0d0, 0, 0.38, bz + 0.036, 0, 0, 0, 0.35, 'armor');
+    b.sbox(ZT.FLAT, r.spine, 0.18, 0.045, 0.012, 0xd0d0d0, 0, 0.38, bz + 0.036, 0, 0, 0, 0.35, 'armor');
     for (const [a, s] of [[r.armL, 1], [r.armR, -1]] as const) {
       b.box(a.shoulder, 0.2, 0.075, 0.22, ARM, s * 0.05, 0.05, 0, 0, 0, s * -0.5, 0.04, 'armor');
       b.box(a.shoulder, 0.17, 0.06, 0.2, EDGE, s * 0.09, -0.04, 0, 0, 0, s * -0.3, 0.06, 'armor');
       if (a !== mu) b.box(a.elbow, 0.16, 0.19, 0.17, ARM, 0, -0.12 * b.al, 0, 0, 0, 0, 0.04, 'armor');
     }
     for (const l of [r.legL, r.legR]) b.box(l.knee, 0.2, 0.17, 0.07, ARM, 0, -0.03, 0.12, 0, 0, 0, 0.04, 'armor');
-    b.box(r.hips, 0.36 * b.bulk, 0.06, 0.22 * sb, 0x101010, 0, 0.05, 0);
+    b.sbox(ZT.LEATHER, r.hips, 0.36 * b.bulk, 0.06, 0.22 * sb, 0x1e1a18, 0, 0.05, 0);
     // Stitched, scarred belly.
     b.box(r.spine, 0.02, 0.18, 0.012, 0x2a1a1a, 0.05, 0.1, bz + 0.004, 0, 0, 0.2);
     for (let i = 0; i < 4; i++) b.box(r.spine, 0.06, 0.012, 0.014, 0x2a1a1a, 0.04 + 0.008 * i, 0.04 + i * 0.04, bz + 0.006, 0, 0, 0.2);
@@ -2191,10 +2199,12 @@ export class Bloater extends Zombie {
     b.neckMesh.scale.set(2.2, 1.2, 2.1);
     // The belly: own pivot so it can jiggle and swell.
     this.belly = Kit.pivot(r.spine, 0, 0.16, 0.08);
+    // Its scale jiggles and swells: lock the skin texture to the surface (no swimming).
+    this.belly.userData.texLocal = true;
     b.part(this.belly, Kit.ico(0.4, 1), skin, 0, 0, 0, 0, 0, 0, 1.2, 1.08, 1.1, 0.26, 'torso');
-    b.box(this.belly, 0.3, 0.012, 0.02, 0x5a6a3a, 0.02, 0.1, 0.43, 0, 0.1, 0.3);
-    b.box(this.belly, 0.22, 0.012, 0.02, 0x5a6a3a, -0.05, -0.1, 0.43, 0, -0.1, -0.4);
-    b.box(this.belly, 0.04, 0.04, 0.03, 0x4a3a2a, 0, -0.04, 0.44);
+    b.sbox(ZT.SKIN, this.belly, 0.3, 0.012, 0.02, 0x5a6a3a, 0.02, 0.1, 0.43, 0, 0.1, 0.3);
+    b.sbox(ZT.SKIN, this.belly, 0.22, 0.012, 0.02, 0x5a6a3a, -0.05, -0.1, 0.43, 0, -0.1, -0.4);
+    b.sbox(ZT.GORE, this.belly, 0.04, 0.04, 0.03, 0x4a3a2a, 0, -0.04, 0.44);
     // Undershirt band riding up over the chest.
     b.box(r.spine, b.chestW + 0.04, 0.14, 0.22 * sb + 0.06, undershirt, 0, 0.4, 0.01);
     // Glowing pustules — weak points that pop individually.

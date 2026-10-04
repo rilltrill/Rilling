@@ -17,9 +17,20 @@ export interface TexInfo {
 
 const INFO = new WeakMap<THREE.Material, TexInfo>();
 
+/**
+ * Untextured Kit.mat materials carry the default retro 'grain' (Kit.retro.grain).
+ * Record it so the baker buckets every grainy colour into ONE draw call instead
+ * of leaving one merged mesh per colour.
+ */
+function noteGrain(m: THREE.MeshLambertMaterial): THREE.MeshLambertMaterial {
+  const rt = m.userData.retroTex as TexName | undefined;
+  if (rt && !INFO.has(m)) INFO.set(m, { tex: rt, scale: 1, strength: 0.6 });
+  return m;
+}
+
 /** Flat Lambert scenery material, optionally with a retro detail texture. */
 export function M(color: number, tex?: TexName, scale = 1, strength = 1): THREE.MeshLambertMaterial {
-  if (!tex) return Kit.mat(color);
+  if (!tex) return noteGrain(Kit.mat(color));
   const m = Kit.mat(color, { tex, texScale: scale, texStrength: strength });
   INFO.set(m, { tex, scale, strength });
   return m;
@@ -27,16 +38,98 @@ export function M(color: number, tex?: TexName, scale = 1, strength = 1): THREE.
 
 /** Back-faced (room interior) Lambert, optionally textured. */
 export function MB(color: number, tex?: TexName, scale = 1, strength = 1): THREE.MeshLambertMaterial {
-  const m = tex
-    ? Kit.mat(color, { side: THREE.BackSide, tex, texScale: scale, texStrength: strength })
-    : Kit.mat(color, { side: THREE.BackSide });
-  if (tex) INFO.set(m, { tex, scale, strength });
+  if (!tex) return noteGrain(Kit.mat(color, { side: THREE.BackSide }));
+  const m = Kit.mat(color, { side: THREE.BackSide, tex, texScale: scale, texStrength: strength });
+  INFO.set(m, { tex, scale, strength });
   return m;
 }
 
 /** Double-sided Lambert (curtains, papers, signs). */
-export function MD(color: number): THREE.MeshLambertMaterial {
-  return Kit.mat(color, { side: THREE.DoubleSide });
+export function MD(color: number, tex?: TexName, scale = 1, strength = 1): THREE.MeshLambertMaterial {
+  if (!tex) return noteGrain(Kit.mat(color, { side: THREE.DoubleSide }));
+  const m = Kit.mat(color, { side: THREE.DoubleSide, tex, texScale: scale, texStrength: strength });
+  INFO.set(m, { tex, scale, strength });
+  return m;
+}
+
+/** A retro texture preset: [texture, texScale, texStrength]. */
+export type Preset = readonly [TexName, number, number];
+
+/**
+ * The stage's texture palette. Every (texture, scale, strength) combination is
+ * one baked draw call per zone, so scenery picks from this short list instead
+ * of inventing new combinations — colour is free (it is baked into vertices).
+ */
+export const TX = {
+  // ── Architecture ──
+  /** Glazed wainscot / wall tiles (clinic, ward, morgue, OR). */
+  wallTile: ['tiles', 1.2, 0.62],
+  /** Painted plaster above the wainscot, side rooms. */
+  plaster: ['stucco', 1, 0.65],
+  /** Patterned wallpaper (lobby, offices, patient rooms). */
+  paper: ['wallpaper', 1, 0.4],
+  /** Poured concrete: slabs, stairs, canopy, basement floors/ceilings. */
+  concrete: ['concrete', 1, 0.8],
+  /** Painted cinder block (basement service walls). */
+  block: ['brick', 1.25, 0.5],
+  /** Exterior brick (hospital facade, wings). */
+  brick: ['brick', 0.8, 0.85],
+  /** Sheet linoleum laid in a checkerboard. */
+  lino: ['checker', 0.55, 0.34],
+  /** Big lobby marble checker. */
+  marble: ['checker', 0.32, 0.36],
+  /** Small ceramic floor tiles (morgue, OR). */
+  floorTile: ['tiles', 0.5, 0.85],
+  /** Speckled terrazzo (the asphalt map's chips on a light ground). */
+  terrazzo: ['asphalt', 1.6, 0.6],
+  /** Acoustic ceiling tiles. */
+  ceiling: ['tiles', 0.5, 0.8],
+  asphalt: ['asphalt', 1, 0.9],
+  /** Rain puddles. */
+  water: ['water', 1.2, 0.7],
+  // ── Fixtures / props ──
+  /** Brushed / stainless steel (gurneys, IV stands, trays, drawers, sinks). */
+  steel: ['metal', 2, 0.5],
+  /** Painted sheet metal (cabinets, vending machines, carts, doors, cylinders). */
+  paint: ['metal', 1.5, 0.32],
+  /** Vehicle body panels. */
+  panel: ['metal', 1, 0.3],
+  /** Fabric: sheets, curtains, upholstery, body bags, scrubs. */
+  cloth: ['cloth', 0.5, 0.55],
+  /** Printed privacy curtains. */
+  curtain: ['wallpaper', 0.7, 0.55],
+  /** Wood veneer: doors, counters, benches. */
+  wood: ['planks', 1.2, 0.35],
+  /** Vent grilles, drains, cable trays, chain-link. */
+  grate: ['grate', 1.5, 0.9],
+  /** Yellow/black safety striping. */
+  hazard: ['hazard', 1, 0.7],
+  /** Corrugated shutters / pipes lagging. */
+  ribbed: ['corrugated', 1.2, 0.5],
+  /** Dead bark (bay trees). */
+  bark: ['bark', 1, 0.8],
+  // ── Flesh ──
+  /** Bumpy wrinkled flesh mass (Patient Zero, the cocoon, creeping veins). */
+  flesh: ['hide', 1.3, 0.75],
+  /** Veiny human skin with rot sores. */
+  skin: ['skin', 0.7, 0.65],
+  /** Bone / cartilage. */
+  bone: ['hide', 2.2, 0.45],
+} as const satisfies Record<string, Preset>;
+
+/** Lambert scenery material from a palette preset. */
+export function T(color: number, p: Preset): THREE.MeshLambertMaterial {
+  return M(color, p[0], p[1], p[2]);
+}
+
+/** Back-faced preset material (room interiors seen through doorways). */
+export function TB(color: number, p: Preset): THREE.MeshLambertMaterial {
+  return MB(color, p[0], p[1], p[2]);
+}
+
+/** Double-sided preset material. */
+export function TD(color: number, p: Preset): THREE.MeshLambertMaterial {
+  return MD(color, p[0], p[1], p[2]);
 }
 
 /** Unlit glow (lamps, screens, signs). */
@@ -58,8 +151,8 @@ export function bakedLambert(info: TexInfo | undefined, side: THREE.Side): THREE
 
 export const C = {
   // Clinic walls / floors.
-  wallLow: 0x2f5b54,
-  wallHigh: 0x7c8c84,
+  wallLow: 0x2a6258,
+  wallHigh: 0x86968a,
   wallRail: 0xc9cdbf,
   floor: 0x5d6a63,
   floorAlt: 0x46524c,

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
-import { C, G, M } from './mats';
+import { C, G, M, T, TX } from './mats';
 import {
   ambulance,
   bed,
@@ -56,23 +56,32 @@ import { exitSign, emergencyLamp } from './props';
 // Ambulance bay (exterior, night, rain)
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function buildBay(ctx: ZoneCtx): THREE.Group {
+/**
+ * The bay is built as two zones: `near` (facade, entrance, canopy — also seen
+ * from just inside the ER) and `field` (ground, car park, wings, debris) which
+ * env.ts culls once the camera is through the doors, so its baked batches don't
+ * cost triangles behind the camera in the ER.
+ */
+export function buildBay(ctx: ZoneCtx): { near: THREE.Group; field: THREE.Group } {
   const { rng } = ctx;
   const g = new THREE.Group();
   g.name = 'bay';
+  const f = new THREE.Group();
+  f.name = 'bayField';
   // Ground: asphalt apron, kerb + sidewalk along the facade.
-  box(g, 80, 0.2, 80, M(0x2a2d31, 'asphalt', 1, 0.9), 0, -0.1, -5);
-  box(g, 40, 0.14, 3.6, M(0x5f605a, 'concrete', 1.5, 0.7), 0, 0.07, -24.2);
-  box(g, 40, 0.16, 0.2, M(0x8a8a80), 0, 0.08, -22.4);
+  // (Stops at the facade line: the ER / corridor floors are at the same height.)
+  box(f, 80, 0.2, 61, T(0x3a3e46, TX.asphalt), 0, -0.1, 4.5);
+  box(g, 40, 0.14, 3.6, T(0x66665e, TX.concrete), 0, 0.07, -24.2);
+  box(g, 40, 0.16, 0.2, T(0x8a8a80, TX.concrete), 0, 0.08, -22.4);
   // Lane paint: ambulance-only box, hatching in front of the doors.
   const yellow = M(0xb8962a);
-  for (const sx of [-4.6, 4.6]) box(g, 0.14, 0.012, 28, yellow, sx, 0.008, -8);
-  for (let i = 0; i < 7; i++) box(g, 0.25, 0.012, 3.2, yellow, -3 + i, 0.009, -20, 0.6);
-  pixelText(g, 'AMBULANCE', 0, 0.012, -9.5, 0, { px: 0.1, mat: M(0x6a6a64), depth: 0.01 }).rotation.set(-Math.PI / 2, 0, 0);
+  for (const sx of [-4.6, 4.6]) box(f, 0.14, 0.012, 28, yellow, sx, 0.008, -8);
+  for (let i = 0; i < 7; i++) box(f, 0.25, 0.012, 3.2, yellow, -3 + i, 0.009, -20, 0.6);
+  pixelText(f, 'AMBULANCE', 0, 0.012, -9.5, 0, { px: 0.1, mat: M(0x6a6a64), depth: 0.01 }).rotation.set(-Math.PI / 2, 0, 0);
   // Puddles.
   for (let i = 0; i < 9; i++) {
     const r = rng.range(0.6, 1.6);
-    const p = cyl(g, r, r, 0.01, M(0x1a222a), rng.spread(9), 0.006, rng.range(-20, 18), 10);
+    const p = cyl(f, r, r, 0.01, T(0x243444, TX.water), rng.spread(9), 0.006, rng.range(-20, 18), 10);
     p.scale.z = rng.range(0.5, 1);
   }
 
@@ -92,19 +101,19 @@ export function buildBay(ctx: ZoneCtx): THREE.Group {
       if (Math.abs(x) < 9.6 && fl === 2) continue;
       const on = rng.chance(0.18);
       box(g, 1.7, 1.7, 0.1, on ? rng.pick(lit) : winDark, x, y, -25.82);
-      box(g, 1.9, 0.12, 0.25, M(0x6e6a62), x, y - 0.92, -25.75);
+      box(g, 1.9, 0.12, 0.25, T(0x7a766c, TX.concrete), x, y - 0.92, -25.75);
     }
   }
   // Hospital name sign on the roofline.
   sign(g, 'ST MERCY HOSPITAL', 0, 13.3, -25.7, 0, 0.15, 0xdff4ff, 0x1a2024, 1.25, [3, 12]);
-  box(g, 18.5, 0.25, 0.5, M(0x3a3e42), 0, 12.2, -25.6);
+  box(g, 18.5, 0.25, 0.5, T(0x3a3e42, TX.paint), 0, 12.2, -25.6);
   // Big red cross.
   box(g, 0.9, 2.6, 0.2, G(0xff2a2a, 1.4), 12.5, 13.3, -25.7);
   box(g, 2.6, 0.9, 0.2, G(0xff2a2a, 1.4), 12.5, 13.3, -25.7);
 
   // ─── Entrance: broken sliding doors ──────────────────────────────────────
   const glass = Kit.mat(0x8ab8c0, { transparent: true, opacity: 0.28 });
-  const alu = M(0x8a9094, 'metal', 2, 0.4);
+  const alu = T(0x8a9094, TX.steel);
   box(g, 5.4, 0.25, 0.4, alu, 0, 3.5, -26);
   for (const sx of [-1, 1]) {
     // Panels slid open (left one shattered).
@@ -125,13 +134,13 @@ export function buildBay(ctx: ZoneCtx): THREE.Group {
   sign(g, 'EMERGENCY', 0, 3.95, -25.7, 0, 0.05, 0xff3a2a, 0x1a0c0c, 1.6);
 
   // ─── Canopy (porte-cochère) ──────────────────────────────────────────────
-  const conc = M(0x7a7870, 'concrete', 1, 0.8);
+  const conc = T(0x7a7870, TX.concrete);
   box(g, 20, 0.5, 16, conc, 0, 4.85, -18);
-  box(g, 20.2, 0.9, 0.4, M(0x2a2c30), 0, 4.75, -10);
+  box(g, 20.2, 0.9, 0.4, T(0x3a3e44, TX.ribbed), 0, 4.75, -10);
   for (const sx of [-8.6, 8.6]) {
     for (const sz of [-12.5, -21]) {
       cyl(g, 0.38, 0.38, 4.6, conc, sx, 2.3, sz, 10);
-      cyl(g, 0.42, 0.42, 0.9, M(0xb8962a, 'hazard', 1, 0.6), sx, 0.45, sz, 10);
+      cyl(g, 0.42, 0.42, 0.9, T(0xd0a82a, TX.hazard), sx, 0.45, sz, 10);
     }
   }
   // Fascia sign (one dead letter).
@@ -141,73 +150,73 @@ export function buildBay(ctx: ZoneCtx): THREE.Group {
   // Bollards along the kerb.
   for (let x = -16; x <= 16; x += 2.6) {
     if (Math.abs(x) < 3.5) continue;
-    cyl(g, 0.12, 0.12, 0.9, M(0xc9a227), x, 0.45, -22.1, 8);
+    cyl(g, 0.12, 0.12, 0.9, T(0xc9a227, TX.paint), x, 0.45, -22.1, 8);
   }
 
   // ─── Left wing + right-side car park ─────────────────────────────────────
-  box(g, 16, 12, 38, M(0x6a665e, 'concrete', 1, 0.8), -26, 6, -7);
+  box(f, 16, 12, 38, T(0x7a5446, TX.brick), -26, 6, -7);
   for (let fl = 0; fl < 3; fl++) {
     for (let z = -24; z <= 10; z += 3.2) {
       const on = rng.chance(0.12);
-      box(g, 0.1, 1.6, 1.7, on ? rng.pick(lit) : winDark, -17.95, 2.4 + fl * 3.4, z);
+      box(f, 0.1, 1.6, 1.7, on ? rng.pick(lit) : winDark, -17.95, 2.4 + fl * 3.4, z);
     }
   }
-  sign(g, 'OUTPATIENTS', -17.85, 10.6, -8, Math.PI / 2, 0.11, 0x9fd8ff, 0x101418, 1.1, [2, 7]);
+  sign(f, 'OUTPATIENTS', -17.85, 10.6, -8, Math.PI / 2, 0.11, 0x9fd8ff, 0x101418, 1.1, [2, 7]);
   // Low wall + fence on the right.
-  box(g, 0.4, 0.9, 50, M(0x5a5a54, 'concrete', 1, 0.7), 18, 0.45, 0);
-  for (let z = -24; z <= 24; z += 2.5) cyl(g, 0.04, 0.04, 2.4, M(0x4a4e50), 18, 1.6, z, 5);
-  box(g, 0.03, 1.5, 50, Kit.mat(0x5a6266, { transparent: true, opacity: 0.35 }), 18, 1.75, 0);
-  car(g, 23, 0, -12, 0.1, 0x6a2a2a);
-  car(g, 23.5, 0, -4, -0.05, 0x2a3a5a);
-  car(g, 24, 0, 8, 3.1, 0x8a8a84);
+  box(f, 0.4, 0.9, 50, T(0x5e5e58, TX.concrete), 18, 0.45, 0);
+  for (let z = -24; z <= 24; z += 2.5) cyl(f, 0.04, 0.04, 2.4, M(0x4a4e50), 18, 1.6, z, 5);
+  box(f, 0.03, 1.5, 50, Kit.mat(0x8a9498, { transparent: true, opacity: 0.4, tex: 'grate', texScale: 1.5, texStrength: 1 }), 18, 1.75, 0);
+  car(f, 23, 0, -12, 0.1, 0x6a2a2a);
+  car(f, 23.5, 0, -4, -0.05, 0x2a3a5a);
+  car(f, 24, 0, 8, 3.1, 0x8a8a84);
   // Street lamps (warm heads; one dead).
   for (const [lx, lz, on] of [[16.5, -14, true], [16.5, 6, false], [-15.5, 14, true]] as [number, number, boolean][]) {
-    cyl(g, 0.08, 0.1, 6, M(0x3a3e40), lx, 3, lz, 6);
-    box(g, 1.2, 0.08, 0.1, M(0x3a3e40), lx - Math.sign(lx) * 0.6, 6, lz);
-    box(g, 0.6, 0.12, 0.3, on ? G(0xffd9a0, 1.5) : M(0x2a2a2a), lx - Math.sign(lx) * 1.1, 5.92, lz);
+    cyl(f, 0.08, 0.1, 6, T(0x3a3e40, TX.paint), lx, 3, lz, 6);
+    box(f, 1.2, 0.08, 0.1, T(0x3a3e40, TX.paint), lx - Math.sign(lx) * 0.6, 6, lz);
+    box(f, 0.6, 0.12, 0.3, on ? G(0xffd9a0, 1.5) : M(0x2a2a2a), lx - Math.sign(lx) * 1.1, 5.92, lz);
   }
   // Dead trees on the right.
   for (const [tx, tz] of [[21, 16], [27, -20], [29, 2]] as [number, number][]) {
-    cyl(g, 0.18, 0.28, 4, M(0x2a2420), tx, 2, tz, 6);
+    cyl(f, 0.18, 0.28, 4, T(0x3a3028, TX.bark), tx, 2, tz, 6);
     for (let i = 0; i < 4; i++) {
       const a = rng.next() * 6.28;
-      const b = box(g, 0.08, 1.8, 0.08, M(0x2a2420), tx + Math.cos(a) * 0.5, 4.2, tz + Math.sin(a) * 0.5);
+      const b = box(f, 0.08, 1.8, 0.08, T(0x3a3028, TX.bark), tx + Math.cos(a) * 0.5, 4.2, tz + Math.sin(a) * 0.5);
       b.rotation.set(Math.sin(a) * 0.7, 0, -Math.cos(a) * 0.7);
     }
   }
   // Distant skyline blocks to the right (beyond the fog edge they read as silhouettes).
   for (let i = 0; i < 6; i++) {
     const h = rng.range(10, 26);
-    box(g, rng.range(8, 14), h, rng.range(8, 14), M(0x1c2028), 44 + rng.range(0, 10), h / 2, -40 + i * 14);
+    box(f, rng.range(8, 14), h, rng.range(8, 14), T(0x1e222a, TX.concrete), 44 + rng.range(0, 10), h / 2, -40 + i * 14);
   }
 
   // ─── Parked ambulance (lights going) ─────────────────────────────────────
   const ambB = ambulance();
   ambB.root.position.set(5.6, 0, -19.4);
   ambB.root.rotation.y = -0.08;
-  g.add(ambB.root);
+  f.add(ambB.root);
   ctx.sc.lightbars.push({ red: ambB.red, blue: ambB.blue });
   occluder(ctx, 5.6, 1.6, -19.7, 2.3, 3.2, 6.0, -0.08);
 
   // ─── Debris & gore ───────────────────────────────────────────────────────
-  gurney(g, -3.6, 0, -2.5, 0.9, { tipped: true, sheet: C.sheetBlue, blood: true });
-  wheelchair(g, 3.4, 0, 3, 2.4);
-  ivStand(g, -1.6, 0, 6.5, 0xd8e8d0);
-  bodyBag(g, -6.2, 0, -14, 0.4);
-  bodyBag(g, -7.5, 0, -6, 1.6);
-  corpse(g, 2.8, 0, -7.5, 2.6, rng, 0x2e4a7a);
-  trashBin(g, -11, 0, -21, true);
-  trashBin(g, 11, 0, -21);
-  dragTrail(g, -1, -9, 0.4, -24.5, 0, rng);
-  dragTrail(g, 3, -6.5, 1.2, -16, 0, rng);
-  bloodPool(g, -1.2, 0, -8.6, 0.9, rng);
-  papers(g, 0, -12, 6, 10, 40, 0, rng);
+  gurney(f, -3.6, 0, -2.5, 0.9, { tipped: true, sheet: C.sheetBlue, blood: true });
+  wheelchair(f, 3.4, 0, 3, 2.4);
+  ivStand(f, -1.6, 0, 6.5, 0xd8e8d0);
+  bodyBag(f, -6.2, 0, -14, 0.4);
+  bodyBag(f, -7.5, 0, -6, 1.6);
+  corpse(f, 2.8, 0, -7.5, 2.6, rng, 0x2e4a7a);
+  trashBin(f, -11, 0, -21, true);
+  trashBin(f, 11, 0, -21);
+  dragTrail(f, -1, -9, 0.4, -24.5, 0, rng);
+  dragTrail(f, 3, -6.5, 1.2, -16, 0, rng);
+  bloodPool(f, -1.2, 0, -8.6, 0.9, rng);
+  papers(f, 0, -12, 6, 10, 40, 0, rng);
   // Traffic cones.
   for (const [cx, cz] of [[-5, 4], [-4.2, 6.4], [5.2, -1]] as [number, number][]) {
-    cyl(g, 0.02, 0.22, 0.7, M(0xe0601a), cx, 0.35, cz, 8);
-    box(g, 0.45, 0.04, 0.45, M(0x1a1a1a), cx, 0.02, cz);
+    cyl(f, 0.02, 0.22, 0.7, M(0xe0601a), cx, 0.35, cz, 8);
+    box(f, 0.45, 0.04, 0.45, M(0x1a1a1a), cx, 0.02, cz);
   }
-  return g;
+  return { near: g, field: f };
 }
 
 /** The crashing ambulance (dynamic): built in its own group. */
@@ -298,13 +307,13 @@ export function buildER(ctx: ZoneCtx): THREE.Group {
   // Reception desk (left) — runners vault it.
   counter(g, -6, 0, -35.4, 0, 5.2, rng, 3);
   occluder(ctx, -6, 0.55, -35.0, 5.2, 1.1, 0.25);
-  box(g, 0.14, 1.1, 1.4, M(0x5c7a74, 'planks', 1.5, 0.35), -8.55, 0.55, -35.9);
+  box(g, 0.14, 1.1, 1.4, T(0x5c7a74, TX.wood), -8.55, 0.55, -35.9);
   sign(g, 'ER', -6, 3.1, -49.8, 0, 0.12, 0xff3020, 0x1a0c0c, 1.5);
   plateSign(g, 'RECEPTION', -6, 2.3, -49.82, 0, 0.04, 0x1a2a2a, 0xc8d4cc);
   wallSmear(g, -6.5, 1.0, -34.85, 0, rng, true);
   smear(g, -6, 1.16, -35.2, 1.4, 0.4, 1.4, C.bloodFresh);
   // Behind the desk: filing cabinets, chairs.
-  for (let i = 0; i < 4; i++) blk(g, 0.5, 1.3, 0.6, M(0x7a807c, 'metal', 2, 0.4), -9.6 + i * 0.55, 0, -38.3);
+  for (let i = 0; i < 4; i++) blk(g, 0.5, 1.3, 0.6, T(0x7a807c, TX.paint), -9.6 + i * 0.55, 0, -38.3);
   papers(g, -6, -37, 2.5, 1.2, 18, 0, rng);
   // Waiting area (right): chair rows facing the desk.
   chairRow(g, 4.4, 0, -33.5, -Math.PI / 2, 5, 0x2f5a8a, [2]);
@@ -326,7 +335,7 @@ export function buildER(ctx: ZoneCtx): THREE.Group {
   // Triage bays at the back (curtains on rails).
   for (let i = 0; i < 3; i++) {
     const bx = -8 + i * 2.8;
-    box(g, 0.04, 0.04, 3, M(0xb0b4b0), bx - 1.35, 3.6, -48.4);
+    box(g, 0.04, 0.04, 3, T(0xb0b4b0, TX.steel), bx - 1.35, 3.6, -48.4);
     gurney(g, bx, 0, -48.6, Math.PI, { body: i === 1, blood: i !== 0, sheet: C.sheet });
     curtainPanel(g, bx - 1.35, -48.4, 2.6, 'z', i === 2 ? C.curtainAlt : C.curtain);
   }
@@ -351,7 +360,7 @@ export function buildER(ctx: ZoneCtx): THREE.Group {
 
 /** Static hanging curtain panel along an axis (folded fabric). */
 export function curtainPanel(g: THREE.Object3D, x: number, z: number, len: number, axis: 'x' | 'z', color: number, y0 = 0.45, y1 = 3.55) {
-  const mat = M(color, 'cloth', 1, 0.6);
+  const mat = T(color, TX.curtain);
   const n = Math.max(2, Math.round(len / 0.32));
   const h = y1 - y0;
   for (let i = 0; i < n; i++) {
@@ -360,8 +369,8 @@ export function curtainPanel(g: THREE.Object3D, x: number, z: number, len: numbe
     if (axis === 'x') box(g, len / n + 0.03, h, 0.04, mat, x + k * len, y0 + h / 2, z + off);
     else box(g, 0.04, h, len / n + 0.03, mat, x + off, y0 + h / 2, z + k * len);
   }
-  if (axis === 'x') box(g, len, 0.04, 0.04, M(0xb0b4b0), x, y1 + 0.03, z);
-  else box(g, 0.04, 0.04, len, M(0xb0b4b0), x, y1 + 0.03, z);
+  if (axis === 'x') box(g, len, 0.04, 0.04, T(0xb0b4b0, TX.steel), x, y1 + 0.03, z);
+  else box(g, 0.04, 0.04, len, T(0xb0b4b0, TX.steel), x, y1 + 0.03, z);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -394,10 +403,10 @@ export function buildCorrA(ctx: ZoneCtx): THREE.Group {
     const zw = side < 0 ? r.z0 : r.z1;
     const z0 = side < 0 ? zw - 3.4 : zw + 0.15;
     const z1 = side < 0 ? zw - 0.15 : zw + 3.4;
-    sideRoom(g, x - 1.7, x + 1.7, z0, z1, 0, 3, rng.pick([0x1a2220, 0x22201a, 0x1a1e24]));
+    sideRoom(g, x - 1.7, x + 1.7, z0, z1, 0, 3, rng.pick([0x26302c, 0x302c22, 0x262a32]), undefined, TX.paper);
     // A bed silhouette and a faint window inside.
     const zb = side < 0 ? zw - 2.6 : zw + 2.6;
-    blk(g, 0.9, 0.6, 2.0, M(0x3a4440), x + 0.6, 0, zb, Math.PI / 2);
+    blk(g, 0.9, 0.6, 2.0, T(0x3a4440, TX.cloth), x + 0.6, 0, zb, Math.PI / 2);
     box(g, 1.2, 0.9, 0.02, G(0x2a3a5a, 0.6), x - 0.4, 1.8, side < 0 ? zw - 3.38 : zw + 3.38);
     // Room number plate.
     plateSign(g, `3${Math.round(x)}`, x + 0.95, 1.75, zw - side * 0.17, side < 0 ? 0 : Math.PI, 0.016, 0x1a1a1a, 0xd8d8cc);
@@ -479,7 +488,7 @@ export function buildWard(ctx: ZoneCtx): THREE.Group {
   buildShell(g, {
     ...r,
     style: styles.ward(),
-    floor: M(0x56625c, 'checker', 0.55, 0.25),
+    floor: T(0x5a685e, TX.lino),
     ceiling: ceilMat(),
     sides: {
       xMin: [{ at: -44, w: 4.6, h: 3.0 }],
@@ -518,8 +527,8 @@ export function buildWard(ctx: ZoneCtx): THREE.Group {
       const len = Math.abs(zB - zA);
       const zc = (zA + zB) / 2;
       const col = i % 2 ? C.curtain : C.curtainAlt;
-      for (const sx of [-2.0, 2.0]) box(g, 0.04, 0.04, len, M(0xb0b4b0), bx + sx, 2.8, zc);
-      box(g, 4.0, 0.04, 0.04, M(0xb0b4b0), bx, 2.8, zB);
+      for (const sx of [-2.0, 2.0]) box(g, 0.04, 0.04, len, T(0xb0b4b0, TX.steel), bx + sx, 2.8, zc);
+      box(g, 4.0, 0.04, 0.04, T(0xb0b4b0, TX.steel), bx, 2.8, zB);
       for (const sx of [-1.9, 1.9]) box(g, 0.02, 0.8, 0.02, M(0x7a7e7a), bx + sx, 3.2, zB);
       if (isClosed) {
         curtainPanel(g, bx - 2.0, zc, len, 'z', col, 0.62, 2.75);
@@ -541,7 +550,7 @@ export function buildWard(ctx: ZoneCtx): THREE.Group {
     ctx.dyn.add(holder);
     const color = rng.pick([C.curtain, C.curtainAlt, 0xc8b8a0]);
     bakeInto(holder, (h) => {
-      const mat = M(color, 'cloth', 1, 0.6);
+      const mat = T(color, TX.curtain);
       const n = 12;
       const w = 3.9 / n;
       for (let k = 0; k < n; k++) box(h, w + 0.03, 2.13, 0.04, mat, (k + 0.5) * w, 0.62 + 1.065, k % 2 ? 0.05 : -0.05);
@@ -608,7 +617,7 @@ export function buildHub(ctx: ZoneCtx): THREE.Group {
   counter(g, 84.4, 0, -40.4, Math.PI, 3.2, rng, 1);
   // Back wall: medicine shelves, whiteboard, sign.
   for (let i = 0; i < 4; i++) {
-    blk(g, 1.1, 2.0, 0.45, M(0xb8bcb4, 'metal', 2, 0.3), 88.5, 0, -47 + i * 1.2, -Math.PI / 2);
+    blk(g, 1.1, 2.0, 0.45, T(0xb8bcb4, TX.paint), 88.5, 0, -47 + i * 1.2, -Math.PI / 2);
     for (let k = 0; k < 3; k++) blk(g, 0.9, 0.12, 0.3, M(rng.pick([0xd8d0b0, 0x9ab8d8, 0xd89a9a])), 88.4, 0.5 + k * 0.5, -47 + i * 1.2, -Math.PI / 2);
   }
   whiteboard(g, 88.8, 1.7, -41.6, -Math.PI / 2, rng);
@@ -627,7 +636,7 @@ export function buildHub(ctx: ZoneCtx): THREE.Group {
   // Fire doors to the stairwell (swung open) + signs.
   for (const sx of [-1, 1]) {
     const dg = grp(g, 79 + sx * 1.75, 0, -51.0, -sx * 0.25);
-    blk(dg, 0.06, 2.75, 1.7, M(0x8a2a22, 'metal', 1.5, 0.4), 0, 0, 0.88);
+    blk(dg, 0.06, 2.75, 1.7, T(0x9a2a22, TX.paint), 0, 0, 0.88);
     box(dg, 0.08, 0.5, 0.3, M(0x101414), 0, 1.9, 0.88);
   }
   sign(g, 'STAIRS', 79, 3.1, -50.82, 0, 0.045, 0xbfe8ff, 0x101418, 1.1);

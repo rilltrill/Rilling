@@ -4,6 +4,7 @@ import type { World } from '../../../gameplay/World';
 import { angleDelta } from '../../../core/math';
 import { Baker } from './bake';
 import { D } from './layout';
+import { clean, tx } from './retro';
 
 const _v = new THREE.Vector3();
 const _m = new THREE.Matrix4();
@@ -19,12 +20,15 @@ const DARK = 0x1e2022;
 /** Ranger jeep body (ground at y = 0, gunner at the origin, nose toward −Z). */
 export function buildJeepBody(baker: Baker): THREE.Group {
   const b = new THREE.Group();
-  const olive = Kit.tex('metal', OLIVE, 1, 0.35);
-  const oliveDark = Kit.mat(OLIVE_DARK);
-  const sand = Kit.mat(SAND);
-  const metal = Kit.mat(METAL);
-  const dark = Kit.mat(DARK);
-  const mud = Kit.mat(0x4a3a28);
+  // Olive-drab sheet steel: panel seams, rivets and rust blotches at a scale that
+  // reads on the hood right under the camera.
+  const olive = tx('metal', OLIVE, 1.6, 0.6);
+  const oliveDark = tx('metal', OLIVE_DARK, 1.6, 0.6);
+  const sand = tx('metal', SAND, 1.6, 0.5);
+  const metal = tx('metal', METAL, 3, 0.6);
+  const dark = tx('asphalt', DARK, 3, 0.8);
+  const grille = tx('grate', 0x2a2c2e, 2.5, 0.8);
+  const mud = tx('dirt', 0x4e3c2a, 3, 1);
   // Hood + body tub.
   Kit.add(b, Kit.box(1.94, 0.6, 4.4), olive, 0, 0.62, -0.9);
   Kit.add(b, Kit.box(1.7, 0.16, 1.5), olive, 0, 0.98, -2.35, 0.04, 0, 0);
@@ -47,19 +51,19 @@ export function buildJeepBody(baker: Baker): THREE.Group {
     Kit.add(b, Kit.box(0.18, 0.12, 0.05), Kit.glow(0xff2a1a, 1.3), sx * 0.72, 0.92, 1.34);
   }
   // Grille + bull bar + winch.
-  Kit.add(b, Kit.box(1.4, 0.46, 0.1), dark, 0, 0.74, -3.12);
+  Kit.add(b, Kit.box(1.4, 0.46, 0.1), grille, 0, 0.74, -3.12);
   for (let i = 0; i < 7; i++) Kit.add(b, Kit.box(0.06, 0.4, 0.12), metal, -0.54 + i * 0.18, 0.74, -3.14);
   Kit.add(b, Kit.cyl(0.05, 0.05, 1.8, 6), metal, 0, 1.0, -3.32, 0, 0, Math.PI / 2);
   Kit.add(b, Kit.cyl(0.05, 0.05, 1.8, 6), metal, 0, 0.55, -3.35, 0, 0, Math.PI / 2);
   for (const sx of [-0.6, 0.6]) Kit.add(b, Kit.cyl(0.045, 0.045, 0.55, 6), metal, sx, 0.78, -3.32);
-  Kit.add(b, Kit.box(0.5, 0.25, 0.25), dark, 0, 0.58, -3.28);
+  Kit.add(b, Kit.box(0.5, 0.25, 0.25), metal, 0, 0.58, -3.28);
   // Windscreen folded flat onto the hood (keeps the view clear), wet glass catching the light.
   Kit.add(b, Kit.box(1.62, 0.05, 0.05), metal, 0, 1.08, -1.62);
   Kit.add(b, Kit.box(1.62, 0.05, 0.05), metal, 0, 1.1, -2.12);
   for (const sx of [-0.79, 0.79]) Kit.add(b, Kit.box(0.05, 0.05, 0.52), metal, sx, 1.09, -1.87);
-  Kit.add(b, Kit.box(1.5, 0.015, 0.44), Kit.mat(0x26323c, { emissive: 0x0a1218, emissiveIntensity: 1 }), 0, 1.085, -1.87);
+  Kit.add(b, Kit.box(1.5, 0.015, 0.44), clean(0x26323c, { emissive: 0x0a1218, emissiveIntensity: 1 }), 0, 1.085, -1.87);
   // Front seats.
-  for (const sx of [-0.45, 0.45]) Kit.add(b, Kit.box(0.6, 0.62, 0.16), Kit.mat(0x5a4a36), sx, 1.02, -0.8, -0.15, 0, 0);
+  for (const sx of [-0.45, 0.45]) Kit.add(b, Kit.box(0.6, 0.62, 0.16), tx('cloth', 0x5e4e38, 2.5, 0.9), sx, 1.02, -0.8, -0.15, 0, 0);
   // Roll hoop at the rear corners (frames the edges when looking back, never the centre) + amber beacon.
   for (const sx of [-0.92, 0.92]) Kit.add(b, Kit.cyl(0.035, 0.035, 1.8, 8), metal, sx, 2.2, 1.3);
   Kit.add(b, Kit.cyl(0.035, 0.035, 1.88, 8), metal, 0, 3.1, 1.3, 0, 0, Math.PI / 2);
@@ -68,10 +72,10 @@ export function buildJeepBody(baker: Baker): THREE.Group {
   Kit.add(b, Kit.box(1.86, 0.52, 0.08), olive, 0, 0.96, 1.32);
   Kit.add(b, Kit.cyl(0.4, 0.4, 0.24, 12), dark, 0, 0.82, 1.48, Math.PI / 2, 0, 0);
   Kit.add(b, Kit.cyl(0.17, 0.17, 0.26, 8), sand, 0, 0.82, 1.48, Math.PI / 2, 0, 0);
-  Kit.add(b, Kit.box(1.78, 0.06, 2.5), Kit.mat(0x3a3a32), 0, 0.9, 0.05);
-  Kit.add(b, Kit.box(0.24, 0.42, 0.42), Kit.mat(0x6a2a1a), -0.55, 1.12, 0.9);
-  Kit.add(b, Kit.box(0.24, 0.42, 0.42), Kit.mat(0x6a2a1a), -0.25, 1.12, 0.9);
-  Kit.add(b, Kit.box(0.5, 0.32, 0.32), Kit.mat(0x4a5a34), 0.55, 1.08, 0.85);
+  Kit.add(b, Kit.box(1.78, 0.06, 2.5), tx('grate', 0x3e3e36, 3, 0.6), 0, 0.9, 0.05);
+  Kit.add(b, Kit.box(0.24, 0.42, 0.42), tx('metal', 0x7a3020, 3, 0.6), -0.55, 1.12, 0.9);
+  Kit.add(b, Kit.box(0.24, 0.42, 0.42), tx('metal', 0x7a3020, 3, 0.6), -0.25, 1.12, 0.9);
+  Kit.add(b, Kit.box(0.5, 0.32, 0.32), tx('cloth', 0x4a5a34, 2.5, 0.8), 0.55, 1.08, 0.85);
   baker.bake(b);
   return b;
 }
@@ -120,7 +124,7 @@ export class JeepViewModel {
     this.buildGun(baker);
     this.buildCabin(baker);
     this.cabin.visible = false;
-    this.coolMat = Kit.mat(0x2a2c2e);
+    this.coolMat = tx('metal', 0x34383c, 4, 0.5);
     this.heatMats = [Kit.glow(0x8a2010, 1), Kit.glow(0xd04a14, 1.2), Kit.glow(0xff8a2a, 1.4), Kit.glow(0xffd070, 1.6)];
 
     // Headlights: one spot light for both lamps.
@@ -143,9 +147,9 @@ export class JeepViewModel {
 
   private buildGun(baker: Baker) {
     const mount = this.gun;
-    const metal = Kit.mat(0x2e3134);
-    const dark = Kit.mat(0x1a1b1d);
-    const olive = Kit.mat(0x3e4e30);
+    const metal = tx('metal', 0x34383c, 4, 0.5);
+    const dark = tx('metal', 0x222326, 4, 0.5);
+    const olive = tx('metal', 0x44552f, 4, 0.5);
     Kit.add(mount, Kit.cyl(0.05, 0.07, 0.75, 8), metal, 0.42, -1.12, -0.55);
     mount.add(this.gunKick);
     const k = this.gunKick;
@@ -179,21 +183,21 @@ export class JeepViewModel {
   /** Helicopter cabin seen from the open side door (shown after boarding). */
   private buildCabin(baker: Baker) {
     const c = new THREE.Group();
-    const frame = Kit.mat(0x1a1e24);
-    const white = Kit.mat(0xc8ccd0);
-    const floor = Kit.mat(0x2a2c30);
+    const frame = tx('metal', 0x22262c, 3, 0.6);
+    const white = tx('metal', 0xc8ccd0, 2, 0.5);
+    const floor = tx('grate', 0x34363a, 3, 0.7);
     // Door frame around the view.
     Kit.add(c, Kit.box(0.18, 2.6, 0.2), frame, -1.25, -0.2, -1.1);
     Kit.add(c, Kit.box(0.18, 2.6, 0.2), frame, 1.25, -0.2, -1.1);
     Kit.add(c, Kit.box(2.7, 0.22, 0.4), white, 0, 0.82, -1.0);
     Kit.add(c, Kit.box(2.7, 0.12, 1.6), floor, 0, -0.95, -0.6);
-    Kit.add(c, Kit.box(2.7, 0.1, 0.12), Kit.tex('hazard', 0xe0b020, 2, 1), 0, -0.89, -1.35);
+    Kit.add(c, Kit.box(2.7, 0.1, 0.12), tx('hazard', 0xe0b020, 2, 1), 0, -0.89, -1.35);
     // Skid below the door.
     Kit.add(c, Kit.cyl(0.07, 0.07, 3.6, 6), frame, 0.1, -2.15, -1.6, 0, Math.PI / 2, Math.PI / 2);
     Kit.add(c, Kit.box(0.08, 1.1, 0.08), frame, -0.9, -1.6, -1.4, 0.2, 0, 0);
     Kit.add(c, Kit.box(0.08, 1.1, 0.08), frame, 0.9, -1.6, -1.4, 0.2, 0, 0);
     // Grab handle + warm cabin light.
-    Kit.add(c, Kit.cyl(0.025, 0.025, 0.7, 6), Kit.mat(0xd0b020), 1.1, 0.25, -1.05);
+    Kit.add(c, Kit.cyl(0.025, 0.025, 0.7, 6), tx('metal', 0xd0b020, 4, 0.4), 1.1, 0.25, -1.05);
     Kit.add(c, Kit.box(0.5, 0.06, 0.2), Kit.glow(0xffd090, 0.9), -0.6, 0.72, -0.7);
     baker.bake(c);
     this.cabin.add(c);

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import { Rng } from '../../../core/Rng';
 import type { World } from '../../../gameplay/World';
+import { skyClouds } from './retro';
 
 const _v = new THREE.Vector3();
 const _c = new THREE.Color();
@@ -36,6 +37,8 @@ export class Storm {
   readonly group = new THREE.Group();
   private skyMat: THREE.MeshBasicMaterial;
   private sky: THREE.Mesh;
+  /** Scrolling offset of the textured cloud layer (driven by the wind). */
+  private cloudOff = { value: new THREE.Vector2() };
   private rain: THREE.LineSegments;
   private rainMat: THREE.LineBasicMaterial;
   private rainSeeds: Float32Array;
@@ -109,8 +112,11 @@ export class Storm {
       cols.push(_c.r, _c.g, _c.b);
     }
     geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
-    this.skyMat = Kit.track(
-      new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }),
+    this.skyMat = skyClouds(
+      Kit.track(new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false })),
+      { name: 'stucco', scale: 1, strength: 0.65 },
+      this.cloudOff,
+      0.5,
     );
     this.sky = new THREE.Mesh(geo, this.skyMat);
     this.sky.renderOrder = -2;
@@ -267,6 +273,9 @@ export class Storm {
       this.gustTarget = this.rng.range(-0.2, 0.9);
     }
     this.gust += (this.gustTarget - this.gust) * Math.min(1, dt * 1.2);
+    // Storm clouds race across the sky with the wind.
+    this.cloudOff.value.x += dt * (0.05 + this.gust * 0.04);
+    this.cloudOff.value.y += dt * 0.025;
 
     // Rain: world-anchored grid wrapped around the camera so streaks don't swim when turning.
     const half = 15;

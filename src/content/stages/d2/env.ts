@@ -195,8 +195,10 @@ export class LabScene {
       { d: z(-190), sky: 0xb0bccc, ground: 0x3e3e40, hemi: 2.31, fog: 0x10141a, near: 12, far: 46 },
       { d: z(-198), sky: 0x8094d8, ground: 0x2a2c3a, hemi: 2.0, fog: 0x080c18, near: 10, far: 40 },
       { d: z(-214), sky: 0x8094d8, ground: 0x2a2c3a, hemi: 2.0, fog: 0x080c18, near: 10, far: 40 },
-      { d: z(-222), sky: 0xa88488, ground: 0x3a2224, hemi: 1.88, fog: 0x160a0a, near: 8, far: 36 },
-      { d: z(-288), sky: 0xa88488, ground: 0x3a2224, hemi: 1.88, fog: 0x160a0a, near: 8, far: 36 },
+      // Service level: the warmer ground bounce lifts the corrugated ceilings and
+      // pipe undersides out of black through the arcade monitor pass.
+      { d: z(-222), sky: 0xa88488, ground: 0x54363a, hemi: 1.88, fog: 0x160a0a, near: 8, far: 36 },
+      { d: z(-288), sky: 0xa88488, ground: 0x54363a, hemi: 1.88, fog: 0x160a0a, near: 8, far: 36 },
       { d: z(-298), sky: 0x98a8c4, ground: 0x34343c, hemi: 2.12, fog: 0x0c1018, near: 12, far: 52 },
       { d: z(-326), sky: 0x98a8c4, ground: 0x34343c, hemi: 2.12, fog: 0x0c1018, near: 12, far: 52 },
       { d: z(-334), sky: 0x8aa0c8, ground: 0x30323a, hemi: 2.12, fog: 0x080c14, near: 16, far: 64 },
@@ -207,7 +209,7 @@ export class LabScene {
       { from: z(-54), to: z(-79), pos: V(4.5, 3.4, -74), color: 0xffa860, intensity: 14, distance: 14, mode: 'flicker' },
       // Warm grow-lamp over the planting beds: green/olive dinos pop against the dark foliage.
       { from: z(-79), to: z(-123), pos: V(-3.5, 3.4, -104), color: 0xffc888, intensity: 22, distance: 20, mode: 'steady' },
-      { from: z(-123), to: z(-161), pos: V(0, 2.2, -142), color: 0x40ff70, intensity: 12, distance: 16, mode: 'pulse' },
+      { from: z(-123), to: z(-161), pos: V(0, 2.2, -142), color: 0x40ff70, intensity: 10, distance: 16, mode: 'pulse' },
       { from: z(-161), to: z(-193), pos: V(0, 3.4, -179), color: 0xc8dcff, intensity: 16, distance: 18, mode: 'flicker' },
       { from: z(-193), to: z(-216), pos: V(0, 3.0, -206), color: 0x3060ff, intensity: 16, distance: 16, mode: 'steady' },
       { from: z(-216), to: z(-277), pos: 'follow', color: 0xff2010, intensity: 16, distance: 13, mode: 'strobe' },

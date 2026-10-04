@@ -66,6 +66,9 @@ export class FireField {
     const smokeMat = Kit.track(
       new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.48, depthWrite: false, flatShading: true }),
     );
+    // Chunky dithered billows (projected in each puff's own unit space, so the
+    // texture rides with the puff instead of swimming through it).
+    Kit.applyTexture(smokeMat, 'stucco', 2.2, 0.7);
     this.flames = new THREE.InstancedMesh(Kit.cone(0.42, 1.3, 5), flameMat, maxEmitters * FLAMES_PER);
     this.smoke = new THREE.InstancedMesh(Kit.ico(1, 1), smokeMat, maxEmitters * PUFFS_PER);
     for (const im of [this.flames, this.smoke]) {
@@ -167,6 +170,7 @@ export class Plumes {
 
   constructor(bases: { pos: THREE.Vector3; size: number }[]) {
     const mat = Kit.track(new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false, fog: false, flatShading: true }));
+    Kit.applyTexture(mat, 'stucco', 1.6, 0.6);
     this.mesh = new THREE.InstancedMesh(Kit.ico(1, 1), mat, bases.length * this.per);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = -1;

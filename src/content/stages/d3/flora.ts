@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import type { Rng } from '../../../core/Rng';
 import { sway } from './bake';
+import { tx } from './retro';
+
+const DS = { side: THREE.DoubleSide } as const;
 
 /** Night-jungle palette (lifted a little so silhouettes read under moonlight). */
 export const FLORA = {
@@ -89,8 +92,8 @@ export class Flora {
   /** Curved coconut palm, 6–11 m. Sways (trunk bends, crown thrashes). */
   palm(rng: Rng, height = rng.range(6.5, 11), lean = rng.range(0.05, 0.22)): THREE.Group {
     const root = new THREE.Group();
-    const bark = Kit.tex('bark', FLORA.palmTrunk, 1.5, 0.8);
-    const ring = Kit.mat(FLORA.palmRing);
+    const bark = tx('bark', FLORA.palmTrunk, 1.8, 0.9);
+    const ring = tx('bark', FLORA.palmRing, 2.5, 0.9);
     const segs = 5;
     const segLen = height / segs;
     let parent: THREE.Object3D = root;
@@ -110,11 +113,11 @@ export class Flora {
       const f = Kit.pivot(crown, 0, 0.05, 0);
       f.rotation.set(0, (i / n) * Math.PI * 2 + rng.spread(0.25), 0);
       const geo = this.frondGeos[rng.int(0, this.frondGeos.length - 1)];
-      const m = Kit.add(f, geo, Kit.mat(rng.pick(FLORA.frond), { side: THREE.DoubleSide, tex: 'leaves', texScale: 1.4, texStrength: 0.7 }));
+      const m = Kit.add(f, geo, tx('leaves', rng.pick(FLORA.frond), 1.8, 0.85, DS));
       m.rotation.x = -rng.range(0.05, 0.45);
       m.scale.setScalar(rng.range(0.85, 1.15));
     }
-    Kit.add(crown, Kit.ico(0.3, 0), Kit.mat(FLORA.coconut), 0, -0.22, 0, 0, 0, 0, 1, 0.7, 1);
+    Kit.add(crown, Kit.ico(0.3, 0), tx('hide', FLORA.coconut, 3, 0.7), 0, -0.22, 0, 0, 0, 0, 1, 0.7, 1);
     return sway(root, 0.55 + height * 0.03, height);
   }
 
@@ -122,15 +125,15 @@ export class Flora {
   jungleTree(rng: Rng, height = rng.range(9, 15), lod = 1): THREE.Group {
     const root = new THREE.Group();
     root.rotation.y = rng.range(0, Math.PI * 2);
-    const bark = Kit.tex('bark', FLORA.trunk, 1, 0.9);
+    const bark = tx('bark', FLORA.trunk, 1.3, 1);
     const r = rng.range(0.38, 0.55);
     Kit.add(root, Kit.cyl(r * 0.7, r, height, 7), bark, 0, height / 2, 0);
     for (let i = 0; i < (lod ? 3 : 0); i++) {
       const a = (i / 3) * Math.PI * 2 + rng.spread(0.4);
       Kit.add(root, Kit.box(0.14, 1.6, r * 2.6), bark, Math.cos(a) * r * 0.9, 0.7, Math.sin(a) * r * 0.9, 0, -a, 0);
     }
-    const leaf = Kit.mat(rng.pick(FLORA.canopy), { side: THREE.DoubleSide, tex: 'leaves', texScale: 0.8, texStrength: 0.9 });
-    const leaf2 = Kit.mat(rng.pick(FLORA.canopy), { side: THREE.DoubleSide, tex: 'leaves', texScale: 0.8, texStrength: 0.9 });
+    const leaf = tx('leaves', rng.pick(FLORA.canopy), 0.9, 1, DS);
+    const leaf2 = tx('leaves', rng.pick(FLORA.canopy), 0.9, 1, DS);
     const blobs = rng.int(3, 5);
     for (let i = 0; i < blobs; i++) {
       const a = (i / blobs) * Math.PI * 2 + rng.spread(0.6);
@@ -143,7 +146,7 @@ export class Flora {
       const a = rng.range(0, Math.PI * 2);
       Kit.add(root, Kit.cyl(0.1, 0.18, 3.2, 5), bark, Math.cos(a) * 0.9, height - 2.6, Math.sin(a) * 0.9, Math.sin(a) * 0.7, 0, -Math.cos(a) * 0.7);
     }
-    const vine = Kit.mat(FLORA.vine);
+    const vine = tx('bark', FLORA.vine, 3, 0.8);
     const vines = lod ? rng.int(2, 5) : 0;
     for (let i = 0; i < vines; i++) {
       const a = rng.range(0, Math.PI * 2);
@@ -157,7 +160,7 @@ export class Flora {
   /** Ground fern (sways). */
   fern(rng: Rng, scale = rng.range(0.8, 1.5)): THREE.Group {
     const root = new THREE.Group();
-    const mat = Kit.mat(rng.pick(FLORA.fern), { side: THREE.DoubleSide, tex: 'leaves', texScale: 2, texStrength: 0.6 });
+    const mat = tx('leaves', rng.pick(FLORA.fern), 2.4, 0.75, DS);
     const n = rng.int(5, 7);
     for (let i = 0; i < n; i++) {
       const m = Kit.add(root, this.fernGeo, mat, 0, 0.05, 0);
@@ -170,8 +173,8 @@ export class Flora {
   /** Elephant-ear plant: big leaves on stalks (sways). */
   earPlant(rng: Rng, scale = rng.range(0.9, 1.6)): THREE.Group {
     const root = new THREE.Group();
-    const stalk = Kit.mat(0x3f6a34);
-    const mat = Kit.mat(rng.pick(FLORA.ear), { side: THREE.DoubleSide, tex: 'leaves', texScale: 1.5, texStrength: 0.5 });
+    const stalk = tx('bark', 0x3f6a34, 3, 0.6);
+    const mat = tx('leaves', rng.pick(FLORA.ear), 1.8, 0.6, DS);
     const n = rng.int(4, 6);
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + rng.spread(0.4);
@@ -189,7 +192,7 @@ export class Flora {
   /** Dense undergrowth blob (static). */
   bush(rng: Rng, scale = rng.range(0.8, 1.6)): THREE.Group {
     const root = new THREE.Group();
-    const leaf = Kit.mat(rng.pick(FLORA.canopy), { side: THREE.DoubleSide, tex: 'leaves', texScale: 1.6, texStrength: 0.8 });
+    const leaf = tx('leaves', rng.pick(FLORA.canopy), 1.7, 0.9, DS);
     const n = rng.int(2, 3);
     for (let i = 0; i < n; i++) {
       const s = rng.range(0.7, 1.1) * scale;
@@ -199,7 +202,7 @@ export class Flora {
   }
 
   rock(rng: Rng, scale = rng.range(0.5, 1.6)): THREE.Mesh {
-    const m = Kit.mesh(rng.pick(this.rocks), Kit.tex('rock', rng.pick(FLORA.rock), 1, 0.9));
+    const m = Kit.mesh(rng.pick(this.rocks), tx('rock', rng.pick(FLORA.rock), 1.5, 1));
     m.scale.set(scale * rng.range(0.9, 1.4), scale * rng.range(0.5, 0.9), scale * rng.range(0.9, 1.3));
     m.rotation.y = rng.range(0, Math.PI * 2);
     m.position.y = scale * 0.2;
@@ -209,10 +212,10 @@ export class Flora {
   /** A snapped palm trunk with a ragged frond tuft (roadside debris / thrown debris). */
   brokenPalm(rng: Rng, len = 4.5): THREE.Group {
     const g = new THREE.Group();
-    const bark = Kit.tex('bark', FLORA.palmTrunk, 1.5, 0.8);
+    const bark = tx('bark', FLORA.palmTrunk, 1.8, 0.9);
     Kit.add(g, Kit.cyl(0.2, 0.24, len, 6), bark, 0, 0, 0, Math.PI / 2, 0, 0);
-    for (let i = 0; i < 4; i++) Kit.add(g, Kit.cyl(0.26, 0.26, 0.08, 6), Kit.mat(FLORA.palmRing), 0, 0, -len / 2 + 0.5 + i * (len / 4.5), Math.PI / 2, 0, 0);
-    const mat = Kit.mat(FLORA.frond[0], { side: THREE.DoubleSide, tex: 'leaves', texScale: 1.4, texStrength: 0.7 });
+    for (let i = 0; i < 4; i++) Kit.add(g, Kit.cyl(0.26, 0.26, 0.08, 6), tx('bark', FLORA.palmRing, 2.5, 0.9), 0, 0, -len / 2 + 0.5 + i * (len / 4.5), Math.PI / 2, 0, 0);
+    const mat = tx('leaves', FLORA.frond[0], 1.8, 0.85, DS);
     for (let i = 0; i < 5; i++) {
       const m = Kit.add(g, this.frondGeos[i % 3], mat, 0, 0, len / 2);
       m.rotation.set(rng.range(-0.6, 0.6), (i / 5) * Math.PI * 2, 0, 'YXZ');
