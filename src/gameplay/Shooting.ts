@@ -112,7 +112,12 @@ export class Shooter {
     const w = this.world;
     const targets = w.shootables.active();
     const occluders = w.env?.occluders ?? [];
-    const hits = raycaster.intersectObjects([...targets, ...occluders], false);
+    // Shootables are individual meshes; occluders may be whole groups (walls, vehicles).
+    const hits = raycaster.intersectObjects(targets, false);
+    if (occluders.length) {
+      for (const h of raycaster.intersectObjects(occluders, true)) if (!h.object.userData.shot) hits.push(h);
+      hits.sort((a, b) => a.distance - b.distance);
+    }
     const list: Candidate[] = [];
     let blocker: THREE.Intersection | null = null;
     for (const h of hits) {
