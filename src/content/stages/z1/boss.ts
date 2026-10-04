@@ -32,9 +32,10 @@ const PUS_BELLY: [number, number, number, number, number][] = [
  *
  * Phase 1 (100–66%): cleaver slams, hook throws, charges (one heart hit stops either).
  * Phase 2 (66–33%):  rips off the apron (3 more pustules), summons walkers and a
- *                    runner, adds barrel / car-door throws, two-hook volleys.
+ *                    runner, adds barrel / car-door throws, two-hook volleys;
+ *                    two heart hits to stop a slam or a charge.
  * Phase 3 (< 33%):   frenzy — faster windups, shorter gaps, three-hook volleys,
- *                    two heart hits to stop a charge.
+ *                    and a slam's first 0.5 s of hits don't count (aim, don't spray).
  * At 83%, 50% and 20% health he bellows for help: a roar, and minions rise
  * while he keeps attacking (a runner + walker, two walkers, and in the frenzy a
  * crawler + walker: the last push asks you to split your fire).
@@ -63,10 +64,15 @@ export const BUTCHER_TUNE = {
   bodyChip: 0.35,
   /** Weak-point damage that interrupts a slam, by phase (a pistol heart hit = 2, a head hit = 1). */
   interruptNeed: [2, 4, 4],
-  /** Seconds at the start of a slam's ring in which hits don't count toward the interrupt (they still hurt him). */
-  slamGrace: 0.3,
+  /**
+   * Seconds at the start of a slam's ring in which hits don't count toward the
+   * interrupt (they still hurt him), by phase: fire already resting on the heart
+   * can't cancel it the instant it shows — the frenzy asks for two clean heart
+   * hits in the last 1.1 s of its 1.6 s ring.
+   */
+  slamGrace: [0.3, 0.3, 0.5],
   /** ...and a charge (the heart swells 1.5× while he charges). */
-  chargeNeed: [2, 2, 4],
+  chargeNeed: [2, 4, 4],
   /** Extra slams chained after one that lands, by phase. */
   slamCombo: [0, 0, 0],
   /**
@@ -85,12 +91,12 @@ export const BUTCHER_TUNE = {
   /** Heart scale while the cleaver is up (a bigger target: "shoot it to stop him"). */
   slamHeartSwell: 1.3,
   /** Seconds he holds his next attack after the player continues. */
-  continueRest: 2.5,
+  continueRest: 3,
   /** Gap after an attack before the next, [min, max] s by phase. */
   gap: [
     [1.3, 2.0],
-    [1.0, 1.5],
-    [0.65, 1.05],
+    [0.9, 1.4],
+    [0.55, 0.95],
   ] as [number, number][],
 };
 
@@ -492,7 +498,7 @@ export class Butcher extends Boss {
   protected override onDamaged(hit: ShotHit, amount: number): void {
     if (hit.part === 'weak' || hit.part === 'head') {
       // (Fire already resting on the heart can't cancel a slam the instant its ring shows.)
-      if (this.state !== 'slam' || this.stateTime >= BUTCHER_TUNE.slamGrace) this.dmgInState += amount;
+      if (this.state !== 'slam' || this.stateTime >= this.slamGrace) this.dmgInState += amount;
       this.flinchT = Math.min(1.4, this.flinchT + 0.45);
       // Pustules pop after enough damage.
       for (const list of [this.pustules, this.bellyPustules]) {
@@ -619,7 +625,11 @@ export class Butcher extends Boss {
     return BUTCHER_TUNE.interruptNeed[Math.min(this.phase, BUTCHER_TUNE.interruptNeed.length - 1)];
   }
 
-  /** Charges are stopped by one heart hit early on (it teaches the move), two in the frenzy. */
+  /** Charges are stopped by one heart hit in his first phase (it teaches the move), two later. */
+  private get slamGrace() {
+    return BUTCHER_TUNE.slamGrace[Math.min(this.phase, BUTCHER_TUNE.slamGrace.length - 1)];
+  }
+
   private get chargeNeed() {
     return BUTCHER_TUNE.chargeNeed[Math.min(this.phase, BUTCHER_TUNE.chargeNeed.length - 1)];
   }

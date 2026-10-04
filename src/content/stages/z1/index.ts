@@ -450,6 +450,7 @@ const beats: Beat[] = [
       { kind: 'health', pos: [4, 1.3, 6.5], t: 85 },
       { kind: 'health', pos: [-4.2, 1.3, 6], t: 112 },
       { kind: 'health', pos: [4.2, 1.3, 6], t: 135 },
+      { kind: 'health', pos: [-4, 1.3, 6.5], t: 152 },
     ],
     waves: [
       { start: { after: 26 }, spawns: [{ type: 'crawler', pos: [-4.5, 0, 9], entry: 'rise' }, { type: 'crawler', pos: [4.5, 0, 10], t: 0.6, entry: 'rise' }] },

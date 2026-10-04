@@ -544,14 +544,15 @@ export class Behemoth extends Boss {
   }
 
   /**
-   * Weak-point damage needed to stagger a wind-up: 9–12 twin-gun rounds (0.8)
-   * on the wound/head, ≈0.7–0.85 s of on-target fire inside a 1.0–1.5 s ring.
-   * Answer the ring on the glow and it breaks with time to spare; spray the body
-   * or react late and it lands. (At 11–13 a loose aim lost ~6 hearts to the giant
-   * alone on top of the riot-brute stops; the stops now carry that pressure.)
+   * Weak-point damage needed to stagger a wind-up: 8–10 twin-gun rounds (0.8)
+   * on the wound/head, ≈0.6–0.75 s of on-target fire inside a 1.0–1.5 s ring.
+   * Answer the ring on the glow and it breaks with time to spare; spray the body,
+   * chase a runner first or react late and it lands. (At 11–13 a loose aim lost
+   * ~6 hearts to the giant alone on top of the riot-brute stops; those stops and
+   * the runners that leap aboard mid-fight now carry that pressure.)
    */
   private interruptNeed() {
-    return [7, 8, 9][this.phase] ?? 9;
+    return [6, 7, 8][this.phase] ?? 8;
   }
 
   protected override onPhase(phase: number): void {

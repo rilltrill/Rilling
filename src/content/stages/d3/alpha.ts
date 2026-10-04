@@ -21,9 +21,9 @@ export const ALPHA_TUNE = {
   /** A single hit this big (magnum, point-blank shotgun) staggers the alpha even while it's closing in. */
   heavy: 3,
   /** Pack-mate base hp before the spawn's hp multiplier (a stock raptor has 3). */
-  packHp: 4.6,
-  /** Interrupt damage that breaks a pack-mate's rallied / ambush pounce: seven body hits or three head hits. */
-  rallyGuard: 5.6,
+  packHp: 5,
+  /** Interrupt damage that breaks a pack-mate's rallied / ambush pounce: eight body hits or three head hits. */
+  rallyGuard: 6,
   /** A pack-mate joins the alpha's pounce only if its own attack cooldown is about done. */
   rallyCooldown: 0.5,
   /** Ambush ('opts.ambush'): seconds after landing from the entry leap in which it may spring straight into its pounce… */
