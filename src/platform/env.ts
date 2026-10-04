@@ -8,6 +8,8 @@ export interface EnvGlobals {
   navigator: Pick<Navigator, 'userAgent' | 'maxTouchPoints'> & { standalone?: boolean; webdriver?: boolean };
   matchMedia?: (q: string) => { matches: boolean };
   Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string };
+  /** True when the game runs inside another page's frame (e.g. a hosted preview). */
+  embedded?: boolean;
 }
 
 function globals(): EnvGlobals {
@@ -16,6 +18,13 @@ function globals(): EnvGlobals {
     navigator: g.navigator ?? { userAgent: '', maxTouchPoints: 0 },
     matchMedia: typeof g.matchMedia === 'function' ? (q) => g.matchMedia!(q) : undefined,
     Capacitor: g.Capacitor,
+    embedded: (() => {
+      try {
+        return typeof window !== 'undefined' && window.self !== window.top;
+      } catch {
+        return true; // cross-origin parent
+      }
+    })(),
   };
 }
 
@@ -55,5 +64,7 @@ export function isInAppBrowser(env: EnvGlobals = globals()): boolean {
 
 /** Should we suggest "Share → Add to Home Screen"? */
 export function canSuggestInstall(env: EnvGlobals = globals()): boolean {
+  // Inside someone else's frame, "Add to Home Screen" would install the host page.
+  if (env.embedded) return false;
   return isIOS(env) && !isStandalone(env) && !isNative(env) && !isInAppBrowser(env);
 }
