@@ -88,6 +88,8 @@ interface TeleRec {
   frames: number;
   onScreen: number;
   shootable: number;
+  /** Last sampled reachability (sampled every 3rd frame; the frames between carry it). */
+  lastReach: boolean;
   hud: number;
   startOnScreen: boolean;
   startShootable: boolean;
@@ -512,6 +514,7 @@ export function simulateHuman(
           frames: 0,
           onScreen: 0,
           shootable: 0,
+          lastReach: false,
           hud: 0,
           startOnScreen: !!sp,
           startShootable: anyReachable(e),
@@ -523,7 +526,10 @@ export function simulateHuman(
       r.frames++;
       if (sp) r.onScreen++;
       if (sp && inHud(sp, W, H, !!world.boss)) r.hud++;
-      if (r.frames % 3 === 1 ? anyReachable(e) : r.shootable / Math.max(1, r.frames - 1) > 0.5) r.shootable++;
+      // Sample every 3rd frame and carry the last sample (a running-ratio carry undercounted
+      // telegraphs blocked on their first sample but reachable for the rest of their life).
+      if (r.frames % 3 === 1) r.lastReach = anyReachable(e);
+      if (r.lastReach) r.shootable++;
     }
     for (const [e, r] of tele) {
       if (!seenNow.has(e)) {
