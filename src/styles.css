@@ -1602,6 +1602,18 @@ button {
   height: auto;
 }
 
+.glyph-swap {
+  color: #000;
+  background: #fff;
+  border: var(--b) solid #000;
+  box-shadow: 3px 3px 0 #000;
+}
+
+.glyph-swap svg {
+  width: 70%;
+  height: auto;
+}
+
 .glyph-combo {
   color: var(--orange);
   font-size: var(--t3);
@@ -1629,6 +1641,12 @@ button {
 }
 
 /* ─── Settings ────────────────────────────────────────────────────────── */
+/* Rows with a long and a short label (Menus.segRow `short`): the short one shows
+   in narrow phone-landscape columns. */
+.lbl-short {
+  display: none;
+}
+
 .settings-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1820,11 +1838,18 @@ button {
   background: #000;
 }
 
-/* Confirmation dialog (RESET PROGRESS). */
+/* Confirmation dialog (RESET PROGRESS). Fixed, so it covers the viewport even when
+   the settings screen is scrolled (portrait / short landscape); .modal-open freezes it. */
+.screen.modal-open {
+  overflow: hidden;
+}
+
 .confirm-veil {
-  position: absolute;
+  position: fixed;
   inset: 0;
   z-index: 6;
+  touch-action: none;
+  overscroll-behavior: contain;
   display: grid;
   place-items: center;
   padding: 16px;
@@ -1929,19 +1954,22 @@ button {
 }
 
 .nt-opts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* Side by side when both rows fit, stacked otherwise (portrait phones, big fonts). */
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-self: stretch;
   padding: 0 12px;
 }
 
 .nt-opts .set-row {
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: 46px;
 }
 
 .nt-note {
-  font-size: var(--t1);
+  font-size: var(--tr);
   color: var(--cyan);
 }
 
@@ -2674,13 +2702,14 @@ button {
 }
 
 .clear-stage-name {
-  font-size: var(--t1);
+  font-size: var(--tr);
+  line-height: 1.3;
   text-shadow: 2px 2px 0 #000;
 }
 
 /* This run's grade is the badge; a better lifetime grade shows as a small tag. */
 .clear-stage-best {
-  font-size: var(--t1);
+  font-size: var(--tr);
   opacity: 0.85;
   text-shadow: 2px 2px 0 #000;
 }
@@ -3410,26 +3439,65 @@ button {
   animation: blink 0.3s steps(1) infinite;
 }
 
-.hud-weapon.swap-hint::after {
-  content: 'TAP TO SWITCH';
+/* Callout above the gun panel ("TAP TO SWITCH"); shots still go through it. */
+.hud-swap-tip {
+  display: none;
   position: absolute;
   right: 0;
-  top: -8px;
-  transform: translateY(-100%);
+  bottom: calc(100% + 8px);
   font-size: var(--tr);
   color: var(--gold);
   white-space: nowrap;
+  pointer-events: none;
   text-shadow: var(--o1), 2px 2px 0 #000;
 }
 
-.left-handed .hud-weapon.swap-hint::after {
+.hud-weapon.swap-hint .hud-swap-tip {
+  display: block;
+}
+
+/* Coaching (until the player has switched by hand a few times): a boxed call-out with a pointer. */
+.hud-weapon.swap-coach .hud-swap-tip {
+  bottom: calc(100% + 14px);
+  padding: 6px 8px;
+  line-height: 1.3;
+  color: #000;
+  text-shadow: none;
+  background: var(--gold);
+  border: 2px solid #000;
+  box-shadow: 3px 3px 0 #000;
+  animation: swap-tip-bob 0.6s steps(2) infinite;
+}
+
+.hud-weapon.swap-coach .hud-swap-tip::after {
+  content: '';
+  position: absolute;
+  right: 14px;
+  top: 100%;
+  border: 8px solid transparent;
+  border-top-color: var(--gold);
+  border-bottom: 0;
+}
+
+@keyframes swap-tip-bob {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+.left-handed .hud-swap-tip {
   right: auto;
   left: 0;
 }
 
+.left-handed .hud-weapon.swap-coach .hud-swap-tip::after {
+  right: auto;
+  left: 14px;
+}
+
 /* Nobody can tap anything in the attract demo. */
-.hud.demo .hud-weapon.swap-hint::after {
-  content: none;
+.hud.demo .hud-swap-tip {
+  display: none !important;
 }
 
 .hud-ammo {
@@ -4076,7 +4144,34 @@ button {
 }
 
 .reduce-flash .hud-dmg-dir.hit {
-  animation-timing-function: ease-out;
+  animation: dmg-dir-soft 0.8s ease-out;
+}
+
+@keyframes dmg-dir-soft {
+  from {
+    opacity: 0.45;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+/* Colour strobes and fast-moving stripe patterns: static. */
+.reduce-flash .ne-title,
+.reduce-flash .bi-stripes,
+.reduce-flash .set-btn.armed {
+  animation: none;
+}
+
+.reduce-flash .ne-title {
+  color: var(--gold);
+}
+
+/* Low-HP heartbeat: a slower beat (scale only, no flash). */
+.reduce-flash .low-hp .heart.full {
+  animation-duration: 1.2s;
 }
 
 .reduce-flash .hud-prompt.show,
@@ -4088,6 +4183,7 @@ button {
 .reduce-flash .hud-weapon.low .pip.on,
 .reduce-flash .hud-weapon.empty .hud-ammo,
 .reduce-flash .hud-weapon.swap-hint .hud-swap,
+.reduce-flash .hud-weapon.swap-coach .hud-swap-tip,
 .reduce-flash .hud-heat.over .hud-heat-label,
 .reduce-flash .hud-heat.over .hud-heat-fill,
 .reduce-flash .hud-reload.urge,
@@ -4106,7 +4202,10 @@ button {
 
 .reduce-flash .screen.title.starting .tap-start,
 .reduce-flash .intro-hint,
+.reduce-flash .intro-stage em,
 .reduce-flash .boot-cursor,
+.reduce-flash .boot-free,
+.reduce-flash .btn-cursor,
 .reduce-flash .ne-timer.urgent b,
 .reduce-flash .ne-slot.active .ne-letter::after {
   animation: blink 1.2s steps(1) infinite !important;
@@ -4193,6 +4292,17 @@ button {
 
 /* Short landscape phones (iPhone SE … Pro Max). */
 @media (max-height: 500px) and (orientation: landscape) {
+  /* Campaign clear: long stage names wrap inside their card, so all three stay on one row. */
+  .clear-stage-name {
+    max-width: 10ch;
+  }
+  /* Segmented choices hug their text (3-letter choices stay ≥ 44 px wide). */
+  .seg {
+    padding: 0 5px;
+  }
+  .set-seg {
+    gap: 3px;
+  }
   .screen {
     gap: 12px;
     padding-top: calc(var(--safe-t) + 10px);
@@ -4234,6 +4344,17 @@ button {
   .tip-icon {
     width: 48px;
   }
+  /* How to play: eight cards + BACK fit 375 px tall. */
+  .howto-grid {
+    gap: 4px 10px;
+  }
+  .tip {
+    padding: 3px 6px 3px 3px;
+  }
+  .tip-body {
+    margin-top: 4px;
+    line-height: 1.4;
+  }
   .set-row {
     min-height: 44px;
   }
@@ -4274,6 +4395,77 @@ button {
   .hs-table {
     gap: 5px;
     padding: 10px 12px;
+  }
+}
+
+/* Toolbar-reduced landscape phones (Safari / Chrome with bars, iPhone SE 1st gen). */
+@media (max-height: 340px) and (orientation: landscape) {
+  .screen {
+    gap: 6px;
+    padding-top: calc(var(--safe-t) + 6px);
+    padding-bottom: calc(var(--safe-b) + 4px);
+  }
+  .screen.howto .screen-title {
+    font-size: var(--t4);
+  }
+  .screen.howto .btn.back,
+  .screen.settings .btn.back {
+    min-height: 34px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .screen.settings {
+    gap: 6px;
+  }
+  .screen.settings .screen-title {
+    font-size: var(--t3);
+  }
+  .screen.settings .set-row {
+    min-height: 34px;
+  }
+  .screen.settings .set-col,
+  .screen.settings .settings-form {
+    gap: 3px;
+  }
+  .screen.settings .slider {
+    height: 28px;
+  }
+  .screen.settings .slider-knob {
+    height: 22px;
+    margin-top: -11px;
+  }
+  .screen.settings .seg {
+    height: 28px;
+  }
+  .screen.settings .set-btn {
+    height: 28px;
+  }
+  .screen.settings .set-toggle {
+    height: 28px;
+  }
+  .screen.settings .sw-knob {
+    width: 18px;
+    height: 18px;
+  }
+  .screen.howto .howto-grid {
+    gap: 3px 8px;
+  }
+  .screen.howto .tip-body {
+    margin-top: 2px;
+    line-height: 1.35;
+  }
+  .screen.howto .tip-icon {
+    width: 40px;
+  }
+}
+
+/* Narrow setting columns: rows with a short label use it (SCREEN SHAKE → SHAKE). */
+@media (orientation: landscape) and (max-width: 600px), (orientation: landscape) and (min-height: 501px) and (max-width: 900px) {
+  .lbl-long {
+    display: none;
+  }
+  .lbl-short {
+    display: inline;
   }
 }
 

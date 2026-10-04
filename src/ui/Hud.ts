@@ -97,6 +97,15 @@ export class Hud implements HudApi {
   private bossIntroAt = 0;
   private bossFillK = 1;
   private swapHintT = 0;
+  private swapTip!: HTMLDivElement;
+  /** Empty-mag "switch guns" hints shown this stage (coaching only). */
+  private emptyHints = 0;
+  private lastOverride: string | null = null;
+  /**
+   * Coach the gun panel (bigger callout, extra moments: empty mag, leaving a
+   * vehicle) until the player has switched by hand a few times. Set by Game.
+   */
+  coachSwap = true;
   private bossLagFrac = 1;
   private shownScore = 0;
   private popupPool: HTMLDivElement[] = [];
@@ -192,6 +201,7 @@ export class Hud implements HudApi {
     this.weaponIconEl = el('div', 'hud-wicon', wtop, weaponIcon('pistol'));
     this.weaponName = el('div', 'hud-weapon-name', wtop, 'PISTOL');
     el('div', 'hud-swap', wtop, swapSvg());
+    this.swapTip = el('div', 'hud-swap-tip', this.weaponBox);
     this.ammoPips = el('div', 'hud-ammo', this.weaponBox);
     const wbot = el('div', 'hud-wbottom', this.weaponBox);
     this.slots = el('div', 'hud-slots', wbot);
@@ -294,6 +304,9 @@ export class Hud implements HudApi {
     this.bossIntroT = 0;
     this.bossFillK = 1;
     this.swapHintT = 0;
+    this.emptyHints = 0;
+    this.lastOverride = null;
+    toggle(this.weaponBox, 'swap-hint', false);
     this.bannerTimer = 0;
     this.promptTimer = 0;
     setText(this.score, arcadeScore(0));
@@ -448,6 +461,18 @@ export class Hud implements HudApi {
     this.overlay.shot(x, y);
   }
 
+  /** Point at the gun panel for `seconds` (shown only while there is something to switch to). */
+  private hintSwap(text: string, seconds: number) {
+    setText(this.swapTip, text);
+    toggle(this.weaponBox, 'swap-coach', this.coachSwap);
+    this.swapHintT = Math.max(this.swapHintT, seconds);
+  }
+
+  /** The player switched guns by hand: the callout has done its job. */
+  swapAnswered() {
+    this.swapHintT = Math.min(this.swapHintT, 0.4);
+  }
+
   prompt(text: string | null) {
     if (text === null) {
       this.promptTimer = 0;
@@ -530,8 +555,13 @@ export class Hud implements HudApi {
     const st = ws.state;
     const owned = ws.owned;
     const canSwap = !ws.override && owned.length > 1;
-    if (!ws.override && owned.length > this.lastOwned) this.swapHintT = 2.5;
+    if (!ws.override && owned.length > this.lastOwned) {
+      this.hintSwap(this.coachSwap ? 'NEW GUN! TAP HERE TO SWITCH' : 'TAP TO SWITCH', this.coachSwap ? 5 : 2.5);
+    } else if (this.lastOverride && !ws.override && canSwap && this.coachSwap) {
+      this.hintSwap('ON FOOT! TAP TO SWITCH GUNS', 3);
+    }
     this.lastOwned = ws.override ? this.lastOwned : owned.length;
+    this.lastOverride = ws.override ?? null;
     const ammoKey = `${def.id}|${st.inMag}|${st.reserve}|${ws.override ?? ''}|${owned.join(',')}`;
     if (ammoKey !== this.lastAmmoKey) {
       const weaponChanged = !this.lastAmmoKey.startsWith(`${def.id}|`);
@@ -567,7 +597,13 @@ export class Hud implements HudApi {
       toggle(this.reloadBtn, 'hidden', turret);
       const low = !turret && st.inMag > 0 && st.inMag <= Math.max(1, Math.ceil(def.mag * 0.25));
       toggle(this.weaponBox, 'low', low);
-      toggle(this.weaponBox, 'empty', !turret && st.inMag === 0);
+      const empty = !turret && st.inMag === 0;
+      // Out of rounds with another gun in hand: switching beats waiting on the reload.
+      if (empty && !weaponChanged && canSwap && this.coachSwap && this.emptyHints < 2 && !this.weaponBox.classList.contains('empty')) {
+        this.emptyHints++;
+        this.hintSwap('EMPTY? TAP TO SWITCH GUNS', 2.5);
+      }
+      toggle(this.weaponBox, 'empty', empty);
     }
     if (this.swapHintT > 0) this.swapHintT -= dt;
     toggle(this.weaponBox, 'swap-hint', this.swapHintT > 0 && canSwap);

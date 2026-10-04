@@ -68,6 +68,8 @@ const LOAD_PAINT_FRAMES = 2;
 /** Pause-screen note while the GPU has dropped the WebGL context. */
 const GFX_NOTE = 'GRAPHICS RESET - PLEASE WAIT';
 /** CONTINUE? countdown length (s), and the least it reopens with after the app was backgrounded. */
+/** Hand-made weapon switches after which the HUD stops coaching the gun panel. */
+const SWAP_COACH = 3;
 const CONTINUE_SECS = 9;
 const CONTINUE_MIN_RESUME = 3;
 
@@ -187,7 +189,7 @@ export class Game implements MenuActions {
       pause: () => this.pause(),
       reload: () => this.shooter?.reload(),
       bomb: () => this.state === 'playing' && this.world?.useBomb(),
-      cycleWeapon: () => this.state === 'playing' && this.world?.weapons.cycle(),
+      cycleWeapon: () => this.manualSwap(() => this.world?.weapons.cycle()),
     });
     this.menus = new Menus(root.querySelector('#menu-layer') as HTMLElement, this.save, this.audio, campaigns, this);
     this.menus.onScreen = (name) => {
@@ -391,6 +393,7 @@ export class Game implements MenuActions {
     // HUD wiring first: the opening beat (usually a banner, or a boss when
     // debugging with ?beat=) talks to the HUD from inside runner.start().
     this.hud.reset();
+    this.hud.coachSwap = this.save.data.swaps < SWAP_COACH;
     w.events.on('boss-start', ({ boss }) => this.hud.bossIntro(boss.title));
     w.events.on('player-hurt', ({ from }) => this.showHurtDirection(from));
     // The intro card already names the stage: don't repeat it as the opening banner.
@@ -933,9 +936,28 @@ export class Game implements MenuActions {
     }
     if (this.state !== 'playing' || !this.world) return;
     const map: Record<string, WeaponId> = { Digit1: 'pistol', Digit2: 'shotgun', Digit3: 'smg', Digit4: 'magnum' };
-    if (map[code]) this.world.weapons.select(map[code]);
-    if (code === 'KeyQ' || code === 'Tab') this.world.weapons.cycle();
+    const ws = this.world.weapons;
+    if (map[code]) this.manualSwap(() => ws.select(map[code]));
+    if (code === 'KeyQ' || code === 'Tab') this.manualSwap(() => ws.cycle());
     if (code === 'KeyB') this.world.useBomb();
+  }
+
+  /**
+   * A weapon switch the player asked for (gun-panel tap, keys). Counts toward
+   * retiring the HUD's switch coaching once they've clearly got it.
+   */
+  private manualSwap(fn: () => void) {
+    const w = this.world;
+    if (this.state !== 'playing' || !w) return;
+    const before = w.weapons.active;
+    fn();
+    if (w.weapons.active === before) return;
+    this.hud.swapAnswered();
+    if (this.save.data.swaps < SWAP_COACH) {
+      this.save.data.swaps++;
+      this.save.persist();
+      this.hud.coachSwap = this.save.data.swaps < SWAP_COACH;
+    }
   }
 
   /** Held-finger repeat fire. Semi-autos wait a moment so single taps stay single. */
