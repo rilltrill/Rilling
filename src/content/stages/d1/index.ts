@@ -144,15 +144,16 @@ const beats: Beat[] = [
       {
         start: { remaining: 1, after: 7 },
         spawns: [
-          { type: 'raptor', pos: [-12, 0, 8], entry: 'leap', opts: { variant: 'tan' } },
-          { type: 'raptor', pos: [12, 0, 9], entry: 'leap', t: 0.7, opts: { variant: 'blue' } },
+          // Flank from the right (the ranger is sheltering on the left).
+          { type: 'raptor', pos: [12, 0, 9], entry: 'leap', opts: { variant: 'blue' } },
+          { type: 'raptor', pos: [4.5, 0, 20], entry: 'leap', t: 0.8, opts: { variant: 'tan' } },
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
           { type: 'raptor', pos: [0.5, 0, 19], entry: 'leap', opts: { variant: 'red' } },
-          { type: 'compy', pos: [-3, 0, 16], count: 3, every: 0.4, offset: [3, 0, 0], t: 0.6 },
+          { type: 'compy', pos: [-1, 0, 16], count: 3, every: 0.4, offset: [2.5, 0, 0], t: 0.6 },
           { type: 'dilo', pos: [6.8, 0, 15], t: 1.6 },
         ],
       },
