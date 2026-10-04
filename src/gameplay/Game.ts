@@ -21,7 +21,7 @@ import type { Entity } from './Entity';
 import { Projectile } from './Projectile';
 import { prewarmFxAtlases } from '../fx/Fx';
 import { buildWarmupSet } from './Warmup';
-import { SpriteArt, parseLook } from './SpriteArt';
+import { SpriteArt, isSpriteEntity, parseLook } from './SpriteArt';
 
 export interface DebugFlags {
   stage?: string;
@@ -328,6 +328,8 @@ export class Game implements MenuActions {
       });
       // Debug: `&spriteLook=bands:6,k:1` tunes the pixel-art pass.
       if (typeof location !== 'undefined') this.sprites.look = parseLook(new URLSearchParams(location.search).get('spriteLook'));
+      // Switched on mid-stage: compile the bake variants of what is already on stage now (no hitch on the first bakes).
+      for (const e of w.entities) if (!e.removed && isSpriteEntity(e)) this.sprites.precompile(e.root);
       this.redrawUntil = performance.now() + 100;
     } else if (!want && this.sprites) {
       this.sprites.dispose();

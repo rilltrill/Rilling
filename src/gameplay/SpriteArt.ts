@@ -72,6 +72,8 @@ const _c = new THREE.Vector3();
 const _d = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const _q2 = new THREE.Quaternion();
+const _up = new THREE.Vector3(0, 1, 0);
 const _crop = new THREE.Matrix4();
 const _clear = new THREE.Color();
 
@@ -110,6 +112,8 @@ export interface SpriteLook {
   ss: number;
   /** Blob shadow strength under sprites (0 = off). */
   shadows: number;
+  /** Doom-style turning: characters shown at the nearest of this many view angles (0 = off; try 8). */
+  dirs: number;
   /** Finest texel in world units (cm; bosses 2×). 0 = off. */
   texelCm: number;
 }
@@ -133,6 +137,7 @@ export const DEFAULT_LOOK: SpriteLook = {
   ss: 2,
   shadows: 1,
   texelCm: 1.2,
+  dirs: 0,
 };
 
 /** Parse `bands:8,dither:0.3,k:1` (debug URL `&spriteLook=`) over a look. */
@@ -1325,8 +1330,37 @@ export class SpriteArt {
     return this.bounds(s.obj, _box) && this.project(cam);
   }
 
-  /** Re-render one character into its sprite image and frame its billboard. False = nothing to draw (off screen). */
+  /**
+   * Re-render one character into its sprite image and frame its billboard. False =
+   * nothing to draw (off screen). With `look.dirs`, the character is turned (for
+   * the bake only) to the nearest of N view angles, so it turns in steps like a
+   * Doom / Area 51 sprite.
+   */
   private bake(s: Sprite, cam: THREE.PerspectiveCamera): boolean {
+    const dirs = this.look.dirs;
+    const src = s.obj;
+    if (!(dirs > 0) || src !== s.e.root || !isCharacter(s.e)) return this.bakeNow(s, cam);
+    const m = src.matrixWorld.elements;
+    _v.setFromMatrixPosition(src.matrixWorld);
+    _d.setFromMatrixPosition(cam.matrixWorld);
+    const view = Math.atan2(_v.x - _d.x, _v.z - _d.z);
+    const step = (Math.PI * 2) / Math.round(dirs);
+    let rel = Math.atan2(m[8], m[10]) - view;
+    rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+    const delta = Math.round(rel / step) * step - rel;
+    if (Math.abs(delta) < 1e-4) return this.bakeNow(s, cam);
+    _q2.copy(src.quaternion);
+    src.quaternion.premultiply(_q.setFromAxisAngle(_up, delta));
+    src.updateMatrixWorld(true);
+    try {
+      return this.bakeNow(s, cam);
+    } finally {
+      src.quaternion.copy(_q2);
+      src.updateMatrixWorld(true);
+    }
+  }
+
+  private bakeNow(s: Sprite, cam: THREE.PerspectiveCamera): boolean {
     const e = s.e;
     const src = s.obj;
     const keep = this.bakeKeep;
