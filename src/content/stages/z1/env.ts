@@ -204,8 +204,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       if (fireFade <= 0) {
         fireTarget = best;
         fireFade = 0;
-        const f = anim.fires.find((x) => x.plume === best);
-        if (f) fireLight.position.copy(f.pos);
+        for (const f of anim.fires) if (f.plume === best) fireLight.position.copy(f.pos);
       }
     } else fireFade = Math.min(1, fireFade + dt * 2);
     fireLight.intensity = fireTarget ? bestBase * fireFade * (0.75 + 0.17 * Math.sin(t * 21) + 0.1 * Math.sin(t * 47 + 1.3)) : 0;
@@ -218,10 +217,10 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     }
 
     // Police light bars.
-    for (const [red, blue] of anim.lightbars) {
-      const ph = Math.floor(t * 4) % 2 === 0;
-      red.visible = ph;
-      blue.visible = !ph;
+    const ph = Math.floor(t * 4) % 2 === 0;
+    for (let i = 0; i < anim.lightbars.length; i++) {
+      anim.lightbars[i][0].visible = ph;
+      anim.lightbars[i][1].visible = !ph;
     }
     // Blinkers + buzzing neon + chase lights.
     for (const b of anim.blinkers) b.obj.visible = ((t + b.phase) % b.period) / b.period < b.duty;

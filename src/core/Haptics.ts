@@ -24,6 +24,9 @@ export function haptic(ms: number) {
       void h.impact({ style: ms >= 150 ? 'HEAVY' : ms >= 60 ? 'MEDIUM' : 'LIGHT' }).catch(() => {});
       return;
     }
+    // Chrome blocks (and logs) vibrate() before the first user gesture.
+    const act = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation;
+    if (act && !act.hasBeenActive) return;
     navigator.vibrate?.(ms);
   } catch {
     /* unsupported */

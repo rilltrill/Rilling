@@ -485,9 +485,9 @@ export function buildTown(): Town {
       for (const s of [-0.62, 0.62]) {
         const bx = x + fx * 2.3 + Math.cos(ry) * s;
         const bz = z + fz * 2.3 - Math.sin(ry) * s;
-        beams.add(bx, 0.68, bz, 9, 1.6, 0xfff0d0, 0.8, -Math.PI / 2 + 0.06, ry);
+        beams.add(bx, 0.68, bz, 9, 1.6, 0xfff0d0, 0.5, -Math.PI / 2 + 0.06, ry);
       }
-      pools.add(x + fx * 7, z + fz * 7, 4.5, 0xfff0d0, 0.35);
+      pools.add(x + fx * 7, z + fz * 7, 4.5, 0xfff0d0, 0.25);
     }
   }
   // Burning car (right lane).

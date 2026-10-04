@@ -40,7 +40,7 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'first contact',
     look: { at: [0, 1.3, 16], blend: 1.5 },
-    pickups: [{ kind: 'shotgun', pos: [4.6, 1.85, 7.3], t: 0.5 }],
+    pickups: [{ kind: 'shotgun', pos: [1.9, 1.45, 6.8], t: 0.3 }],
     waves: [
       { spawns: [{ type: 'walker', pos: [0.6, 0, 21], t: 0.8, opts: { variant: 'cop' } }] },
       { spawns: [{ type: 'walker', pos: [-4.4, 0, 15], opts: { variant: 'civilian' } }] },
@@ -50,11 +50,10 @@ const beats: Beat[] = [
           { type: 'walker', pos: [-1.8, 0, 22], t: 1.4, opts: { variant: 'worker' } },
         ],
       },
-      { start: { remaining: 1 }, spawns: [{ type: 'walker', pos: [6, 0, 14], t: 0.4, opts: { variant: 'civilian' } }] },
     ],
   },
   // ── 2. The diner: shapes behind the glass, then through it ───────────────
-  { kind: 'move', label: 'to the diner', to: 46, speed: 3.0 },
+  { kind: 'move', label: 'to the diner', to: 46, speed: 3.4 },
   {
     kind: 'hold',
     label: 'diner',
@@ -63,7 +62,7 @@ const beats: Beat[] = [
     waves: [
       { spawns: [{ type: 'walker', pos: [-8.4, 0, 15.6], t: 0.6, opts: { variant: 'worker' } }] },
       {
-        start: { after: 6 },
+        start: { remaining: 0, after: 5 },
         spawns: [
           // One shambles up to the window from behind the booths, one crashes straight through.
           { type: 'walker', pos: [-14.5, 0, 5.7], opts: { variant: 'civilian' } },
@@ -75,7 +74,6 @@ const beats: Beat[] = [
         spawns: [
           { type: 'walker', pos: [-11.6, 0, 12.3], entry: 'burst', opts: { variant: 'worker' } },
           { type: 'crawler', pos: [-11.4, 0, 11.6], t: 0.6, entry: 'burst' },
-          { type: 'walker', pos: [1.5, 0, 21], t: 1.2, opts: { variant: 'civilian' } },
         ],
       },
     ],
@@ -85,7 +83,7 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'past the burning car',
     to: 84,
-    speed: 3.2,
+    speed: 3.5,
     waves: [{ start: { atD: 58 }, spawns: [{ type: 'walker', pos: [-3, 0, 15], frame: 'world', opts: { variant: 'office' } }] }],
   },
   {
@@ -106,7 +104,6 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           { type: 'walker', pos: [8, 0, 17], t: 0.4, opts: { variant: 'biker' } },
-          { type: 'walker', pos: [10, 0, 19.5], t: 1.2, opts: { variant: 'office' } },
         ],
       },
     ],
@@ -116,7 +113,7 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'up Main Street',
     to: 126,
-    speed: 3.3,
+    speed: 3.7,
     waves: [{ start: { atD: 104 }, spawns: [{ type: 'runner', pos: [-1, 0, 20], frame: 'world' }] }],
   },
   {
@@ -141,14 +138,13 @@ const beats: Beat[] = [
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'walker', pos: [7.2, 0, 14.5], opts: { variant: 'patient' } },
-          { type: 'runner', pos: [-5, 0, 21], t: 1.2 },
+          { type: 'runner', pos: [-5, 0, 21], t: 0.6 },
         ],
       },
     ],
   },
   // ── 5. The alley: they drop from the fire escapes ────────────────────────
-  { kind: 'move', label: 'into the alley', to: 184, speed: 3.1 },
+  { kind: 'move', label: 'into the alley', to: 184, speed: 3.5 },
   {
     kind: 'hold',
     label: 'alley',
@@ -166,16 +162,15 @@ const beats: Beat[] = [
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'walker', pos: [-1, 0, 16], opts: { variant: 'worker' } },
-          { type: 'walker', pos: [1.5, 0, 19], t: 0.8, opts: { variant: 'biker' } },
-          { type: 'walker', pos: [-2.3, 8.2, 7.6], t: 1.6, entry: 'drop', opts: { variant: 'civilian' } },
+          { type: 'walker', pos: [1.5, 0, 19], opts: { variant: 'biker' } },
+          { type: 'walker', pos: [-2.3, 8.2, 7.6], t: 1.2, entry: 'drop', opts: { variant: 'civilian' } },
         ],
       },
     ],
     onEnd: (w) => w.rig.look('path'),
   },
   // ── 6. Rescue: a cop pinned against her cruiser ──────────────────────────
-  { kind: 'move', label: 'onto Second Street', to: 228, speed: 3.1 },
+  { kind: 'move', label: 'onto Second Street', to: 228, speed: 3.5 },
   {
     kind: 'hold',
     label: 'rescue',
@@ -199,19 +194,18 @@ const beats: Beat[] = [
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'walker', pos: [-1.5, 0, 19], opts: { variant: 'office' } },
-          { type: 'walker', pos: [-4, 0, 17], t: 0.7, opts: { variant: 'worker' } },
+          { type: 'walker', pos: [-3, 0, 18], opts: { variant: 'office' } },
         ],
       },
     ],
   },
   // ── 7. Gas station: shoot the barrels ────────────────────────────────────
-  { kind: 'move', label: 'to the gas station', to: 250, speed: 3.1 },
+  { kind: 'move', label: 'to the gas station', to: 250, speed: 3.3 },
   {
     kind: 'hold',
     label: 'gas station',
     look: { at: [-11, 1.4, 10], blend: 1.3 },
-    civilians: [{ pos: [5, 0, 9.5], variant: 'worker', t: 0.5 }],
+    civilians: [{ pos: [-1.5, 0, 6], variant: 'worker', t: 0.5 }],
     pickups: [{ kind: 'smg', pos: [-5, 1.3, 6], t: 1 }],
     onStart: (w) => w.later(1.6, () => popupCenter(w, 'SHOOT THE BARRELS!', 0.36, 0.3)),
     waves: [
@@ -249,7 +243,7 @@ const beats: Beat[] = [
   },
   { kind: 'wait', label: 'inferno', duration: 2.4, look: { at: [-12, 2.5, 10], blend: 1.5 } },
   // ── 8. The bus: something is banging inside… ─────────────────────────────
-  { kind: 'move', label: 'to the bus', to: 282, speed: 3.1 },
+  { kind: 'move', label: 'to the bus', to: 282, speed: 3.6 },
   {
     kind: 'action',
     label: 'bus rocks',
@@ -286,13 +280,12 @@ const beats: Beat[] = [
         spawns: [
           { type: 'walker', pos: [-3, 0, 20], opts: { variant: 'civilian' } },
           { type: 'crawler', pos: [0.5, 0, 10], t: 0.6, entry: 'rise' },
-          { type: 'runner', pos: [-5, 0, 22], t: 1.4 },
         ],
       },
     ],
   },
   // ── 9. Town square: brute + rooftop spitters ─────────────────────────────
-  { kind: 'move', label: 'into the square', to: 319, speed: 3.0 },
+  { kind: 'move', label: 'into the square', to: 319, speed: 3.5 },
   {
     kind: 'hold',
     label: 'town square',
@@ -325,7 +318,6 @@ const beats: Beat[] = [
           { type: 'runner', pos: [-6, 0, 20] },
           { type: 'runner', pos: [6, 0, 21], t: 0.5 },
           { type: 'bloater', pos: [0, 0, 19], t: 1.4 },
-          { type: 'walker', pos: [-2.5, 0, 22], t: 2.2, opts: { variant: 'worker' } },
         ],
       },
     ],

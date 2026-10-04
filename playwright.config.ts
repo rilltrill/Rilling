@@ -10,7 +10,10 @@ import { defineConfig, devices } from '@playwright/test';
  * Set E2E_SKIP_BUILD=1 to serve an existing dist/ instead of rebuilding.
  * Screenshots land in test-results/screenshots/<project>/.
  */
-const PORT = Number(process.env.E2E_PORT ?? 5141);
+// Not 5141 (or the other 51xx dev-server ports): with reuseExistingServer a
+// running dev server would otherwise be mistaken for the production preview,
+// and the service-worker test would leave a worker behind on a dev origin.
+const PORT = Number(process.env.E2E_PORT ?? 6141);
 const CI = !!process.env.CI;
 
 export default defineConfig({

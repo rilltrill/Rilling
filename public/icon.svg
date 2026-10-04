@@ -2,8 +2,8 @@
   <!--
     OVERRUN app icon. Full-bleed square: iOS / Android apply their own corner
     masks. scripts/gen-icons.mjs renders every PNG icon / splash from this file
-    and scales the <g id="fg"> group for maskable icons, so keep the
-    foreground inside that group and within ~200 px of the centre.
+    scales the group whose id is "fg" for maskable / adaptive icons, so keep
+    the foreground inside that group and within ~210 px of the centre.
   -->
   <defs>
     <radialGradient id="bg" cx="50%" cy="54%" r="62%">

@@ -6,7 +6,13 @@
   left: 50%;
   transform: translate(-50%, -140%);
   opacity: 0;
-  transition: transform 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2), opacity 0.3s ease-out;
+  /* Fully out of the render tree while hidden (gameplay): no backdrop-filter
+     layer over the WebGL canvas, no hit target. visibility flips after the exit. */
+  visibility: hidden;
+  transition:
+    transform 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    opacity 0.3s ease-out,
+    visibility 0s linear 0.45s;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -30,6 +36,11 @@
 #install-hint.show {
   transform: translate(-50%, 0);
   opacity: 1;
+  visibility: visible;
+  transition:
+    transform 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    opacity 0.3s ease-out,
+    visibility 0s linear 0s;
 }
 
 #install-hint .ih-icon {

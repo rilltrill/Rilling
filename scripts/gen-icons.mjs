@@ -35,12 +35,28 @@ const fontB64 = fs
   .readFileSync(path.join(ROOT, 'node_modules/@fontsource/black-ops-one/files/black-ops-one-latin-400-normal.woff2'))
   .toString('base64');
 
-/** The icon with the foreground scaled about the centre (maskable safe zone), optionally without background. */
+// Comments are stripped first so the element patterns below can only ever match
+// real markup (a comment mentioning the group once swallowed the replacement).
+const svgMarkup = svgSrc.replace(/<!--[^]*?-->/g, '');
+const FG_RE = /<g id="fg">/;
+const BG_RE = /<rect id="bgrect"[^>]*\/>/;
+if (!FG_RE.test(svgMarkup) || !BG_RE.test(svgMarkup)) {
+  throw new Error('public/icon.svg must contain <g id="fg"> and <rect id="bgrect" …/>');
+}
+
+/** Replace exactly one element match or fail loudly (never silently emit the unmodified icon). */
+function sub(s, re, to) {
+  const out = s.replace(re, to);
+  if (out === s) throw new Error(`gen-icons: pattern ${re} did not apply`);
+  return out;
+}
+
+/** The icon with the foreground scaled about the centre (maskable safe zone), optionally without background / foreground. */
 function iconSvg({ scale = 1, background = true, foreground = true } = {}) {
-  let s = svgSrc;
-  if (!foreground) s = s.replace('<g id="fg">', '<g id="fg" display="none">');
-  if (scale !== 1) s = s.replace('<g id="fg">', `<g id="fg" transform="translate(256 256) scale(${scale}) translate(-256 -256)">`);
-  if (!background) s = s.replace(/<rect id="bgrect"[^>]*\/>/, '');
+  let s = svgMarkup;
+  if (!foreground) s = sub(s, FG_RE, '<g id="fg" display="none">');
+  else if (scale !== 1) s = sub(s, FG_RE, `<g id="fg" transform="translate(256 256) scale(${scale}) translate(-256 -256)">`);
+  if (!background) s = sub(s, BG_RE, '');
   return `data:image/svg+xml;base64,${Buffer.from(s).toString('base64')}`;
 }
 

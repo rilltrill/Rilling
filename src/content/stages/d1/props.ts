@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Kit } from '../../kit/ModelKit';
+import { Kit, type TexName } from '../../kit/ModelKit';
 import { Destructible } from '../../../gameplay/Props';
 import type { World } from '../../../gameplay/World';
 import type { Rng } from '../../../core/Rng';
@@ -50,7 +50,8 @@ const _em = new THREE.Color();
 export function merged<T extends THREE.Object3D>(g: T): T {
   g.updateMatrixWorld(true);
   _inv.copy(g.matrixWorld).invert();
-  const geos: THREE.BufferGeometry[] = [];
+  // Geometries grouped by retro texture (Kit.mat `tex`), so textured parts keep their look.
+  const groups = new Map<string, THREE.BufferGeometry[]>();
   const remove: THREE.Mesh[] = [];
   const visit = (o: THREE.Object3D, tint: number) => {
     const t = tint * ((o.userData.tint as number | undefined) ?? 1);
@@ -72,14 +73,17 @@ export function merged<T extends THREE.Object3D>(g: T): T {
           arr[i * 3 + 2] = _col.b;
         }
         geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
-        geos.push(geo);
+        const key = (mat.userData.retroTex as string | undefined) ?? '';
+        const list = groups.get(key) ?? [];
+        list.push(geo);
+        groups.set(key, list);
         remove.push(m);
       }
     }
     for (const c of o.children) visit(c, t);
   };
   visit(g, 1);
-  if (!geos.length) return g;
+  if (!groups.size) return g;
   for (const m of remove) m.parent?.remove(m);
   // Hoist the meshes we couldn't merge (glows, transparent) and drop the empty
   // pivot groups so they don't cost a matrix update every frame.
@@ -89,22 +93,26 @@ export function merged<T extends THREE.Object3D>(g: T): T {
   });
   for (const o of keep) g.attach(o);
   for (const c of [...g.children]) if (!(c as THREE.Mesh).isMesh) g.remove(c);
-  const geo = mergeGeometries(geos, false);
-  geos.forEach((x) => x.dispose());
-  if (!geo) return g;
-  geo.computeBoundingSphere();
-  const mesh = new THREE.Mesh(Kit.track(geo), Kit.mat(0xffffff, { vertexColors: true }));
-  mesh.matrixAutoUpdate = false;
-  g.add(mesh);
+  for (const [tex, geos] of groups) {
+    const geo = mergeGeometries(geos, false);
+    geos.forEach((x) => x.dispose());
+    if (!geo) continue;
+    geo.computeBoundingSphere();
+    const mat =
+      tex === '' || tex === 'grain'
+        ? Kit.mat(0xffffff, { vertexColors: true })
+        : Kit.mat(0xffffff, { vertexColors: true, tex: tex as TexName });
+    const mesh = new THREE.Mesh(Kit.track(geo), mat);
+    mesh.matrixAutoUpdate = false;
+    g.add(mesh);
+  }
   return g;
 }
 
-/** Like `merged` but returns the merged mesh (or null). */
-export function mergedMesh(g: THREE.Object3D): THREE.Mesh | null {
-  const before = new Set(g.children);
+/** Like `merged` but returns every mesh left under `g` (the baked mesh(es) plus any unmerged glows). */
+export function mergedMeshes(g: THREE.Object3D): THREE.Mesh[] {
   merged(g);
-  for (const c of g.children) if (!before.has(c) && (c as THREE.Mesh).isMesh) return c as THREE.Mesh;
-  return null;
+  return g.children.filter((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh);
 }
 
 // ─── Park gate ───────────────────────────────────────────────────────────────

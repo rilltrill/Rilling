@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ATLAS_COLS, ATLAS_ROWS } from './textures';
+import { newRange, uploadRange } from './upload';
 
 /**
  * Pooled GPU particles drawn as ONE instanced quad mesh (one draw call).
@@ -67,6 +68,11 @@ export class PSpec {
   floor = -1e9;
   /** Free value passed back through `onLand` (e.g. decal size). */
   tag = 0;
+  /**
+   * Glow pool only: 0 = purely additive (sparks, flashes); towards 1 the particle
+   * also covers what's behind it (dense fire), so stacked flames don't blow out to white.
+   */
+  occlude = 0;
 
   reset(): this {
     this.vx = this.vy = this.vz = 0;
@@ -84,6 +90,7 @@ export class PSpec {
     this.flags = 0;
     this.floor = -1e9;
     this.tag = 0;
+    this.occlude = 0;
     return this;
   }
 
@@ -159,7 +166,8 @@ const PX = 0,
   STRETCH = 25,
   FLOOR = 26,
   FLAGS = 27,
-  TAG = 28;
+  TAG = 28,
+  OCC = 29;
 
 // GPU layout (floats per instance).
 const G = 16;
@@ -174,8 +182,10 @@ const VERT = /* glsl */ `
   uniform float uMinPx;
   varying vec2 vUv;
   varying vec4 vColor;
+  varying float vOcc;
   #include <fog_pars_vertex>
   void main() {
+    vOcc = iMisc.w;
     float size = iPosSize.w;
     float alpha = iColor.a;
     vec4 mvPosition;
@@ -188,6 +198,8 @@ const VERT = /* glsl */ `
     } else {
       mvPosition = modelViewMatrix * vec4(iPosSize.xyz, 1.0);
       float depth = max(0.05, -mvPosition.z);
+      // Fade out big sprites right in front of the lens so smoke never blankets the screen.
+      alpha *= smoothstep(0.3, 0.3 + max(0.8, size * 0.9), depth);
       // Keep tiny particles at least uMinPx wide (fade them instead) so they don't shimmer away.
       float minSize = uMinPx * depth / (projectionMatrix[1][1] * uHalfH);
       if (size < minSize) {
@@ -242,11 +254,15 @@ const FRAG_SOFT = /* glsl */ `
   }
 `;
 
-/** Additive, unlit (fire, sparks, flashes). Fog fades it out instead of tinting. */
+/**
+ * Unlit glow (fire, sparks, flashes) with premultiplied blending (ONE, ONE_MINUS_SRC_ALPHA):
+ * vOcc = 0 is purely additive, higher values also occlude the background. Fog fades it out.
+ */
 const FRAG_GLOW = /* glsl */ `
   uniform sampler2D uMap;
   varying vec2 vUv;
   varying vec4 vColor;
+  varying float vOcc;
   #include <fog_pars_fragment>
   void main() {
     vec4 t = texture2D(uMap, vUv);
@@ -260,8 +276,9 @@ const FRAG_GLOW = /* glsl */ `
       a *= 1.0 - fogF;
     #endif
     if (a < 0.004) discard;
-    gl_FragColor = vec4(vColor.rgb * t.rgb, a);
+    gl_FragColor = vec4(vColor.rgb * t.rgb, 1.0);
     #include <colorspace_fragment>
+    gl_FragColor = vec4(gl_FragColor.rgb * a, a * vOcc);
   }
 `;
 
@@ -278,6 +295,7 @@ export class ParticleSystem {
   private geo: THREE.InstancedBufferGeometry;
   private n = 0;
   private recycle = 0;
+  private range = newRange();
 
   constructor(
     readonly capacity: number,
@@ -318,9 +336,16 @@ export class ParticleSystem {
       transparent: true,
       depthWrite: false,
       fog: true,
-      blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+      blending: additive ? THREE.CustomBlending : THREE.NormalBlending,
       toneMapped: !additive,
     });
+    if (additive) {
+      this.mat.blendEquation = THREE.AddEquation;
+      this.mat.blendSrc = THREE.OneFactor;
+      this.mat.blendDst = THREE.OneMinusSrcAlphaFactor;
+      this.mat.blendSrcAlpha = THREE.ZeroFactor;
+      this.mat.blendDstAlpha = THREE.OneFactor;
+    }
     this.mesh = new THREE.Mesh(geo, this.mat);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = additive ? 6 : 5;
@@ -378,6 +403,7 @@ export class ParticleSystem {
     d[o + FLOOR] = s.floor;
     d[o + FLAGS] = s.flags;
     d[o + TAG] = s.tag;
+    d[o + OCC] = s.occlude;
   }
 
   update(dt: number) {
@@ -470,16 +496,13 @@ export class ParticleSystem {
       g[go + 12] = d[o + FRAME];
       g[go + 13] = d[o + STRETCH];
       g[go + 14] = flags & PFLAG.FLAT ? 1 : 0;
+      g[go + 15] = d[o + OCC];
       i++;
     }
     this.n = n;
     this.geo.instanceCount = n;
     this.mesh.visible = n > 0;
-    if (n > 0) {
-      this.buf.clearUpdateRanges();
-      this.buf.addUpdateRange(0, n * G);
-      this.buf.needsUpdate = true;
-    }
+    if (n > 0) uploadRange(this.buf, this.range, 0, n * G);
   }
 
   clear() {

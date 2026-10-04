@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const SAVE_KEY = 'overrun.save.v1';
+/** src/platform/installHint.ts — set so the iPhone install pill never overlays menus in the WebKit/iPhone project. */
+export const INSTALL_HINT_KEY = 'overrun.installHint.dismissed';
 
 /** Console errors / uncaught exceptions collected for a page. */
 export function trackErrors(page: Page): string[] {
@@ -24,18 +26,21 @@ export function trackErrors(page: Page): string[] {
 
 /**
  * Seeds the save before the page's scripts run (first load only — a later
- * reload keeps whatever the game persisted): tutorial already seen.
+ * reload keeps whatever the game persisted): tutorial already seen, iPhone
+ * install hint already dismissed (the webkit-iphone project has an iPhone UA,
+ * and hiding the hint must not depend on navigator.webdriver).
  */
 export async function seedSave(page: Page, extra: Record<string, unknown> = {}) {
   await page.addInitScript(
-    ([key, data]) => {
+    ([key, hintKey, data]) => {
       try {
         if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({ version: 1, seenTutorial: true, ...data }));
+        localStorage.setItem(hintKey, '1');
       } catch {
         /* storage unavailable */
       }
     },
-    [SAVE_KEY, extra] as const,
+    [SAVE_KEY, INSTALL_HINT_KEY, extra] as const,
   );
 }
 

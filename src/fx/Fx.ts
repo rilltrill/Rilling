@@ -3,7 +3,7 @@ import { Rng } from '../core/Rng';
 import { DecalSystem } from './Decals';
 import { GIB_FLAG, GibMesh } from './Gibs';
 import { PFLAG, ParticleSystem, PSpec } from './Particles';
-import { DF, PF, decalAtlasTexture, particleAtlasTexture } from './textures';
+import { DF, PF, decalAtlasReady, decalAtlasTexture, particleAtlasReady, particleAtlasTexture, pumpFxAtlases } from './textures';
 
 export interface BloodOptions {
   color?: number;
@@ -98,6 +98,9 @@ export class Fx {
 
   private particleTex = particleAtlasTexture();
   private decalTex = decalAtlasTexture();
+  /** Atlases still being painted (time-sliced) → re-upload each one once it completes. */
+  private particleTexPending = !particleAtlasReady();
+  private decalTexPending = !decalAtlasReady();
   private soft = new ParticleSystem(SOFT_CAP, false, this.particleTex);
   private glow = new ParticleSystem(GLOW_CAP, true, this.particleTex);
   private decals = new DecalSystem(DECAL_CAP, this.decalTex);
@@ -159,31 +162,33 @@ export class Fx {
     const dx = dir?.x ?? 0;
     const dy = dir?.y ?? 0;
     const dz = dir?.z ?? 0;
-    const sz = 0.85 + amount * 0.3;
+    const sz = 0.9 + amount * 0.35;
 
-    // Impact burst: a dense puff that blooms out of the wound.
-    _sp.reset().pos(point).color(_c, 1.15);
-    _sp.vel(-dx * 0.6, 0.25, -dz * 0.6);
-    _sp.frame = PF.SMOKE;
-    _sp.size(0.14 * sz, 0.6 * sz);
-    _sp.life = 0.22;
-    _sp.alpha = 0.95;
-    _sp.drag = 6;
-    _sp.fadeIn = 0.02;
-    _sp.fadeOut = 0.2;
-    _sp.rot = r.next() * 6.28;
-    this.soft.spawn(_sp);
+    // Impact burst: dense puffs that bloom out of the wound towards the camera.
+    for (let i = 0; i < 2; i++) {
+      _sp.reset().pos(point).color(_c, i === 0 ? 1.25 : 0.8);
+      _sp.vel(-dx * 0.8 + r.spread(0.4), 0.3 + r.spread(0.3), -dz * 0.8 + r.spread(0.4));
+      _sp.frame = PF.SMOKE;
+      _sp.size(0.18 * sz, (i === 0 ? 0.75 : 0.55) * sz);
+      _sp.life = i === 0 ? 0.26 : 0.18;
+      _sp.alpha = 1;
+      _sp.drag = 6;
+      _sp.fadeIn = 0.02;
+      _sp.fadeOut = 0.25;
+      _sp.rot = r.next() * 6.28;
+      this.soft.spawn(_sp);
+    }
 
     // Streaks: fast stretched droplets, mostly out of the exit side plus back-spatter.
-    const nStreak = Math.round((4 + 5 * amount) * lod);
+    const nStreak = Math.round((6 + 6 * amount) * lod);
     for (let i = 0; i < nStreak; i++) {
       const through = !dir || r.chance(0.55);
       const k = through ? r.range(2.5, 6.5) : -r.range(1.5, 3.5);
       _sp.reset().pos(point).color(_c, r.range(0.75, 1.25));
       _sp.vel(dx * k + r.spread(1.8), dy * k + r.range(0.6, 3.2), dz * k + r.spread(1.8));
       _sp.frame = PF.DROP;
-      _sp.stretch = 0.05;
-      _sp.size(r.range(0.035, 0.065) * sz, r.range(0.02, 0.04) * sz);
+      _sp.stretch = 0.06;
+      _sp.size(r.range(0.05, 0.09) * sz, r.range(0.03, 0.05) * sz);
       _sp.life = r.range(0.45, 0.85);
       _sp.grav = 11;
       _sp.drag = 1.2;
@@ -195,13 +200,13 @@ export class Fx {
     }
 
     // Round droplets, slower, arcing down.
-    const nDrop = Math.round((5 + 7 * amount) * lod);
+    const nDrop = Math.round((6 + 8 * amount) * lod);
     for (let i = 0; i < nDrop; i++) {
       const k = r.range(0.3, 2.4);
       _sp.reset().pos(point).color(_c, r.range(0.7, 1.2));
       _sp.vel(dx * k + r.spread(1.9), r.range(0.4, 3.4), dz * k + r.spread(1.9));
       _sp.frame = PF.DROP;
-      _sp.size(r.range(0.05, 0.11) * sz, r.range(0.03, 0.06) * sz);
+      _sp.size(r.range(0.07, 0.15) * sz, r.range(0.04, 0.08) * sz);
       _sp.life = r.range(0.55, 1.0);
       _sp.grav = 10;
       _sp.drag = 1.1;
@@ -218,9 +223,9 @@ export class Fx {
       _sp.reset().pos(point).color(_c, kind === 'goo' ? 1 : 1.3);
       _sp.vel(dx * r.range(0.3, 1.2) + r.spread(0.5), r.range(0.0, 0.5), dz * r.range(0.3, 1.2) + r.spread(0.5));
       _sp.frame = PF.SMOKE;
-      _sp.size(r.range(0.2, 0.3) * sz, r.range(0.6, 0.95) * sz);
-      _sp.life = r.range(0.4, 0.7);
-      _sp.alpha = 0.45;
+      _sp.size(r.range(0.25, 0.35) * sz, r.range(0.8, 1.2) * sz);
+      _sp.life = r.range(0.45, 0.8);
+      _sp.alpha = 0.5;
       _sp.drag = 3.5;
       _sp.grav = 0.4;
       _sp.fadeIn = 0.05;
@@ -246,12 +251,12 @@ export class Fx {
         _sp.fadeOut = 0.95;
         _sp.flags = PFLAG.DIE_ON_FLOOR | PFLAG.LAND_EVENT;
         _sp.floor = floor;
-        _sp.tag = r.range(0.4, 0.65) * (0.7 + amount * 0.45);
+        _sp.tag = r.range(0.55, 0.85) * (0.7 + amount * 0.45);
         this.soft.spawn(_sp);
       }
       // Low hits (crawlers, limbs hitting the ground) splat immediately.
       if (height < 1.0 && amount >= 0.25) {
-        this.splatDecal(point.x + dx * 0.25, floor, point.z + dz * 0.25, _c.r, _c.g, _c.b, r.range(0.45, 0.7) * (0.6 + amount * 0.5));
+        this.splatDecal(point.x + dx * 0.25, floor, point.z + dz * 0.25, _c.r, _c.g, _c.b, r.range(0.6, 0.9) * (0.6 + amount * 0.5));
       }
     }
 
@@ -266,7 +271,8 @@ export class Fx {
     const bloody = kind !== null;
     const n = Math.min(24, Math.max(0, Math.round(count)));
     for (let i = 0; i < n; i++) {
-      const meat = bloody ? r.chance(0.8) : r.chance(0.3);
+      // Gore is mostly lumpy meat; other colours (skin, bone, glass, clods) a mix with shards.
+      const meat = bloody ? r.chance(0.8) : r.chance(0.5);
       const s = size * r.range(0.6, 1.5);
       let sx = s * r.range(0.75, 1.3);
       const sy = s * r.range(0.6, 1.05);
@@ -355,18 +361,18 @@ export class Fx {
 
     // Dust puff blown out along the normal.
     _c.setHex(S.dust);
-    const nPuff = surface === 'metal' ? 1 : 2;
+    const nPuff = surface === 'metal' ? 1 : 3;
     for (let i = 0; i < nPuff; i++) {
-      const k = r.range(0.4, 1.3);
+      const k = i === 2 ? r.range(1.8, 2.6) : r.range(0.4, 1.3);
       _sp.reset().color(_c, r.range(0.85, 1.1));
       _sp.x = point.x + nrm.x * 0.05;
       _sp.y = point.y + nrm.y * 0.05;
       _sp.z = point.z + nrm.z * 0.05;
       _sp.vel(nrm.x * k + r.spread(0.3), nrm.y * k + r.range(0.1, 0.5), nrm.z * k + r.spread(0.3));
       _sp.frame = PF.SMOKE;
-      _sp.size(r.range(0.1, 0.16), r.range(0.45, 0.75));
-      _sp.life = r.range(0.5, 0.95);
-      _sp.alpha = 0.6;
+      _sp.size(r.range(0.12, 0.2), r.range(0.6, 0.95));
+      _sp.life = r.range(0.55, 1.0);
+      _sp.alpha = 0.65;
       _sp.drag = 3.2;
       _sp.grav = -0.3;
       _sp.fadeIn = 0.04;
@@ -380,7 +386,7 @@ export class Fx {
     _c.setHex(S.chip);
     const nChip = Math.round(S.chips * lod);
     for (let i = 0; i < nChip; i++) {
-      _v.set(r.spread(1.4), r.range(0.8, 2.6), r.spread(1.4)).addScaledVector(nrm, r.range(1.2, 3.6));
+      _v.set(r.spread(1.4), r.range(1, 3.2), r.spread(1.4)).addScaledVector(nrm, r.range(1.5, 4.2));
       _sp.reset().pos(point).vel(_v.x, _v.y, _v.z).color(_c, r.range(0.7, 1.2));
       if (S.splinters && r.chance(0.6)) {
         _sp.frame = PF.STREAK;
@@ -388,7 +394,7 @@ export class Fx {
         _sp.size(r.range(0.025, 0.04));
       } else {
         _sp.frame = PF.CHIP;
-        _sp.size(r.range(0.03, 0.06));
+        _sp.size(r.range(0.04, 0.075));
         _sp.rot = r.next() * 6.28;
         _sp.rotV = r.spread(18);
       }
@@ -408,12 +414,12 @@ export class Fx {
       this.decalBudget--;
       _c.setHex(S.tint);
       this.decals.add(
-        point.x,
+        point.x + nrm.x * DECAL_LIFT,
         floor + DECAL_LIFT,
-        point.z,
-        0,
-        1,
-        0,
+        point.z + nrm.z * DECAL_LIFT,
+        nrm.x,
+        nrm.y,
+        nrm.z,
         S.decalSize * r.range(0.8, 1.25),
         r.next() * 6.28,
         _c.r,
@@ -512,10 +518,10 @@ export class Fx {
     this.muzzleT = 0;
 
     // Blinding core.
-    _sp.reset().pos(point).rgb0(3.2, 2.9, 2.4).rgb1(2.4, 1.4, 0.6);
+    _sp.reset().pos(point).rgb0(2.0, 1.7, 1.2).rgb1(1.3, 0.6, 0.2);
     _sp.frame = PF.GLOW;
-    _sp.size(1.4 * s, 4.2 * s);
-    _sp.life = 0.16;
+    _sp.size(1.2 * s, 3.6 * s);
+    _sp.life = 0.14;
     _sp.fadeIn = 0.01;
     _sp.fadeOut = 0.15;
     this.glow.spawn(_sp);
@@ -530,7 +536,9 @@ export class Fx {
       _sp.y = point.y + _v.y * 0.35 * s + 0.1 * s;
       _sp.z = point.z + _v.z * 0.35 * s;
       _sp.vel(_v.x * k, _v.y * k + r.range(0.5, 2) * sq, _v.z * k);
-      _sp.rgb0(2.7, 2.1, 1.2).rgb1(1.1, 0.18, 0.03);
+      _sp.rgb0(1.9, 1.15, 0.45).rgb1(0.55, 0.1, 0.03);
+      _sp.alpha = 0.95;
+      _sp.occlude = 0.55;
       _sp.frame = PF.FLAME;
       _sp.size(r.range(0.5, 0.8) * s, r.range(1.5, 2.4) * s);
       _sp.life = r.range(0.4, 0.8);
@@ -592,17 +600,19 @@ export class Fx {
     this.glow.spawn(_sp);
 
     // Smoke column: dark, fire-lit at first, rising and spreading as the fire dies.
-    const nSmoke = Math.round(6 + 6 * s);
+    // (Growth is capped for huge blasts like the bomb so the view stays readable.)
+    const nSmoke = Math.round(6 + 5 * Math.min(s, 1.6));
+    const ss = Math.min(s, 1.1 + 0.3 * s);
     for (let i = 0; i < nSmoke; i++) {
-      const g = r.range(0.1, 0.17);
+      const g = r.range(0.07, 0.12);
       _sp.reset();
-      _sp.x = point.x + r.spread(0.6) * s;
-      _sp.y = point.y + r.range(0, 0.8) * s;
-      _sp.z = point.z + r.spread(0.6) * s;
+      _sp.x = point.x + r.spread(0.6) * ss;
+      _sp.y = point.y + r.range(0, 0.8) * ss;
+      _sp.z = point.z + r.spread(0.6) * ss;
       _sp.vel(r.spread(1.2) * sq, r.range(1.4, 3.6) * sq, r.spread(1.2) * sq);
-      _sp.rgb0(g * 3.2, g * 1.9, g * 1.2).rgb1(g * 1.6, g * 1.55, g * 1.5);
+      _sp.rgb0(g * 2.0, g * 1.5, g * 1.15).rgb1(g * 1.7, g * 1.65, g * 1.6);
       _sp.frame = PF.SMOKE;
-      _sp.size(r.range(0.8, 1.2) * s, r.range(2.6, 3.8) * s);
+      _sp.size(r.range(0.8, 1.2) * ss, r.range(2.6, 3.8) * ss);
       _sp.life = r.range(2.2, 3.8) * Math.min(1.4, sq);
       _sp.delay = r.range(0.05, 0.3);
       _sp.alpha = r.range(0.6, 0.8);
@@ -634,20 +644,20 @@ export class Fx {
     }
 
     // Flying debris chunks (some still glowing hot → ember trails).
-    const nDebris = Math.round(4 + 4 * s);
+    const nDebris = Math.round(4 + 3 * Math.min(s, 1.6));
     for (let i = 0; i < nDebris; i++) {
       const hot = i % 2 === 0;
-      const sz = 0.13 * s * r.range(0.6, 1.4);
-      _c.setHex(hot ? 0x3a2a20 : 0x2b2622).multiplyScalar(r.range(0.7, 1.2));
+      const sz = 0.12 * Math.min(s, 1.2) * r.range(0.6, 1.3);
+      _c.setHex(hot ? 0x5a4636 : 0x4a443e).multiplyScalar(r.range(0.75, 1.15));
       this.shards.spawn(
         point,
         r.spread(5) * sq,
         r.range(3.5, 8) * sq,
         r.spread(5) * sq,
         _c,
-        sz * r.range(0.6, 1),
-        sz * r.range(0.5, 0.9),
-        sz * r.range(1.2, 2.2),
+        sz * r.range(0.7, 1),
+        sz * r.range(0.6, 0.9),
+        sz * r.range(1.1, 1.8),
         r.range(3, 5),
         floor,
         hot ? GIB_FLAG.HOT : 0,
@@ -763,11 +773,11 @@ export class Fx {
   muzzleFlash(strength = 1, color = 0xffb35a) {
     if (!this.camera || this.flashT > 0.08) return;
     this.muzzleT = 0.07;
-    this.muzzlePeak = 14 * Math.max(0, strength);
+    this.muzzlePeak = 16 * Math.max(0, strength);
     this.muzzleColor.setHex(color);
     this.flashLight.color.copy(this.muzzleColor);
-    this.flashLight.distance = 12;
-    this.flashLight.decay = 1.7;
+    this.flashLight.distance = 26;
+    this.flashLight.decay = 1.2;
     this.placeMuzzleLight();
   }
 
@@ -777,6 +787,7 @@ export class Fx {
   }
 
   update(dt: number) {
+    if (this.particleTexPending || this.decalTexPending) this.pumpAtlases();
     this.decalBudget = DECAL_BUDGET;
     this.updateLighting(dt);
     // Gibs first (they spawn trail particles/decals), then particles (landing → decals), then decals.
@@ -795,7 +806,7 @@ export class Fx {
       this.muzzleT = Math.max(0, this.muzzleT - dt);
       const k = this.muzzleT / 0.07;
       this.placeMuzzleLight();
-      this.flashLight.intensity = this.muzzlePeak * k;
+      this.flashLight.intensity = this.muzzlePeak * Math.sqrt(k);
     } else this.flashLight.intensity = 0;
   }
 
@@ -824,6 +835,18 @@ export class Fx {
 
   // ─── Internals ────────────────────────────────────────────────────────────
 
+  private pumpAtlases() {
+    pumpFxAtlases(3);
+    if (this.particleTexPending && particleAtlasReady()) {
+      this.particleTexPending = false;
+      this.particleTex.needsUpdate = true;
+    }
+    if (this.decalTexPending && decalAtlasReady()) {
+      this.decalTexPending = false;
+      this.decalTex.needsUpdate = true;
+    }
+  }
+
   /** 1 near the camera → 0.45 far away (fewer particles where nobody can see them). */
   private lod(p: THREE.Vector3): number {
     if (!this.camera) return 1;
@@ -834,8 +857,9 @@ export class Fx {
   private placeMuzzleLight() {
     const cam = this.camera;
     if (!cam) return;
-    // Slightly right of and below the eye, a metre ahead (where the gun would be).
-    this.flashLight.position.set(0.3, -0.25, -1.1).applyMatrix4(cam.matrixWorld);
+    // Just ahead of the eye, slightly right/low (where the gun would be) — lights the
+    // ground around the player and puts a warm kick on enemies in front.
+    this.flashLight.position.set(0.25, -0.1, -1.6).applyMatrix4(cam.matrixWorld);
   }
 
   private splash(point: THREE.Vector3, lod: number) {
@@ -948,31 +972,32 @@ export class Fx {
       _sp.floor = y - 3;
       this.soft.spawn(_sp);
     } else if (flags & GIB_FLAG.HOT) {
-      _sp.reset().vel(rng.spread(0.2), 0.3, rng.spread(0.2)).rgb0(2.0, 1.0, 0.3).rgb1(0.8, 0.15, 0.02);
+      _sp.reset().vel(vx * 0.1, vy * 0.1, vz * 0.1).rgb0(1.6, 0.8, 0.25).rgb1(0.7, 0.12, 0.02);
       _sp.x = x;
       _sp.y = y;
       _sp.z = z;
       _sp.frame = PF.GLOW;
-      _sp.size(0.12, 0.05);
-      _sp.life = 0.3;
+      _sp.size(0.22, 0.1);
+      _sp.life = 0.22;
+      _sp.alpha = 0.8;
       _sp.fadeIn = 0.01;
-      _sp.fadeOut = 0.3;
+      _sp.fadeOut = 0.2;
       this.glow.spawn(_sp);
-      if (rng.chance(0.5)) {
-        _sp.reset().vel(rng.spread(0.2), 0.5, rng.spread(0.2)).rgb0(0.18, 0.17, 0.16).rgb1(0.28, 0.28, 0.28);
-        _sp.x = x;
-        _sp.y = y;
-        _sp.z = z;
-        _sp.frame = PF.SMOKE;
-        _sp.size(0.12, 0.45);
-        _sp.life = 0.8;
-        _sp.alpha = 0.45;
-        _sp.drag = 1.5;
-        _sp.grav = -0.3;
-        _sp.rot = rng.next() * 6.28;
-        _sp.fadeOut = 0.3;
-        this.soft.spawn(_sp);
-      }
+      _sp.reset().vel(rng.spread(0.2), 0.4, rng.spread(0.2)).rgb0(0.16, 0.15, 0.14).rgb1(0.3, 0.3, 0.3);
+      _sp.x = x;
+      _sp.y = y;
+      _sp.z = z;
+      _sp.frame = PF.SMOKE;
+      _sp.size(0.4, 0.8);
+      _sp.life = rng.range(0.6, 0.9);
+      _sp.alpha = 0.35;
+      _sp.drag = 1.5;
+      _sp.grav = -0.3;
+      _sp.rot = rng.next() * 6.28;
+      _sp.rotV = rng.spread(1);
+      _sp.fadeIn = 0.05;
+      _sp.fadeOut = 0.2;
+      this.soft.spawn(_sp);
     }
   }
 
@@ -1027,7 +1052,7 @@ export class Fx {
     const f = this.flashT > 0 ? (this.flashT / this.flashDur) * Math.min(2, this.flashPeak / 40) : 0;
     const k = 1 / Math.PI;
     const clampL = (x: number) => Math.min(1.6, Math.max(0.06, x));
-    this.soft.lightUniform.setRGB(clampL(sr * k + f * 0.9), clampL(sg * k + f * 0.55), clampL(sb * k + f * 0.25));
+    this.soft.lightUniform.setRGB(clampL(sr * k + f * 0.4), clampL(sg * k + f * 0.22), clampL(sb * k + f * 0.08));
     this.decals.lightUniform.setRGB(clampL(ur * k), clampL(ug * k), clampL(ub * k));
   }
 }

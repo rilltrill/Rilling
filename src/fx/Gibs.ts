@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Rng } from '../core/Rng';
+import { newRange, uploadRange } from './upload';
 
 /**
  * Physical chunks (gore, debris, shards) as one InstancedMesh per shape.
@@ -75,6 +76,8 @@ export class GibMesh {
   private col: Float32Array;
   private n = 0;
   private recycle = 0;
+  private matRange = newRange();
+  private colRange = newRange();
 
   constructor(
     readonly capacity: number,
@@ -169,7 +172,8 @@ export class GibMesh {
       }
       d[o + AGE] = age;
       const sy = d[o + SY];
-      const rest = d[o + FLOOR] + sy * 0.28;
+      // Contact radius while tumbling (average half-extent, a bit inside the jittered hull).
+      const contact = d[o + FLOOR] + (d[o + SX] + sy + d[o + SZ]) * 0.13;
       if (d[o + REST] === 0) {
         let vx = d[o + VX];
         let vy = d[o + VY] - 14 * dt;
@@ -178,19 +182,22 @@ export class GibMesh {
         let py = d[o + PY] + vy * dt;
         let pz = d[o + PZ] + vz * dt;
         const flags = d[o + FLAGS];
-        if (py < rest) {
-          py = rest;
+        if (py < contact) {
+          py = contact;
           const impact = -vy;
           if (d[o + BOUNCES] === 0 && this.onLand) {
             this.onLand(px, d[o + FLOOR], pz, col[i * 3], col[i * 3 + 1], col[i * 3 + 2], Math.max(d[o + SX], sy, d[o + SZ]), flags);
           }
           d[o + BOUNCES]++;
           if (impact < 1.6 || d[o + BOUNCES] > 3) {
-            // Settle: lie still (flatten the tumble so it sits on the floor).
+            // Settle: lie on a side with the long (local Z) axis horizontal — RX ∈ {0, π},
+            // RZ ∈ {0, π/2} picks whether local Y or X points up — resting on the floor.
             vx = vy = vz = 0;
             d[o + REST] = 1;
-            d[o + RX] = Math.round(d[o + RX] / 1.5708) * 1.5708;
-            d[o + RZ] = Math.round(d[o + RZ] / 1.5708) * 1.5708;
+            d[o + RX] = Math.cos(d[o + RX]) >= 0 ? 0 : Math.PI;
+            const onSide = Math.abs(Math.sin(d[o + RZ])) > 0.7071;
+            d[o + RZ] = onSide ? Math.PI / 2 : 0;
+            py = d[o + FLOOR] + (onSide ? d[o + SX] : sy) * 0.4;
           } else {
             vy = impact * 0.32;
             vx *= 0.55;
@@ -202,7 +209,7 @@ export class GibMesh {
         } else if (flags !== 0 && this.onTrail) {
           d[o + TRAIL] -= dt;
           if (d[o + TRAIL] <= 0) {
-            d[o + TRAIL] = flags & GIB_FLAG.HOT ? 0.025 : 0.05;
+            d[o + TRAIL] = flags & GIB_FLAG.HOT ? 0.028 : 0.05;
             this.onTrail(px, py, pz, vx, vy, vz, col[i * 3], col[i * 3 + 1], col[i * 3 + 2], flags);
           }
         }
@@ -221,21 +228,15 @@ export class GibMesh {
       // Shrink away over the last 0.6 s (sinking slightly into the floor).
       const left = d[o + LIFE] - age;
       const k = left < 0.6 ? left / 0.6 : 1;
-      this.writeMatrix(m, i * 16, o, k, d[o + REST] === 1 ? (1 - k) * sy * 0.3 : 0);
+      this.writeMatrix(m, i * 16, o, k, d[o + REST] === 1 ? (1 - k) * sy * 0.4 : 0);
       i++;
     }
     this.n = n;
     this.mesh.count = n;
     this.mesh.visible = n > 0;
     if (n > 0) {
-      const im = this.mesh.instanceMatrix;
-      im.clearUpdateRanges();
-      im.addUpdateRange(0, n * 16);
-      im.needsUpdate = true;
-      const ic = this.mesh.instanceColor!;
-      ic.clearUpdateRanges();
-      ic.addUpdateRange(0, n * 3);
-      ic.needsUpdate = true;
+      uploadRange(this.mesh.instanceMatrix, this.matRange, 0, n * 16);
+      uploadRange(this.mesh.instanceColor!, this.colRange, 0, n * 3);
     }
   }
 

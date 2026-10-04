@@ -40,8 +40,8 @@ const PUS_BELLY: [number, number, number, number, number][] = [
 
 type Part = { mesh: THREE.Mesh; hp: number; popped: boolean };
 
-const SKIN = 0xb39684;
-const SKIN_DARK = 0x7e5f55;
+const SKIN = 0xa08474;
+const SKIN_DARK = 0x6e5048;
 const PANTS = 0x2e2a28;
 const BLOOD = 0x4a0808;
 
@@ -72,6 +72,8 @@ export class Butcher extends Boss {
   private apronParts: THREE.Mesh[] = [];
   private pustules: Part[] = [];
   private bellyPustules: Part[] = [];
+  private allPustules: Part[] = [];
+  private relOut = { fwd: 0, right: 0 };
   private hookInHand!: THREE.Group;
   private handL!: THREE.Object3D;
   private propBarrel!: THREE.Group;
@@ -223,6 +225,7 @@ export class Butcher extends Boss {
       this.bellyPustules.push({ mesh, hp, popped: false });
     }
     bp.visible = false;
+    this.allPustules = [...this.pustules, ...this.bellyPustules];
 
     // Chain-mail apron (armour) hanging from the chest.
     this.apron = Kit.pivot(this.chest, 0, -0.02, 0.6, 'apron');
@@ -380,10 +383,12 @@ export class Butcher extends Boss {
       this.dmgInState += amount;
       this.flinchT = Math.min(1.4, this.flinchT + 0.45);
       // Pustules pop after enough damage.
-      for (const p of this.pustules.concat(this.bellyPustules)) {
-        if (p.popped || p.mesh !== hit.object) continue;
-        p.hp -= amount;
-        if (p.hp <= 0) this.popPustule(p, hit);
+      for (const list of [this.pustules, this.bellyPustules]) {
+        for (const p of list) {
+          if (p.popped || p.mesh !== hit.object) continue;
+          p.hp -= amount;
+          if (p.hp <= 0) this.popPustule(p, hit);
+        }
       }
     }
     super.onDamaged(hit, amount);
@@ -453,7 +458,9 @@ export class Butcher extends Boss {
     const rig = this.world.rig.space;
     const h = rig.rotation.y;
     _v.subVectors(pos, rig.position);
-    return { fwd: _v.x * -Math.sin(h) + _v.z * -Math.cos(h), right: _v.x * Math.cos(h) - _v.z * Math.sin(h) };
+    this.relOut.fwd = _v.x * -Math.sin(h) + _v.z * -Math.cos(h);
+    this.relOut.right = _v.x * Math.cos(h) - _v.z * Math.sin(h);
+    return this.relOut;
   }
 
   private get speedMul() {
@@ -913,10 +920,10 @@ export class Butcher extends Boss {
     const bpm = this.phase === 0 ? 1.2 : this.phase === 1 ? 1.6 : 2.2;
     const beat = Math.pow(Math.max(0, Math.sin(a * Math.PI * 2 * bpm)), 6);
     this.heart.scale.set(1 + beat * 0.25, 1.15 + beat * 0.3, 0.9 + beat * 0.2);
-    for (const p of this.pustules.concat(this.bellyPustules)) {
+    for (let i = 0; i < this.allPustules.length; i++) {
+      const p = this.allPustules[i];
       if (p.popped) continue;
-      const k = 1 + Math.sin(a * 5 + p.mesh.position.x * 9) * 0.08;
-      p.mesh.scale.setScalar(k);
+      p.mesh.scale.setScalar(1 + Math.sin(a * 5 + p.mesh.position.x * 9) * 0.08);
     }
 
     // Locomotion.
@@ -1159,7 +1166,7 @@ export class Butcher extends Boss {
       this.mouthGlow.visible = h > 0.3;
       const swell = 1 + clamp((t - 1.3) / 1.1, 0, 1) * 0.8 + Math.sin(t * 30) * 0.05;
       this.heart.scale.setScalar(swell);
-      for (const p of this.pustules.concat(this.bellyPustules)) if (!p.popped) p.mesh.scale.setScalar(swell);
+      for (const p of this.allPustules) if (!p.popped) p.mesh.scale.setScalar(swell);
       this.model.rotation.z = Math.sin(t * 17) * 0.02 * h;
       this.bloodT -= dt;
       if (t > 1.2 && this.bloodT <= 0) {

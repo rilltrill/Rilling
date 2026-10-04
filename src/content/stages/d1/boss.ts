@@ -3,7 +3,7 @@ import { Boss } from '../../../gameplay/Boss';
 import type { ShotHit } from '../../../gameplay/Entity';
 import { registerEnemy, createEnemy } from '../../registry';
 import { Kit } from '../../kit/ModelKit';
-import { mergedMesh } from './props';
+import { mergedMeshes } from './props';
 import { angleDelta, clamp, damp } from '../../../core/math';
 import { D, RIVER_WIDTH } from './layout';
 
@@ -156,8 +156,7 @@ export class Carnotaur extends Boss {
     const g = new THREE.Group();
     parent.add(g);
     build(g);
-    const m = mergedMesh(g);
-    return m ? [m] : [];
+    return mergedMeshes(g);
   }
 
   protected override build(): void {

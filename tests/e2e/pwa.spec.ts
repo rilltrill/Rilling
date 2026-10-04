@@ -65,10 +65,12 @@ test.describe('installable web app', () => {
     expect(errors).toEqual([]);
   });
 
-  test('iOS install hint: hidden under automation, forced with ?installhint=1, dismissible', async ({ page }, info) => {
-    await page.goto('/');
+  test('iOS install hint: never with debug flags, forced with ?installhint=1, dismissal persists', async ({ page }, info) => {
+    // Debug/test sessions (?stage / ?autoplay) never create it — deterministic in
+    // both projects, unlike the navigator.webdriver guard.
+    await page.goto('/?stage=z1&god=1&mute=1');
     await waitForBoot(page);
-    await page.waitForTimeout(1200);
+    await page.waitForTimeout(2000); // past the 1.6 s reveal delay
     await expect(page.locator('#install-hint')).toHaveCount(0);
 
     await page.goto('/?installhint=1');
@@ -76,12 +78,21 @@ test.describe('installable web app', () => {
     const hint = page.locator('#install-hint');
     await expect(hint).toHaveClass(/show/);
     await expect(hint).toContainText('Add to Home Screen');
+    await page.waitForTimeout(700); // let the slide-in transition finish before the screenshot
     await shot(page, info, 'install-hint');
     await hint.locator('.ih-close').tap();
     await expect(hint).not.toHaveClass(/show/);
     expect(await page.evaluate(() => localStorage.getItem('overrun.installHint.dismissed'))).toBe('1');
+    // Off-screen hint is out of the render tree (no blur layer / hit target over the canvas).
+    await expect(hint).toBeHidden();
     // The title screen still works underneath.
     await expect(page.locator('#menus .screen.title')).toBeVisible();
+
+    // Dismissal sticks: a normal launch (even on a real iPhone UA) no longer shows it.
+    await page.goto('/');
+    await waitForBoot(page);
+    await page.waitForTimeout(2000);
+    await expect(page.locator('#install-hint')).toHaveCount(0);
   });
 });
 

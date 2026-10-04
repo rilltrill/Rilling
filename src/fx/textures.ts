@@ -147,14 +147,37 @@ function segDist(px: number, py: number, ax: number, ay: number, bx: number, by:
 
 type Painter = (x: number, y: number, out: Float32Array) => void;
 
-/** Paint one cell. `fn` gets cell-local coords in [-0.5, 0.5] (y up) and writes rgba (0..1). */
-export const PAINT_TIMES: number[] = [];
+interface CellJob {
+  data: Uint8Array;
+  frame: number;
+  fn: Painter;
+  /** Row strip [j0, j1) of the cell. */
+  j0: number;
+  j1: number;
+}
+
+/** Rows per job — keeps each slice to a few ms even on a cold JIT. */
+const STRIP = 16;
+
+/** Pending cell paints (generation is time-sliced across frames, see `pumpFxAtlases`). */
+let queue: CellJob[] | null = null;
+let queueIndex = 0;
+let particleJobsEnd = 0;
+let particleData: Uint8Array | null = null;
+let decalData: Uint8Array | null = null;
+
+/** Queue one cell. `fn` gets cell-local coords in [-0.5, 0.5] (y up) and writes rgba (0..1). */
 function paintCell(data: Uint8Array, frame: number, fn: Painter) {
-  const __t = performance.now();
+  for (let j0 = 0; j0 < CELL; j0 += STRIP) queue!.push({ data, frame, fn, j0, j1: j0 + STRIP });
+}
+
+const _out = new Float32Array(4);
+
+function runCell({ data, frame, fn, j0, j1 }: CellJob) {
   const col = frame % ATLAS_COLS;
   const row = Math.floor(frame / ATLAS_COLS);
-  const out = new Float32Array(4);
-  for (let j = 0; j < CELL; j++) {
+  const out = _out;
+  for (let j = j0; j < j1; j++) {
     const y = (j + 0.5) / CELL - 0.5;
     const rowOff = (row * CELL + j) * W;
     for (let i = 0; i < CELL; i++) {
@@ -169,14 +192,11 @@ function paintCell(data: Uint8Array, frame: number, fn: Painter) {
       data[o + 3] = Math.round(clamp01(out[3]) * 255);
     }
   }
-  PAINT_TIMES.push(performance.now() - __t);
 }
 
 // ─── Particle atlas ──────────────────────────────────────────────────────────
 
-function buildParticleAtlas(): Uint8Array {
-  const d = new Uint8Array(W * H * 4);
-
+function buildParticleAtlas(d: Uint8Array) {
   paintCell(d, PF.GLOW, (x, y, o) => {
     const r2 = (x * x + y * y) * 4; // r in 0..1 at cell edge
     const a = Math.exp(-r2 * 9) * 0.85 + Math.exp(-r2 * 40) * 0.4;
@@ -271,8 +291,6 @@ function buildParticleAtlas(): Uint8Array {
     const a = cross * 0.9 + Math.exp(-r2 * 14) * 0.8;
     o[3] = a * smooth(1, 0.85, Math.max(ax, ay));
   });
-
-  return d;
 }
 
 // ─── Decal atlas ─────────────────────────────────────────────────────────────
@@ -305,6 +323,8 @@ function splatPainter(seed: number): Painter {
     for (let i = 0; i < sats.length; i += 3) {
       const dx = x - sats[i];
       const dy = y - sats[i + 1];
+      const lim = sats[i + 2] + 0.008;
+      if (dx > lim || dx < -lim || dy > lim || dy < -lim) continue;
       const dd = Math.sqrt(dx * dx + dy * dy);
       const s = smooth(sats[i + 2] + 0.006, sats[i + 2] - 0.006, dd);
       if (s > a) a = s;
@@ -329,8 +349,7 @@ function splatPainter(seed: number): Painter {
   };
 }
 
-function buildDecalAtlas(): Uint8Array {
-  const d = new Uint8Array(W * H * 4);
+function buildDecalAtlas(d: Uint8Array) {
   paintCell(d, DF.SPLAT0, splatPainter(11));
   paintCell(d, DF.SPLAT1, splatPainter(29));
   paintCell(d, DF.SPLAT2, splatPainter(47));
@@ -392,6 +411,8 @@ function buildDecalAtlas(): Uint8Array {
       for (let i = 0; i < dots.length; i += 3) {
         const dx = x - dots[i];
         const dy = y - dots[i + 1];
+        const lim = dots[i + 2] * 1.2 + 0.008;
+        if (dx > lim || dx < -lim || dy > lim || dy < -lim) continue;
         const dd = Math.sqrt(dx * dx + dy * dy);
         const rad = dots[i + 2] * (0.85 + 0.3 * vnoise(Math.atan2(dy, dx) * 2 + i, i, 3));
         const s = smooth(rad + 0.006, rad - 0.006, dd);
@@ -413,12 +434,45 @@ function buildDecalAtlas(): Uint8Array {
     o[3] = Math.max(smooth(0.9, 0.3, edge) * (0.6 + 0.4 * n), speck * 0.8);
     o[0] = o[1] = o[2] = 0.45 + 0.4 * n;
   });
-
-  return d;
 }
 
-let particleData: Uint8Array | null = null;
-let decalData: Uint8Array | null = null;
+function init() {
+  if (queue) return;
+  queue = [];
+  particleData = new Uint8Array(W * H * 4);
+  buildParticleAtlas(particleData);
+  particleJobsEnd = queue.length;
+  decalData = new Uint8Array(W * H * 4);
+  buildDecalAtlas(decalData);
+}
+
+/**
+ * Paint pending atlas cells for up to `budgetMs` (at least one cell). Returns true
+ * when both atlases are complete. Called by Fx.update every frame until done.
+ */
+export function pumpFxAtlases(budgetMs = 3): boolean {
+  init();
+  const q = queue!;
+  const t0 = performance.now();
+  while (queueIndex < q.length) {
+    runCell(q[queueIndex++]);
+    if (performance.now() - t0 >= budgetMs) break;
+  }
+  return queueIndex >= q.length;
+}
+
+/** Generate everything now (call from a loading screen / boot idle to avoid in-game work). */
+export function prewarmFxAtlases() {
+  pumpFxAtlases(Infinity);
+}
+
+export function particleAtlasReady(): boolean {
+  return queue !== null && queueIndex >= particleJobsEnd;
+}
+
+export function decalAtlasReady(): boolean {
+  return queue !== null && queueIndex >= queue.length;
+}
 
 function makeTexture(data: Uint8Array): THREE.DataTexture {
   const t = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.UnsignedByteType);
@@ -427,18 +481,20 @@ function makeTexture(data: Uint8Array): THREE.DataTexture {
   t.generateMipmaps = true;
   t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
   t.colorSpace = THREE.NoColorSpace;
+  // Upload right away even if not painted yet (all-transparent), so nothing samples
+  // an incomplete texture; Fx re-flags it once the atlas is finished.
   t.needsUpdate = true;
   return t;
 }
 
-/** New texture over the (cached) particle atlas pixels. Caller disposes it. */
+/** New texture over the shared particle atlas pixels. Caller disposes it. */
 export function particleAtlasTexture(): THREE.DataTexture {
-  particleData ??= buildParticleAtlas();
-  return makeTexture(particleData);
+  init();
+  return makeTexture(particleData!);
 }
 
-/** New texture over the (cached) decal atlas pixels. Caller disposes it. */
+/** New texture over the shared decal atlas pixels. Caller disposes it. */
 export function decalAtlasTexture(): THREE.DataTexture {
-  decalData ??= buildDecalAtlas();
-  return makeTexture(decalData);
+  init();
+  return makeTexture(decalData!);
 }

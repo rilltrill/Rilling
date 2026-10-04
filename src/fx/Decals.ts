@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ATLAS_COLS, ATLAS_ROWS } from './textures';
+import { newRange, uploadRange } from './upload';
 
 /**
  * Pooled projected-quad decals (blood pools, bullet holes, scorch marks) in one
@@ -83,6 +84,7 @@ export class DecalSystem {
   private time = 0;
   private dirtyMin = Infinity;
   private dirtyMax = -1;
+  private range = newRange();
 
   constructor(
     readonly capacity: number,
@@ -185,9 +187,7 @@ export class DecalSystem {
     this.time += dt;
     this.mat.uniforms.uTime.value = this.time;
     if (this.dirtyMax >= 0) {
-      this.buf.clearUpdateRanges();
-      this.buf.addUpdateRange(this.dirtyMin * G, (this.dirtyMax - this.dirtyMin + 1) * G);
-      this.buf.needsUpdate = true;
+      uploadRange(this.buf, this.range, this.dirtyMin * G, (this.dirtyMax - this.dirtyMin + 1) * G);
       this.dirtyMin = Infinity;
       this.dirtyMax = -1;
     }

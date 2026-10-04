@@ -85,6 +85,8 @@ export class WeaponSystem {
   heat = 0;
   overheated = false;
   private cooldown = 0;
+  /** Seconds since the last successful shot (heat only dissipates when not firing). */
+  private sinceShot = 0;
   /** Called when the weapon automatically changes (ran out of ammo). */
   onChange: (id: WeaponId) => void = () => {};
   onReloadDone: () => void = () => {};
@@ -166,6 +168,7 @@ export class WeaponSystem {
     const st = this.state;
     if (st.inMag <= 0) return { ok: false, reason: 'empty' };
     if (st.inMag !== Infinity) st.inMag--;
+    this.sinceShot = 0;
     this.cooldown = held && !def.auto ? def.holdInterval ?? def.interval : def.interval;
     if (def.heatPerShot) {
       this.heat = Math.min(1, this.heat + def.heatPerShot);
@@ -205,11 +208,13 @@ export class WeaponSystem {
         this.onReloadDone();
       }
     }
-    // Heat dissipates; once overheated you must cool to 35% before firing again.
+    // Heat only dissipates after a short pause in firing (so sustained fire really
+    // does overheat, ~3 s); once overheated you must cool to 35% before firing again.
+    this.sinceShot += dt;
     const def = this.def;
     if (def.heatPerShot !== undefined || this.heat > 0) {
-      const rate = this.overheated ? 0.55 : 0.4;
-      this.heat = Math.max(0, this.heat - rate * dt);
+      const cooling = this.overheated || this.sinceShot > 0.25;
+      if (cooling) this.heat = Math.max(0, this.heat - (this.overheated ? 0.6 : 0.5) * dt);
       if (this.overheated && this.heat <= 0.35) this.overheated = false;
     }
     // Out of a pickup gun entirely → back to pistol.
