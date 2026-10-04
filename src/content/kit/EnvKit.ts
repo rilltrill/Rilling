@@ -182,7 +182,8 @@ export const EnvKit = {
     const toRemove: THREE.Mesh[] = [];
     group.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (!m.isMesh || Array.isArray(m.material) || m.userData.noMerge) return;
+      // Skip already-baked vertex-coloured meshes (merging would strip their colours).
+      if (!m.isMesh || Array.isArray(m.material) || m.userData.noMerge || (m.material as THREE.MeshLambertMaterial).vertexColors) return;
       const g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
       // Keep only attributes every geometry shares so mergeGeometries succeeds.
       for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);

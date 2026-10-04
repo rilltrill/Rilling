@@ -482,7 +482,7 @@ export class Behemoth extends Boss {
     this.root.rotation.y = -Math.PI / 2 - 0.4;
     this.go('intro');
     this.updateFocus(1);
-    rig.lookAtObject(this.focus, 2.2);
+    rig.lookAtObject(this.focus, 3.2);
     this.world.audio.play('boss_roar', { volume: 0.7, pitch: 0.7 });
     const z = z3Scene(this.world);
     if (z) z.beacon = 1;
@@ -599,8 +599,8 @@ export class Behemoth extends Boss {
 
   /**
    * Where the look-back camera aims. The pitch follows the head: the split
-   * skull sits ~20° above the view centre (clear of the boss health bar), and
-   * the pitch never exceeds ~14°, so the deck right behind the truck — where
+   * skull sits ~19° above the view centre (clear of the boss health bar), and
+   * the pitch never exceeds ~15.5°, so the deck right behind the truck — where
    * the minions attack from — stays in frame even when the giant is close.
    */
   private updateFocus(k: number) {
@@ -613,7 +613,7 @@ export class Behemoth extends Boss {
     rig.space.worldToLocal(_v);
     const hFlat = Math.max(3, Math.hypot(_v.x - ex, _v.z - ez));
     const eHead = Math.atan2(_v.y + 0.9 - eye, hFlat);
-    const pitch = clamp(eHead - 0.36, 0.05, 0.245);
+    const pitch = clamp(eHead - 0.33, 0.05, 0.27);
     const fx = p.x * 0.6;
     const fz = Math.max(4, p.z);
     _w.set(fx, eye + Math.tan(pitch) * Math.hypot(fx - ex, fz - ez), fz);
@@ -885,7 +885,7 @@ export class Behemoth extends Boss {
         this.faceTruck(dt);
         if (t > 0.75) {
           this.leapFrom.copy(p);
-          this.leapTo.set(clamp(p.x * 0.3, -2, 2), 0, 8.2);
+          this.leapTo.set(clamp(p.x * 0.3, -2, 2), 0, 10.5);
           w.audio.play('boss_roar', { volume: 0.8, pitch: 1.1 });
           w.audio.play('whoosh', { pitch: 0.5 });
           this.go('leap');
@@ -895,7 +895,7 @@ export class Behemoth extends Boss {
       case 'leap': {
         const k = clamp(t / 1.05, 0, 1);
         p.lerpVectors(this.leapFrom, this.leapTo, k);
-        p.y = Math.sin(k * Math.PI) * 7;
+        p.y = Math.sin(k * Math.PI) * 4.2;
         this.targetZ = p.z;
         this.targetX = p.x;
         this.faceTruck(dt, 6);
@@ -919,7 +919,7 @@ export class Behemoth extends Boss {
       }
       case 'swipeWind': {
         this.faceTruck(dt, 6);
-        this.targetZ = 8;
+        this.targetZ = 10.5;
         if (
           this.windAttack(1.45, this.wound, 1.7, () => {
             w.hurtPlayer(1, this.title);
@@ -1220,8 +1220,8 @@ export class Behemoth extends Boss {
       case 'swipeWind': {
         const k = smoothstep(0, 0.8, t);
         const tremble = Math.sin(t * 30) * 0.05 * k;
-        this.set(this.spine, 0.55 + 0.2 * k, 0.3 * k, 0);
-        this.set(this.shL, lerp(-0.4, -1.55, k) + tremble, 0, lerp(0.3, 0.05, k));
+        this.set(this.spine, 0.3 + 0.1 * k, 0.3 * k, 0);
+        this.set(this.shL, lerp(-0.4, -1.7, k) + tremble, 0, lerp(0.3, 0.05, k));
         this.set(this.elL, lerp(-0.6, -0.15, k));
         this.set(this.handL, -0.4 * k);
         this.set(this.neck, -0.7);
@@ -1277,7 +1277,7 @@ export class Behemoth extends Boss {
         this.ring.scale.setScalar(1 + k * 6);
       }
     }
-    this.updateFocus(1 - Math.exp(-3 * dt));
+    this.updateFocus(1 - Math.exp(-5.5 * dt));
   }
 
   // ─── Death: shudders, bursts open, topples over the railing into the bay ──

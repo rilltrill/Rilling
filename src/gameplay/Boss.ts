@@ -17,6 +17,8 @@ export abstract class Boss extends Enemy {
   override isBoss = true;
   override superArmor = true;
   override usesAttackSlot = false;
+  /** Big on screen: flash at most ~3×/s under autofire (photosensitivity guideline). */
+  override flashCooldown = 0.34;
   /** Display name on the health bar, e.g. "THE BUTCHER". */
   title = 'BOSS';
   /** Health fractions at which the boss changes phase, descending (e.g. [0.66, 0.33]). */

@@ -71,7 +71,7 @@ export class Shooter {
     }
     void anyResolved;
     w.score.shot(anyCounted);
-    w.events.emit('shot', { hit: anyCounted });
+    w.events.emit('shot', { hit: anyCounted, x, y });
     this.lastHit = anyCounted;
     if (w.weapons.empty && def.mag !== Infinity) {
       if (w.settings.autoReload) this.reload();

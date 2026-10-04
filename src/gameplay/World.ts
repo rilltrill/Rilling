@@ -35,7 +35,8 @@ export interface HudApi {
 }
 
 export interface WorldEvents {
-  shot: { hit: boolean };
+  /** A trigger pull; x/y = tap position in client pixels. */
+  shot: { hit: boolean; x: number; y: number };
   kill: { enemy: Enemy; headshot: boolean; points: number };
   'player-hurt': { amount: number; hp: number; source: string; from?: Entity };
   'player-heal': { hp: number };
@@ -221,7 +222,12 @@ export class World {
    * Explosion at a world point: FX, sound, shake, and damage to enemies and other
    * destructibles within `radius` (falls off with distance). Never hurts the player.
    */
+  /** Where/when the most recent explosion happened (enemies fall away from it). */
+  readonly lastExplosion = { point: new THREE.Vector3(), time: -1 };
+
   explode(point: THREE.Vector3, radius: number, damage: number) {
+    this.lastExplosion.point.copy(point);
+    this.lastExplosion.time = this.time;
     this.fx.explosion(point, Math.min(2, radius / 3.5));
     this.audio.play('explosion', { vary: 0.15 });
     const camDist = point.distanceTo(this.camera.position);

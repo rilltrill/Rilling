@@ -248,7 +248,9 @@ export class Fx {
       _sp.reset().pos(point).color(_c, kind === 'goo' ? 1 : 1.3);
       _sp.vel(dx * r.range(0.3, 1.2) + r.spread(0.5), r.range(0.0, 0.5), dz * r.range(0.3, 1.2) + r.spread(0.5));
       _sp.frame = PF.SMOKE;
-      _sp.size(r.range(0.25, 0.35) * sz, r.range(0.8, 1.2) * sz);
+      // Cap mist growth so big bursts don't read as dark smoke balls.
+      const msz = Math.min(sz, 1.25);
+      _sp.size(r.range(0.25, 0.35) * msz, r.range(0.8, 1.2) * msz);
       _sp.life = r.range(0.45, 0.8);
       _sp.alpha = 0.5;
       _sp.drag = 3.5;

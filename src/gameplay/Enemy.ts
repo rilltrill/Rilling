@@ -25,6 +25,7 @@ const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const _p = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const GROUND_STATES = new Set<string>(['advance', 'windup', 'recover', 'stagger']);
 
 /**
  * Base class for every enemy (and boss). Subclasses:
@@ -71,6 +72,16 @@ export abstract class Enemy extends Entity {
   knockback = 0.12;
   /** Needs an attack slot to start winding up (fairness cap on simultaneous attackers). */
   usesAttackSlot = true;
+  /**
+   * Snap to / fall onto the ground. Flying enemies (pteranodons) and anything that
+   * manages its own height should set this false.
+   */
+  grounded = true;
+  /** Minimum seconds between hit flashes — keeps autofire from strobing big models. */
+  flashCooldown = 0.1;
+  private lastFlashAge = -1;
+  private falling = false;
+  private wasOnGround = false;
 
   state: EnemyState = 'entry';
   stateTime = 0;
@@ -139,15 +150,25 @@ export abstract class Enemy extends Entity {
     return out;
   }
 
-  /** Ground height under a point in this enemy's frame. */
+  /**
+   * Ground height under a point in this enemy's frame. Stage scripts can pin a
+   * raised floor (rooftop, deck, gallery) with `opts.floor` (metres, same frame).
+   */
   groundY(x: number, z: number): number {
+    const floor = this.spawn.opts.floor;
+    if (typeof floor === 'number') return floor;
     if (this.frame === 'rig') return 0;
     return this.world.groundAt(x, z);
   }
 
+  /** Custom attack states that should keep the attack slot (e.g. a crawler's 'pounce'). */
+  protected keepsSlot(_s: EnemyState): boolean {
+    return false;
+  }
+
   setState(s: EnemyState) {
     if (this.state === 'windup' && s !== 'windup') this.telegraph = null;
-    if (s !== 'windup' && s !== 'recover') this.releaseSlot();
+    if (s !== 'windup' && s !== 'recover' && !this.keepsSlot(s)) this.releaseSlot();
     this.state = s;
     this.stateTime = 0;
     if (s === 'windup') {
@@ -197,6 +218,21 @@ export abstract class Enemy extends Entity {
     // Rig forward is local -Z rotated by heading.
     const h = rig.rotation.y;
     return _w.x * -Math.sin(h) + _w.z * -Math.cos(h);
+  }
+
+  /** Move on the ground plane WITHOUT turning (bosses backing off / strafing while facing you). */
+  slideToward(target: THREE.Vector3, speed: number, dt: number, stopAt = 0): number {
+    _v.set(target.x - this.root.position.x, 0, target.z - this.root.position.z);
+    const dist = _v.length();
+    const remaining = dist - stopAt;
+    if (remaining <= 0.001) {
+      this.moveSpeed = 0;
+      return Math.max(0, remaining);
+    }
+    const step = Math.min(remaining, speed * dt);
+    this.root.position.addScaledVector(_v, step / dist);
+    this.moveSpeed = dt > 0 ? step / dt : 0;
+    return remaining - step;
   }
 
   /** Is the anchor inside the camera view (with margin)? */
@@ -279,7 +315,11 @@ export abstract class Enemy extends Entity {
         break;
       case 'drop':
         this.model.position.y = 0;
-        this.root.position.y = Math.max(pos.y, this.groundY(pos.x, pos.z) + 6);
+        {
+          // Honour scripted low drop points (vents, ceilings); default to a 6 m fall.
+          const g = this.groundY(pos.x, pos.z);
+          this.root.position.y = pos.y > g + 1.2 ? pos.y : g + 6;
+        }
         this.vy = 0;
         break;
       case 'leap': {
@@ -366,6 +406,11 @@ export abstract class Enemy extends Entity {
   }
 
   protected windupUpdate(dt: number) {
+    // A moving vehicle carried the player out of reach: abandon the attack.
+    if (!this.isBoss && this.frame === 'world' && this.distToPlayer > this.attackRange * 1.6 + 1) {
+      this.setState('advance');
+      return;
+    }
     this.playerPos(_p);
     this.faceToward(_p, dt);
     this.moveSpeed = 0;
@@ -390,7 +435,7 @@ export abstract class Enemy extends Entity {
     }
   }
 
-  private acquireSlot(): boolean {
+  protected acquireSlot(): boolean {
     if (!this.usesAttackSlot || this.isBoss) return true;
     if (this.holdsSlot) return true;
     if (this.world.attackSlots > 0) {
@@ -401,7 +446,7 @@ export abstract class Enemy extends Entity {
     return false;
   }
 
-  private releaseSlot() {
+  protected releaseSlot() {
     if (this.holdsSlot) {
       this.holdsSlot = false;
       this.world.attackSlots++;
@@ -436,7 +481,8 @@ export abstract class Enemy extends Entity {
         break;
       case 'recover':
         if (this.stateTime >= this.recoverTime) {
-          this.setState(this.distToPlayer <= this.attackRange * 1.25 && this.acquireSlot() ? 'windup' : 'advance');
+          // Never re-attack from off-screen (look-back chases pitch the camera around).
+          this.setState(this.distToPlayer <= this.attackRange * 1.25 && this.onScreen() && this.acquireSlot() ? 'windup' : 'advance');
         }
         break;
       case 'stagger':
@@ -457,9 +503,29 @@ export abstract class Enemy extends Entity {
         this.customUpdate(dt);
     }
 
-    if (this.state !== 'dying' && this.state !== 'entry') {
+    if (this.state !== 'dying' && this.state !== 'entry' && this.grounded) {
       const g = this.groundY(this.root.position.x, this.root.position.z);
-      if (this.root.position.y < g + 0.5) this.root.position.y = g;
+      const y = this.root.position.y;
+      if (this.isBoss) {
+        // Bosses choreograph their own jumps/leaps.
+        if (y < g + 0.5) this.root.position.y = g;
+      } else if (this.falling) {
+        // Walked off a ledge: fall until we land.
+        this.vy -= 22 * dt;
+        this.root.position.y = Math.max(g, y + this.vy * dt);
+        if (this.root.position.y <= g) {
+          this.falling = false;
+          this.vy = 0;
+        }
+      } else if (y < g + 0.5) {
+        // Step up small rises only; anything taller acts like a wall, not a lift.
+        if (g - y < 0.6) this.root.position.y = g;
+      } else if (y - g > 0.5 && this.wasOnGround && GROUND_STATES.has(this.state)) {
+        // Only the stock walk/attack states fall; custom leap/pounce states own their arc.
+        this.falling = true;
+        this.vy = 0;
+      }
+      this.wasOnGround = !this.falling && Math.abs(this.root.position.y - g) < 0.05;
     }
 
     // Safety nets against soft-locks: enemies left behind by a moving rig, or
@@ -554,8 +620,10 @@ export abstract class Enemy extends Entity {
     this.origMats = this.meshes.map((m) => m.material);
   }
 
-  /** Briefly flash the model white (or red for critical hits). */
+  /** Briefly flash the model white (or red for critical hits). Rate-limited (photosensitivity). */
   flash(critical = false) {
+    if (this.age - this.lastFlashAge < this.flashCooldown) return;
+    this.lastFlashAge = this.age;
     this.collectMeshes();
     const mat = critical ? RED_FLASH_MAT : FLASH_MAT;
     for (const m of this.meshes!) if (m.userData.noFlash !== true) m.material = mat;

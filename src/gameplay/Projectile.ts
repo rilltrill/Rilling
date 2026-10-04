@@ -28,6 +28,8 @@ export interface ProjectileOptions {
 }
 
 const _v = new THREE.Vector3();
+const _dir = new THREE.Vector3();
+const _q = new THREE.Quaternion();
 
 /**
  * A thrown/spat object flying at the camera (acid spit, barrels, rocks, cars…).
@@ -36,8 +38,8 @@ const _v = new THREE.Vector3();
  */
 export class Projectile extends Entity {
   readonly opts: ProjectileOptions;
-  private from = new THREE.Vector3();
-  private to = new THREE.Vector3();
+  protected from = new THREE.Vector3();
+  protected to = new THREE.Vector3();
   private hp: number;
   private mesh: THREE.Object3D;
 
@@ -72,13 +74,18 @@ export class Projectile extends Entity {
     rig.space.updateMatrixWorld();
     this.from.copy(this.opts.from);
     rig.space.worldToLocal(this.from);
-    // Aim slightly off-centre in front of the camera so it reads clearly and doesn't fill the screen.
+    // Aim slightly off-centre just in front of the camera — along the direction the
+    // camera is LOOKING (look-back chase bosses), so it reads clearly and stays shootable.
     const r = this.world.rng;
-    this.to.set(r.spread(0.35), rig.eyeHeight - 0.15 + r.spread(0.15), -0.9);
+    _v.copy(this.world.camera.getWorldDirection(_dir)).applyQuaternion(_q.copy(rig.space.quaternion).invert()).setY(0);
+    if (_v.lengthSq() < 1e-6) _v.set(0, 0, -1);
+    _v.normalize();
+    this.to.set(r.spread(0.35), rig.eyeHeight - 0.15 + r.spread(0.15), 0).addScaledVector(_v, 0.9);
     this.to.add(rig.offset);
     this.root.position.copy(this.from);
     this.telegraph = { progress: 0, anchor: this.root, radius: Math.max(0.35, this.opts.size * 1.4) };
-    this.hitbox(this.mesh, 'body');
+    // Groups (e.g. a hook made of parts) register their child meshes only.
+    if ((this.mesh as THREE.Mesh).isMesh) this.hitbox(this.mesh, 'body');
     this.mesh.traverse((o) => {
       if ((o as THREE.Mesh).isMesh && o !== this.mesh) this.hitbox(o, 'body');
     });

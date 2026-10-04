@@ -89,11 +89,6 @@ const STOMP_OPTS = { volume: 0.4, vary: 0.12, pitch: 1.25 };
 const VEHICLE_RANGE = 3.4;
 const VEHICLE_POUNCE_RANGE = 5.4;
 
-/**
- * Last bloater blast per World (weakly held, so a disposed stage's World is
- * never kept alive), so blast deaths fall away from its centre.
- */
-const blasts = new WeakMap<object, { pos: THREE.Vector3; time: number }>();
 const _box = new THREE.Box3();
 const _m4 = new THREE.Matrix4();
 const _e = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -772,7 +767,7 @@ export abstract class Zombie extends Enemy {
       this.deathDir.set(hit.dir.x / len, 0, hit.dir.z / len);
     } else if (this.recentBlast()) {
       // Thrown away from the blast centre.
-      this.deathDir.subVectors(this.root.position, blasts.get(this.world)!.pos).setY(0);
+      this.deathDir.subVectors(this.root.position, this.world.lastExplosion.point).setY(0);
       const len = this.deathDir.length();
       if (len > 0.01) this.deathDir.divideScalar(len);
       else this.deathDir.set(-fx, 0, -fz);
@@ -838,9 +833,10 @@ export abstract class Zombie extends Enemy {
     return this.flyers.length === 0;
   }
 
+  /** Killed by any explosion (bloater, barrel, bomb) in the last moment? */
   private recentBlast(): boolean {
-    const b = blasts.get(this.world);
-    return !!b && this.world.time - b.time < 0.1;
+    const t = this.world.lastExplosion.time;
+    return t >= 0 && this.world.time - t < 0.1;
   }
 
   /** Where the torso ends up lying, relative to the feet (model space, before any death spin). */
@@ -1175,7 +1171,8 @@ export class Runner extends Zombie {
     if (remaining <= 0.1) {
       this.playerPos(_p);
       this.faceToward(_p, dt);
-      if (this.grabSlot()) this.setState('windup');
+      // Never start an attack from off-screen (look-back chases pitch the camera).
+      if (this.inView(this.anchor, 0.9, 0.85) && this.grabSlot()) this.setState('windup');
     }
   }
 
@@ -2024,6 +2021,9 @@ export class Spitter extends Zombie {
     this.maxHp = 3;
     this.speed = rng.range(0.95, 1.2);
     this.attackRange = rng.range(9, 12);
+    // Stage scripts can pin the firing range (behind counters, on galleries).
+    const range = this.spawn.opts.range;
+    if (typeof range === 'number') this.attackRange = range;
     this.windup = 1.4;
     this.recoverTime = 2.2;
     this.points = 200;
@@ -2258,13 +2258,7 @@ export class Bloater extends Zombie {
     if (this.distToPlayer < 5) this.world.fx.screenSplat(GOO);
     this.model.visible = false;
     // Short fuse makes chain reactions ripple instead of popping all at once.
-    this.world.later(0.06, () => {
-      let b = blasts.get(this.world);
-      if (!b) blasts.set(this.world, (b = { pos: new THREE.Vector3(), time: -1 }));
-      b.pos.copy(p);
-      b.time = this.world.time;
-      this.world.explode(p, 4.5, 6);
-    });
+    this.world.later(0.06, () => this.world.explode(p, 4.5, 6));
   }
 
   protected override updateDeath(dt: number): boolean {

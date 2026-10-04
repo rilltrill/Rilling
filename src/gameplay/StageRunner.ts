@@ -43,6 +43,7 @@ export class StageRunner {
   private pickups: Pickup[] = [];
   private actionPending = false;
   private boss: Enemy | null = null;
+  private offBossDead: (() => void) | null = null;
   private clearTimer = 0;
 
   constructor(readonly world: World, readonly stage: StageDef) {}
@@ -99,6 +100,8 @@ export class StageRunner {
     this.things = [];
     this.waves = [];
     this.boss = null;
+    this.offBossDead?.();
+    this.offBossDead = null;
     this.beat = null;
   }
 
@@ -181,6 +184,13 @@ export class StageRunner {
     w.add(boss);
     if (boss instanceof Boss) w.boss = boss;
     this.boss = boss;
+    // The moment the boss falls: no more reinforcements, minions die with it.
+    this.offBossDead?.();
+    this.offBossDead = w.events.on('boss-dead', () => {
+      this.spawns = [];
+      for (const wr of this.waves) wr.started = true;
+      for (const e of w.enemies()) if (!e.isBoss && e.state !== 'dying' && e.hostile) e.die(null);
+    });
     w.audio.play('boss_warning');
     w.audio.playMusic('boss');
   }
@@ -315,7 +325,7 @@ export class StageRunner {
         complete = this.beatTime >= b.duration;
         break;
       case 'action':
-        complete = !this.actionPending;
+        complete = !this.actionPending && this.beatTime >= (b.duration ?? 0) && (!b.until || b.until(w));
         break;
     }
     if (complete) this.next();

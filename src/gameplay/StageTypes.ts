@@ -196,7 +196,16 @@ export interface WaitBeat extends BeatBase {
 
 export interface ActionBeat extends BeatBase {
   kind: 'action';
+  /**
+   * Run once at beat start. Prefer `duration` / `until` over returning a Promise:
+   * promises resolve in real time (not game time) and never resolve in the
+   * headless simulator.
+   */
   run(world: World): void | Promise<void>;
+  /** Keep the beat running for at least this many seconds of game time. */
+  duration?: number;
+  /** Polled every frame; the beat ends once it returns true (and duration elapsed). */
+  until?(world: World): boolean;
 }
 
 export type Beat = MoveBeat | HoldBeat | BossBeat | BannerBeat | WaitBeat | ActionBeat;

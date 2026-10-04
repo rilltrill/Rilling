@@ -213,7 +213,10 @@ export class RailRig {
     const eye = this.eyeWorld(_c);
     const spec = this.lookSpec;
     if (this.lookTarget) {
-      if (!this.lookTarget.parent) this.lookTarget = null;
+      // Stop tracking anything that has left the scene graph (e.g. a removed boss).
+      let n: THREE.Object3D | null = this.lookTarget;
+      while (n.parent) n = n.parent;
+      if (!(n as THREE.Scene).isScene) this.lookTarget = null;
       else {
         this.lookTarget.getWorldPosition(_a);
         ({ yaw: targetYaw, pitch: targetPitch } = this.yawPitchTo(eye, _a));

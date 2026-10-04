@@ -112,7 +112,7 @@ function probe(world: World, b: Enemy): [number, number, number] {
     _v.copy(m.geometry.boundingSphere!.center).applyMatrix4(m.matrixWorld);
     ray.set(cam.position, _v.sub(cam.position).normalize());
     const h = ray.intersectObjects(objs, false);
-    return h.length && h[0].object === o ? 1 : 0;
+    return h.length && (h[0].object.userData.shot as ShotTag).part === 'weak' ? 1 : 0;
   };
   const weakObjs = objs.filter((o) => (o.userData.shot as ShotTag).part === 'weak');
   const eye = weakObjs[0];
@@ -152,6 +152,10 @@ function run(seed: number, mode: 'auto' | 'human', jitter = 8, fps = 30) {
   let maxWindDist = 0;
   const vis: Record<string, { n: number; weak: number; eye: number; thr: number; dist: number }> = {};
   let probeT = 0;
+  let windDmg = 0;
+  let windShots0 = 0;
+  let windHeat = 0;
+  const windLog: string[] = [];
   while (!cleared && t < 400) {
     bot.update(dt);
     const sdt = world.update(dt);
@@ -162,7 +166,19 @@ function run(seed: number, mode: 'auto' | 'human', jitter = 8, fps = 30) {
       bossSeen = true;
       bossT += dt;
       const st = b.state;
+      if (/Wind$/.test(st)) {
+        windDmg = Math.max(windDmg, (b as unknown as { interruptDmg: number }).interruptDmg);
+        if (world.weapons.overheated) windHeat += dt;
+      }
       if (st !== last) {
+        if (/Wind$/.test(st)) {
+          windShots0 = world.score.shots;
+          windDmg = 0;
+          windHeat = 0;
+        }
+        if (/Wind$/.test(last) && last !== 'flingWind') {
+          windLog.push(`${last.replace('Wind', '')}:${windDmg.toFixed(1)}/${world.score.shots - windShots0}sh/${windHeat.toFixed(1)}oh/${st === 'stumble' ? 'INT' : 'hit'}`);
+        }
         if (/Wind$/.test(last)) {
           const a = (att[last] ??= { n: 0, intr: 0, land: 0 });
           a.n++;
@@ -199,6 +215,7 @@ function run(seed: number, mode: 'auto' | 'human', jitter = 8, fps = 30) {
     hits: hurts.length,
     hurts: hurts.join(' '),
     att: JSON.stringify(att),
+    wind: windLog.join(' '),
     vis: Object.entries(vis).map(([k, r]) => `${k}: wk=${(r.weak / r.n).toFixed(0)} eye=${(r.eye / r.n).toFixed(2)} thr=${(r.thr / r.n).toFixed(2)} d=${(r.dist / r.n).toFixed(1)}`).join(' | '),
   };
   world.dispose();
