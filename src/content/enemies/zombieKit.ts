@@ -4,6 +4,10 @@ import type { HitPart } from '../../core/types';
 import { Kit, RETRO_DETAIL } from '../kit/ModelKit';
 import { Textures, type TexName } from '../kit/Textures';
 import { buildHumanoid, type HumanoidRig, type Limb, type LegLimb } from '../kit/humanoid';
+import { humanLook, type HumanLook, type Outfit } from '../pixel/human';
+
+/** Painter seeds for ART: SPRITES looks (never the world RNG: gameplay stays identical in both ART modes). */
+let lookSeed = 1;
 
 /**
  * Zombie model kit: palettes, outfits, gore dressing, a draw-call saving
@@ -478,6 +482,8 @@ export class ZBody {
   readonly neckMesh: THREE.Mesh;
   /** Geometry created by the bake (owned by this body). */
   readonly geos: THREE.BufferGeometry[] = [];
+  /** What the PixelCast painter draws (ART: SPRITES): filled in as the body is dressed. */
+  readonly look: HumanLook;
   private zoneOf = new Map<THREE.Object3D, Zone>();
 
   constructor(o: ZBodyOptions) {
@@ -485,6 +491,15 @@ export class ZBody {
     this.bulk = o.bulk ?? 1;
     this.hs = o.headSize ?? 1;
     this.al = o.armLength ?? 1;
+    this.look = humanLook({
+      dead: true,
+      skin: o.skin,
+      bulk: this.bulk,
+      headSize: this.hs,
+      armLength: this.al,
+      hair: o.hair === undefined ? null : o.hair,
+      seed: (lookSeed = (lookSeed * 48271) % 2147483647),
+    });
     const r = (this.rig = buildHumanoid({
       height: o.height,
       skin: o.skin,
@@ -643,12 +658,21 @@ export function addFace(b: ZBody, rng: Rng, eyeColor: number, eyeGlow = 1.6) {
   b.sbox(ZT.SKIN, h, 0.2 * hs, 0.028 * hs, 0.03, _col.getHex(), 0, 0.182 * hs, fz - 0.004);
   // Mouth: dark gash, sometimes a hanging jaw with teeth.
   const open = rng.chance(0.55);
+  b.look.eyes = eyeColor;
+  b.look.mouthOpen = open;
   b.box(h, 0.11 * hs, (open ? 0.05 : 0.03) * hs, 0.014, MOUTH, 0, 0.065 * hs, fz + 0.002);
   if (open) b.box(h, 0.08 * hs, 0.014 * hs, 0.016, TEETH, 0, 0.082 * hs, fz + 0.004);
   // Blood drool down the chin.
-  if (rng.chance(0.6)) b.box(h, 0.03 * hs, 0.06 * hs, 0.012, BLOOD, rng.spread(0.03) * hs, 0.03 * hs, fz + 0.003);
+  if (rng.chance(0.6)) {
+    b.look.drool = true;
+    b.box(h, 0.03 * hs, 0.06 * hs, 0.012, BLOOD, rng.spread(0.03) * hs, 0.03 * hs, fz + 0.003);
+  }
   // Face wound.
-  if (rng.chance(0.35)) b.box(h, 0.06 * hs, 0.05 * hs, 0.012, BLOOD_DARK, rng.chance(0.5) ? 0.065 * hs : -0.065 * hs, 0.1 * hs, fz + 0.002);
+  if (rng.chance(0.35)) {
+    const side = rng.chance(0.5) ? 1 : -1;
+    b.look.faceWound = side;
+    b.box(h, 0.06 * hs, 0.05 * hs, 0.012, BLOOD_DARK, side * 0.065 * hs, 0.1 * hs, fz + 0.002);
+  }
   // Ears.
   b.box(h, 0.03, 0.06 * hs, 0.05 * hs, b.skin, 0.115 * hs, 0.14 * hs, -0.01);
   b.box(h, 0.03, 0.06 * hs, 0.05 * hs, b.skin, -0.115 * hs, 0.14 * hs, -0.01);
@@ -662,6 +686,8 @@ export function addGore(b: ZBody, rng: Rng, shirt: number, amount = 1) {
   const sp = r.spine;
   // Ragged hem strips hanging below the shirt.
   const rags = rng.int(1, 3);
+  const L = b.look;
+  L.rags = rags + 1;
   for (let i = 0; i < rags; i++) {
     const x = rng.pick([-0.12, -0.05, 0.03, 0.1]) * b.bulk;
     const back = rng.chance(0.35);
@@ -670,34 +696,54 @@ export function addGore(b: ZBody, rng: Rng, shirt: number, amount = 1) {
   // Torso wound / exposed ribs.
   if (rng.chance(0.38 * amount)) {
     const side = rng.chance(0.5) ? 1 : -1;
+    L.ribs = side;
     b.box(sp, 0.15, 0.17, 0.012, BLOOD_DARK, side * 0.08 * b.bulk, 0.29, fz + 0.004);
     for (let i = 0; i < 3; i++) b.box(sp, 0.12, 0.022, 0.014, BONE, side * 0.08 * b.bulk, 0.235 + i * 0.05, fz + 0.009);
   } else if (rng.chance(0.7 * amount)) {
-    b.box(sp, 0.11, 0.12, 0.012, BLOOD, rng.pick([-0.09, 0, 0.08]) * b.bulk, rng.pick([0.1, 0.2]), fz + 0.004);
+    const x = rng.pick([-0.09, 0, 0.08]);
+    L.bellyWound = x < 0 ? -1 : x > 0 ? 1 : 0.4;
+    b.box(sp, 0.11, 0.12, 0.012, BLOOD, x * b.bulk, rng.pick([0.1, 0.2]), fz + 0.004);
   }
   // Bite wound / skin through torn shirt.
-  if (rng.chance(0.45)) b.box(sp, 0.1, 0.08, 0.012, b.skin, rng.pick([-0.1, 0.1]) * b.bulk, 0.06, fz + 0.003, 0, 0, 0, SKIN_E);
+  if (rng.chance(0.45)) {
+    const x = rng.pick([-0.1, 0.1]);
+    L.bite = x < 0 ? -1 : 1;
+    b.box(sp, 0.1, 0.08, 0.012, b.skin, x * b.bulk, 0.06, fz + 0.003, 0, 0, 0, SKIN_E);
+  }
   // Feeding blood down the front.
   if (rng.chance(0.55 * amount)) {
+    L.chestBlood = true;
     b.box(sp, w * 0.55, 0.09, 0.012, BLOOD, 0, 0.4, fz + 0.005);
     b.box(sp, 0.03, 0.14, 0.012, BLOOD, -0.05, 0.31, fz + 0.005);
     b.box(sp, 0.025, 0.1, 0.012, BLOOD, 0.04, 0.33, fz + 0.005);
   }
   // Arm wound band.
   if (rng.chance(0.5 * amount)) {
-    const a = rng.chance(0.5) ? r.armL : r.armR;
+    const left = rng.chance(0.5);
+    L.armWound = left ? 1 : -1;
+    const a = left ? r.armL : r.armR;
     b.box(a.elbow, 0.096, 0.07, 0.106, BLOOD, 0, -0.11 * b.al, 0);
   }
   // Torn trouser leg showing a bloody shin.
   if (rng.chance(0.4 * amount)) {
-    const l = rng.chance(0.5) ? r.legL : r.legR;
+    const left = rng.chance(0.5);
+    L.legWound = left ? 1 : -1;
+    const l = left ? r.legL : r.legR;
     b.box(l.knee, 0.085, 0.12, 0.012, b.skin, 0, -0.16, 0.069, 0, 0, 0, SKIN_E);
     b.box(l.knee, 0.05, 0.05, 0.014, BLOOD, 0.01, -0.15, 0.072);
   }
 }
 
+/** Record outfit details for the pixel-art painter. */
+function wear(b: ZBody, outfit: Outfit, o: Partial<HumanLook>) {
+  Object.assign(b.look, o);
+  b.look.outfit = outfit;
+  if (o.shirt !== undefined && o.sleeveColor === undefined) b.look.sleeveColor = o.shirt;
+}
+
 /** Optional long hair at the back of the head. */
 function longHair(b: ZBody, color: number) {
+  b.look.longHair = true;
   const hs = b.hs;
   b.sbox(ZT.HAIR, b.rig.head, 0.235 * hs, 0.22 * hs, 0.05, color, 0, 0.12 * hs, -0.125 * hs - 0.005);
 }
@@ -717,6 +763,7 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
   switch (variant as ZombieVariant) {
     case 'cop': {
       const navy = rng.pick([0x2a3f6a, 0x263860]);
+      wear(b, 'cop', { shirt: navy, sleeves: 'long', pants: 0x222c48, pantsPat: 'cloth', shoes: 0x1a1a1c, belt: 0x1e1a18, badge: 0xd4af37, tie: 0x1c2440 });
       b.clothes({ shirt: navy, sleeves: 'long', pants: 0x222c48, shoes: 0x1a1a1c });
       b.sbox(ZT.LEATHER, r.hips, 0.35 * b.bulk, 0.05, 0.21 * Math.sqrt(b.bulk), 0x1e1a18, 0, 0.055, 0); // duty belt
       b.sbox(ZT.FLAT, r.hips, 0.05, 0.035, 0.012, 0xc8a840, 0, 0.055, 0.105 * Math.sqrt(b.bulk) + 0.004);
@@ -724,6 +771,7 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
       b.sbox(ZT.FLAT, sp, 0.05, 0.06, 0.012, 0xd4af37, 0.09 * b.bulk, 0.34, fz + 0.004, 0, 0, 0, 0.35); // badge
       b.sbox(ZT.LEATHER, sp, 0.05, 0.08, 0.04, 0x161618, -0.12 * b.bulk, 0.42, fz - 0.01); // radio
       if (rng.chance(0.6)) {
+        b.look.hat = navy;
         b.box(head, 0.245 * hs, 0.07 * hs, 0.255 * hs, navy, 0, top + 0.025 * hs, 0);
         b.sbox(ZT.LEATHER, head, 0.23 * hs, 0.018, 0.1 * hs, 0x141416, 0, top - 0.005, 0.15 * hs, 0.15, 0, 0);
         b.sbox(ZT.FLAT, head, 0.04 * hs, 0.035 * hs, 0.01, 0xd4af37, 0, top + 0.03 * hs, 0.128 * hs + 0.006, 0, 0, 0, 0.35);
@@ -732,17 +780,26 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
     }
     case 'nurse': {
       const scrubs = rng.pick([0x6fb8ac, 0xd48aac, 0x6a8fd0]);
+      wear(b, 'nurse', { shirt: scrubs, sleeves: 'short', pants: scrubs, pantsPat: 'cloth', shoes: 0xd8d8d8 });
       b.clothes({ shirt: scrubs, sleeves: 'short', pants: scrubs, shoes: 0xd8d8d8 });
       b.sbox(ZT.FLAT, sp, 0.04, 0.055, 0.012, 0xf0f0f0, 0.08 * b.bulk, 0.3, fz + 0.004, 0, 0, 0, 0.1); // ID card
       b.sbox(ZT.FLAT, sp, 0.012, 0.12, 0.012, 0x2a5aa0, 0.06 * b.bulk, 0.38, fz + 0.004, 0, 0, 0.35);
-      if (rng.chance(0.6)) b.sbox(ZT.HAIR, head, 0.1 * hs, 0.1 * hs, 0.08 * hs, 0x4a2a14, 0, 0.22 * hs, -0.14 * hs); // bun
+      if (rng.chance(0.6)) {
+        b.look.bun = true;
+        if (b.look.hair === null) b.look.hair = 0x4a2a14;
+        b.sbox(ZT.HAIR, head, 0.1 * hs, 0.1 * hs, 0.08 * hs, 0x4a2a14, 0, 0.22 * hs, -0.14 * hs); // bun
+      }
       return scrubs;
     }
     case 'doctor': {
       const coat = 0xe2e2da;
-      b.clothes({ shirt: coat, sleeves: 'long', pants: rng.pick([0x3a3f4a, 0x2a2a30]), shoes: 0x1c1c1c });
-      b.box(sp, 0.1, 0.36, 0.012, rng.pick([0x9ab8d8, 0xd8d0b8]), 0, 0.28, fz + 0.004); // shirt
-      b.box(sp, 0.035, 0.26, 0.014, rng.pick([0x8a1a1a, 0x1a2a5a, 0x2a4a2a]), 0, 0.26, fz + 0.008); // tie
+      const trousers = rng.pick([0x3a3f4a, 0x2a2a30]);
+      b.clothes({ shirt: coat, sleeves: 'long', pants: trousers, shoes: 0x1c1c1c });
+      const inner = rng.pick([0x9ab8d8, 0xd8d0b8]);
+      const tie = rng.pick([0x8a1a1a, 0x1a2a5a, 0x2a4a2a]);
+      wear(b, 'doctor', { shirt: coat, sleeves: 'long', pants: trousers, pantsPat: 'cloth', shoes: 0x1c1c1c, inner, tie });
+      b.box(sp, 0.1, 0.36, 0.012, inner, 0, 0.28, fz + 0.004); // shirt
+      b.box(sp, 0.035, 0.26, 0.014, tie, 0, 0.26, fz + 0.008); // tie
       b.sbox(ZT.LEATHER, sp, 0.13, 0.016, 0.03, 0x404448, 0, 0.45, fz - 0.005, -0.3); // stethoscope
       b.sbox(ZT.LEATHER, sp, 0.016, 0.14, 0.016, 0x404448, 0.06, 0.37, fz + 0.004);
       // Coat tails hanging over the hips (front + back panels).
@@ -753,8 +810,10 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
     }
     case 'worker': {
       const shirt = rng.pick([0x5a6a7a, 0x6a4a3a, 0x3a4a5a]);
-      b.clothes({ shirt, sleeves: rng.chance(0.5) ? 'long' : 'short', pants: 0x34404f, shoes: 0x4a3018 });
+      const sleeves = rng.chance(0.5) ? 'long' : 'short';
+      b.clothes({ shirt, sleeves, pants: 0x34404f, shoes: 0x4a3018 });
       const vest = rng.pick([0xc8f020, 0xff7a1a]);
+      wear(b, 'worker', { shirt, sleeves, pants: 0x34404f, pantsPat: 'denim', shoes: 0x4a3018, vest, belt: 0x3a2a1a });
       const sb = Math.sqrt(b.bulk);
       b.box(sp, w + 0.025, 0.36, 0.22 * sb + 0.025, vest, 0, 0.27, 0, 0, 0, 0, 0.32);
       for (const y of [0.18, 0.3]) {
@@ -762,6 +821,7 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
       }
       if (rng.chance(0.75)) {
         const hat = rng.pick([0xf0c020, 0xf2f2f2, 0xe06a10]);
+        b.look.hat = hat;
         b.part(head, Kit.cyl(0.13 * hs, 0.145 * hs, 0.1 * hs, 8), hat, 0, top + 0.03 * hs, 0, 0, 0, 0, 1, 1, 1.05, 0.12).userData.t = ZT.BONE;
         b.sbox(ZT.BONE, head, 0.3 * hs, 0.018, 0.32 * hs, hat, 0, top - 0.015 * hs, 0.02, 0, 0, 0, 0.12);
       }
@@ -774,12 +834,14 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
       b.clothes({ shirt: jacket ? suit : shirt, sleeves: 'long', sleeveColor: jacket ? suit : shirt, pants: suit, shoes: 0x111111 });
       if (jacket) b.box(sp, 0.12, 0.3, 0.012, shirt, 0, 0.31, fz + 0.004);
       const tie = rng.pick([0x8a1a1a, 0x1a2a5a, 0x2a4a2a, 0x5a1a4a]);
+      wear(b, 'office', { shirt, sleeves: 'long', pants: suit, pantsPat: 'cloth', shoes: 0x111111, tie, jacket: jacket ? suit : null, inner: jacket ? shirt : null, belt: 0x1a1412 });
       b.box(sp, 0.04, 0.3, 0.014, tie, rng.spread(0.015), 0.27, fz + 0.008, 0, 0, rng.spread(0.12));
       b.box(sp, 0.055, 0.04, 0.02, tie, 0, 0.43, fz + 0.008);
       return jacket ? suit : shirt;
     }
     case 'patient': {
       const gown = rng.pick([0xa8c8d0, 0xc0d4b8, 0xb8c0d8]);
+      wear(b, 'patient', { shirt: gown, shirtPat: 'gown', sleeves: 'short', pants: gown, pantsPat: 'gown', bareLegs: true, shoes: b.skin, bellyWound: 0.4 });
       b.clothes({ shirt: gown, sleeves: 'short', pants: gown, thighs: 'skin', shins: 'skin', shoes: b.skin }, ZT.GOWN);
       const sb = Math.sqrt(b.bulk);
       // Gown skirt over the hips.
@@ -788,7 +850,10 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
       b.sbox(ZT.GOWN, r.hips, 0.025, 0.3, 0.2 * sb, gown, 0.2 * b.bulk, -0.12, 0, 0, 0, 0, 0, 'torso');
       b.sbox(ZT.GOWN, r.hips, 0.025, 0.3, 0.2 * sb, gown, -0.2 * b.bulk, -0.12, 0, 0, 0, 0, 0, 'torso');
       b.sbox(ZT.FLAT, r.armL.elbow, 0.096, 0.03, 0.106, 0xf0f0f0, 0, -0.22 * b.al, 0); // wristband
-      if (rng.chance(0.5)) b.box(head, 0.235 * hs, 0.05 * hs, 0.25 * hs, 0xe8e8e0, 0, 0.22 * hs, 0.002, 0, 0, 0.12, 0.15); // bandage
+      if (rng.chance(0.5)) {
+        b.look.hat = 0xe8e8e0;
+        b.box(head, 0.235 * hs, 0.05 * hs, 0.25 * hs, 0xe8e8e0, 0, 0.22 * hs, 0.002, 0, 0, 0.12, 0.15); // bandage
+      }
       // Bloody gown stains.
       b.box(sp, 0.14, 0.12, 0.012, BLOOD, rng.pick([-0.08, 0.06]), 0.12, fz + 0.004);
       return gown;
@@ -798,6 +863,7 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
       b.clothes({ shirt: camo, sleeves: 'long', pants: camo, shoes: 0x2e2418 }, ZT.CAMO);
       const sb = Math.sqrt(b.bulk);
       const vest = camo === 0x56683a ? 0x3c4629 : 0x665c3e;
+      wear(b, 'soldier', { shirt: camo, shirtPat: 'camo', sleeves: 'long', pants: camo, pantsPat: 'camo', shoes: 0x2e2418, vest, belt: 0x2a2418, hat: camo === 0x56683a ? 0x48553a : 0x726848 });
       b.box(sp, w + 0.04, 0.3, 0.22 * sb + 0.05, vest, 0, 0.29, 0);
       b.box(sp, 0.08, 0.08, 0.04, vest, -0.08, 0.2, 0.11 * sb + 0.04);
       b.box(sp, 0.08, 0.08, 0.04, vest, 0.08, 0.2, 0.11 * sb + 0.04);
@@ -810,26 +876,33 @@ export function dressVariant(b: ZBody, variant: string, rng: Rng): number {
     case 'biker': {
       const tee = rng.pick([0x8a8a8a, 0xd0ccc0, 0x7a2a2a]);
       const leather = 0x2c2624;
+      wear(b, 'biker', { shirt: leather, shirtPat: 'leather', sleeves: 'long', pants: 0x2e3a52, pantsPat: 'denim', shoes: 0x181616, inner: tee, jacket: leather });
       b.clothes({ shirt: leather, sleeves: 'long', pants: 0x2e3a52, shoes: 0x181616 }, ZT.LEATHER);
       // Jeans are cloth, not leather.
       for (const m of [b.pelvis, r.legL.thigh, r.legR.thigh, r.legL.shin, r.legR.shin]) m.userData.t = ZT.CLOTH;
       b.box(sp, 0.12, 0.42, 0.012, tee, 0, 0.23, fz + 0.004); // open jacket
       b.sbox(ZT.LEATHER, sp, 0.04, 0.42, 0.016, 0x3a3432, 0.08, 0.23, fz + 0.006);
       b.sbox(ZT.LEATHER, sp, 0.04, 0.42, 0.016, 0x3a3432, -0.08, 0.23, fz + 0.006);
-      if (rng.chance(0.6)) b.sbox(ZT.HAIR, head, 0.2 * hs, 0.08 * hs, 0.04, 0x3a2a1a, 0, 0.05 * hs, b.faceZ - 0.006); // beard
-      if (rng.chance(0.35)) b.box(head, 0.24 * hs, 0.06 * hs, 0.26 * hs, rng.pick([0x8a1a1a, 0x1c1c22]), 0, top - 0.005, 0, 0, 0, 0, 0.05);
+      if (rng.chance(0.6)) {
+        b.look.beard = 0x3a2a1a;
+        b.sbox(ZT.HAIR, head, 0.2 * hs, 0.08 * hs, 0.04, 0x3a2a1a, 0, 0.05 * hs, b.faceZ - 0.006); // beard
+      }
+      if (rng.chance(0.35)) {
+        const band = rng.pick([0x8a1a1a, 0x1c1c22]);
+        b.look.hat = band;
+        b.box(head, 0.24 * hs, 0.06 * hs, 0.26 * hs, band, 0, top - 0.005, 0, 0, 0, 0, 0.05);
+      }
       return leather;
     }
     case 'civilian':
     default: {
       const shirt = rng.pick(CASUAL_SHIRTS);
       const sleeve = rng.next();
-      b.clothes({
-        shirt,
-        sleeves: sleeve < 0.2 ? 'none' : sleeve < 0.65 ? 'short' : 'long',
-        pants: rng.pick(CASUAL_PANTS),
-        shoes: rng.pick(SHOES),
-      });
+      const sleeves = sleeve < 0.2 ? 'none' : sleeve < 0.65 ? 'short' : 'long';
+      const pants = rng.pick(CASUAL_PANTS);
+      const shoes = rng.pick(SHOES);
+      wear(b, 'casual', { shirt, sleeves, pants, pantsPat: 'denim', shoes });
+      b.clothes({ shirt, sleeves, pants, shoes });
       return shirt;
     }
   }

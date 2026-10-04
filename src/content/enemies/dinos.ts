@@ -28,6 +28,8 @@ import {
   type TheroSpec,
   type TrikeRig,
 } from './dinoKit';
+import type { PixelFigure } from '../../gameplay/pixel/figure';
+import { paintTheropod, type TheroPose } from '../pixel/theropod';
 
 /**
  * PRIMAL ISLAND dinosaur roster:
@@ -132,6 +134,24 @@ abstract class Theropod extends Dino {
   protected civSide = 0;
 
   protected abstract makeSpec(): TheroSpec;
+
+  // ─── ART: SPRITES (PixelCast) ────────────────────────────────────────────
+
+  /** Theropods whose pixel art is drawn (the rest use the 3D impostor bake). */
+  protected pixelArt = false;
+  private readonly pose2d: TheroPose = { jaw: 0, squash: 0, time: 0, quills: 0, sickle: false, breath: 1 };
+
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.pixelArt || !this.r || !this.model.visible) return false;
+    const p = this.pose2d;
+    p.jaw = this.jawOpen;
+    p.time = this.age;
+    p.quills = this.spec.quills;
+    p.sickle = this.spec.sickle;
+    p.breath = this.r.torso.scale.y;
+    p.squash = this.state === 'dying' ? 0 : Math.min(1, this.flinch) ** 2 * 0.8;
+    return paintTheropod(f, this.r, this.spec, this.spec.pal, p);
+  }
 
   protected override build() {
     this.spec = this.makeSpec();
@@ -869,6 +889,7 @@ const RAPTOR_PALS: Record<string, Palette> = {
 };
 
 export class Raptor extends Theropod {
+  protected override pixelArt = true;
   private variant = 'tan';
 
   protected override configure() {

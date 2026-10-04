@@ -7,6 +7,8 @@ import { Projectile } from './Projectile';
 import { Pickup } from './Pickup';
 import { RETRO_DETAIL } from '../content/kit/ModelKit';
 import { buildPalette, linearToOklab, PALETTE_MAX, paletteRamps, type PaletteId } from './spritePalette';
+import { PixelFigure } from './pixel/figure';
+import { PixelCast, type CastEnv } from './pixel/PixelCast';
 
 /**
  * ART: SPRITES — every character (enemies, bosses, civilians), plus the things
@@ -623,6 +625,22 @@ export interface SpriteStats {
   fallbacksTotal: number;
   /** Live 3D parts drawn over sprites this frame. */
   live3d: number;
+  /** PixelCast paints (hand-drawn pixel art) this frame, and CPU ms they took (smoothed). */
+  paints: number;
+  paintMs: number;
+  /** Primitives in the last painted figure (and table overflows since creation). */
+  prims: number;
+  primOverflow: number;
+}
+
+/** Scene-linear colour → the sRGB display colour the retro pass shows (ACES × exposure). */
+function toDisplay(c: THREE.Color, exposure: number, out: THREE.Color): THREE.Color {
+  const f = (x: number) => {
+    x *= exposure;
+    const y = Math.min(1, Math.max(0, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)));
+    return Math.pow(y, 1 / 2.2);
+  };
+  return out.setRGB(f(c.r), f(c.g), f(c.b), THREE.LinearSRGBColorSpace);
 }
 
 function sizeClass(n: number): number {
@@ -741,7 +759,25 @@ export class SpriteArt {
     fallbacks: 0,
     fallbacksTotal: 0,
     live3d: 0,
+    paints: 0,
+    paintMs: 0,
+    prims: 0,
+    primOverflow: 0,
   };
+  /** PixelCast: characters with a painter (`Entity.paintPixels`) are drawn as pixel art. */
+  private cast: PixelCast;
+  private figure = new PixelFigure();
+  private env: CastEnv = {
+    tint: new THREE.Color(1, 1, 1),
+    rim: new THREE.Color(0.5, 0.65, 1),
+    rimAmount: 0,
+    fog: new THREE.Color(),
+    fogAmount: 0,
+  };
+  /** Stage darkness 0..1 (from the fog / background), light tint (display). */
+  private night = 0;
+  private framePaints = 0;
+  private framePaintMs = 0;
 
   private sprites = new Map<THREE.Object3D, Sprite>();
   private free = new Map<string, THREE.WebGLRenderTarget[]>();
@@ -887,6 +923,7 @@ export class SpriteArt {
     this.group.add(this.shadows);
     world.scene.add(this.group);
     world.fx.setGibSprites(true, this.targetU);
+    this.cast = new PixelCast(renderer);
   }
 
   /**
@@ -913,6 +950,7 @@ export class SpriteArt {
       });
       if (swapped.length) r.compile(objects, this.world.camera, this.bakeScene);
       r.compile(this.postScene, this.postCam);
+      this.cast.precompile();
     } finally {
       for (const [m, mat] of swapped) m.material = mat;
       r.setRenderTarget(prev);
@@ -961,6 +999,8 @@ export class SpriteArt {
       } else if (w.time >= s.next || s.gh !== this.gridH || s.gw !== this.gridW || this.turned(s)) due.push(s);
     }
     let bakes = 0;
+    this.framePaints = 0;
+    this.framePaintMs = 0;
     if (due.length) {
       due.sort((a, b) => (a.ready === b.ready ? a.next - b.next : a.ready ? 1 : -1));
       const cap = Math.max(MAX_BAKES_PER_FRAME, Math.min(firsts, MAX_FIRST_BAKES));
@@ -1061,6 +1101,8 @@ export class SpriteArt {
     st.fallbacks = fallbacks;
     st.fallbacksTotal += fallbacks;
     st.live3d = live;
+    st.paints = this.framePaints;
+    st.paintMs = st.paintMs * 0.9 + this.framePaintMs * 0.1;
     st.cpuMs = st.cpuMs * 0.9 + ms * 0.1;
     st.lastMs = ms;
     this.secPeak = Math.max(this.secPeak, ms);
@@ -1246,7 +1288,7 @@ export class SpriteArt {
   }
 
   private rtBytes(): number {
-    let b = SCRATCH * SCRATCH * (8 + 4);
+    let b = SCRATCH * SCRATCH * (8 + 4) + this.cast.bytes();
     for (const s of this.sprites.values()) if (s.rt) b += s.rt.width * s.rt.height * 4;
     for (const list of this.free.values()) for (const rt of list) b += rt.width * rt.height * 4;
     return b;
@@ -1373,6 +1415,8 @@ export class SpriteArt {
   }
 
   private bakeNow(s: Sprite, cam: THREE.PerspectiveCamera): boolean {
+    const painted = this.paint(s, cam);
+    if (painted !== null) return painted;
     const e = s.e;
     const src = s.obj;
     const keep = this.bakeKeep;
@@ -1542,6 +1586,138 @@ export class SpriteArt {
     return true;
   }
 
+  /**
+   * PixelCast: let the entity PAINT its sprite frame (hand-drawn pixel art from
+   * its live rig) instead of re-rendering its 3D model. null = it has no painter
+   * (or declined): use the impostor bake. false = nothing on screen.
+   */
+  private paint(s: Sprite, cam: THREE.PerspectiveCamera): boolean | null {
+    const e = s.e;
+    const root = s.obj === e.root;
+    if (root ? !e.paintPixels : !e.paintPart) return null;
+    const t0 = performance.now();
+    const f = this.figure;
+    f.begin(cam, this.gridW, this.gridH);
+    f.time = this.world.time;
+    f.night = this.night;
+    const ok = root ? e.paintPixels!(f) : e.paintPart!(s.obj, f);
+    if (!ok || f.count === 0) return null;
+    // Something reaching through the lens: the 3D bake handles near-plane clipping.
+    if (f.minDepth < cam.near * 1.5) return null;
+    this.stats.prims = f.count;
+    this.stats.primOverflow += f.overflow;
+    if (!f.layout(s.k, 24, 256)) {
+      s.ready = false;
+      s.away = true;
+      s.cost = 1;
+      return false;
+    }
+    s.k = f.kpx;
+    // Live 3D parts under the model (blood pools, halos) stay real meshes.
+    const keep = this.bakeKeep;
+    keep.length = 0;
+    const stack = this.paintStack;
+    stack.length = 0;
+    stack.push(s.obj);
+    while (stack.length) {
+      const o = stack.pop()!;
+      if (!o.visible) continue;
+      if (renderable(o) && keepLive(o)) keep.push(o);
+      for (const c of o.children) stack.push(c);
+    }
+    s.keepAny = keep.length > 0;
+    s.cost = 2;
+
+    const W = f.W;
+    const H = f.H;
+    const k = f.kpx;
+    const gw = this.gridW;
+    const gh = this.gridH;
+    const cw = sizeClass(W);
+    const ch = sizeClass(H);
+    const key = `${cw}x${ch}`;
+    if (!s.rt || s.rtKey !== key) {
+      if (s.rt) this.giveBack(s.rtKey, s.rt);
+      const t = this.takeTarget(cw, ch);
+      s.rt = t.rt;
+      s.rtKey = t.key;
+    }
+    // Stage light, back rim and fog at this character's distance.
+    this.castEnv(f);
+    this.cast.paint(f, s.rt, this.env);
+
+    // Billboard over the texel rectangle (NDC), at the figure's nearest depth.
+    const P = cam.projectionMatrix.elements;
+    const rx0 = (f.ox / gw) * 2 - 1;
+    const ry0 = (f.oy / gh) * 2 - 1;
+    const rx1 = ((f.ox + W * k) / gw) * 2 - 1;
+    const ry1 = ((f.oy + H * k) / gh) * 2 - 1;
+    const cx = (rx0 + rx1) / 2;
+    const cy = (ry0 + ry1) / 2;
+    const hx = (rx1 - rx0) / 2;
+    const hy = (ry1 - ry0) / 2;
+    const D = Math.max(f.d0, cam.near * 4);
+    const qx = ((cx + P[8]) * D) / P[0];
+    const qy = ((cy + P[9]) * D) / P[5];
+    const m = s.mesh;
+    m.position.set(qx, qy, -D).applyMatrix4(cam.matrixWorld);
+    m.quaternion.copy(cam.getWorldQuaternion(_q));
+    m.scale.set((2 * hx * D) / P[0], (2 * hy * D) / P[5], 1);
+    const fb = f.foot;
+    const foot = Math.max(fb.max.x - fb.min.x, fb.max.z - fb.min.z);
+    const want = THREE.MathUtils.clamp(foot * 0.42, 0.22, 7);
+    s.shadowR = s.shadowR > 0 ? s.shadowR + (want - s.shadowR) * 0.35 : want;
+    _v.setFromMatrixPosition(s.obj.matrixWorld);
+    s.offset.subVectors(m.position, _v);
+    s.dir.setFromMatrixPosition(cam.matrixWorld).subVectors(m.position, s.dir).normalize();
+    const u = s.mat.uniforms;
+    u.map.value = s.rt.texture;
+    (u.uSize.value as THREE.Vector2).set(W, H);
+    (u.uRt.value as THREE.Vector2).set(cw, ch);
+    (u.uDepth.value as THREE.Vector4).set(f.d0, f.d1, D, ((f.d1 - f.d0) / 254) * 0.5 + 0.015);
+    s.tw = W;
+    s.th = H;
+    s.gw = gw;
+    s.gh = gh;
+    s.ready = true;
+    s.away = false;
+    this.framePaints++;
+    this.framePaintMs += performance.now() - t0;
+    return true;
+  }
+  private paintStack: THREE.Object3D[] = [];
+
+  /** Stage light tint, night rim and fog for a painted sprite (display space). */
+  private castEnv(f: PixelFigure) {
+    const env = this.env;
+    const sc = this.world.scene;
+    const fog = sc.fog as THREE.Fog | THREE.FogExp2 | null;
+    // Day ≈ 1, night ≈ 0.68: characters stay readable without glowing.
+    const lit = THREE.MathUtils.clamp(0.52 + 0.2 * this.irr, 0.62, 1);
+    env.tint.setRGB(lit * this.skyTint.r, lit * this.skyTint.g, lit * this.skyTint.b);
+    env.rimAmount = 0.42 * this.night;
+    env.rim.copy(this.rimDisplay);
+    env.fogAmount = 0;
+    if (fog) {
+      _v.copy(f.foot.min).add(f.foot.max).multiplyScalar(0.5);
+      const dist = f.depth(_v);
+      let a = 0;
+      if ((fog as THREE.FogExp2).isFogExp2) {
+        const dd = (fog as THREE.FogExp2).density * dist;
+        a = 1 - Math.exp(-dd * dd);
+      } else {
+        const fl = fog as THREE.Fog;
+        a = THREE.MathUtils.clamp((dist - fl.near) / Math.max(1e-3, fl.far - fl.near), 0, 1);
+      }
+      env.fogAmount = a;
+      toDisplay(fog.color, this.expU.value, env.fog);
+    }
+  }
+  /** Stage light level (irradiance-ish, see syncRimLight) and the sky's tint for painted sprites. */
+  private irr = 2;
+  private skyTint = new THREE.Color(1, 1, 1);
+  private rimDisplay = new THREE.Color(0.55, 0.7, 1);
+
   /** Blob shadow under a sprite: on the floor it stands on, gone once it leaves the ground. */
   private placeShadow(s: Sprite, i: number, cam: THREE.PerspectiveCamera): boolean {
     const e = s.e;
@@ -1623,6 +1799,11 @@ export class SpriteArt {
     }
     this.rimLight.color.copy(_sc);
     this.rimLight.intensity = 0.9 * Math.max(irr, 0.3) * dark * this.look.rimLight;
+    // PixelCast: light level, darkness and a faint sky tint for painted sprites.
+    this.irr = irr;
+    this.night = dark;
+    this.skyTint.setRGB(1, 1, 1).lerp(_clear.setRGB(_sc.r, _sc.g, _sc.b), 0.18 * dark);
+    toDisplay(_sc, 1.1, this.rimDisplay);
     const x = Math.max(0.02, 0.4 * irr * this.expU.value);
     const a = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
     this.refL.value = THREE.MathUtils.clamp(a, 0.04, 0.6);
@@ -1764,6 +1945,7 @@ export class SpriteArt {
     this.postMat.dispose();
     this.shadowMat.dispose();
     this.shadows.dispose();
+    this.cast.dispose();
     this.showMat.dispose();
     this.quad.dispose();
     this.group.parent?.remove(this.group);

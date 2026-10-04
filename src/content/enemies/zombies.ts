@@ -7,6 +7,8 @@ import { angleDelta, clamp, lerp, smoothstep } from '../../core/math';
 import { registerEnemy } from '../registry';
 import { Kit } from '../kit/ModelKit';
 import type { HumanoidRig, Limb } from '../kit/humanoid';
+import type { PixelFigure } from '../../gameplay/pixel/figure';
+import { paintHuman, paintLooseArm, type HumanPose } from '../pixel/human';
 import {
   ZBody,
   footWorld,
@@ -169,6 +171,41 @@ export abstract class Zombie extends Enemy {
   /** Body parts this zombie has flung into the world (severed limbs): ART: SPRITES draws each as its own sprite. */
   looseParts(): readonly { obj: THREE.Object3D }[] {
     return this.flyers;
+  }
+
+  // ─── ART: SPRITES (PixelCast) ────────────────────────────────────────────
+
+  /** Zombie types whose pixel art is drawn (the rest use the 3D impostor bake). */
+  protected pixelArt = false;
+  private readonly pose2d: HumanPose = { severed: this.severed, headless: false, jaw: 0, face: 'zombie', squash: 0, time: 0, speed: 0 };
+
+  /** Jaw for the painter: a slow groan, gaping through the windup, snapping shut on the bite. */
+  protected pixelJaw(): number {
+    const t = this.stateTime;
+    if (this.state === 'windup') return clamp(0.25 + (t / Math.max(0.1, this.windup)) * 0.9, 0, 1);
+    if (this.state === 'recover') return t < 0.12 ? 0 : 0.2;
+    if (this.state === 'dying') return 0.55;
+    if (this.state === 'stagger') return 0.7;
+    return 0.12 + 0.2 * Math.max(0, Math.sin(this.age * 1.6 + this.seed));
+  }
+
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.pixelArt || !this.r || !this.b) return false;
+    const p = this.pose2d;
+    p.headless = this.headless;
+    p.jaw = this.pixelJaw();
+    p.time = this.age;
+    p.speed = this.state === 'dying' ? 0 : this.groundSpeed;
+    // Squash on the hit reactions (they decay over ~0.3 s).
+    const k = Math.max(this.kHead, this.kTorso, this.kArmL, this.kArmR) * this.flinch;
+    p.squash = this.state === 'dying' ? 0 : k * k;
+    return paintHuman(f, this.r, this.b.look, p);
+  }
+
+  override paintPart(obj: THREE.Object3D, f: PixelFigure): boolean {
+    if (!this.pixelArt || !this.b) return false;
+    const whole = obj.userData.limb === 'arm';
+    return paintLooseArm(f, obj, whole, this.b.look);
   }
 
   /** After configure()/build(), before the entry starts: adapt to the player being on foot or in a vehicle. */
@@ -636,6 +673,7 @@ export abstract class Zombie extends Enemy {
     // Bloody stump left on the body.
     Kit.add(parent, Kit.box(0.11, 0.05, 0.12), STUMP_MAT(), pivot.position.x, pivot.position.y + (whole ? 0 : 0.01), pivot.position.z);
     this.severed[idx] = whole ? 2 : 1;
+    pivot.userData.limb = whole ? 'arm' : 'forearm';
     this.launchLimb(pivot, hit.dir, side);
     this.unrig(arm, whole);
     const fx = this.world.fx;
@@ -814,6 +852,8 @@ export abstract class Zombie extends Enemy {
     if (this.deathBaseY > -0.5) {
       this.pool = Kit.add(this.root, Kit.cyl(0.55, 0.55, 0.01, 10), POOL_MAT(), 0, 0.012, 0, 0, rng.next() * 3, 0, 0.01, 1, 0.01);
       this.pool.userData.noFlash = true;
+      // ART: SPRITES: the pool stays a real mesh on the ground under the sprite.
+      this.pool.userData.spriteKeep3D = true;
     }
   }
 
@@ -1052,6 +1092,7 @@ const UNFRAMED_MAX = 8;
 
 /** Bread-and-butter shambler. One headshot or three body shots. */
 export class Walker extends Zombie {
+  protected override pixelArt = true;
   protected variant = 'civilian';
   protected limp = 0;
   protected lean = 0.18;
