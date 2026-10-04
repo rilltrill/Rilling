@@ -19,10 +19,10 @@ import './minions';
  * bridge → THE BEHEMOTH climbs onto the bridge and chases the truck.
  *
  * As the campaign finale it is the hardest DEAD ZONE stage, tuned with the
- * human-like bot (tests/unit/humanbot.test.ts, σ 0.03) across aim styles:
- * ≈ 3–3.5 hearts lost for a bot that goes for heads half the time, ≈ 4.5–5 for
- * one that only ever aims at the body — spread over the stops and the boss,
- * never 3+ in one regular fight.
+ * human-like bot (tests/unit/humanbot.test.ts, seeds 1–12): ≈ 3.5–4 hearts lost
+ * at σ 0.03 and ≈ 7–7.5 at σ 0.05 (the challenge of the build the owner played),
+ * spread over the riot-brute stops and the boss — the army barricade is the
+ * heaviest stop (≈ 1.5 at σ 0.03), and no regular fight regularly costs 3+.
  */
 
 /** World position at rail distance d, x metres right, y up (for `world: true` spawns/looks). */
@@ -507,13 +507,14 @@ const beats: Beat[] = toughen([
         ],
       },
       {
-        // The last stand before the giant: a second riot brute vaults the sandbags (left of
-        // centre, away from the cop) and the last pack comes round with it.
+        // The last stand before the giant: the last pack rushes as soon as it's round both
+        // flanks, and a second riot brute vaults the sandbags (left of centre, away from the
+        // cop) on its heels — back-to-back threats rather than one pile-on.
         start: { remaining: 1 },
         spawns: [
-          { type: 'pack_runner', pos: [-4.5, 0, -7], entry: 'leap', opts: { variant: 'soldier', pack: 'barr', cue: 'brute', wait: 9 } },
-          { type: 'pack_runner', pos: [4.5, 0, -7], entry: 'leap', t: 0.4, opts: { variant: 'soldier', pack: 'barr', cue: 'brute', wait: 9 } },
-          { type: 'pack_runner', pos: [5, 0, -9], entry: 'leap', t: 0.8, opts: { variant: 'soldier', pack: 'barr', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [-4.5, 0, -7], entry: 'leap', opts: { variant: 'soldier', pack: 'barr' } },
+          { type: 'pack_runner', pos: [4.5, 0, -7], entry: 'leap', t: 0.4, opts: { variant: 'soldier', pack: 'barr' } },
+          { type: 'pack_runner', pos: [5, 0, -9], entry: 'leap', t: 0.8, opts: { variant: 'soldier', pack: 'barr' } },
           { type: 'bloater', pos: [-1.5, 0, 16], t: 0.9 },
           { type: 'walker', pos: [1, 0, 19], t: 1.3, opts: { variant: 'soldier' } },
           { type: 'walker', pos: [-3, 0, 17], t: 1.8, opts: { variant: 'soldier' } },

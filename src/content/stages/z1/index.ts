@@ -127,9 +127,12 @@ const beats: Beat[] = [
         ],
       },
       {
+        // Crawler + walkers together: the first time two things want you at once.
         start: { remaining: 1 },
         spawns: [
           { type: 'walker', pos: [8, 0, 17], t: 0.4, opts: { variant: 'biker' } },
+          { type: 'crawler', pos: [-3.2, 0, 8], t: 1.0, entry: 'rise' },
+          { type: 'walker', pos: [-5.5, 0, 11.5], t: 1.5, entry: 'rise', opts: { variant: 'office' } },
         ],
       },
     ],
@@ -162,9 +165,13 @@ const beats: Beat[] = [
         ],
       },
       {
+        // Runner + walkers: a sprinter down the street while the pharmacy empties.
         start: { remaining: 1 },
         spawns: [
+          { type: 'walker', pos: [7.4, 0, 8.6], opts: { variant: 'patient' } },
           { type: 'runner', pos: [-5, 0, 21], t: 0.6 },
+          { type: 'walker', pos: [7.0, 0, 12], t: 0.9, opts: { variant: 'nurse' } },
+          { type: 'runner', pos: [2, 0, 23], t: 2.4 },
         ],
       },
     ],
@@ -337,10 +344,12 @@ const beats: Beat[] = [
         ],
       },
       {
+        // Crawler + walker up close, and one more off the roof.
         start: { remaining: 1 },
         spawns: [
-          { type: 'walker', pos: [-3, 0, 20], opts: { variant: 'civilian' } },
-          { type: 'crawler', pos: [0.5, 0, 10], t: 0.6, entry: 'rise' },
+          { type: 'walker', pos: [-3, 0, 14], opts: { variant: 'civilian' } },
+          { type: 'crawler', pos: [0.5, 0, 8.5], t: 0.4, entry: 'rise' },
+          { type: 'runner', pos: [4.2, 2.6, 15.8], t: 1.3, entry: 'leap' },
         ],
       },
     ],
@@ -440,6 +449,7 @@ const beats: Beat[] = [
       // A long fight (a struggling player) gets more first aid.
       { kind: 'health', pos: [4, 1.3, 6.5], t: 85 },
       { kind: 'health', pos: [-4.2, 1.3, 6], t: 112 },
+      { kind: 'health', pos: [4.2, 1.3, 6], t: 135 },
     ],
     waves: [
       { start: { after: 26 }, spawns: [{ type: 'crawler', pos: [-4.5, 0, 9], entry: 'rise' }, { type: 'crawler', pos: [4.5, 0, 10], t: 0.6, entry: 'rise' }] },

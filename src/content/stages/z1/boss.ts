@@ -35,8 +35,9 @@ const PUS_BELLY: [number, number, number, number, number][] = [
  *                    runner, adds barrel / car-door throws, two-hook volleys.
  * Phase 3 (< 33%):   frenzy — faster windups, shorter gaps, three-hook volleys,
  *                    two heart hits to stop a charge.
- * Between the phase changes (83% and 50% health) he bellows for help: a roar,
- * and walkers (the first time with a runner) rise while he keeps attacking.
+ * At 83%, 50% and 20% health he bellows for help: a roar, and minions rise
+ * while he keeps attacking (a runner + walker, two walkers, and in the frenzy a
+ * crawler + walker: the last push asks you to split your fire).
  * Every attack is telegraphed: slams and charges with the ring on his heart
  * (enough weak-point damage interrupts them), throws as shootable projectiles.
  * Tuning: BUTCHER_TUNE below.
@@ -70,18 +71,21 @@ export const BUTCHER_TUNE = {
   slamCombo: [0, 0, 0],
   /**
    * Health fractions at which he bellows for help (a roar, then minions rise),
-   * between the phase-change summons — tied to his health, not the clock, so a
-   * long fight doesn't bring more of them.
+   * on top of the phase-change summons — tied to his health, not the clock, so
+   * a long fight doesn't bring more of them.
    */
-  callAt: [0.83, 0.5],
+  callAt: [0.83, 0.5, 0.2],
   callMinions: [
     ['runner', 'walker'],
     ['walker', 'walker'],
+    ['crawler', 'walker'],
   ],
   /** Shortest charge run after the wind-up (s): the whole charge ring lasts ≥ CHARGE_WIND + this. */
   chargeMinRun: 0.8,
   /** Heart scale while the cleaver is up (a bigger target: "shoot it to stop him"). */
   slamHeartSwell: 1.3,
+  /** Seconds he holds his next attack after the player continues. */
+  continueRest: 2.5,
   /** Gap after an attack before the next, [min, max] s by phase. */
   gap: [
     [1.3, 2.0],
@@ -89,6 +93,9 @@ export const BUTCHER_TUNE = {
     [0.65, 1.05],
   ] as [number, number][],
 };
+
+/** States in which an attack is under way (called off by a continue). */
+const ATTACK_STATES = new Set(['slamStep', 'slam', 'slamStuck', 'hookWind', 'heavyPick', 'heavyThrow', 'chargeWind', 'charge']);
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -149,6 +156,8 @@ export class Butcher extends Boss {
   /** Bellows for help done so far (BUTCHER_TUNE.callAt) and whether the current roar is one. */
   private calls = 0;
   private calling = false;
+  /** No new attack before this age (a breather after a continue). */
+  private restUntil = 0;
   private apronOff = false;
   private apronVel = new THREE.Vector3();
   private apronSpin = new THREE.Vector3();
@@ -522,6 +531,17 @@ export class Butcher extends Boss {
     this.pendingPhase = phase;
   }
 
+  /**
+   * After a continue, a fresh start: an attack under way is called off (he backs
+   * off — a charge's run is timed by chargeT, so it would otherwise finish into the
+   * revived player) and he holds his next attack for BUTCHER_TUNE.continueRest s.
+   */
+  override onContinue(): void {
+    if (ATTACK_STATES.has(this.state)) this.go('backoff');
+    else super.onContinue();
+    this.restUntil = this.age + BUTCHER_TUNE.continueRest;
+  }
+
   // ─── AI helpers ───────────────────────────────────────────────────────────
 
   /** Like moveToward but never turns the body (he always squares up to the player). */
@@ -736,7 +756,7 @@ export class Butcher extends Boss {
           this.calls++;
           this.go('roar');
           this.calling = true;
-        } else if (this.nextAttack <= 0) {
+        } else if (this.nextAttack <= 0 && this.age >= this.restUntil) {
           this.startAttack(this.chooseAttack());
         } else if (this.age > 10 && this.world.rng.chance(dt * 0.04)) {
           this.go('roar');
@@ -845,8 +865,8 @@ export class Butcher extends Boss {
           this.roarSfx = true;
           this.roarFx(0.8);
           // Fair in every phase: a fixed 0.85 s wind-up and a run of at least
-          // 0.7 s, so there is always ≥ 1.5 s to land the weak-point hits that
-          // trip him (one in phase 1, two later; the heart swells as a target).
+          // chargeMinRun (0.8 s), so one ring of ≥ 1.65 s to land the weak-point
+          // hits that trip him (one early on, two in the frenzy; the heart swells).
           const minRun = BUTCHER_TUNE.chargeMinRun;
           const dist = Math.max(0, this.relOf(this.root.position).fwd - 2.7);
           const runSpeed = Math.min(6.5 * this.speedMul, dist / minRun);

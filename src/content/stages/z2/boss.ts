@@ -26,7 +26,8 @@ import { z2Scene } from './scene';
  *                      exposed (big weak point); spawns crawlers from the pool.
  *  Phase 3 (< 33 %):   frenzy — faster wind-ups, double slams, bile volleys.
  *
- * Bursting an eye during a wind-up always interrupts the attack.
+ * Bursting an eye during a wind-up interrupts the attack (once the ring has
+ * been up for a moment: fire already on the eyes can't snuff it as it opens).
  *
  * Fairness/pacing (tuned with tests/unit/humanbot.test.ts, target 45–90 s for a
  * ~3 taps/s phone player): eyes and armed tentacle tips carry invisible hit
@@ -35,13 +36,15 @@ import { z2Scene } from './scene';
  * screen area, and the pool crawlers emerge in the lower-centre of the view and
  * hold a 4.8 m stand-off so their pounce ring is drawn above the HUD panels.
  * Bile volleys fan out low (clear of the health bar, never one glob hiding
- * another). Mercy is FIGHT-scoped: every heart the player loses buys a short
- * breather (no new boss attack and no new minion windup), and once this fight
- * has cost two hearts — or the player is down to their last two — the boss
- * eases off for good: longer gaps, slower and easier-to-break slams, no combos,
- * one crawler at a time, single globs, and it waits out any minion's windup. So
- * the fight bites (one or two hearts for an average player) without regularly
- * taking three.
+ * another). Mercy is FIGHT-scoped (see TIERS): every heart the player loses
+ * buys a short breather (no new boss attack and no new minion windup); once
+ * this fight has cost two hearts — or the player is down to their last two —
+ * the boss eases off: a little longer gaps and windups, easier-to-break slams,
+ * no combos, pairs of globs, one minion ring at a time; and after seven hearts
+ * (or a second continue) it goes really easy. A single continue only refills
+ * the hearts — it's an arcade boss. So the fight bites (two hearts, sometimes
+ * three, for an average player; a full bar and a continue for a shaky one)
+ * without snowballing.
  */
 
 const FLESH = 0x8a4038;
@@ -79,6 +82,8 @@ const CRAWL_PTS: [number, number][] = [
 const CRAWL_RANGE = 4.8;
 /** At most this many pool crawlers alive at once. */
 const CRAWL_MAX = 3;
+/** Extra windup on the fight's first slam (a learning slam, like the first single glob). */
+const FIRST_SLAM_EASE = 0.4;
 /** Lateral slot (−1 … 1) of each glob in a volley, in launch order. */
 const VOLLEY_SLOTS = [-1, 1, 0];
 /** Seconds without a new attack (boss or minion) after the player loses a heart. */
@@ -87,10 +92,13 @@ const BREATHER = 2.2;
 const MERCY_AFTER = 2;
 /**
  * Hearts this fight may take before the boss goes REALLY easy (tier 2) — or the
- * player has used a continue against it. A struggling player still has to
- * finish the fight, just with time to answer every ring.
+ * player has used DEEP_MERCY_CONTINUES continues against it. A struggling
+ * player still has to finish the fight, just with time to answer every ring.
+ * (One continue alone only refills the hearts: it's an arcade boss — the fight
+ * carries on at tier 1 until the deep-mercy count is reached.)
  */
-const DEEP_MERCY_AFTER = 5;
+const DEEP_MERCY_AFTER = 7;
+const DEEP_MERCY_CONTINUES = 2;
 /**
  * When a heart is lost, a minion whose windup still has more than this left
  * backs off (anything closer lands inside the player's 1.1 s grace and is absorbed).
@@ -128,7 +136,7 @@ interface MercyTier {
  * Pressure by mercy tier. 0: the full fight. 1 (MERCY_AFTER hearts lost this
  * fight, or ≤ 2 left): one minion ring at a time, no combos, pairs of globs at
  * most, a little more time on every ring. 2 (DEEP_MERCY_AFTER hearts, or a
- * continue): slow, easy-to-break slams, single globs, no new crawlers and long
+ * second continue): slow, easy-to-break slams, single globs, no new crawlers and long
  * gaps between minion attacks.
  */
 const TIERS: MercyTier[] = [
@@ -401,8 +409,10 @@ export class PatientZero extends Boss {
   private globs: Projectile[] = [];
   /** Spit attacks so far. */
   private spits = 0;
-  /** The player has used a continue during this fight. */
-  private continued = false;
+  /** Slams so far (the first one is a slower one to learn on). */
+  private slams = 0;
+  /** Continues the player has used during this fight. */
+  private continues = 0;
   /** End of the current windup's opening grace (state time; see MercyTier.grace). */
   private graceUntil = 0;
 
@@ -413,7 +423,7 @@ export class PatientZero extends Boss {
   protected override configure() {
     this.name = 'patient_zero';
     this.title = 'PATIENT ZERO';
-    this.maxHp = 176;
+    this.maxHp = 170;
     this.speed = 0;
     this.attackRange = 99;
     this.points = 30000;
@@ -808,7 +818,7 @@ export class PatientZero extends Boss {
 
   override onContinue(): void {
     super.onContinue();
-    this.continued = true;
+    this.continues++;
     // A fresh start: the pool crawlers slither back into the flesh (no points).
     for (const m of this.minions) {
       if (m.removed || m.state === 'dying') continue;
@@ -997,6 +1007,8 @@ export class PatientZero extends Boss {
     this.slamTent = t;
     t.dmg = 0;
     this.setState(ST.slam);
+    // (The fight's first slam gives a little longer to find the glowing tip / an eye.)
+    if (this.slams++ === 0) this.windupEase += FIRST_SLAM_EASE;
     t.mode = 'raise';
     this.armTip(t, true);
     this.world.audio.play('whoosh', { volume: 0.7, pitch: 0.6 });
@@ -1119,11 +1131,11 @@ export class PatientZero extends Boss {
   /**
    * How easy the boss is going (see TIERS). Fight-scoped: once this fight has
    * cost MERCY_AFTER hearts (or the player is down to their last two) one bad
-   * stretch can't snowball; after DEEP_MERCY_AFTER hearts or a continue, a
-   * struggling player gets time to answer every ring.
+   * stretch can't snowball; after DEEP_MERCY_AFTER hearts or a second continue,
+   * a struggling player gets time to answer every ring.
    */
   private mercyTier(): MercyTier {
-    if (this.continued || this.heartsLost >= DEEP_MERCY_AFTER) return TIERS[2];
+    if (this.continues >= DEEP_MERCY_CONTINUES || this.heartsLost >= DEEP_MERCY_AFTER) return TIERS[2];
     if (this.heartsLost >= MERCY_AFTER || this.world.player.hp <= 2) return TIERS[1];
     return TIERS[0];
   }

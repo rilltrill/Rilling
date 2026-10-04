@@ -3,6 +3,7 @@ import { Boss } from '../../../gameplay/Boss';
 import { ndcInPlayArea } from '../../../gameplay/Enemy';
 import { Projectile } from '../../../gameplay/Projectile';
 import type { ShotHit } from '../../../gameplay/Entity';
+import type { ShotTag } from '../../../gameplay/Shootables';
 import type { EntryKind } from '../../../core/types';
 import type { World } from '../../../gameplay/World';
 import { registerEnemy, createEnemy } from '../../registry';
@@ -202,6 +203,9 @@ export class Tyrant extends Boss {
   private legs: Leg[] = [];
   private arms: THREE.Group[] = [];
   private focus = new THREE.Object3D();
+  /** The Tyrant's own hit meshes (sightline checks for its pack; gathered on first use). */
+  private bodyHits: THREE.Object3D[] | null = null;
+  private readonly sightRay = new THREE.Raycaster();
   private throat!: THREE.Mesh;
   private mat!: THREE.Material;
   /** Warm, low-contrast hit tint for body parts (never a white strobe). */
@@ -860,6 +864,37 @@ export class Tyrant extends Boss {
     }
   }
 
+  /**
+   * No blind hits from the pack: a minion whose ring the Tyrant's own body
+   * hides from the gun (it rolls past the jeep on its side, its tail sweeps
+   * across the view, it lunges in between) is knocked out of the attack — it
+   * regroups and strikes again from a clear spot. Checks the camera → chest and
+   * camera → head sightlines against the Tyrant's hit meshes (last frame's
+   * matrices), so a ring the player can still reach part of keeps going.
+   */
+  private clearSightlines() {
+    const w = this.world;
+    let cam: THREE.Vector3 | null = null;
+    for (const e of w.enemies()) {
+      if (e.isBoss || (e.state !== 'windup' && e.state !== 'pounce')) continue;
+      if (!cam) {
+        cam = w.camera.getWorldPosition(_w);
+        this.bodyHits ??= w.shootables.objects.filter((o) => (o.userData.shot as ShotTag | undefined)?.owner === this);
+      }
+      if (this.hides(e.anchor, cam) && (!e.headAnchor || this.hides(e.headAnchor, cam))) e.stagger();
+    }
+  }
+
+  /** Is the camera's line of sight to `obj` blocked by the Tyrant's body? */
+  private hides(obj: THREE.Object3D, cam: THREE.Vector3): boolean {
+    obj.getWorldPosition(_u).sub(cam);
+    const d = _u.length();
+    if (d < 0.5) return false;
+    this.sightRay.set(cam, _u.divideScalar(d));
+    this.sightRay.far = d - 0.3;
+    return this.sightRay.intersectObjects(this.bodyHits!, false).length > 0;
+  }
+
   private stompFx(volume: number, shake: number) {
     this.world.audio.play('stomp', { volume, pitch: this.world.rng.range(0.62, 0.78), vary: 0.1 });
     if (shake > 0) this.world.rig.shake(shake);
@@ -1450,6 +1485,7 @@ export class Tyrant extends Boss {
     }
 
     if (this.winding) this.clearLane();
+    this.clearSightlines();
 
     // Anchored: stand still in the world while the rig moves.
     if (this.anchored) p.z += rig.speed * dt;

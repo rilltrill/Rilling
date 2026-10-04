@@ -20,8 +20,10 @@ export const ALPHA_TUNE = {
   guard: 8,
   /** A single hit this big (magnum, point-blank shotgun) staggers the alpha even while it's closing in. */
   heavy: 3,
-  /** Interrupt damage that breaks a pack-mate's rallied / ambush pounce: five body hits or two head hits. */
-  rallyGuard: 4,
+  /** Pack-mate base hp before the spawn's hp multiplier (a stock raptor has 3). */
+  packHp: 4.6,
+  /** Interrupt damage that breaks a pack-mate's rallied / ambush pounce: seven body hits or three head hits. */
+  rallyGuard: 5.6,
   /** A pack-mate joins the alpha's pounce only if its own attack cooldown is about done. */
   rallyCooldown: 0.5,
   /** Ambush ('opts.ambush'): seconds after landing from the entry leap in which it may spring straight into its pounce… */
@@ -46,6 +48,20 @@ const hintedPack = new WeakSet<World>();
 const PROMPT_TIME = 1.6;
 
 /**
+ * A pack pounce (and the alpha's crouch) asks for a sustained burst, so — like a
+ * boss windup (World.checkBossWindup) — it vents an overheated or nearly
+ * overheated mounted gun: holding the trigger never leaves you locked out for
+ * the rings. (No-op for guns without heat and for a cool barrel.)
+ */
+function ventGun(w: World) {
+  const locked = w.weapons.overheated;
+  if (w.weapons.vent()) {
+    w.audio.play('reload_done', { volume: 0.55, pitch: 0.8 });
+    if (locked) w.hud.prompt(null);
+  }
+}
+
+/**
  * The finale's raptor pack (d3 only): an ALPHA and its PACK-MATES.
  *
  * ALPHA ('raptor_alpha') — the stock red raptor look (bigger, quilled) with a
@@ -60,6 +76,11 @@ const PROMPT_TIME = 1.6;
  *
  * PACK-MATE ('raptor_pack') — a stock raptor that answers the alpha's call; a
  * pack pounce takes a short burst to break (`rallyGuard`) instead of one round.
+ *
+ * CHARGE (`opts.charge`, pack-mates): it runs in like the alpha does — every
+ * hit flinches and bloodies it, none pins it in place (a heavy hit still does)
+ * — and springs into a pack pounce (the guarded ring) as soon as it's in reach,
+ * so the pack arrives and strikes together.
  *
  * AMBUSH (`opts.ambush`, either kind): it leaps out of cover and goes straight
  * into its pounce as it lands (or as soon as it's in reach, within
@@ -96,7 +117,10 @@ export class PackRaptor extends Raptor {
       this.name = 'alpha';
       this.maxHp = ALPHA_TUNE.hp;
       this.points = 500;
-    } else this.name = 'pack';
+    } else {
+      this.name = 'pack';
+      this.maxHp = ALPHA_TUNE.packHp;
+    }
   }
 
   override onAdded(): void {
@@ -114,7 +138,10 @@ export class PackRaptor extends Raptor {
   protected override onWindup() {
     super.onWindup();
     this.meter = 0;
-    if (this.alpha) this.callPack();
+    if (this.alpha) {
+      ventGun(this.world);
+      this.callPack();
+    }
   }
 
   override setState(s: string) {
@@ -133,6 +160,9 @@ export class PackRaptor extends Raptor {
         this.ambushT = 0;
         return;
       }
+    } else if (this.spawn.opts.charge && this.cooldown <= 0 && !this.mercy()) {
+      // CHARGE: it springs as soon as it's in reach.
+      if (this.strikeNow(ALPHA_TUNE.ambushReach)) return;
     }
     super.advanceUpdate(dt);
   }
@@ -185,7 +215,10 @@ export class PackRaptor extends Raptor {
     if (!this.takeSlot()) return false;
     this.cooldown = 0;
     this.setState('windup');
-    if (!this.alpha) this.rallied = true;
+    if (!this.alpha) {
+      this.rallied = true;
+      ventGun(this.world);
+    }
     this.hintPack();
     return true;
   }
@@ -217,6 +250,9 @@ export class PackRaptor extends Raptor {
           return;
         }
       } else if (this.rallied && this.attacking() && !this.mercy() && this.meter < ALPHA_TUNE.rallyGuard) {
+        return;
+      } else if (this.spawn.opts.charge && this.state === 'advance' && this.lastAmount < ALPHA_TUNE.heavy && !this.mercy()) {
+        // CHARGE: it flinches but keeps coming.
         return;
       }
       this.meter = 0;

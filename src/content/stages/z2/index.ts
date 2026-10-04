@@ -534,7 +534,7 @@ const beats: Beat[] = [
         spawns: [
           // (Tougher and faster than stock: it comes for you through the dust, and
           // only headshots stop its long super-armoured windup.)
-          S('brute_z2', 58.9, -124.3, { entry: 'burst', hp: 2.0, speed: 1.4 }),
+          S('brute_z2', 58.9, -124.3, { entry: 'burst', hp: 2.4, speed: 1.4 }),
           // Runners pour through the breach behind it, timed to reach you while
           // it winds up: split your fire.
           S('runner', 59.6, -124.8, { entry: 'burst', t: 2.6 }),

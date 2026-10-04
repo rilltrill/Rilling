@@ -208,10 +208,12 @@ const beats: Beat[] = [
       {
         // Three at once out of the doors.
         spawns: [
-          // The alpha leads; the pack charges across the plaza and pounces as soon as it's in reach.
-          { type: 'raptor_alpha', pos: DOOR, entry: 'burst', t: 0.15, opts: { ambush: true } },
-          { type: 'raptor_pack', pos: [DOOR[0] + 0.8, 0, DOOR[2] - 1.2], entry: 'burst', t: 0.5, hp: 1.3, opts: { variant: 'tan', ambush: true } },
-          { type: 'raptor_pack', pos: [DOOR[0] - 0.6, 0, DOOR[2] + 1], entry: 'burst', t: 0.85, hp: 1.3, opts: { variant: 'tan', ambush: true } },
+          // The alpha leads (tougher here: it has to cross the plaza under fire);
+          // the pack charges in behind it without being pinned by fire, and
+          // pounces as soon as it's in reach — or with the alpha's call.
+          { type: 'raptor_alpha', pos: DOOR, entry: 'burst', t: 0.15, hp: 1.5, opts: { ambush: true } },
+          { type: 'raptor_pack', pos: [DOOR[0] + 0.8, 0, DOOR[2] - 1.2], entry: 'burst', t: 0.5, hp: 1.3, opts: { variant: 'tan', ambush: true, charge: true } },
+          { type: 'raptor_pack', pos: [DOOR[0] - 0.6, 0, DOOR[2] + 1], entry: 'burst', t: 0.85, hp: 1.3, opts: { variant: 'tan', ambush: true, charge: true } },
         ],
       },
       {
@@ -237,9 +239,10 @@ const beats: Beat[] = [
         park()?.strike(w);
         w.audio.play('roar_distant', { volume: 0.9 });
       });
-      // The storm splits a palm ahead just as the pack springs its ambush (atD 218).
+      // The storm splits a palm ahead just as the pack lands from its ambush
+      // (atD 218): its burning branches come down while the pack's rings close.
       const onRoad = () => w.rig.d < D.HOLD_ROADBLOCK - 6;
-      atDistance(w, 215, () => lightningTree(w, [-5, 4.5, 22], 2, onRoad), onRoad);
+      atDistance(w, 222, () => lightningTree(w, [-5, 4.5, 22], 2, onRoad), onRoad);
     },
     waves: [
       {
@@ -264,8 +267,8 @@ const beats: Beat[] = [
         start: { atD: 218 },
         spawns: [
           { type: 'raptor_pack', pos: [6, 0, 14.5], entry: 'leap', hp: 1.3, opts: { variant: 'blue', ambush: true } },
-          { type: 'raptor_pack', pos: [-5.5, 0, 15], entry: 'leap', t: 0.2, hp: 1.3, opts: { variant: 'tan', ambush: true } },
-          { type: 'raptor_pack', pos: [0.5, 0, 16.5], entry: 'leap', t: 0.35, hp: 1.3, opts: { variant: 'green', ambush: true } },
+          { type: 'raptor_pack', pos: [-5.5, 0, 15], entry: 'leap', t: 0.1, hp: 1.3, opts: { variant: 'tan', ambush: true } },
+          { type: 'raptor_pack', pos: [0.5, 0, 16.5], entry: 'leap', t: 0.2, hp: 1.3, opts: { variant: 'green', ambush: true } },
         ],
       },
     ],
@@ -327,9 +330,10 @@ const beats: Beat[] = [
       if (!park()?.roadblockBlasted) park()?.blastRoadblock(w);
       w.audio.play('engine_rev', { volume: 0.8 });
       w.later(3.5, () => w.audio.play('roar_distant', { volume: 1, pitch: 0.9 }));
-      // Lightning splits a palm ahead on the right just as the pack springs its ambush (atD 284).
+      // Lightning splits a palm ahead on the right just as the pack lands from
+      // its ambush (atD 284): branches come down while the pack's rings close.
       const onRoad = () => w.rig.d < D.HOLD_MUD - 8;
-      atDistance(w, 281, () => lightningTree(w, [5.5, 4.5, 22], 2, onRoad), onRoad);
+      atDistance(w, 288, () => lightningTree(w, [5.5, 4.5, 22], 2, onRoad), onRoad);
     },
     pickups: [{ kind: 'points', pos: [3, 2.3, 40] }],
     waves: [
@@ -352,8 +356,8 @@ const beats: Beat[] = [
         spawns: [
           // Another three out of the ferns, pouncing as they land.
           { type: 'raptor_pack', pos: [-5, 0, 15], entry: 'leap', hp: 1.3, opts: { variant: 'green', ambush: true } },
-          { type: 'raptor_pack', pos: [6, 0, 14.5], entry: 'leap', t: 0.2, hp: 1.3, opts: { variant: 'blue', ambush: true } },
-          { type: 'raptor_pack', pos: [1, 0, 16.5], entry: 'leap', t: 0.35, hp: 1.3, opts: { variant: 'tan', ambush: true } },
+          { type: 'raptor_pack', pos: [6, 0, 14.5], entry: 'leap', t: 0.1, hp: 1.3, opts: { variant: 'blue', ambush: true } },
+          { type: 'raptor_pack', pos: [1, 0, 16.5], entry: 'leap', t: 0.2, hp: 1.3, opts: { variant: 'tan', ambush: true } },
         ],
       },
     ],

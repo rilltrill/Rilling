@@ -26,8 +26,9 @@ function branchMesh(w: World): THREE.Group {
 
 /**
  * Storm hazard: lightning splits a tree beside the road and `count` burning
- * branches tumble at the jeep — shootable projectiles with warning rings (three
- * mounted-gun hits each). `at` is the rig-relative [right, up, forward] of the
+ * branches tumble at the jeep — shootable projectiles with warning rings (four
+ * mounted-gun hits each: the storm's branches are part of the pack fights'
+ * pressure, so they take a real burst — still under a second of fire). `at` is the rig-relative [right, up, forward] of the
  * crown. A branch is only launched from inside the playable view (clear of the
  * HUD corners), so every one can be seen and shot from its first frame.
  * `active` is re-checked at each launch (the beat may already be over).
@@ -56,7 +57,7 @@ export function lightningTree(w: World, at: V3, count = 2, active: () => boolean
           from: _p.clone(),
           flightTime: 1.75,
           arc: 1,
-          hp: 2,
+          hp: 2.5,
           size: 0.5,
           damage: 1,
           points: 150,
