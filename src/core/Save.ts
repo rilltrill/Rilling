@@ -31,6 +31,8 @@ export interface SaveData {
   /** Best full-campaign score keyed by campaign id. */
   campaignBest: Record<string, number>;
   seenTutorial: boolean;
+  /** Weapon switches the player has made by hand (the HUD coaches the gun panel until a few). */
+  swaps: number;
   /** Arcade top-10 tables keyed by campaign id (a missing table reads as the default one). */
   hiscores: Record<string, HiScoreEntry[]>;
   /** Initials entered last time (pre-filled on the next name entry). */
@@ -138,6 +140,7 @@ function fresh(reducedMotion = false): SaveData {
     best: {},
     campaignBest: {},
     seenTutorial: false,
+    swaps: 0,
     hiscores: {},
     lastInitials: '',
   };
@@ -192,6 +195,7 @@ export class Save {
         best: parsed.best ?? {},
         campaignBest: parsed.campaignBest ?? {},
         hiscores,
+        swaps: Number.isFinite(parsed.swaps) ? Math.max(0, Math.floor(parsed.swaps as number)) : 0,
         lastInitials: typeof parsed.lastInitials === 'string' ? cleanInitials(parsed.lastInitials).trimEnd() : '',
       };
     } catch {

@@ -122,6 +122,12 @@ abstract class Theropod extends Dino {
    */
   protected standOff = 0;
   protected maxStandOff = 2.5;
+  /**
+   * Extra range (m) while the rig walks/drives toward this (world-frame) dino: it
+   * strikes from further out, so the camera's own approach during the windup brings
+   * it to its normal range instead of carrying it off the bottom of the screen.
+   */
+  protected leadIn = 0;
   /** Screen side (+1 right / -1 left) of a civilian this dino overlaps on screen (0 = none). */
   protected civSide = 0;
 
@@ -153,9 +159,26 @@ abstract class Theropod extends Dino {
     return 1;
   }
 
-  /** Striking range including any learned stand-off. */
+  /** Striking range including any learned stand-off and the rig's approach lead-in. */
   protected get range(): number {
-    return this.attackRange + this.standOff;
+    return this.attackRange + this.standOff + this.leadIn;
+  }
+
+  /**
+   * Track `leadIn` from how fast the rig is closing on this dino (`dir` = unit
+   * direction player → dino, same frame). Rig-frame dinos ride along: no lead-in.
+   */
+  protected updateLeadIn(dir: THREE.Vector3, dt: number) {
+    const rig = this.world.rig;
+    let want = 0;
+    if (this.frame !== 'rig' && rig.speed > 0.3) {
+      // Rig forward in the world is (-sin h, 0, -cos h).
+      const h = rig.space.rotation.y;
+      const closing = (-Math.sin(h) * dir.x - Math.cos(h) * dir.z) * rig.speed;
+      want = clamp(closing * this.windup, 0, 6);
+    }
+    // Grows quickly (the rig is already closing in), relaxes gently once it stops.
+    this.leadIn = damp(this.leadIn, want, want > this.leadIn ? 4 : 1.5, dt);
   }
 
   /**
@@ -210,6 +233,7 @@ abstract class Theropod extends Dino {
     const dist = _d.length();
     if (dist > 1e-3) _d.divideScalar(dist);
     else _d.set(0, 0, 1);
+    this.updateLeadIn(_d, dt);
     const range = this.range;
     if (dist > range + 0.25) {
       // Approach with a flanking weave that fades out near striking range.
@@ -235,13 +259,15 @@ abstract class Theropod extends Dino {
     // Too low on screen at this range: learn to hang back further.
     if (this.sy < this.spotLow + 0.04 && Math.abs(this.sx) < 0.9) this.standOff = Math.min(this.maxStandOff, this.standOff + dt * 2.5);
     else if (this.sy > this.spotLow + 0.3) this.standOff = Math.max(0, this.standOff - dt * 0.4);
-    // Strike only from a framed spot, never while the view is swinging away from it,
-    // and not from too close (just shot out of a pounce, a leap entry landed short).
+    // Strike only from a framed spot, never while the view is swinging away from it
+    // or the rig is about to walk/drive past it, and not from too close (just shot
+    // out of a pounce, a leap entry landed short).
     if (
       f === 0 &&
       this.cooldown <= 0 &&
       dist >= range * this.minStrikeFrac &&
       this.staysFramed(this.sx, this.windup, 0.85) &&
+      this.framedAhead(this.windup) &&
       this.takeSlot()
     ) {
       this.setState('windup');
@@ -1082,6 +1108,7 @@ export class Dilo extends Theropod {
       // Between spits: side-step around at range, watching the player.
       this.playerPos(_p);
       _d.set(this.root.position.x - _p.x, 0, this.root.position.z - _p.z).normalize();
+      this.updateLeadIn(_d, dt);
       this.prowl(dt, this.distToPlayer);
       return;
     }
@@ -1369,8 +1396,17 @@ export class Ptero extends Dino {
     // while the camera is swinging away (it would leave the frame mid-swoop).
     if (this.circleTime > this.nextDive && this.cooldown <= 0 && this.inPlayArea(this.anchor, 0.8)) {
       _v.set(this.root.position.x, 0, this.root.position.z).sub(this.playerPos(_p));
-      // (Below the boss bar / progress rail too, so the ring starts in clear sky.)
-      if (_v.dot(this.fwd) > 8 && this.spotNdc() && this.sy < 0.6 && this.staysFramed(this.sx, this.windup * 0.7, 0.8)) this.startDive();
+      // (Below the progress rail too — and well below the boss bar, as a boss fight's
+      // camera keeps re-framing — so the ring starts and stays in clear sky.)
+      if (
+        _v.dot(this.fwd) > 8 &&
+        this.spotNdc() &&
+        this.sy < (this.world.boss ? 0.52 : 0.6) &&
+        this.staysFramed(this.sx, this.windup * 0.7, 0.8) &&
+        // (The flare hangs in place for a moment: the rig mustn't race out from under it.)
+        this.framedAhead(0.5, 0.85)
+      )
+        this.startDive();
     }
   }
 
@@ -1748,7 +1784,7 @@ export class Trike extends Dino {
       this.moveToward(_v, this.speed * 1.5, dt);
       return;
     }
-    if (this.cooldown <= 0 && this.spotNdc() && this.staysFramed(this.sx, this.windup, 0.8) && this.takeSlot()) {
+    if (this.cooldown <= 0 && this.spotNdc() && this.staysFramed(this.sx, this.windup, 0.8) && this.framedAhead(this.windup, 0.9) && this.takeSlot()) {
       this.chargeDmg = 0;
       this.stompCount = 0;
       this.setState('windup');

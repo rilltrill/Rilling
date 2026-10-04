@@ -120,7 +120,13 @@ class Throwable extends Projectile {
 
 export class Behemoth extends Boss {
   override title = 'THE BEHEMOTH';
-  override deathDuration = 7.0;
+  /**
+   * Stagger (1.7 s) → topple over the railing → splash (~4.2 s) → spray column
+   * past the deck, held ~2 s; the truck floors it 0.6 s after the splash, and the
+   * column collapses on its own while the camera swings back to the road (see
+   * dispose). Kill → stage clear stays under ~8 s.
+   */
+  override deathDuration = 6.3;
 
   // Rig.
   private hips!: THREE.Group;
@@ -188,7 +194,12 @@ export class Behemoth extends Boss {
 
   // Death.
   private deathRight = new THREE.Vector3();
+  private deathFwd = new THREE.Vector3();
+  /** Metres the death stagger also lurches along the rail (keeps a bridge tower out of the shot). */
+  private deathShift = 0;
   private deathFrom = new THREE.Vector3();
+  /** Death-clock time at which the truck floors it (after the splash has read), −1 = not yet. */
+  private floorAt = -1;
   private splashed = false;
   private deathTravel = 4;
   private deathFocus = new THREE.Object3D();
@@ -201,7 +212,7 @@ export class Behemoth extends Boss {
 
   protected override configure(): void {
     this.name = 'behemoth';
-    this.maxHp = 330;
+    this.maxHp = 390;
     this.speed = 0;
     this.points = 30000;
     this.phases = [0.66, 0.33];
@@ -465,6 +476,7 @@ export class Behemoth extends Boss {
 
     // Splash column for the death plunge (added to the scene when it hits the water).
     this.splash = new THREE.Group();
+    this.splash.name = 'behemoth-splash';
     const foam = Kit.glow(0xe8f2ff, 1, true, 0.75);
     const spray = Kit.glow(0xb8d0e8, 1, true, 0.5);
     Kit.add(this.splash, Kit.cyl(2.2, 4.5, 34, 10, ), foam, 0, 17, 0);
@@ -531,8 +543,16 @@ export class Behemoth extends Boss {
     }
   }
 
+  /**
+   * Weak-point damage needed to stagger a wind-up: 8–10 twin-gun rounds (0.8)
+   * on the wound/head, ≈0.6–0.75 s of on-target fire inside a 1.0–1.5 s ring.
+   * Answer the ring on the glow and it breaks with time to spare; spray the body,
+   * chase a runner first or react late and it lands. (At 11–13 a loose aim lost
+   * ~6 hearts to the giant alone on top of the riot-brute stops; those stops and
+   * the runners that leap aboard mid-fight now carry that pressure.)
+   */
   private interruptNeed() {
-    return [8, 9, 10][this.phase] ?? 10;
+    return [6, 7, 8][this.phase] ?? 8;
   }
 
   protected override onPhase(phase: number): void {
@@ -678,7 +698,8 @@ export class Behemoth extends Boss {
         flightTime: kind === 'car' ? (fast ? 1.65 : 1.95) : fast ? 1.4 : 1.6,
         arc: kind === 'car' ? 0.5 : 0.4,
         damage: 1,
-        hp: kind === 'car' ? 4 : 3,
+        // Twin-gun rounds (0.8) to shoot it down: a car takes 4, a slab 3.
+        hp: kind === 'car' ? 3 : 2.2,
         points: kind === 'car' ? 400 : 250,
         mesh,
         size: kind === 'car' ? 1.3 : 1.0,
@@ -731,7 +752,7 @@ export class Behemoth extends Boss {
     if (this.phase >= 1 && this.bs !== 'intro' && this.bs !== 'roar') {
       this.minionT -= dt;
       if (this.minionT <= 0) {
-        this.minionT = this.phase >= 2 ? 11 : 14;
+        this.minionT = this.phase >= 2 ? 13 : 15;
         this.spawnMinion(this.phase >= 2 && this.minionFlip ? 'drop' : 'leap');
         if (this.phase >= 2) w.later(0.8, () => this.state !== 'dying' && !this.removed && this.spawnMinion('leap'));
       }
@@ -1301,6 +1322,7 @@ export class Behemoth extends Boss {
     this.deathFrom.copy(this.root.position);
     const off = _w.subVectors(this.root.position, rig.space.position).dot(_v);
     this.deathTravel = Math.max(1, BRIDGE.R + 0.6 - off);
+    this.deathShift = this.towerShift();
     this.vy = 0;
     w.audio.play('boss_roar', { volume: 1, pitch: 0.6 });
     // The horde breaks off: minions drop where they stand and anything in the air
@@ -1329,7 +1351,7 @@ export class Behemoth extends Boss {
     // Anything that still arrives (a scheduled minion wave) is cut down at once: no hits during the finale.
     for (const e of w.enemies()) if (e !== this && e.hostile && e.state !== 'dying') e.die(null);
     // Explosions from the wound and across the body.
-    if (t < 3.0 && Math.floor((t - dt) * 5) !== Math.floor(t * 5)) {
+    if (t < 2.6 && Math.floor((t - dt) * 5) !== Math.floor(t * 5)) {
       this.wound.getWorldPosition(_v);
       _v.x += w.rng.spread(1.4);
       _v.y += w.rng.spread(1.6);
@@ -1340,11 +1362,11 @@ export class Behemoth extends Boss {
       w.rig.shake(0.25);
     }
     const r = this.deathRight;
-    const shud = Math.sin(t * 24) * 0.06 * (1 - clamp(t / 2.0, 0, 1));
-    if (t < 2.0) {
+    const shud = Math.sin(t * 24) * 0.06 * (1 - clamp(t / DEATH_STAGGER, 0, 1));
+    if (t < DEATH_STAGGER) {
       // Staggering sideways to the railing, clutching the wound.
-      const k = smoothstep(0, 2.0, t);
-      this.root.position.copy(this.deathFrom).addScaledVector(r, k * this.deathTravel);
+      const k = smoothstep(0, DEATH_STAGGER, t);
+      this.root.position.copy(this.deathFrom).addScaledVector(r, k * this.deathTravel).addScaledVector(this.deathFwd, k * this.deathShift);
       this.model.rotation.z = shud + k * 0.12;
       this.spine.rotation.x += (-0.4 - this.spine.rotation.x) * Math.min(1, dt * 3);
       this.neck.rotation.x += (-0.9 - this.neck.rotation.x) * Math.min(1, dt * 3);
@@ -1353,16 +1375,16 @@ export class Behemoth extends Boss {
       this.shR.rotation.set(-1.2, 0, -0.5);
       this.elL.rotation.x = -1.6;
       this.elR.rotation.x = -1.5;
-      if (t > 1.2 && t - dt <= 1.2) w.audio.play('boss_roar', { volume: 0.9, pitch: 0.5 });
+      if (t > 1.0 && t - dt <= 1.0) w.audio.play('boss_roar', { volume: 0.9, pitch: 0.5 });
     } else {
       // Topple over the railing (pivoting on the feet), then drop into the bay.
-      const k = t - 2.0;
-      const roll = Math.min(1.9, 0.12 + k * k * 1.1);
+      const k = t - DEATH_STAGGER;
+      const roll = Math.min(1.9, 0.12 + k * k * 1.3);
       this.model.rotation.z = roll;
       this.shL.rotation.x += (-2.8 - this.shL.rotation.x) * Math.min(1, dt * 2);
       this.shR.rotation.x += (-2.6 - this.shR.rotation.x) * Math.min(1, dt * 2);
-      if (roll > 1.2) {
-        this.vy -= 18 * dt;
+      if (roll > 1.0) {
+        this.vy -= 20 * dt;
         this.root.position.y = Math.max(BRIDGE.WATER - 8, this.root.position.y + this.vy * dt);
         this.root.position.addScaledVector(r, dt * 3);
       }
@@ -1386,30 +1408,88 @@ export class Behemoth extends Boss {
         this.splashT = 0;
         w.scene.add(this.splash);
         w.fx.dust(_v.setY(BRIDGE.WATER + 2), 4, 0xd8e4f0);
+        // Let the column climb past the deck before the truck pulls away.
+        this.floorAt = t + 0.6;
       }
+    }
+    if (this.floorAt >= 0 && t >= this.floorAt) {
+      // Floor it: the truck pulls away while the camera holds on the spray (the
+      // 'escape' beat turns it back to the open road a moment later).
+      this.floorAt = -1;
+      w.rig.moveTo(Math.min(w.rig.length, w.rig.d + 120), 14);
+      w.audio.play('engine_rev', { volume: 0.9 });
     }
     // Splash column climbing past the deck.
     if (this.splashT >= 0) {
       this.splashT += dt;
-      const k = this.splashT;
-      const h = Math.min(1, k / 0.7);
-      this.splash.scale.set(1 + k * 0.8, 0.05 + h * (1 - Math.max(0, k - 1.2) * 0.4), 1 + k * 0.8);
-      this.splash.visible = true;
+      splashPose(this.splash, this.splashT);
     }
     this.root.getWorldPosition(_v);
     this.deathFocus.position.lerp(_v.setY(Math.max(3.5, _v.y + 4)), Math.min(1, dt * 4));
     return t > this.deathDuration;
   }
 
+  /**
+   * Rail metres to lurch along during the death stagger so the fall isn't hidden
+   * behind a bridge tower. The camera looks back from about rig.d + 9 (the truck
+   * eases on 9 m before the splash); a tower between it and the fall point, close
+   * enough to the fall to cover it, moves the fall in front of the tower (one last
+   * lunge after the truck), or — tower too near the truck for that — further
+   * back, where the tower covers less of the view.
+   */
+  private towerShift(): number {
+    const rig = this.world.rig;
+    _w.set(0, 0, -1).applyQuaternion(rig.space.quaternion).setY(0);
+    if (_w.lengthSq() < 1e-6) return 0;
+    this.deathFwd.copy(_w.normalize());
+    const dBoss = rig.d + _v.subVectors(this.root.position, rig.space.position).dot(this.deathFwd);
+    const dCam = Math.min(rig.length, rig.d + 9);
+    let shift = 0;
+    for (const T of TOWERS) {
+      if (T < dBoss - 4 || T > dCam) continue;
+      const ratio = (dCam - T) / Math.max(1, dCam - dBoss);
+      if (ratio < 0.45) continue;
+      if (T + 6 <= dCam - 9) shift = Math.min(12, T + 6 - dBoss); // ≤ ~7 m/s: a lunge, not a slide
+      else shift = Math.max(-10, Math.min(0, dCam - (dCam - T) / 0.45 - dBoss));
+    }
+    return shift;
+  }
+
   override dispose(): void {
     this.deathFocus.parent?.remove(this.deathFocus);
-    this.splash.parent?.remove(this.splash);
+    // The spray column outlives the boss: it collapses back into the bay while the
+    // camera swings round to the road, instead of vanishing at full height.
+    const splash = this.splash;
+    const z = z3Scene(this.world);
+    if (splash.parent && this.splashT >= 0 && z) {
+      let k = this.splashT;
+      z.tween(
+        1.8,
+        (_u, dt) => {
+          k += dt;
+          splashPose(splash, k);
+        },
+        () => splash.parent?.remove(splash),
+      );
+    } else splash.parent?.remove(splash);
     this.focus.parent?.remove(this.focus);
     this.ring.parent?.remove(this.ring);
-    const z = z3Scene(this.world);
     if (z) z.beacon = 0;
     super.dispose();
   }
+}
+
+/** Seconds the dying Behemoth staggers to the railing before it topples over. */
+const DEATH_STAGGER = 1.7;
+/** Rail distances of the bridge towers (they can hide the death plunge). */
+const TOWERS = [D.TOWER_A, D.TOWER_B];
+
+/** Splash column `k` seconds after the plunge: shoots up past the deck, spreads, then collapses into the bay. */
+function splashPose(splash: THREE.Object3D, k: number) {
+  const h = Math.min(1, k / 0.7);
+  const sy = 0.05 + h * Math.max(0, 1 - Math.max(0, k - 1.6) * 0.5);
+  splash.scale.set(1 + k * 0.8, sy, 1 + k * 0.8);
+  splash.visible = sy > 0.06;
 }
 
 registerEnemy('behemoth', (w, s) => new Behemoth(w, s));

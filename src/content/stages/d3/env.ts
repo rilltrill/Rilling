@@ -1244,6 +1244,11 @@ export class ParkEnv {
     this.storm.strike(world, close);
   }
 
+  /** A close strike with its bolt toward a world position (thunder right away). */
+  strikeAt(world: World, p: THREE.Vector3) {
+    this.storm.strike(world, true, _v.subVectors(p, world.camera.position));
+  }
+
   // ─── Update ───────────────────────────────────────────────────────────────
 
   private update(dt: number, w: World) {
@@ -1259,17 +1264,24 @@ export class ParkEnv {
     this.environment.surface =
       rd > D.MUD_FROM - 2 && rd < D.MUD_TO + 4 ? 'water' : rd > D.BRIDGE_FROM - 4 && rd < D.BRIDGE_TO + 6 ? 'wood' : rd > D.PAD - 20 ? 'concrete' : 'dirt';
 
-    // Blinkers + flickers.
+    // Blinkers + flickers. Reduced flashing: flickering lamps / windows hold steady
+    // and the sparking fence glows shimmer instead of strobing.
+    const calm = !!w.settings.reduceFlashes;
     for (const b of this.blinkers) b.obj.visible = ((t / b.period + b.phase) % 1) < b.duty;
     for (const f of this.flickers) {
       const s = Math.sin(t * 23 + f.seed) + Math.sin(t * 7.1 + f.seed * 2) + Math.sin(t * 1.3 + f.seed);
-      f.obj.visible = s > -0.4 || ((t * 3 + f.seed) % 1) < 0.08;
+      f.obj.visible = calm || s > -0.4 || ((t * 3 + f.seed) % 1) < 0.08;
     }
 
     // Paddock sparks.
     if (rd < D.FENCE_TO + 40) {
       this.sparkT -= dt;
       for (let i = 0; i < this.sparkGlows.length; i++) {
+        if (calm) {
+          this.sparkGlows[i].visible = true;
+          this.sparkGlows[i].scale.setScalar(0.75 + Math.sin(t * 2.3 + i * 1.7) * 0.2);
+          continue;
+        }
         const k = Math.sin(t * 31 + i * 2.3) + Math.sin(t * 13.7 + i);
         this.sparkGlows[i].visible = k > 0.6;
         this.sparkGlows[i].scale.setScalar(0.6 + Math.max(0, k) * 0.8);
@@ -1447,7 +1459,8 @@ export class ParkEnv {
       pl.color.setHex(0xa8d0ff);
       this.at((D.GAP_FROM + D.GAP_TO) / 2, D.FENCE_SIDE - 3, 2.2, pl.position);
       pl.distance = 30;
-      pl.intensity = (Math.sin(t * 31) + Math.sin(t * 13.7) > 0.4 ? 150 : 45) * (rd < D.GAP_TO + 10 ? 1 : 0.4);
+      const arc = calm ? 90 + Math.sin(t * 2.1) * 15 : Math.sin(t * 31) + Math.sin(t * 13.7) > 0.4 ? 150 : 45;
+      pl.intensity = arc * (rd < D.GAP_TO + 10 ? 1 : 0.4);
       if (pb > 0.01) {
         pl.position.lerp(this.packPos, pb * 0.8);
         pl.intensity += (110 - pl.intensity) * pb * 0.75;
@@ -1456,7 +1469,7 @@ export class ParkEnv {
       pl.color.setHex(0xff3020);
       this.visitor.beacon.getWorldPosition(pl.position);
       pl.position.y += 0.8;
-      pl.intensity = this.visitor.beacon.visible ? 140 : 25;
+      pl.intensity = calm ? 70 + Math.sin((t / 1.1) * Math.PI * 2) * 30 : this.visitor.beacon.visible ? 140 : 25;
       pl.distance = 30;
       if (pb > 0.01) {
         // A warm pool over the pack (the red beacon would turn green compys black).
@@ -1473,15 +1486,15 @@ export class ParkEnv {
     } else if (rd > D.ROADBLOCK - 30 && rd < D.ROADBLOCK + 10) {
       pl.color.setHex(0xffa020);
       this.at(D.ROADBLOCK - 2.4, 0, 1.6, pl.position);
-      pl.intensity = ((t / 0.9) % 1) < 0.45 ? 45 : 5;
+      pl.intensity = calm ? 25 + Math.sin((t / 0.9) * Math.PI * 2) * 12 : ((t / 0.9) % 1) < 0.45 ? 45 : 5;
     } else if (rd > D.MUD_FROM - 20 && rd < D.MUD_TO + 10) {
       pl.color.setHex(0xffa020);
       this.at(D.HOLD_MUD + 7, -6, 2.6, pl.position);
-      pl.intensity = ((t / 0.8) % 1) < 0.5 ? 50 : 6;
+      pl.intensity = calm ? 28 + Math.sin((t / 0.8) * Math.PI * 2) * 14 : ((t / 0.8) % 1) < 0.5 ? 50 : 6;
     } else if (rd > D.PAD - 60) {
       pl.color.setHex(0xff2a10);
       this.heli.beacon.getWorldPosition(pl.position);
-      pl.intensity = this.heli.beacon.visible ? 60 : 10;
+      pl.intensity = calm ? 35 + Math.sin((t / 1.2) * Math.PI * 2) * 12 : this.heli.beacon.visible ? 60 : 10;
     } else {
       pl.intensity = 0;
     }

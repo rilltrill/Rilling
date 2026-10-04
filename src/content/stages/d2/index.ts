@@ -8,6 +8,7 @@ import { buildLabs, labs } from './env';
 import { propaneTank } from './setpieces';
 
 import './boss';
+import './hybrid';
 
 /**
  * PRIMAL ISLAND · STAGE 2 — RESEARCH LABS
@@ -22,7 +23,10 @@ import './boss';
  *   gift shop   compys pour out of the ceiling vents, a raptor bursts from the
  *               stock room; a scientist hides behind the till
  *   atrium      dilos spit from the planting beds, a raptor pack flanks
- *   hatchery    raptors blow the lab doors off; hatchlings; a second scientist
+ *   hatchery    raptors blow the lab doors off; hatchlings; a second scientist;
+ *               the first of Specimen X's brood (hybrid.ts: shrugs off body
+ *               hits — aim for the head). More hybrids in the kitchen, server
+ *               room, pump room and containment wing.
  *   kitchen     raptors stalking between the counters, the freezer door flies
  *   servers     blinking racks, compys in the cable trays
  *   tunnels     steam, red strobes, an alcove ambush; pump-room pack + gas tanks
@@ -145,7 +149,8 @@ const beats: Beat[] = [
     ],
   },
   // Pacing: the 50 m walk across the lobby is broken up — compys skitter out of the
-  // gift shop, then a straggler vaults down off the left mezzanine.
+  // gift shop, a straggler vaults down off the left mezzanine, then a second pair
+  // darts out of the shop doorway as you reach it.
   {
     kind: 'move',
     label: 'to the gift shop',
@@ -159,8 +164,12 @@ const beats: Beat[] = [
       },
       {
         // Far end of the balcony (between the last pillar and the wall), ~30° off-axis.
-        start: { atD: D.LOBBY_HOLD + 13 },
+        start: { atD: D.LOBBY_HOLD + 16 },
         spawns: [at('raptor', -11.2, 5.2, -50, { entry: 'leap', opts: { variant: 'green' } })],
+      },
+      {
+        start: { atD: D.LOBBY_HOLD + 28 },
+        spawns: [at('compy', -0.8, 0, -55, { count: 2, every: 0.45, offset: [1.3, 0, 0.3] })],
       },
     ],
   },
@@ -257,6 +266,11 @@ const beats: Beat[] = [
         start: { atD: D.GREEN_HOLD + 8 },
         spawns: [at('raptor', -6, 0, -120, { entry: 'leap', opts: { variant: 'tan' } })],
       },
+      {
+        // Escaped hatchlings scurry out through the hatchery doorway ahead.
+        start: { atD: D.GREEN_HOLD + 25 },
+        spawns: [at('compy', 0.5, 0, -128.5, { count: 2, every: 0.5, offset: [-1.0, 0, 0.3] })],
+      },
     ],
   },
   // ── 4. Hatchery: lab doors blown open, hatchlings ────────────────────────
@@ -277,8 +291,9 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           at('raptor', labRSpawn[0], 0, labRSpawn[1], { entry: 'burst', opts: { variant: 'tan' } }),
-          // Off the far-left incubator (lands clear of the scientist's line of fire).
-          at('raptor', -3.6, 0.95, -147.2, { entry: 'leap', t: 1.1, opts: { variant: 'green' } }),
+          // Off the far-left incubator (lands clear of the scientist's line of fire):
+          // one of Specimen X's brood — it shrugs off body hits, aim for the head.
+          at('raptor_hybrid', -3.6, 0.95, -147.2, { entry: 'leap', t: 1.1 }),
         ],
       },
       {
@@ -324,10 +339,12 @@ const beats: Beat[] = [
         ],
       },
       {
-        start: { remaining: 1, after: 10 },
+        // The freezer door flies while the first pair is still closing in: the
+        // kitchen is a juggling act (and the gas tanks earn their keep).
+        start: { remaining: 2, after: 6 },
         spawns: [
-          at('raptor', freezerSpawn[0], 0, freezerSpawn[1], { entry: 'burst', opts: { variant: 'blue' } }),
-          at('raptor', -4.6, 0.95, -184, { entry: 'leap', t: 1.4, opts: { variant: 'red' } }),
+          at('raptor_hybrid', freezerSpawn[0], 0, freezerSpawn[1], { entry: 'burst', t: 1.2 }),
+          at('raptor', -4.6, 0.95, -184, { entry: 'leap', t: 2.6, opts: { variant: 'red' } }),
         ],
       },
       {
@@ -379,7 +396,7 @@ const beats: Beat[] = [
       },
       {
         start: { remaining: 1 },
-        spawns: [at('raptor', 0, 0, -216.5, { entry: 'leap', opts: { variant: 'red' } })],
+        spawns: [at('raptor_hybrid', 0, 0, -216.5, { entry: 'leap' })],
       },
     ],
   },
@@ -447,12 +464,13 @@ const beats: Beat[] = [
         ],
       },
       {
-        start: { remaining: 1 },
+        // Springs before the first wave is quite done.
+        start: { remaining: 2, after: 6 },
         spawns: [
           // The pack springs the trap together: both side tunnels and the far door at once.
           at('raptor', 2.4, 0, PUMP_SIDE_Z - 0.4, { entry: 'leap', opts: { variant: 'blue' } }),
           at('raptor', 19.6, 0, PUMP_SIDE_Z - 0.4, { entry: 'leap', t: 0.2, opts: { variant: 'blue' } }),
-          at('raptor', 11, 0, -295, { t: 0.5, opts: { variant: 'red' } }),
+          at('raptor_hybrid', 11, 0, -295, { t: 0.5 }),
         ],
       },
     ],
@@ -466,6 +484,14 @@ const beats: Beat[] = [
     to: D.WING_HOLD,
     speed: 4.3,
     look: { at: W(14, 2.2, -310), world: true, blend: 1.6 },
+    // A pair of compys bolts out of the wing doorway — fleeing whatever is
+    // pounding on the glass in there (keeps the build-up from going quiet).
+    waves: [
+      {
+        start: { atD: D.PUMP_HOLD + 1.5 },
+        spawns: [at('compy', 11.6, 0, -297.5, { count: 2, every: 0.45, offset: [-1.1, 0, 0.4] })],
+      },
+    ],
     onStart: (w) => {
       w.later(3.6, () => w.audio.play('trike_bellow', { volume: 0.8, pitch: 0.9 }));
       w.later(4.3, () => labs(w)?.cells[4]?.crack(w));
@@ -514,7 +540,7 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           at('raptor', 18.6, 0, -324.5, { entry: 'leap', opts: { variant: 'blue' } }),
-          at('raptor', 11, 0, -332, { t: 1.2, opts: { variant: 'red' } }),
+          at('raptor_hybrid', 11, 0, -332, { t: 1.2 }),
         ],
       },
     ],
@@ -527,8 +553,9 @@ const beats: Beat[] = [
     look: { at: W(11, 2.6, -356), world: true, blend: 1.6 },
     waves: [
       {
-        // Compys bolt out of the holding hall, fleeing something worse.
-        start: { atD: D.WING_HOLD + 9 },
+        // Compys bolt out of the holding hall, fleeing something worse (late in the
+        // walk, so the build-up into the lights-out never goes quiet for long).
+        start: { atD: D.WING_HOLD + 14 },
         spawns: [at('compy', 11.6, 0, -333, { count: 3, every: 0.35, offset: [-0.8, 0, 0.3] })],
       },
     ],

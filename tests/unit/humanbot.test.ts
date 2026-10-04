@@ -24,6 +24,7 @@ import { DEFAULT_SETTINGS } from '../../src/core/types';
 import { Kit } from '../../src/content/kit/ModelKit';
 import { ALL_STAGES } from '../../src/content';
 import { Enemy } from '../../src/gameplay/Enemy';
+import type { Boss } from '../../src/gameplay/Boss';
 import { Projectile } from '../../src/gameplay/Projectile';
 import { Pickup } from '../../src/gameplay/Pickup';
 import { Civilian } from '../../src/gameplay/Civilian';
@@ -88,6 +89,8 @@ interface TeleRec {
   frames: number;
   onScreen: number;
   shootable: number;
+  /** Last sampled reachability (sampled every 3rd frame; the frames between carry it). */
+  lastReach: boolean;
   hud: number;
   startOnScreen: boolean;
   startShootable: boolean;
@@ -512,6 +515,7 @@ export function simulateHuman(
           frames: 0,
           onScreen: 0,
           shootable: 0,
+          lastReach: false,
           hud: 0,
           startOnScreen: !!sp,
           startShootable: anyReachable(e),
@@ -523,7 +527,10 @@ export function simulateHuman(
       r.frames++;
       if (sp) r.onScreen++;
       if (sp && inHud(sp, W, H, !!world.boss)) r.hud++;
-      if (r.frames % 3 === 1 ? anyReachable(e) : r.shootable / Math.max(1, r.frames - 1) > 0.5) r.shootable++;
+      // Sample every 3rd frame and carry the last sample (a running-ratio carry undercounted
+      // telegraphs blocked on their first sample but reachable for the rest of their life).
+      if (r.frames % 3 === 1) r.lastReach = anyReachable(e);
+      if (r.lastReach) r.shootable++;
     }
     for (const [e, r] of tele) {
       if (!seenNow.has(e)) {
@@ -542,7 +549,7 @@ export function simulateHuman(
       for (const e of world.entities) {
         if (e instanceof Projectile) e.removed = true;
         else if (e instanceof Enemy && e.state !== 'dying') {
-          if (e.isBoss) e.stateTime = 0;
+          if (e.isBoss) (e as Boss).onContinue();
           else if (e.state === 'windup' || e.state === 'recover') e.stagger();
         }
       }

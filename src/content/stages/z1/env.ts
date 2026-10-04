@@ -35,6 +35,8 @@ const _cam = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _c = new THREE.Color();
+const POLICE_RED = new THREE.Color(0xff2020);
+const POLICE_BLUE = new THREE.Color(0x2a50ff);
 
 interface AccentSpot {
   /** Active while rig.d is in [from, to). */
@@ -139,6 +141,8 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   const update = (dt: number, w: World) => {
     z.t += dt;
     const t = z.t;
+    // Settings → REDUCE FLASHING: strobes become slow fades, buzzing/failing lights hold steady.
+    const rf = w.settings.reduceFlashes;
     const cam = w.camera;
     cam.getWorldPosition(_cam);
     // Sky follows the camera on XZ so it always reads as infinitely far.
@@ -179,13 +183,18 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       const a = accents[accentIdx];
       let k = 1;
       if (a.mode === 'police') {
-        const ph = Math.floor(t * 4) % 2;
-        accent.color.setHex(ph ? 0xff2020 : 0x2a50ff);
-        k = 0.55 + 0.45 * Math.abs(Math.sin(t * 12.5));
+        if (rf) {
+          accent.color.copy(POLICE_RED).lerp(POLICE_BLUE, 0.5 + 0.5 * Math.sin(t * 1.6));
+          k = 0.8;
+        } else {
+          const ph = Math.floor(t * 4) % 2;
+          accent.color.setHex(ph ? 0xff2020 : 0x2a50ff);
+          k = 0.55 + 0.45 * Math.abs(Math.sin(t * 12.5));
+        }
       } else if (a.mode === 'buzz') {
-        k = buzzK(t, 3.1);
+        k = rf ? 1 : buzzK(t, 3.1);
       } else if (a.mode === 'flicker') {
-        k = Math.sin(t * 9) > -0.85 ? 0.9 + 0.1 * Math.sin(t * 31) : 0.15;
+        k = rf ? 0.85 + 0.05 * Math.sin(t * 1.3) : Math.sin(t * 9) > -0.85 ? 0.9 + 0.1 * Math.sin(t * 31) : 0.15;
       }
       let base = a.intensity;
       if (accentIdx === accents.length - 1) base *= 0.6 + z.bossLight;
@@ -223,7 +232,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     }
 
     // Police light bars.
-    const ph = Math.floor(t * 4) % 2 === 0;
+    const ph = Math.floor(t * (rf ? 1 : 4)) % 2 === 0;
     for (let i = 0; i < anim.lightbars.length; i++) {
       anim.lightbars[i][0].visible = ph;
       anim.lightbars[i][1].visible = !ph;
@@ -231,12 +240,12 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     // Blinkers + buzzing neon + chase lights.
     for (const b of anim.blinkers) b.obj.visible = ((t + b.phase) % b.period) / b.period < b.duty;
     // The buzz objects are the "off" overlays: visible = tube dark.
-    for (const b of anim.buzz) b.obj.visible = buzzK(t, b.seed) < 0.5;
-    const chaseOn = Math.floor(t * 4) % 2;
+    for (const b of anim.buzz) b.obj.visible = !rf && buzzK(t, b.seed) < 0.5;
+    const chaseOn = Math.floor(t * (rf ? 1 : 4)) % 2;
     for (let i = 0; i < anim.chase.length; i++) anim.chase[i].visible = i % 2 === chaseOn;
     // Failing street lamp.
     if (badLamp && poolDef && beamDef) {
-      const on = buzzK(t * 0.7, 9.1) > 0.5;
+      const on = rf || buzzK(t * 0.7, 9.1) > 0.5;
       badLamp.glow.visible = on;
       const k = on ? 1 : 0.08;
       pools.setColorAt(badLamp.pool, _c.setHex(poolDef.color).multiplyScalar(poolDef.k * k));

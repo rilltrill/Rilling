@@ -6,7 +6,7 @@ import type { ArtStyle, CampaignId, Grade, QualityLevel, RetroMode, Settings, St
 import { haptic } from '../core/Haptics';
 import { applyComfort, el, escapeHtml, onTap } from './dom';
 import { cityCardArt, jungleCardArt, LOCK_ICON, SKULL_ICON, TUTORIAL_ART } from './art';
-import { arrowSvg, bombSvg, installPixelSprites } from './pixel';
+import { arrowSvg, bombSvg, installPixelSprites, swapSvg } from './pixel';
 import { pixelateInto } from './pixelate';
 
 export interface MenuActions {
@@ -400,7 +400,7 @@ export class Menus {
     // Taps on the options (labels included) change settings; they never dismiss the card.
     opts.addEventListener('pointerdown', (e) => e.stopPropagation());
     this.toggleRow(opts, 'REDUCE FLASHING', 'reduceFlashes', st, commit);
-    this.segRow(opts, 'SHAKE', 'screenShake', SHAKE_OPTS, st, commit);
+    this.segRow(opts, 'SCREEN SHAKE', 'screenShake', SHAKE_OPTS, st, commit, 'SHAKE');
     if (prefers) el('div', 'nt-note', box, 'REDUCED MOTION IS ON FOR THIS DEVICE');
     el('div', 'nt-stripes', box);
     el('div', 'nt-foot', s, 'TAP TO CONTINUE');
@@ -708,10 +708,10 @@ export class Menus {
       [TUTORIAL_ART.ring, 'RING + ! = ATTACK', 'It shrinks, then strikes. Shoot before it closes!'],
       [TUTORIAL_ART.reload, 'RELOAD', 'Tap RELOAD or swipe down.'],
       [TUTORIAL_ART.crate, 'SHOOT CRATES', 'Guns, bombs and health inside.'],
+      [`<div class="tip-glyph glyph-swap">${swapSvg()}</div>`, 'SWITCH GUNS', 'Tap your gun panel to swap. Vehicles use their mounted gun.'],
       [TUTORIAL_ART.civ, "DON'T SHOOT CIVILIANS", 'Hitting a survivor costs a life.'],
-      ['<div class="tip-glyph glyph-head">+</div>', 'HEADSHOTS', 'Double damage, bonus points.'],
+      ['<div class="tip-glyph glyph-head">+</div>', 'HEADSHOTS + COMBOS', "Heads take double damage. Don't miss: up to x4 score."],
       [`<div class="tip-glyph glyph-bomb">${bombSvg()}</div>`, 'BOMB', 'Clears the screen. You get one.'],
-      ['<div class="tip-glyph glyph-combo">x4</div>', 'COMBOS', "Don't miss! Up to x4 score."],
     ];
     for (const [art, title, text] of tips) {
       const t = el('div', 'tip', grid);
@@ -825,7 +825,7 @@ export class Menus {
       ['3d', '3D'],
       ['sprites', 'SPRITES'],
     ] as [ArtStyle, string][], st, commit);
-    this.segRow(colA, 'SCREEN SHAKE', 'screenShake', SHAKE_OPTS, st, commit);
+    this.segRow(colA, 'SCREEN SHAKE', 'screenShake', SHAKE_OPTS, st, commit, 'SHAKE');
     this.toggleRow(colA, 'SHOW FPS', 'showFps', st, commit);
     this.toggleRow(colB, 'AIM ASSIST', 'aimAssist', st, commit);
     this.toggleRow(colB, 'AUTO RELOAD', 'autoReload', st, commit);
@@ -846,8 +846,8 @@ export class Menus {
         'Unlocked stages, best scores and both HI-SCORE tables will be wiped. This cannot be undone.',
         'ERASE',
         () => {
+          // (This credit's grades stay: they describe the run in progress, not the save.)
           this.save.reset();
-          this.runGrades.clear();
           reset.textContent = 'DONE';
           reset.classList.add('done');
           this.feedback('ui_back');
@@ -859,7 +859,10 @@ export class Menus {
 
   /** Modal choice over `screen`: KEEP (default, left) / `yes` (right, armed after ARM_MS). */
   private confirm(screen: HTMLElement, title: string, text: string, yes: string, onYes: () => void) {
+    // The veil is position:fixed (covers the viewport even when `screen` is scrolled);
+    // the screen behind it stops scrolling while the dialog is up.
     const veil = el('div', 'confirm-veil', screen);
+    screen.classList.add('modal-open');
     const box = el('div', 'confirm-box', veil);
     box.setAttribute('role', 'alertdialog');
     box.setAttribute('aria-label', title);
@@ -873,6 +876,7 @@ export class Menus {
       if (closed) return;
       closed = true;
       this.keyHandler = prevKeys;
+      screen.classList.remove('modal-open');
       veil.classList.add('leaving');
       window.setTimeout(() => veil.remove(), 160);
     };
@@ -929,9 +933,18 @@ export class Menus {
     return row;
   }
 
-  private segRow<K extends SegKey>(parent: HTMLElement, label: string, key: K, opts: [Settings[K], string][], st: Settings, commit: () => void) {
+  /** `short`: label used where the row is narrow (phone landscape columns), see styles.css .lbl-short. */
+  private segRow<K extends SegKey>(
+    parent: HTMLElement,
+    label: string,
+    key: K,
+    opts: [Settings[K], string][],
+    st: Settings,
+    commit: () => void,
+    short?: string,
+  ) {
     const row = el('div', 'set-row seg-row', parent);
-    el('span', 'set-label', row, label);
+    el('span', 'set-label', row, short ? `<span class="lbl-long">${label}</span><span class="lbl-short">${short}</span>` : label);
     const wrap = el('div', 'set-seg', row);
     // Numeric settings light the nearest choice (a stored 0.8 shows as FULL).
     const cur = st[key];

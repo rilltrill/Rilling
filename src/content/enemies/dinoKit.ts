@@ -1509,6 +1509,26 @@ export abstract class Dino extends Enemy {
     return Math.abs(a) < 1.45 && Math.abs(Math.tan(a)) < limit * tanH;
   }
 
+  /**
+   * Will `obj` still be inside the play area after `t` more seconds of the rig's
+   * travel along the rail? (World-frame dinos only: rig-frame ones ride along.)
+   * Walking up to a crouched compy carries it off the bottom of the screen within
+   * a second; such an attack must not start (prowl backs off to a better spot).
+   */
+  protected framedAhead(t: number, margin = 0.95, obj: THREE.Object3D = this.anchor): boolean {
+    obj.getWorldPosition(_ndc);
+    const rig = this.world.rig;
+    if (this.frame !== 'rig' && rig.speed > 0.3) {
+      // The camera moves forward (-Z of rig.space): the scene slides back toward it.
+      const h = rig.space.rotation.y;
+      const s = rig.speed * t;
+      _ndc.x += Math.sin(h) * s;
+      _ndc.z += Math.cos(h) * s;
+    }
+    _ndc.project(this.world.camera);
+    return ndcInPlayArea(_ndc.x, _ndc.y, _ndc.z, margin);
+  }
+
   /** Arm the framing watchdog for a fresh telegraph. */
   protected watchStart() {
     this.outRun = 0;

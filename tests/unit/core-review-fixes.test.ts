@@ -434,3 +434,45 @@ describe('comfort defaults from the OS reduce-motion preference', () => {
     expect(prefersReducedMotion()).toBe(false);
   });
 });
+
+describe('engine-wide soft-lock nets (Enemy)', () => {
+  /** Root position that puts a Dummy's anchor (0.9 m up) at screen NDC (0, ndcY), standing on the floor. */
+  function pinAt(w: World, ndcY: number) {
+    const ray = new THREE.Raycaster();
+    ray.setFromCamera(new THREE.Vector2(0, ndcY), w.camera);
+    const { origin, direction } = ray.ray;
+    const t = (0.9 - origin.y) / direction.y;
+    return origin.clone().addScaledVector(direction, t).setY(0);
+  }
+
+  it('a walker left buried under the floor (a move that ignored a slope) climbs back out', () => {
+    const { w } = makeWorld();
+    const e = w.add(new Dummy(w, spawn(w, w.rig.relToWorld([0, 0, 9]))));
+    for (let i = 0; i < 240 && e.state === 'entry'; i++) w.update(DT);
+    expect(e.state).not.toBe('entry');
+    e.root.position.y = -2;
+    for (let i = 0; i < 6; i++) w.update(DT);
+    expect(e.root.position.y).toBeLessThan(-1); // a moment's grace…
+    for (let i = 0; i < 30; i++) w.update(DT);
+    expect(e.root.position.y).toBeCloseTo(0, 3); // …then back on the floor, shootable
+  });
+
+  it('an old enemy loitering just outside the play area leaves; one in view stays', () => {
+    const { w } = makeWorld();
+    w.update(DT);
+    const lost = w.add(new Dummy(w, spawn(w, pinAt(w, -1.1))));
+    const seen = w.add(new Dummy(w, spawn(w, pinAt(w, -0.45))));
+    for (let i = 0; i < 240 && (lost.state === 'entry' || seen.state === 'entry'); i++) w.update(DT);
+    lost.age = seen.age = 46;
+    const lostAt = pinAt(w, -1.1);
+    const seenAt = pinAt(w, -0.45);
+    for (let t = 0; t < 9 && !lost.removed; t += DT) {
+      // Held in place (as if stuck) so only the net can end it.
+      lost.root.position.copy(lostAt);
+      seen.root.position.copy(seenAt);
+      w.update(DT);
+    }
+    expect(lost.removed).toBe(true);
+    expect(seen.removed).toBe(false);
+  });
+});

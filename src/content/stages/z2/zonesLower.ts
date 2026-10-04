@@ -256,8 +256,13 @@ export function buildMorgue(ctx: ZoneCtx): THREE.Group {
 // Corridor B (service corridor to surgery)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Corridor B's ceiling vent (x, z): a crawler drops out of it in the service-corridor hold. */
+export const CORR_B_VENT: [number, number] = [78.5, -100.6];
+/** The DANGER door on corridor B's east wall: a breakable door slot (a runner smashes through it). */
+export const CORR_B_DOOR = { x: R.corrB.x1, z: -104, w: 1.3, h: 2.2 };
+
 export function buildCorrB(ctx: ZoneCtx): THREE.Group {
-  const { rng } = ctx;
+  const { rng, sc } = ctx;
   const g = new THREE.Group();
   g.name = 'corrB';
   const r = R.corrB;
@@ -268,9 +273,27 @@ export function buildCorrB(ctx: ZoneCtx): THREE.Group {
     ceiling: T(0x5a5e58, TX.concrete),
     sides: { zMin: null, zMax: null, xMin: [{ at: -100, w: 1.3, h: 2.2 }], xMax: [{ at: -104, w: 1.3, h: 2.2 }] },
   });
-  // Closed doors in the openings.
+  // Closed LINEN door; the DANGER door is a breakable slot with a store room behind it.
   box(g, 0.06, 2.2, 1.3, T(0x5a6a6a, TX.paint), r.x0, B + 1.1, -100);
-  box(g, 0.06, 2.2, 1.3, T(0x6a5a4a, TX.paint), r.x1, B + 1.1, -104);
+  const dz = CORR_B_DOOR.z;
+  sideRoom(g, r.x1 + 0.15, r.x1 + 3.4, dz - 2.2, dz + 1.7, B, 2.9, 0x2a2018, (s) => {
+    // Hazard store: drums and a crate stack in the dark.
+    for (const [x, z] of [[r.x1 + 2.6, dz - 1.4], [r.x1 + 2.9, dz - 0.7], [r.x1 + 2.5, dz + 1.0]] as [number, number][]) {
+      cyl(s, 0.3, 0.3, 0.9, T(0x8a6a1a, TX.paint), x, B + 0.45, z, 8);
+      box(s, 0.62, 0.08, 0.06, M(0x1a1a1a), x, B + 0.62, z + 0.29);
+    }
+    box(s, 0.9, 0.7, 0.8, T(0x5a4a34, TX.wood), r.x1 + 2.8, B + 0.35, dz + 0.2);
+    box(s, 0.7, 0.5, 0.6, T(0x6a5a40, TX.wood), r.x1 + 2.85, B + 0.95, dz + 0.15);
+  });
+  sc.doorSlots.push({
+    hinge: new THREE.Vector3(r.x1, B, dz - CORR_B_DOOR.w / 2),
+    ry: -Math.PI / 2,
+    w: CORR_B_DOOR.w,
+    h: CORR_B_DOOR.h,
+    out: new THREE.Vector3(-1, 0, 0),
+    centre: new THREE.Vector3(r.x1, B, dz),
+    color: 0x6a5a4a,
+  });
   plateSign(g, 'LINEN', r.x0 + 0.17, B + 2.5, -100, Math.PI / 2, 0.03, 0x1a1a1a, 0xd8d8cc);
   plateSign(g, 'DANGER', r.x1 - 0.17, B + 2.5, -104, -Math.PI / 2, 0.03, 0xffffff, 0x9a1a1a);
   // Pipes + cable tray.
@@ -281,7 +304,8 @@ export function buildCorrB(ctx: ZoneCtx): THREE.Group {
   flickerPanel(ctx, g, 79, B + r.h, -98, 0, 'blink');
   panel(g, 79, B + r.h, -102, 0, false);
   flickerPanel(ctx, g, 79, B + r.h, -106, 0, 'buzz');
-  vent(ctx, g, 79.6, B + r.h, -100.6, B);
+  // (Left of the rail: its crawler comes in left of the DANGER-door runner's path.)
+  vent(ctx, g, CORR_B_VENT[0], B + r.h, CORR_B_VENT[1], B);
   gurney(g, 77.6, B, -103, 0.05, { sheet: 0x2a3a34, body: true, blood: true });
   wheelchair(g, 80.5, B, -97.2, -2.2);
   dragTrail(g, 79, -95, 78.4, -108, B, rng);

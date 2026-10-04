@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Engine } from '../core/Engine';
 import { Input } from '../core/Input';
 import { Save } from '../core/Save';
-import type { ArtStyle, CampaignId, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
+import type { ArtStyle, CampaignId, Grade, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
 import { AudioSystem } from '../audio/Audio';
 import type { MusicId } from '../audio/names';
 import { Hud } from '../ui/Hud';
@@ -16,6 +16,7 @@ import { Kit } from '../content/kit/ModelKit';
 import { AutoPlayer } from '../debug/AutoPlayer';
 import type { WeaponId } from '../core/types';
 import { zooStage } from '../content/stages/zoo';
+import type { Boss } from './Boss';
 import { Enemy } from './Enemy';
 import type { Entity } from './Entity';
 import { Projectile } from './Projectile';
@@ -71,6 +72,8 @@ const LOAD_PAINT_FRAMES = 2;
 /** Pause-screen note while the GPU has dropped the WebGL context. */
 const GFX_NOTE = 'GRAPHICS RESET - PLEASE WAIT';
 /** CONTINUE? countdown length (s), and the least it reopens with after the app was backgrounded. */
+/** Hand-made weapon switches after which the HUD stops coaching the gun panel. */
+const SWAP_COACH = 3;
 const CONTINUE_SECS = 9;
 const CONTINUE_MIN_RESUME = 3;
 
@@ -101,10 +104,12 @@ interface Run {
   continues: number;
   /** Arcade: the credit has been scored (game over / campaign clear): leaving adds nothing. */
   ended: boolean;
+  /** This run's grade per cleared stage (the campaign-clear screen shows these, not all-time bests). */
+  grades: Record<string, Grade>;
 }
 
 function newRun(mode: Run['mode'], campaign: CampaignDef, stageIndex: number): Run {
-  return { mode, campaign, stageIndex, total: 0, bombs: 1, stageBombs: 1, banked: 0, continues: 0, ended: false };
+  return { mode, campaign, stageIndex, total: 0, bombs: 1, stageBombs: 1, banked: 0, continues: 0, ended: false, grades: {} };
 }
 
 /** Attract demo progress. */
@@ -194,7 +199,7 @@ export class Game implements MenuActions {
       pause: () => this.pause(),
       reload: () => this.shooter?.reload(),
       bomb: () => this.state === 'playing' && this.world?.useBomb(),
-      cycleWeapon: () => this.state === 'playing' && this.world?.weapons.cycle(),
+      cycleWeapon: () => this.manualSwap(() => this.world?.weapons.cycle()),
     });
     this.menus = new Menus(root.querySelector('#menu-layer') as HTMLElement, this.save, this.audio, campaigns, this);
     this.menus.onScreen = (name) => {
@@ -444,6 +449,7 @@ export class Game implements MenuActions {
     // HUD wiring first: the opening beat (usually a banner, or a boss when
     // debugging with ?beat=) talks to the HUD from inside runner.start().
     this.hud.reset();
+    this.hud.coachSwap = this.save.data.swaps < SWAP_COACH;
     w.events.on('boss-start', ({ boss }) => this.hud.bossIntro(boss.title));
     w.events.on('player-hurt', ({ from }) => this.showHurtDirection(from));
     // The intro card already names the stage: don't repeat it as the opening banner.
@@ -480,7 +486,9 @@ export class Game implements MenuActions {
     const w = this.world;
     if (!l || !w || !this.runner) return;
     const stage = l.stage;
-    this.warmUp(w, stage);
+    // The attract demo (god mode + aimbot) shrugs off first-appearance hitches, but a
+    // multi-second warm-up block would freeze the title screen it starts from.
+    if (!this.demo) this.warmUp(w, stage);
     this.music(stage.music ?? (this.campaignOf(stage).id === 'zombie' ? 'zombie' : 'dino'));
     if (this.demo) {
       // Starts on a black cut that fast-forwards to the first enemies (see demoTick).
@@ -792,6 +800,7 @@ export class Game implements MenuActions {
     if (this.run) {
       this.run.total += result.total;
       this.run.banked = result.total;
+      this.run.grades[stage.id] = result.grade;
       // Arcade runs carry bombs into the next stage; Stage Select always starts fresh.
       if (this.run.mode === 'arcade') this.run.bombs = w.player.bombs;
     }
@@ -869,6 +878,8 @@ export class Game implements MenuActions {
   }
 
   restart(): void {
+    // A second tap on the still-visible results / pause screen while the stage builds.
+    if (this.loading) return;
     if (!this.runner) return this.quit();
     const stage = this.runner.stage;
     const run = this.run;
@@ -907,6 +918,7 @@ export class Game implements MenuActions {
   }
 
   nextStage(): void {
+    if (this.loading) return;
     const run = this.run;
     const stage = this.runner?.stage;
     if (!run || !stage) return this.quit();
@@ -922,7 +934,7 @@ export class Game implements MenuActions {
         this.teardownWorld();
         this.state = 'menu';
         this.music('results');
-        this.menus.showCampaignClear(run.campaign, run.total, isBest, nameEntry);
+        this.menus.showCampaignClear(run.campaign, run.total, isBest, nameEntry, run.grades);
         this.backdropTheme = run.campaign.id === 'zombie' ? 'city' : 'jungle';
       }
     } else {
@@ -948,7 +960,7 @@ export class Game implements MenuActions {
       if (e instanceof Projectile) {
         e.removed = true;
       } else if (e instanceof Enemy && e.state !== 'dying') {
-        if (e.isBoss) e.stateTime = 0;
+        if (e.isBoss) (e as Boss).onContinue();
         else if (e.state === 'windup' || e.state === 'recover') e.stagger();
       }
     }
@@ -993,9 +1005,28 @@ export class Game implements MenuActions {
     }
     if (this.state !== 'playing' || !this.world) return;
     const map: Record<string, WeaponId> = { Digit1: 'pistol', Digit2: 'shotgun', Digit3: 'smg', Digit4: 'magnum' };
-    if (map[code]) this.world.weapons.select(map[code]);
-    if (code === 'KeyQ' || code === 'Tab') this.world.weapons.cycle();
+    const ws = this.world.weapons;
+    if (map[code]) this.manualSwap(() => ws.select(map[code]));
+    if (code === 'KeyQ' || code === 'Tab') this.manualSwap(() => ws.cycle());
     if (code === 'KeyB') this.world.useBomb();
+  }
+
+  /**
+   * A weapon switch the player asked for (gun-panel tap, keys). Counts toward
+   * retiring the HUD's switch coaching once they've clearly got it.
+   */
+  private manualSwap(fn: () => void) {
+    const w = this.world;
+    if (this.state !== 'playing' || !w) return;
+    const before = w.weapons.active;
+    fn();
+    if (w.weapons.active === before) return;
+    this.hud.swapAnswered();
+    if (this.save.data.swaps < SWAP_COACH) {
+      this.save.data.swaps++;
+      this.save.persist();
+      this.hud.coachSwap = this.save.data.swaps < SWAP_COACH;
+    }
   }
 
   /** Held-finger repeat fire. Semi-autos wait a moment so single taps stay single. */

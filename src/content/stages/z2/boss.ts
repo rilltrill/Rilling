@@ -7,6 +7,7 @@ import type { Enemy } from '../../../gameplay/Enemy';
 import { clamp, damp, smoothstep } from '../../../core/math';
 import { Kit } from '../../kit/ModelKit';
 import { createEnemy, registerEnemy } from '../../registry';
+import { Projectile, type ProjectileOptions } from '../../../gameplay/Projectile';
 import { M, T, TX } from './mats';
 import { bakeInto } from './bake';
 import { z2Scene } from './scene';
@@ -25,7 +26,8 @@ import { z2Scene } from './scene';
  *                      exposed (big weak point); spawns crawlers from the pool.
  *  Phase 3 (< 33 %):   frenzy — faster wind-ups, double slams, bile volleys.
  *
- * Bursting an eye during a wind-up always interrupts the attack.
+ * Bursting an eye during a wind-up interrupts the attack (once the ring has
+ * been up for a moment: fire already on the eyes can't snuff it as it opens).
  *
  * Fairness/pacing (tuned with tests/unit/humanbot.test.ts, target 45–90 s for a
  * ~3 taps/s phone player): eyes and armed tentacle tips carry invisible hit
@@ -33,6 +35,16 @@ import { z2Scene } from './scene';
  * after ~5 s, attacks only start when their ring anchor is in the playable
  * screen area, and the pool crawlers emerge in the lower-centre of the view and
  * hold a 4.8 m stand-off so their pounce ring is drawn above the HUD panels.
+ * Bile volleys fan out low (clear of the health bar, never one glob hiding
+ * another). Mercy is FIGHT-scoped (see TIERS): every heart the player loses
+ * buys a short breather (no new boss attack and no new minion windup); once
+ * this fight has cost two hearts — or the player is down to their last two —
+ * the boss eases off: a little longer gaps and windups, easier-to-break slams,
+ * no combos, pairs of globs, one minion ring at a time; and after seven hearts
+ * (or a second continue) it goes really easy. A single continue only refills
+ * the hearts — it's an arcade boss. So the fight bites (two hearts, sometimes
+ * three, for an average player; a full bar and a continue for a shaky one)
+ * without snowballing.
  */
 
 const FLESH = 0x8a4038;
@@ -70,12 +82,99 @@ const CRAWL_PTS: [number, number][] = [
 const CRAWL_RANGE = 4.8;
 /** At most this many pool crawlers alive at once. */
 const CRAWL_MAX = 3;
+/** Lateral slot (−1 … 1) of each glob in a volley, in launch order. */
+const VOLLEY_SLOTS = [-1, 1, 0];
+/** Seconds without a new attack (boss or minion) after the player loses a heart. */
+const BREATHER = 2.2;
+/** Hearts this fight may take before the boss eases off (mercy tier 1, see `tier`). */
+const MERCY_AFTER = 2;
+/**
+ * Hearts this fight may take before the boss goes REALLY easy (tier 2) — or the
+ * player has used DEEP_MERCY_CONTINUES continues against it. A struggling
+ * player still has to finish the fight, just with time to answer every ring.
+ * (One continue alone only refills the hearts: it's an arcade boss — the fight
+ * carries on at tier 1 until the deep-mercy count is reached.)
+ */
+const DEEP_MERCY_AFTER = 7;
+const DEEP_MERCY_CONTINUES = 2;
+/**
+ * When a heart is lost, a minion whose windup still has more than this left
+ * backs off (anything closer lands inside the player's 1.1 s grace and is absorbed).
+ */
+const BACK_OFF_LEFT = 0.9;
+
+interface MercyTier {
+  /** Extra windup on every attack (latched when it starts). */
+  ease: number;
+  /** Extra idle gap between attacks. */
+  gap: number;
+  /** Interrupt damage that breaks a windup (null: the per-phase value). */
+  interrupt: number | null;
+  /** Pool crawlers alive at once (0: no new ones). */
+  crawlCap: number;
+  /** Most globs in one spit. */
+  volleyMax: number;
+  /** Phase-3 double slams. */
+  combos: boolean;
+  /** Minions that may wind up together (World attack slots), and the gap after one's ring before the next. */
+  minionSlots: number;
+  minionSpacing: number;
+  /** How long a new boss attack waits for a minion's ring to play out. */
+  waitForMinion: number;
+  /**
+   * Seconds at the start of a slam/spit windup in which hits don't count toward
+   * breaking it (and a burst eye doesn't cancel it): fire that was already on
+   * the eyes can't snuff the ring the instant it shows — it takes aimed shots
+   * once it's up.
+   */
+  grace: number;
+}
+
+/**
+ * Pressure by mercy tier. 0: the full fight. 1 (MERCY_AFTER hearts lost this
+ * fight, or ≤ 2 left): one minion ring at a time, no combos, pairs of globs at
+ * most, a little more time on every ring. 2 (DEEP_MERCY_AFTER hearts, or a
+ * second continue): slow, easy-to-break slams, single globs, no new crawlers
+ * and long gaps between minion attacks.
+ */
+const TIERS: MercyTier[] = [
+  { ease: 0, gap: 0, interrupt: null, crawlCap: 2, volleyMax: 3, combos: true, minionSlots: 3, minionSpacing: 0, waitForMinion: 0.6, grace: 0.35 },
+  { ease: 0.1, gap: 0.4, interrupt: 4, crawlCap: 2, volleyMax: 2, combos: false, minionSlots: 1, minionSpacing: 0.9, waitForMinion: 1.5, grace: 0.35 },
+  { ease: 0.55, gap: 1.6, interrupt: 3, crawlCap: 0, volleyMax: 1, combos: false, minionSlots: 1, minionSpacing: 3.5, waitForMinion: 2.5, grace: 0 },
+];
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const _t = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
+
+// ─── Bile glob ──────────────────────────────────────────────────────────────
+
+/**
+ * A bile glob that fans out sideways from the volley line (rig-frame metres at
+ * the camera end), so the globs of one volley never line up behind each other
+ * on screen — every one shows its own ring and can be tapped on its own. It
+ * comes in at chest height: from PZ's high mouth a face-height path would keep
+ * the growing ring up against the boss health bar for the whole approach.
+ */
+class BileGlob extends Projectile {
+  constructor(
+    world: World,
+    opts: Partial<ProjectileOptions> & { from: THREE.Vector3 },
+    private lateral: number,
+  ) {
+    super(world, opts);
+  }
+
+  override onAdded(): void {
+    super.onAdded();
+    this.from.x += this.lateral * 0.8;
+    this.to.x += this.lateral;
+    this.to.y -= 0.25;
+    this.root.position.copy(this.from);
+  }
+}
 
 // ─── Dynamic tentacle tube ──────────────────────────────────────────────────
 
@@ -295,6 +394,23 @@ export class PatientZero extends Boss {
   private spawnSel: number[] = [];
   /** Seconds the next attack has been held back for a minion's telegraph. */
   private heldFor = 0;
+  /** Player hearts last frame (to notice a hit) and the breather it earns. */
+  private lastPlayerHp = -1;
+  private breather = 0;
+  /** Hearts the player has lost during THIS fight (health pickups don't undo it). */
+  private heartsLost = 0;
+  /** Extra windup of the current attack (mercy: a beat longer to answer), latched when it starts. */
+  private windupEase = 0;
+  /** Seconds since a minion last had its ring up (mercy spaces minion attacks out). */
+  private sinceMinionTele = 99;
+  /** Bile globs of ours still in flight. */
+  private globs: Projectile[] = [];
+  /** Spit attacks so far. */
+  private spits = 0;
+  /** Continues the player has used during this fight. */
+  private continues = 0;
+  /** End of the current windup's opening grace (state time; see MercyTier.grace). */
+  private graceUntil = 0;
 
   constructor(world: World, spawn: EnemySpawn) {
     super(world, spawn);
@@ -303,7 +419,7 @@ export class PatientZero extends Boss {
   protected override configure() {
     this.name = 'patient_zero';
     this.title = 'PATIENT ZERO';
-    this.maxHp = 185;
+    this.maxHp = 170;
     this.speed = 0;
     this.attackRange = 99;
     this.points = 30000;
@@ -691,10 +807,35 @@ export class PatientZero extends Boss {
     this.dmgInState = 0;
     this.fired = false;
     this.followUp = false;
+    const tier = this.mercyTier();
+    this.windupEase = tier.ease;
+    this.graceUntil = tier.grace;
+  }
+
+  override onContinue(): void {
+    super.onContinue();
+    this.continues++;
+    // A fresh start: the pool crawlers slither back into the flesh (no points).
+    for (const m of this.minions) {
+      if (m.removed || m.state === 'dying') continue;
+      m.root.getWorldPosition(_v);
+      this.world.fx.blood(_v.setY(_v.y + 0.2), UP, { color: 0x6a0808, amount: 1.2 });
+      m.despawn();
+    }
+    this.minions.length = 0;
   }
 
   protected override customUpdate(dt: number) {
     this.playerLocal(this.player);
+    // Mercy: every heart the player loses (to anything) buys a short breather before the next attack.
+    const php = this.world.player.hp;
+    if (this.lastPlayerHp >= 0 && php < this.lastPlayerHp) {
+      this.breather = BREATHER;
+      this.heartsLost += this.lastPlayerHp - php;
+      this.minionsBackOff();
+    }
+    this.lastPlayerHp = php;
+    if (this.breather > 0) this.breather -= dt;
     switch (this.state) {
       case ST.idle:
         this.updateIdle(dt);
@@ -717,9 +858,43 @@ export class PatientZero extends Boss {
       default:
         this.setState(ST.idle);
     }
-    // One threat at a time: while our ring is up, no minion may START a windup
-    // (the boss updates before the minions it spawns; World recounts slots each frame).
-    if (this.telegraph) this.world.attackSlots = 0;
+    // One threat at a time: while our ring is up — or the player is still reeling
+    // from a lost heart — no minion may START a windup (the boss updates before
+    // the minions it spawns; World recounts slots each frame). Mercy also spaces
+    // the minions' own attacks out: one at a time, with a short gap between.
+    this.sinceMinionTele = this.minionThreat() ? 0 : this.sinceMinionTele + dt;
+    const tier = this.mercyTier();
+    if (this.telegraph || this.breather > 0) this.world.attackSlots = 0;
+    else if (tier !== TIERS[0]) {
+      // (Our globs in flight count as our attack; then the tier's minions, spaced out.)
+      if (this.globsInFlight() || this.sinceMinionTele < tier.minionSpacing) this.world.attackSlots = 0;
+      else this.world.attackSlots = Math.min(this.world.attackSlots, tier.minionSlots);
+    }
+  }
+
+  private globsInFlight(): boolean {
+    // (Compact in place: no per-frame garbage.)
+    let n = 0;
+    for (let i = 0; i < this.globs.length; i++) if (!this.globs[i].removed) this.globs[n++] = this.globs[i];
+    this.globs.length = n;
+    return n > 0;
+  }
+
+  /**
+   * The player just lost a heart: any attack still early in its windup (a
+   * minion's or our own) backs off, so no hit chains straight onto the last
+   * one; the breather then holds new windups for a moment.
+   */
+  private minionsBackOff() {
+    // (Our own windup too, if it was only just starting.)
+    if (this.telegraph && (this.state === ST.slam || this.state === ST.spit) && !this.fired) {
+      const W = this.windupFor(this.state === ST.slam ? 'slam' : 'spit');
+      if ((1 - this.telegraph.progress) * W > BACK_OFF_LEFT) this.endAttack();
+    }
+    for (const e of this.world.enemies()) {
+      if (e.isBoss || e.removed || e.state === 'dying' || !e.telegraph) continue;
+      if ((1 - e.telegraph.progress) * e.windup > BACK_OFF_LEFT) e.setState('advance');
+    }
   }
 
   /** A minion (pool crawler, balcony walker…) is telegraphing an attack right now. */
@@ -739,21 +914,25 @@ export class PatientZero extends Boss {
       this.growlT = this.world.rng.range(3, 6);
       this.world.audio.play('zombie_groan', { volume: 0.8, pitch: 0.45, vary: 0.1 });
     }
-    if (this.nextAttack > 0) return;
-    // Don't open a ring on the same beat as a minion's: let its pounce/swipe get a head start.
-    if (this.heldFor < 0.6 && this.minionThreat()) {
+    if (this.nextAttack > 0 || this.breather > 0) return;
+    // Don't open a ring on the same beat as a minion's: let its pounce/swipe get a
+    // head start (mercy: let it play out entirely — one threat at a time).
+    const tier = this.mercyTier();
+    if (this.heldFor < tier.waitForMinion && this.minionThreat()) {
       this.heldFor += dt;
       return;
     }
     this.heldFor = 0;
     const rng = this.world.rng;
     this.minions = this.minions.filter((m) => !m.removed && m.state !== 'dying');
-    const canSpawn = this.phase >= 1 && this.minions.length < CRAWL_MAX - 1 && this.lastAttack !== ST.spawn;
+    // The pool is topped up while crawlers are still out — unless the boss is going easy (mercy).
+    const cap = tier.crawlCap;
+    const canSpawn = this.phase >= 1 && this.minions.length < cap && this.lastAttack !== ST.spawn;
     const r = rng.next();
     let pick: string;
     if (this.phase === 0) pick = r < 0.58 ? ST.slam : ST.spit;
-    else if (this.phase === 1) pick = canSpawn && r < 0.3 ? ST.spawn : r < 0.68 ? ST.slam : ST.spit;
-    else pick = canSpawn && r < 0.2 ? ST.spawn : r < 0.62 ? ST.slam : ST.spit;
+    else if (this.phase === 1) pick = canSpawn && r < 0.4 ? ST.spawn : r < 0.7 ? ST.slam : ST.spit;
+    else pick = canSpawn && r < 0.3 ? ST.spawn : r < 0.65 ? ST.slam : ST.spit;
     if (pick === this.lastAttack) {
       this.repeat++;
       if (this.repeat >= 2) {
@@ -769,16 +948,18 @@ export class PatientZero extends Boss {
     }
     this.lastAttack = pick;
     if (pick === ST.slam) {
-      this.comboLeft = this.phase >= 2 ? 1 : 0;
+      this.comboLeft = this.phase >= 2 && tier.combos ? 1 : 0;
       this.beginSlam();
     } else if (pick === ST.spit) {
-      this.volley = this.phase === 0 ? 1 : this.phase === 1 ? 2 : 3;
+      // (The first spit is a single glob to learn on, then pairs, then volleys of three.)
+      this.volley = Math.min(tier.volleyMax, this.phase === 0 ? (this.spits > 0 ? 2 : 1) : this.phase === 1 ? 2 : 3);
+      this.spits++;
       this.spat = 0;
       this.setState(ST.spit);
       this.world.audio.play('bloater_gurgle', { volume: 1, pitch: 0.55 });
     } else {
       // Pick distinct emergence points now, so the pool boils where they'll climb out.
-      const n = Math.min(this.phase >= 2 ? 3 : 2, CRAWL_MAX - this.minions.length);
+      const n = Math.min(this.phase >= 2 ? 3 : 2, cap - this.minions.length);
       this.spawnSel.length = 0;
       for (let guard = 0; this.spawnSel.length < n && guard < 40; guard++) {
         const i = rng.int(0, this.spawnPts.length - 1);
@@ -790,14 +971,16 @@ export class PatientZero extends Boss {
   }
 
   private windupFor(kind: 'slam' | 'spit'): number {
-    if (kind === 'slam') return [1.75, 1.5, 1.25][this.phase] ?? 1.25;
-    return [1.35, 1.2, 1.05][this.phase] ?? 1.05;
+    const ease = this.windupEase;
+    if (kind === 'slam') return ([1.6, 1.45, 1.2][this.phase] ?? 1.2) + ease;
+    return ([1.35, 1.2, 1.05][this.phase] ?? 1.05) + ease;
   }
 
   private interruptAt(): number {
     // The quick follow-up slam goes down to a single tip hit (counts double) or two eye hits.
     if (this.followUp && this.state === ST.slam) return 3;
-    return [4, 5, 6][this.phase] ?? 6;
+    // (Mercy: a couple of clean hits on an eye or the glowing tip always knock it back.)
+    return this.mercyTier().interrupt ?? [4, 5, 6][this.phase] ?? 6;
   }
 
   /** A resting tentacle whose tip (the ring anchor) is inside the playable screen area. */
@@ -847,6 +1030,11 @@ export class PatientZero extends Boss {
     }
     const W = this.windupFor('slam');
     const st = this.stateTime;
+    // A continue rewinds boss attacks (stateTime = 0); one that already struck just ends.
+    if (this.fired && st < W) {
+      this.endAttack();
+      return;
+    }
     if (st < W) {
       if (!this.telegraph) this.telegraph = { progress: 0, anchor: t.tip, radius: 0.6 };
       this.telegraph.progress = clamp(st / W, 0, 1);
@@ -887,7 +1075,7 @@ export class PatientZero extends Boss {
       t.rate = 3;
     }
     if (since > 1.2) {
-      if (this.comboLeft > 0) {
+      if (this.comboLeft > 0 && this.mercyTier().combos && this.slamCandidate()) {
         this.comboLeft--;
         this.beginSlam();
         // Second slam of a combo winds up a little faster (still > 1 s to react).
@@ -899,6 +1087,14 @@ export class PatientZero extends Boss {
         this.nextAttack = this.idleGap();
       }
     }
+  }
+
+  /** Back to idle after an attack (no combo follow-up). */
+  private endAttack() {
+    this.comboLeft = 0;
+    this.setState(ST.idle);
+    this.slamTent = null;
+    this.nextAttack = this.idleGap();
   }
 
   private interrupt() {
@@ -919,14 +1115,32 @@ export class PatientZero extends Boss {
 
   private idleGap(): number {
     const rng = this.world.rng;
-    if (this.phase === 0) return rng.range(1.9, 2.5);
-    if (this.phase === 1) return rng.range(1.5, 2.0);
-    return rng.range(1.0, 1.5);
+    // (Slower once mercy is on.)
+    const mercy = this.mercyTier().gap;
+    if (this.phase === 0) return rng.range(1.5, 1.95) + mercy;
+    if (this.phase === 1) return rng.range(1.2, 1.6) + mercy;
+    return rng.range(0.9, 1.3) + mercy;
+  }
+
+  /**
+   * How easy the boss is going (see TIERS). Fight-scoped: once this fight has
+   * cost MERCY_AFTER hearts (or the player is down to their last two) one bad
+   * stretch can't snowball; after DEEP_MERCY_AFTER hearts or a second continue,
+   * a struggling player gets time to answer every ring.
+   */
+  private mercyTier(): MercyTier {
+    if (this.continues >= DEEP_MERCY_CONTINUES || this.heartsLost >= DEEP_MERCY_AFTER) return TIERS[2];
+    if (this.heartsLost >= MERCY_AFTER || this.world.player.hp <= 2) return TIERS[1];
+    return TIERS[0];
   }
 
   private updateSpit(_dt: number) {
     const W = this.windupFor('spit');
     const st = this.stateTime;
+    if (this.fired && st < W) {
+      this.endAttack();
+      return;
+    }
     if (st < W) {
       if (!this.telegraph) this.telegraph = { progress: 0, anchor: this.mouth, radius: 0.55 };
       this.telegraph.progress = clamp(st / W, 0, 1);
@@ -955,10 +1169,17 @@ export class PatientZero extends Boss {
     mesh.add(core);
     const skinM = new THREE.Mesh(Kit.ico(0.36, 0), Kit.mat(0x4a6a10, { transparent: true, opacity: 0.55 }));
     mesh.add(skinM);
-    this.throwProjectile(from, {
+    // Fan the volley out: one side, the other side, then the middle (start side alternates).
+    const n = this.volley;
+    const slot = n <= 1 ? 0 : (VOLLEY_SLOTS[this.spat] ?? 0);
+    const lateral = slot * (n >= 3 ? 0.6 : 0.5) * this.lastSlamSide;
+    const glob = new BileGlob(this.world, {
+      from,
       mesh,
       flightTime: ft,
-      arc: 1.6,
+      // (A low lob: the mouth is high in the frame, so a big arc would carry the
+      // glob — and its ring — up under the boss health bar.)
+      arc: 0.15 + Math.abs(slot) * 0.1,
       damage: 1,
       hp: 1,
       points: 150,
@@ -968,7 +1189,9 @@ export class PatientZero extends Boss {
       source: this.title,
       sfxDestroy: 'hit_projectile',
       burst: 'goo',
-    });
+    }, lateral);
+    this.world.add(glob);
+    this.globs.push(glob);
     this.world.audio.play('spit', { volume: 1, pitch: 0.6 });
     this.world.fx.blood(from, null, { color: BILE, amount: 0.8 });
     this.flinchK = Math.max(this.flinchK, 0.4);
@@ -999,7 +1222,8 @@ export class PatientZero extends Boss {
             pos,
             frame: 'world',
             entry: 'rise',
-            hpMul: 1,
+            // (Tougher than stock: a headshot alone won't drop one, so they keep coming.)
+            hpMul: 1.7,
             speedMul: 1.1,
             opts: { variant: 'patient', attackRange: CRAWL_RANGE },
           });
@@ -1072,13 +1296,20 @@ export class PatientZero extends Boss {
     return 0.3;
   }
 
+  /** Inside the opening grace of a slam/spit windup (see MercyTier.grace). */
+  private inGrace(): boolean {
+    return (this.state === ST.slam || this.state === ST.spit) && !this.fired && this.stateTime < this.graceUntil;
+  }
+
   protected override onDamaged(hit: ShotHit, amount: number): void {
     super.onDamaged(hit, amount);
     this.flinchK = Math.min(1, this.flinchK + amount * 0.12);
-    if (hit.part === 'weak' || hit.part === 'head') this.dmgInState += amount;
-    else this.dmgInState += amount * 0.4;
-    for (const t of this.tents) {
-      if ((hit.object === t.pustule || hit.object === t.hit) && t === this.slamTent) t.dmg += amount;
+    if (!this.inGrace()) {
+      if (hit.part === 'weak' || hit.part === 'head') this.dmgInState += amount;
+      else this.dmgInState += amount * 0.4;
+      for (const t of this.tents) {
+        if ((hit.object === t.pustule || hit.object === t.hit) && t === this.slamTent) t.dmg += amount;
+      }
     }
     // Eyes burst.
     for (const e of this.eyes) {
@@ -1109,7 +1340,7 @@ export class PatientZero extends Boss {
     const sp = this.screenPos(e.mesh);
     if (sp) this.world.hud.popup(`EYE +${pts}`, sp.x, sp.y - 30, 'headshot');
     this.flinchK = 1;
-    if (this.state === ST.slam || this.state === ST.spit) this.interrupt();
+    if ((this.state === ST.slam || this.state === ST.spit) && !this.inGrace()) this.interrupt();
   }
 
   // ─── Flash only the part that was hit (a full-body strobe is too much) ───

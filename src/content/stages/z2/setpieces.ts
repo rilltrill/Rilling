@@ -47,11 +47,12 @@ function spawnDoor(world: World, slot: DoorSlot): Destructible {
         obj: slab,
         vel: new THREE.Vector3(slot.out.x * 4.5 + r.spread(0.8), 2.2, slot.out.z * 4.5 + r.spread(0.8)),
         spin: new THREE.Vector3(slot.out.z * -3.5, r.spread(2), slot.out.x * 3.5),
-        floor: 0,
+        // (Slots sit on their floor: corridor A at 0, the basement service corridor at B.)
+        floor: slot.centre.y,
         rest: false,
         half: 0.04,
       });
-      w.fx.dust(_v.copy(slot.centre).setY(1), 1, 0x8a8478);
+      w.fx.dust(_v.copy(slot.centre).setY(slot.centre.y + 1), 1, 0x8a8478);
     },
   });
   d.root.userData.slot = slot;

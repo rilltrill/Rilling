@@ -50,7 +50,7 @@ swipe doesn't open Notification Centre.
 |---|---|---|
 | **Shoot** | **Tap** the target. Hold to keep firing | Left click (hold for auto) |
 | **Reload** | **Swipe down**, or tap **RELOAD**. Auto-reload is on by default | Right click, `R` or `Space` |
-| **Switch weapon** | Tap the weapon panel (bottom right) | `1`–`4`, `Q` / `Tab` |
+| **Switch weapon** | Tap the weapon panel (bottom right; a callout points at it the first few times). Vehicle sections lock you to the mounted gun. | `1`–`4`, `Q` / `Tab` |
 | **Bomb** (clears the screen) | Bomb button (bottom left) | `B` |
 | **Pause** | ❚❚ (top right) | `Esc` / `P` |
 
