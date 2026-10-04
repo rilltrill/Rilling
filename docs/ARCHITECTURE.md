@@ -190,8 +190,9 @@ pixel-art sprite, the way 90s arcade shooters used pre-rendered sprites.
   first) — so animation is choppy like sprite frames while positions stay smooth.
 - **Bake.** The bake camera is the main camera with its projection *cropped* to the
   source's on-screen bounds (no perspective mismatch), rendered at ~1.5 retro
-  pixels per texel (`pxPerTexel`, size caps 192 / 448 texels for bosses — close-ups
-  get chunkier), 2× supersampled, into a 512² HDR scratch target with a depth
+  pixels per texel (`pxPerTexel`) but never finer than 2.5 cm of model per texel
+  (`texelCm`, 5 cm for bosses) — like a fixed-resolution sprite sheet, close-ups
+  scale up into chunkier pixels (size caps 192 / 448 texels), 2× supersampled, into a 512² HDR scratch target with a depth
   texture. Lights are mirrored into a tiny bake scene (same light set → same
   shader programs; `precompile` warms the offscreen variants) with the stage fog.
 - **Pixel-art pass** (`BAKE_FRAG`) into the sprite's own small RGBA8 target (pooled

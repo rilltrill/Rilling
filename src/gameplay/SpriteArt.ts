@@ -75,9 +75,15 @@ export interface SpriteLook {
   ss: number;
   /** Blob shadow strength under sprites (0 = off). */
   shadows: number;
+  /**
+   * Fixed sprite resolution in world units (cm per texel; 0 = off): like a sprite
+   * sheet drawn once, close-ups scale up into chunkier pixels (Doom, Lethal
+   * Enforcers). Bosses use 2× this.
+   */
+  texelCm: number;
 }
 
-export const DEFAULT_LOOK: SpriteLook = { bands: 2, dither: 0, levels: 0, outline: 0.16, outlineIn: 2, inner: 0.6, rim: 0.25, saturation: 1.1, pxPerTexel: PX_PER_TEXEL, ss: 2, shadows: 1 };
+export const DEFAULT_LOOK: SpriteLook = { bands: 2, dither: 0, levels: 0, outline: 0.16, outlineIn: 2, inner: 0.6, rim: 0.25, saturation: 1.1, pxPerTexel: PX_PER_TEXEL, ss: 2, shadows: 1, texelCm: 2.5 };
 
 /** Parse `bands:8,dither:0.3,k:1` (debug URL `&spriteLook=`) over a look. */
 export function parseLook(spec: string | null | undefined, base: SpriteLook = DEFAULT_LOOK): SpriteLook {
@@ -780,6 +786,14 @@ export class SpriteArt {
     const g = this.grid();
     const cap = e instanceof Enemy && e.isBoss && src === e.root ? MAX_TEX_BOSS : MAX_TEX;
     let k = this.look.pxPerTexel;
+    if (this.look.texelCm > 0) {
+      // World-space texel density: one texel never shows less than texelCm of the model.
+      _box.getCenter(_c).applyMatrix4(inv);
+      const dist = Math.max(near * 4, -_c.z);
+      const pxWorld = (2 * dist) / P[5] / g.height; // metres per retro pixel at that distance
+      const tau = (this.look.texelCm / 100) * (cap === MAX_TEX_BOSS ? 2 : 1);
+      k = Math.max(k, tau / pxWorld);
+    }
     let tx = 0;
     let ty = 0;
     let gx0 = 0;
