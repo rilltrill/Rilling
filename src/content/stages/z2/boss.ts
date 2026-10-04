@@ -98,7 +98,7 @@ class BileGlob extends Projectile {
 
   override onAdded(): void {
     super.onAdded();
-    this.from.x += this.lateral * 0.35;
+    this.from.x += this.lateral * 0.6;
     this.to.x += this.lateral;
     this.root.position.copy(this.from);
   }
@@ -1019,7 +1019,7 @@ export class PatientZero extends Boss {
     // Fan the volley out left / centre / right (alternating start side).
     const n = this.volley;
     const slot = n <= 1 ? 0 : (this.spat / (n - 1)) * 2 - 1;
-    const lateral = slot * (n >= 3 ? 0.65 : 0.5) * this.lastSlamSide;
+    const lateral = slot * (n >= 3 ? 0.75 : 0.6) * this.lastSlamSide;
     const glob = new BileGlob(this.world, {
       from,
       mesh,

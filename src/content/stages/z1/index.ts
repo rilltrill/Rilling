@@ -103,7 +103,10 @@ const beats: Beat[] = [
     label: 'past the burning car',
     to: 84,
     speed: 3.5,
-    waves: [{ start: { atD: 58 }, spawns: [{ type: 'walker', pos: [-3, 0, 15], frame: 'world', opts: { variant: 'office' } }] }],
+    waves: [
+      { start: { atD: 58 }, spawns: [{ type: 'walker', pos: [-3, 0, 15], frame: 'world', opts: { variant: 'office' } }] },
+      { start: { atD: 71 }, spawns: [{ type: 'walker', pos: [2.6, 0, 15], frame: 'world', opts: { variant: 'nurse' } }] },
+    ],
   },
   {
     kind: 'hold',
@@ -386,7 +389,7 @@ const beats: Beat[] = [
     ],
   },
   // ── Boss: THE BUTCHER ────────────────────────────────────────────────────
-  { kind: 'move', label: 'approach PRIME MEATS', to: 334.5, speed: 2.9, look: { at: [0, 2.4, 20], blend: 1.4 } },
+  // The music cuts and the butcher's doors start to bang as we cross the square toward them.
   {
     kind: 'action',
     label: 'something big',
@@ -397,21 +400,29 @@ const beats: Beat[] = [
       w.audio.play('brute_roar', { volume: 0.7, pitch: 0.5 });
       w.rig.shake(0.2);
       if (sc) sc.bossLight = 0.6;
-      w.later(0.9, () => {
+      w.later(1.1, () => {
         w.audio.play('door', { volume: 1, pitch: 0.5 });
         w.audio.play('hit_world', { volume: 0.8, pitch: 0.5 });
         w.rig.shake(0.25);
         if (sc) sc.bossLight = 1.4;
       });
-      w.later(1.6, () => {
+      w.later(2.4, () => {
         w.audio.play('door', { volume: 1, pitch: 0.45 });
         w.audio.play('crash', { volume: 0.5, pitch: 0.6 });
         w.rig.shake(0.35);
         if (sc) sc.bossLight = 0.3;
       });
+      w.later(4.3, () => {
+        w.audio.play('door', { volume: 1, pitch: 0.42 });
+        w.audio.play('hit_world', { volume: 0.9, pitch: 0.45 });
+        w.audio.play('brute_roar', { volume: 0.6, pitch: 0.55 });
+        w.rig.shake(0.4);
+        if (sc) sc.bossLight = 1.6;
+      });
     },
   },
-  { kind: 'wait', label: 'the doors bulge', duration: 1.8 },
+  { kind: 'move', label: 'approach PRIME MEATS', to: 334.5, speed: 2.9, look: { at: [0, 2.4, 20], blend: 1.4 } },
+  { kind: 'wait', label: 'the doors bulge', duration: 0.9 },
   {
     kind: 'boss',
     label: 'THE BUTCHER',
