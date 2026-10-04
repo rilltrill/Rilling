@@ -30,12 +30,14 @@ export interface HudApi {
   hitMarker(x: number, y: number, kind: HitMarkerKind): void;
   shotFired(x: number, y: number): void;
   prompt(text: string | null): void;
+  /** WARNING band + name slam for a boss (or a boss's second form). */
+  bossIntro?(title: string): void;
 }
 
 export interface WorldEvents {
   shot: { hit: boolean };
   kill: { enemy: Enemy; headshot: boolean; points: number };
-  'player-hurt': { amount: number; hp: number; source: string };
+  'player-hurt': { amount: number; hp: number; source: string; from?: Entity };
   'player-heal': { hp: number };
   'player-dead': Record<string, never>;
   pickup: { kind: PickupKind };
@@ -80,6 +82,7 @@ export class World {
   private hitStopT = 0;
   private enemyCache: Enemy[] = [];
   private timers: { at: number; fn: () => void }[] = [];
+  private lastHurtFrom: Entity | null = null;
   private lowHpBeat = 0;
 
   constructor(
@@ -93,15 +96,18 @@ export class World {
     this.rig = new RailRig(camera);
     this.scene.add(this.rig.space, this.rig.viewModelHolder, this.fx.group);
     this.fx.groundAt = (x, z) => this.groundAt(x, z);
+    this.fx.attachCamera(camera);
     this.fx.screen.splat = (c) => this.hud.splat(c);
     this.player.hooks = {
       hurt: (amount, hp, source) => {
+        const from = this.lastHurtFrom ?? undefined;
+        this.lastHurtFrom = null;
         this.score.breakCombo();
         this.rig.shake(0.6);
         this.hud.damage();
         this.audio.play('player_hurt');
         this.haptic(120);
-        this.events.emit('player-hurt', { amount, hp, source });
+        this.events.emit('player-hurt', { amount, hp, source, from });
       },
       heal: (_a, hp) => this.events.emit('player-heal', { hp }),
       dead: () => this.events.emit('player-dead', {}),
@@ -137,8 +143,12 @@ export class World {
 
   // ─── Gameplay hooks ───────────────────────────────────────────────────────
 
-  hurtPlayer(amount: number, source: string): boolean {
-    return this.player.hurt(amount, source);
+  /** Damage the player. Pass the attacking entity so the HUD can point at it. */
+  hurtPlayer(amount: number, source: string, from?: Entity): boolean {
+    this.lastHurtFrom = from ?? null;
+    const landed = this.player.hurt(amount, source);
+    this.lastHurtFrom = null;
+    return landed;
   }
 
   onEnemyKilled(enemy: Enemy, hit: ShotHit | null) {

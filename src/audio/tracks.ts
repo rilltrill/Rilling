@@ -6,7 +6,9 @@ import type { DrumKey } from './drums';
  *
  * Notation (16 steps = one 4/4 bar of 16th notes):
  * - chords: per bar, "<semitones from key><quality>", e.g. "0m 8M 7M" (i, bVI, V).
- *   Qualities: m M 5 d s4 s2 m7 M7 7 a.
+ *   Qualities (always letters, so they can't merge with the root's digits):
+ *   m minor, M major, p power chord (root/5th/octave), d dim, s4 sus4, s2 sus2,
+ *   m7, M7, dom7, a augmented. Omitted = major. See QUAL / validateTracks().
  * - drums: one string per instrument; 'X' accent, 'x' hit, 'o' ghost, '.' rest.
  *   Strings longer than 16 span several bars. Keys: k kick, s snare, c clap,
  *   h hat, o open hat, p shaker, r rim, t low tom, m mid tom, T taiko, x crash, b boom.
@@ -26,9 +28,11 @@ export const PARTS: Part[] = ['bass', 'pad', 'kick', 'beat', 'perc', 'arp', 'lea
 /**
  * Ambience under the music: a looping bed plus occasional distant events.
  * city: wind, sirens, howls, far-off groans and clangs · jungle: insects, birdsong,
- * distant roars and cries · storm: deep wind and rolling thunder.
+ * distant roars and cries · storm: deep wind and rolling thunder · wind: the
+ * storm's wind bed alone (the title screen's MenuBackdrop plays its own thunder,
+ * synced to its lightning).
  */
-export type Ambience = 'city' | 'jungle' | 'storm';
+export type Ambience = 'city' | 'jungle' | 'storm' | 'wind';
 
 export interface SectionDef {
   bars: number;
@@ -77,10 +81,99 @@ export interface TrackDef {
 
 const r = (n: number) => '.'.repeat(n);
 
+// ─── Chords ───────────────────────────────────────────────────────────────────
+
+/** Chord qualities: semitone intervals above the root. */
+export const QUAL: Record<string, number[]> = {
+  m: [0, 3, 7], M: [0, 4, 7], p: [0, 7, 12], d: [0, 3, 6], s4: [0, 5, 7], s2: [0, 2, 7],
+  m7: [0, 3, 7, 10], M7: [0, 4, 7, 11], dom7: [0, 4, 7, 10], a: [0, 4, 8],
+};
+
+export interface Chord {
+  /** Semitones from the track key. */
+  root: number;
+  iv: number[];
+  key: string;
+}
+
+const CHORD_RE = /^(-?\d+)([A-Za-z]\w*)?$/;
+
+/** Parse one chord token; null when malformed (unknown quality, root out of -12..12). */
+export function parseChord(tok: string): Chord | null {
+  const m = CHORD_RE.exec(tok);
+  if (!m) return null;
+  const root = Number(m[1]);
+  const iv = QUAL[m[2] ?? 'M'];
+  if (!iv || root < -12 || root > 12) return null;
+  return { root, iv, key: tok };
+}
+
+const warned = new Set<string>();
+/** Parse a section's chord list. Malformed tokens warn once and fall back to a major triad on 0. */
+export function parseChords(str: string): Chord[] {
+  return str
+    .trim()
+    .split(/\s+/)
+    .map((tok) => {
+      const c = parseChord(tok);
+      if (c) return c;
+      if (!warned.has(tok)) {
+        warned.add(tok);
+        console.warn(`[music] bad chord "${tok}"`);
+      }
+      return { root: 0, iv: QUAL.M, key: tok };
+    });
+}
+
+const DRUM_KEYS = new Set(['k', 's', 'c', 'h', 'o', 'p', 'r', 't', 'm', 'T', 'x', 'b']);
+
+/** Arrangement sanity check (unit tests): returns a list of problems, empty when every track is well-formed. */
+export function validateTracks(): string[] {
+  const errs: string[] = [];
+  for (const [id, t] of Object.entries(TRACKS)) {
+    if (!t.order.length) errs.push(`${id}: empty order`);
+    for (const name of t.order) if (!t.sections[name]) errs.push(`${id}: order names missing section "${name}"`);
+    if ((t.loop ?? 0) >= t.order.length) errs.push(`${id}: loop index out of range`);
+    for (const [name, sec] of Object.entries(t.sections)) {
+      const at = `${id}.${name}`;
+      const chords = sec.chords.trim().split(/\s+/);
+      if (sec.bars % chords.length) errs.push(`${at}: ${sec.bars} bars not a multiple of ${chords.length} chords`);
+      for (const c of chords) if (!parseChord(c)) errs.push(`${at}: bad chord "${c}"`);
+      const pats: [string, string | undefined, RegExp][] = [
+        ['bass', sec.bass, /^[ROL53b42.-]{16}$/],
+        ['arp', sec.arp, /^[0-9.-]{16}$/],
+        ['stab', sec.stab, /^[Xx.]{16}$/],
+      ];
+      for (const [k, pat, re] of pats) if (pat !== undefined && !re.test(pat)) errs.push(`${at}: bad ${k} pattern "${pat}"`);
+      for (const d of [sec.drums, sec.fill]) {
+        if (!d) continue;
+        for (const [k, pat] of Object.entries(d)) {
+          if (!DRUM_KEYS.has(k)) errs.push(`${at}: unknown drum "${k}"`);
+          if (!pat || pat.length % 16 || !/^[xXo.]+$/.test(pat)) errs.push(`${at}: bad drum pattern ${k} "${pat}"`);
+        }
+      }
+      if (sec.lead) {
+        const bars = sec.lead.split('|');
+        if (bars.length !== sec.bars) errs.push(`${at}: lead has ${bars.length} bars, section has ${sec.bars}`);
+        bars.forEach((b, i) => {
+          let sum = 0;
+          for (const tok of b.trim().split(/\s+/)) {
+            const [a, len] = tok.split(':');
+            if (a !== '_' && !Number.isFinite(Number(a))) errs.push(`${at}: bad lead note "${tok}"`);
+            sum += Number(len) || 1;
+          }
+          if (sum !== 16) errs.push(`${at}: lead bar ${i} lasts ${sum} steps`);
+        });
+      }
+    }
+  }
+  return errs;
+}
+
 export const TRACKS: Record<MusicId, TrackDef> = {
   // Moody, ominous: D minor, a slow heartbeat, glassy arps and tolling bells.
   menu: {
-    bpm: 76, key: 38, bass: 'sub', arp: 'glass', lead: 'bell', pad: 'dark', reactive: false, fadeIn: 2.5, amb: 'storm',
+    bpm: 76, key: 38, bass: 'sub', arp: 'glass', lead: 'bell', pad: 'dark', reactive: false, fadeIn: 2.5, amb: 'wind',
     mix: { arp: 0.8, lead: 0.9 },
     sections: {
       intro: {
@@ -223,20 +316,20 @@ export const TRACKS: Record<MusicId, TrackDef> = {
     layers: { stab: 0.6, perc: 0.55, arp: 0.65, lead: 0.75 }, floor: 0.6, mix: { kick: 0.55 },
     sections: {
       A: {
-        bars: 8, chords: '05 05 15 05 05 05 65 75', bass: 'RRRRRRRRRRRRRRRR',
+        bars: 8, chords: '0p 0p 1p 0p 0p 0p 6p 7p', bass: 'RRRRRRRRRRRRRRRR',
         drums: { k: 'x.x.x.x.x.x.x.x.', s: '....X.......X...', h: 'x.x.x.x.x.x.x.x.', t: r(14) + 'xx' },
         arp: '0123012301230123',
         lead: '12:2 13:2 12:2 7:2 6:8 | _:4 12:2 13:2 15:4 13:4 | 13:2 15:2 13:2 8:2 7:8 | _:8 6:4 7:4 | 24:2 25:2 24:2 19:2 18:8 | _:4 24:2 25:2 27:4 25:4 | 18:4 19:4 18:4 13:4 | 19:8 12:8',
         stab: 'X..X..X...X..X..',
       },
       B: {
-        bars: 8, chords: '05 05 35 35 15 15 75 75', bass: 'R-------R---R---',
+        bars: 8, chords: '0p 0p 3p 3p 1p 1p 7p 7p', bass: 'R-------R---R---',
         drums: { k: 'x.........x.....', s: '........X.......', h: 'x...x...x...x...', T: 'x.......x.......' },
         lead: '24:16 | 22:8 19:8 | 27:16 | 25:8 24:8 | 25:16 | 24:8 20:8 | 19:16 | 18:8 19:8',
         stab: 'X' + r(15),
       },
       C: {
-        bars: 4, chords: '05 15 05 65', bass: 'RRRRRRRRRRRRRRRR', riser: true,
+        bars: 4, chords: '0p 1p 0p 6p', bass: 'RRRRRRRRRRRRRRRR', riser: true,
         drums: { k: 'xxxxxxxxxxxxxxxx', s: '..x...x...x...x.', h: 'x.x.x.x.x.x.x.x.', t: r(12) + 'xxxx' },
         lead: '12:4 13:4 12:4 6:4 | 12:4 13:4 15:4 13:4 | 12:4 13:4 12:4 6:4 | 18:8 19:8',
         stab: 'X.X.X.X.X.X.X.X.',

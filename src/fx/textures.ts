@@ -5,8 +5,15 @@ import * as THREE from 'three';
  *
  * Pixels are computed in plain JS (no <canvas>, no DOM) and uploaded as
  * DataTextures, so this works identically in the browser and in node unit
- * tests. The pixel data is generated lazily once per process and shared; each
- * Fx instance wraps it in its own texture (disposed with the Fx).
+ * tests. The pixel data is generated once per process and shared; each Fx
+ * instance wraps it in its own texture (disposed with the Fx).
+ *
+ * Painting everything takes a few hundred ms, so it's sliced into small jobs:
+ * in the browser they start in the background as soon as this module loads
+ * (idle callbacks, or short timer slices where those don't exist — iOS Safari),
+ * so the atlases are normally finished while the menus are up. Whatever is left
+ * when a stage starts is painted by `Fx.update` (`pumpFxAtlases`, ~3 ms/frame),
+ * and `prewarmFxAtlases()` finishes it synchronously (e.g. behind a loading screen).
  *
  * Both atlases are 4 × 2 cells of 128 px. Cell (col, row) is addressed as
  * frame = row * 4 + col; row 0 is at v = 0 (DataTextures are not flipped).
@@ -156,8 +163,8 @@ interface CellJob {
   j1: number;
 }
 
-/** Rows per job — keeps each slice to a few ms even on a cold JIT. */
-const STRIP = 16;
+/** Rows per job (512 px) — a single job stays around a millisecond even on a cold JIT / slow phone. */
+const STRIP = 4;
 
 /** Pending cell paints (generation is time-sliced across frames, see `pumpFxAtlases`). */
 let queue: CellJob[] | null = null;
@@ -446,11 +453,7 @@ function init() {
   buildDecalAtlas(decalData);
 }
 
-/**
- * Paint pending atlas cells for up to `budgetMs` (at least one cell). Returns true
- * when both atlases are complete. Called by Fx.update every frame until done.
- */
-export function pumpFxAtlases(budgetMs = 3): boolean {
+function paintFor(budgetMs: number): boolean {
   init();
   const q = queue!;
   const t0 = performance.now();
@@ -461,9 +464,51 @@ export function pumpFxAtlases(budgetMs = 3): boolean {
   return queueIndex >= q.length;
 }
 
+/** Set once a stage is running: the background timer slices stop (Fx.update takes over). */
+let foreground = false;
+
+/**
+ * Paint pending atlas strips for up to `budgetMs` (at least one strip). Returns true
+ * when both atlases are complete. Called by Fx.update every frame until done.
+ */
+export function pumpFxAtlases(budgetMs = 3): boolean {
+  foreground = true;
+  return paintFor(budgetMs);
+}
+
+type IdleDeadlineLike = { timeRemaining(): number };
+interface BrowserGlobals {
+  window?: unknown;
+  requestIdleCallback?: (cb: (deadline: IdleDeadlineLike) => void) => number;
+  setTimeout?: (fn: () => void, ms: number) => unknown;
+}
+
+/** Background painting while the browser is idle (title / menus). No-op outside a browser. */
+function startBackgroundPaint() {
+  const g = globalThis as BrowserGlobals;
+  if (typeof g.window === 'undefined') return;
+  if (typeof g.requestIdleCallback === 'function') {
+    const tick = (deadline: IdleDeadlineLike) => {
+      const left = deadline.timeRemaining() - 1;
+      if (left > 1 && paintFor(Math.min(8, left))) return;
+      if (!decalAtlasReady()) g.requestIdleCallback!(tick);
+    };
+    g.requestIdleCallback(tick);
+  } else if (typeof g.setTimeout === 'function') {
+    // No idle callbacks (iOS Safari): short slices spaced out on a timer, only until
+    // a stage starts pumping in the foreground.
+    const tick = () => {
+      if (foreground || paintFor(4)) return;
+      g.setTimeout!(tick, 40);
+    };
+    g.setTimeout(tick, 300);
+  }
+}
+startBackgroundPaint();
+
 /** Generate everything now (call from a loading screen / boot idle to avoid in-game work). */
 export function prewarmFxAtlases() {
-  pumpFxAtlases(Infinity);
+  paintFor(Infinity);
 }
 
 export function particleAtlasReady(): boolean {

@@ -42,7 +42,6 @@ export function grp(g: O, x: number, y: number, z: number, ry = 0): THREE.Group 
 }
 
 const steel = () => M(C.steel, 'metal', 2, 0.5);
-const steelDark = () => M(C.steelDark);
 const rubber = () => M(0x1c1e1e);
 const white = () => M(0xd6dcd6);
 
@@ -400,7 +399,7 @@ export function dragTrail(g: O, x0: number, z0: number, x1: number, z1: number, 
   const n = Math.max(2, Math.round(len / 1.2));
   for (let i = 0; i < n; i++) {
     const k = (i + 0.5) / n;
-    smear(g, x0 + dx * k + rng.spread(0.1), y + i * 0.0004, z0 + dz * k + rng.spread(0.1), (len / n) * 1.2, rng.range(0.18, 0.32), ry + rng.spread(0.15), rng.chance(0.3) ? C.bloodFresh : C.blood);
+    smear(g, x0 + dx * k + rng.spread(0.1), y + i * 0.0004, z0 + dz * k + rng.spread(0.1), (len / n) * 1.1, rng.range(0.1, 0.2), ry + rng.spread(0.15), rng.chance(0.2) ? C.blood : C.bloodDark);
   }
 }
 

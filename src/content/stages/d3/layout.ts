@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import type { V3 } from '../../../core/types';
 
 /**
@@ -62,7 +63,9 @@ export const D = {
   COLLAPSE_STOP: 395,
   /** Boss chase: rig never passes HELI_APPROACH before the final phase. */
   BOSS_START: 395,
-  HELI_APPROACH: 518,
+  /** Phase 1 chase never takes the jeep past this point. */
+  P0_LIMIT: 486,
+  HELI_APPROACH: 515,
   HELI_STOP: 548,
   /** Fuel tank by the helipad entrance (left of the road). */
   FUEL: 531,
@@ -80,3 +83,74 @@ export const D = {
 export const GORGE_DEPTH = 17;
 /** Half-width of the road. */
 export const ROAD_HALF = 3.6;
+
+// ─── Rail helpers (same curve parameters as RailRig) ────────────────────────
+
+let curve: THREE.CatmullRomCurve3 | null = null;
+let length = 0;
+
+export function railCurve(): THREE.CatmullRomCurve3 {
+  if (!curve) {
+    curve = new THREE.CatmullRomCurve3(
+      RAIL.map((p) => new THREE.Vector3(p[0], p[1], p[2])),
+      false,
+      'centripetal',
+    );
+    curve.arcLengthDivisions = Math.max(200, RAIL.length * 40);
+    curve.updateArcLengths();
+    length = curve.getLength();
+  }
+  return curve;
+}
+
+export function railLength(): number {
+  railCurve();
+  return length;
+}
+
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+
+/** Rail point at distance d (clamped). */
+export function railPoint(d: number, out = new THREE.Vector3()): THREE.Vector3 {
+  const c = railCurve();
+  return c.getPointAt(THREE.MathUtils.clamp(d / length, 0, 1), out);
+}
+
+/** Rail heading at d, exactly as RailRig.headingAt computes it (chord to d + 4). */
+export function railHeading(d: number): number {
+  const c = railCurve();
+  const u0 = THREE.MathUtils.clamp(d / length, 0, 1);
+  const u1 = THREE.MathUtils.clamp((d + 4) / length, 0, 1);
+  c.getPointAt(u0, _a);
+  if (u1 - u0 < 1e-4) c.getTangentAt(u0, _b);
+  else c.getPointAt(u1, _b).sub(_a);
+  return Math.atan2(-_b.x, -_b.z);
+}
+
+/** World position `lat` metres right of the rail at distance d (y = up, ground assumed 0). */
+export function worldAt(d: number, lat: number, up = 0, out = new THREE.Vector3()): THREE.Vector3 {
+  railPoint(d, out);
+  const h = railHeading(d);
+  out.x += Math.cos(h) * lat;
+  out.z += -Math.sin(h) * lat;
+  out.y = up;
+  return out;
+}
+
+/**
+ * Rig-relative [right, up, forward] of the point `lat` m beside the rail at
+ * `dTarget`, as seen from a rig stopped at `dRig` — so beat scripts can aim
+ * spawns and look targets at landmarks precisely.
+ */
+export function rel(dRig: number, dTarget: number, lat: number, up = 0): V3 {
+  const p = worldAt(dTarget, lat, up, new THREE.Vector3());
+  const o = railPoint(dRig, new THREE.Vector3());
+  const h = railHeading(dRig);
+  const dx = p.x - o.x;
+  const dz = p.z - o.z;
+  const right = dx * Math.cos(h) - dz * Math.sin(h);
+  const fwd = -dx * Math.sin(h) - dz * Math.cos(h);
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  return [r2(right), up, r2(fwd)];
+}

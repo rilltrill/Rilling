@@ -9,8 +9,9 @@ import { B, RAIL_LENGTH, dAt, groundAt } from './layout';
 import { bake } from './bake';
 import { type Z2Scene, type AccentLight, clearZ2Scene, setZ2Scene } from './scene';
 import type { ZoneCtx } from './zonekit';
+import { snapAmbulanceCrashed } from './setpieces';
 import { buildBay, buildCorrA, buildCrashAmbulance, buildER, buildHub, buildWard } from './zonesUpper';
-import { buildAtrium, buildCorrB, buildCorrC, buildMorgue, buildOR, buildShafts, buildStair } from './zonesLower';
+import { buildAtrium, buildCocoon, buildCorrB, buildCorrC, buildMorgue, buildOR, buildShafts, buildStair } from './zonesLower';
 
 /** Key rail distances (computed from the layout, so beats follow rail edits). */
 export const D = {
@@ -45,7 +46,7 @@ interface FogZone {
 }
 
 const FOGS: FogZone[] = [
-  { until: D.erDoor - 1, color: 0x121b27, near: 10, far: 64, hemi: 1.0 },
+  { until: D.erDoor - 1, color: 0x141e2b, near: 10, far: 64, hemi: 1.3 },
   { until: D.stairTop + 3, color: 0x0b1614, near: 5, far: 38, hemi: 1.0 },
   { until: D.morgue - 2, color: 0x0a1110, near: 4, far: 30, hemi: 0.9 },
   { until: D.corrB, color: 0x0a1418, near: 4, far: 32, hemi: 1.0 },
@@ -60,7 +61,6 @@ const _right = new THREE.Vector3();
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const _c = new THREE.Color();
-const _c2 = new THREE.Color();
 const _processed = new WeakSet<object>();
 
 /** Irregular buzz: mostly on, short drop-outs. Deterministic in t. */
@@ -131,6 +131,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     cullables: [],
     fleshGlow: 0,
     surge: 0,
+    cocoon: null,
     root,
   };
   setZ2Scene(world, sc);
@@ -160,7 +161,8 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   addZone(buildCorrC(ctx), D.corrB + 4, Infinity);
   addZone(buildAtrium(ctx), D.or + 2, Infinity);
   buildCrashAmbulance(ctx);
-  buildShafts(ctx);
+  zones.push({ g: buildShafts(ctx), from: D.or, to: Infinity });
+  buildCocoon(ctx);
 
   // ─── Oxygen / gas cylinder spots (spawned as Destructibles in setup) ──────
   // (filled by the zone builders' exported constants in index.ts)
@@ -171,14 +173,14 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   A(-1, D.erDoor - 2, 5.4, 3.0, -16.4, 0xff2020, 16, 20, 'police');
   A(D.erDoor - 2, D.corrA + 2, 9.6, 3.4, -42.4, 0xff2a1a, 9, 13, 'strobe');
   A(D.corrA + 2, D.ward, 51.6, 2.7, -43, 0xff2a1a, 11, 15, 'strobe');
-  A(D.ward, D.hubHold - 1, 63, 2.6, -40.2, 0x7fa0ff, 9, 15, 'steady');
+  A(D.ward, D.hubHold - 1, 63, 2.6, -40.2, 0x9ab0ff, 6, 14, 'steady');
   A(D.hubHold - 1, D.stairDoor + 1, 85.2, 1.5, -45.2, 0xffc070, 9, 12, 'buzz');
   A(D.stairDoor + 1, D.morgue + 1, 82.4, B + 3.0, -70, 0xff2a1a, 12, 14, 'strobe');
   A(D.morgue + 1, D.corrB + 1, 79, B + 3.2, -86, 0x8fe0ff, 10, 15, 'buzz');
   A(D.corrB + 1, D.or + 1, 80.9, B + 2.6, -107, 0xff2a1a, 9, 12, 'strobe');
   A(D.or + 1, D.orExit + 1, 82.6, B + 2.5, -118.2, 0xfff6e0, 16, 11, 'surgical');
   A(D.orExit + 1, D.atrium - 1, 60, B + 1.6, -124.6, 0xff7a2a, 10, 12, 'fire');
-  A(D.atrium - 1, Infinity, 37, B + 3.2, -119, 0xff3a2a, 22, 26, 'flesh');
+  A(D.atrium - 1, Infinity, 40.6, B + 0.9, -121, 0xff6a3a, 11, 15, 'flesh');
   let accentIdx = -1;
   let accentFade = 0;
 
@@ -213,6 +215,12 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   for (let i = 0; i < RAIN; i++) placeDrop(i, 0, 10, false);
 
   scene.add(root);
+
+  // Ambience: thunder + lightning outside, distant groans and clangs inside.
+  let thunderT = 5;
+  let flashT = 0;
+  let ambT = 6;
+  const ambRng = new Rng(9);
 
   let fogIdx = 0;
   const fogCol = new THREE.Color(FOGS[0].color);
@@ -256,8 +264,32 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     // Power surges dim the fill.
     sc.surge = Math.max(0, sc.surge - dt * 0.6);
     const surgeK = sc.surge > 0 ? (Math.sin(t * 40) > 0 ? 0.55 : 0.9) : 1;
-    hemi.intensity = hemiK * surgeK;
-    sun.intensity = 0.9 * surgeK;
+    // Lightning (bay only).
+    if (d < D.erDoor + 2) {
+      thunderT -= dt;
+      if (thunderT <= 0) {
+        thunderT = ambRng.range(9, 16);
+        flashT = 0.45;
+        w.later(ambRng.range(0.4, 1.1), () => w.audio.play('thunder', { volume: 0.55, vary: 0.2 }));
+      }
+    }
+    let bolt = 0;
+    if (flashT > 0) {
+      flashT -= dt;
+      bolt = (flashT > 0.36 || (flashT > 0.12 && flashT < 0.22)) ? 2.2 : 0;
+    }
+    hemi.intensity = hemiK * surgeK + bolt;
+    sun.intensity = 0.9 * surgeK + bolt * 0.6;
+    ambT -= dt;
+    if (ambT <= 0) {
+      ambT = ambRng.range(6, 13);
+      const r = ambRng.next();
+      if (d > D.erDoor) {
+        if (r < 0.55) w.audio.play('zombie_groan', { volume: 0.22, pitch: ambRng.range(0.6, 0.8), pan: ambRng.spread(0.8) });
+        else if (r < 0.8) w.audio.play('metal_clang', { volume: 0.12, pitch: ambRng.range(0.5, 0.7), pan: ambRng.spread(0.9) });
+        else w.audio.play('roar_distant', { volume: 0.25, pan: ambRng.spread(0.6) });
+      } else if (r < 0.5) w.audio.play('roar_distant', { volume: 0.2, pan: ambRng.spread(0.8) });
+    }
 
     // ── Flickering panels ──
     let best = -1;
@@ -330,6 +362,13 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
           break;
       }
       accent.intensity = a.intensity * kk * accentFade;
+    }
+
+    // ── Cocoon heartbeat ──
+    if (sc.cocoon) sc.cocoon.visible = d > D.or;
+    if (sc.cocoon && sc.cocoon.visible) {
+      const beat = Math.pow(Math.max(0, Math.sin(t * 2.4)), 6);
+      sc.cocoon.scale.set(1 + beat * 0.05, 1 + beat * 0.07, 1 + beat * 0.05);
     }
 
     // ── Swinging / spinning things, light bars ──
@@ -420,10 +459,10 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
         f.obj.position.y = f.floor + f.half;
         if (Math.abs(f.vel.y) < 2) {
           f.rest = true;
-          // Settle flat.
-          const flat = Math.abs(Math.sin(f.obj.rotation.x)) > 0.5 ? Math.PI / 2 : 0;
-          f.obj.rotation.x = flat;
-          f.obj.rotation.z = 0;
+          // Settle flat (thin axis vertical), keeping the heading.
+          const yaw = f.obj.rotation.y;
+          f.obj.rotation.order = 'YXZ';
+          f.obj.rotation.set(-Math.PI / 2, yaw, 0);
         } else {
           f.vel.y *= -0.3;
           f.vel.x *= 0.5;
@@ -502,17 +541,7 @@ function dropVent(w: World, v: Z2Scene['vents'][number]) {
 function updateAmbulance(w: World, ar: NonNullable<Z2Scene['ambulance']>, dt: number, d: number) {
   const a = ar.amb;
   // Debug starts past the bay: show it already crashed.
-  if (ar.state === 'idle' && d > 30) {
-    ar.state = 'crashed';
-    ar.t = 1;
-    ar.doorsT = 1;
-    a.root.visible = true;
-    a.root.position.copy(ar.to);
-    a.root.rotation.y = ar.yawTo;
-    a.doorL.rotation.y = -1.9;
-    a.doorR.rotation.y = 1.9;
-    for (const f of ar.flames) f.obj.visible = true;
-  }
+  if (ar.state === 'idle' && d > 32) snapAmbulanceCrashed(ar);
   if (ar.state === 'driving') {
     ar.t = Math.min(1, ar.t + dt / 1.35);
     const k = ar.t;

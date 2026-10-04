@@ -1,9 +1,12 @@
 import * as THREE from 'three';
-import { Rng } from '../core/Rng';
 import { DecalSystem } from './Decals';
+import { FxRng } from './FxRng';
 import { GIB_FLAG, GibMesh } from './Gibs';
 import { PFLAG, ParticleSystem, PSpec } from './Particles';
 import { DF, PF, decalAtlasReady, decalAtlasTexture, particleAtlasReady, particleAtlasTexture, pumpFxAtlases } from './textures';
+
+/** Paint the FX texture atlases now (e.g. from a loading screen); otherwise Fx paints them a few ms per frame. */
+export { prewarmFxAtlases } from './textures';
 
 export interface BloodOptions {
   color?: number;
@@ -18,13 +21,18 @@ export interface FxScreenHooks {
 
 const SOFT_CAP = 1800;
 const GLOW_CAP = 900;
-const DECAL_CAP = 128;
+/** One draw call regardless of size; big enough that heavy combat doesn't recycle fresh splats. */
+const DECAL_CAP = 320;
 const MEAT_CAP = 160;
 const SHARD_CAP = 120;
 /** Max decals spawned per frame (bursts of landing droplets). */
 const DECAL_BUDGET = 8;
 /** Ground decals float this far above the ground (above road ribbons/markings). */
 const DECAL_LIFT = 0.035;
+/** Bloody chunks per `gibs()` call that leave a full splat (the rest maybe a few drips). */
+const GIB_SPLATS_PER_CALL = 2;
+/** Liquid decal frames (splats + drips) — new ones merge into a recent one nearby. */
+const LIQUID_MASK = (1 << DF.SPLAT0) | (1 << DF.SPLAT1) | (1 << DF.SPLAT2) | (1 << DF.SPLAT3) | (1 << DF.DRIPS);
 
 interface SurfaceFx {
   dust: number;
@@ -52,7 +60,20 @@ const _n = new THREE.Vector3();
 const _c = new THREE.Color();
 const _c2 = new THREE.Color();
 const _sp = new PSpec();
+/** Terrain normal from `terrainFrame`. */
+const _tn = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
+
+/** Clamp for the estimated sprite/decal lighting. */
+function clampL(x: number): number {
+  return Math.min(1.6, Math.max(0.06, x));
+}
+
+/** Minmod slope limiter: the gentler of two one-sided slopes, 0 at a ridge/valley/step. */
+function minmod(a: number, b: number): number {
+  if (a * b <= 0) return 0;
+  return Math.abs(a) < Math.abs(b) ? a : b;
+}
 
 /** Classify a colour as blood/goo (saturated red or green) from its sRGB hex. */
 function liquidKind(hex: number): 'blood' | 'goo' | null {
@@ -112,10 +133,11 @@ export class Fx {
   private flashPeak = 0;
   private muzzleT = 0;
   private muzzlePeak = 0;
+  private muzzleAhead = 1.6;
   private muzzleColor = new THREE.Color();
   private explosionColor = new THREE.Color(0xffa04a);
   private camera: THREE.Camera | null = null;
-  private rng = new Rng(4242);
+  private rng = new FxRng(4242);
   private decalBudget = DECAL_BUDGET;
   // Approximate scene lighting for the lit (normal-blended) sprites and decals.
   private lights: THREE.Light[] = [];
@@ -127,14 +149,17 @@ export class Fx {
   constructor() {
     this.group.name = 'fx';
     this.group.add(this.decals.mesh, this.meat.mesh, this.shards.mesh, this.soft.mesh, this.glow.mesh, this.flashLight);
-    this.soft.onLand = (x, y, z, r, g, b, tag) => this.landSplat(x, y, z, r, g, b, tag);
-    this.meat.onLand = this.shards.onLand = (x, y, z, r, g, b, size, flags) => this.gibLanded(x, y, z, r, g, b, size, flags);
-    this.meat.onTrail = this.shards.onTrail = (x, y, z, vx, vy, vz, r, g, b, flags) => this.gibTrail(x, y, z, vx, vy, vz, r, g, b, flags);
+    this.soft.onLand = (ev) => this.landSplat(ev);
+    this.meat.onLand = this.shards.onLand = (ev) => this.gibLanded(ev);
+    this.meat.onTrail = this.shards.onTrail = (ev) => this.gibTrail(ev);
     this.soft.lightUniform.setRGB(0.8, 0.8, 0.8);
     this.decals.lightUniform.setRGB(0.8, 0.8, 0.8);
   }
 
-  /** Give the FX system the player camera (muzzle flashes, distance LOD). */
+  /**
+   * Give the FX system the player camera (muzzle flashes, distance LOD). Optional
+   * for LOD: without it, Fx adopts the camera it is first rendered with.
+   */
   attachCamera(camera: THREE.Camera) {
     this.camera = camera;
   }
@@ -236,8 +261,8 @@ export class Fx {
     }
 
     if (stains) {
-      // Heavy drops that leave a splat where they land.
-      const carriers = amount >= 1.4 ? 2 : 1;
+      // Heavy drops that leave a splat where they land (small spurts only sometimes).
+      const carriers = amount >= 1.4 ? 2 : amount >= 0.9 || r.chance(0.5) ? 1 : 0;
       for (let i = 0; i < carriers; i++) {
         const k = r.range(0.8, 2.2);
         _sp.reset().pos(point).color(_c);
@@ -256,7 +281,7 @@ export class Fx {
       }
       // Low hits (crawlers, limbs hitting the ground) splat immediately.
       if (height < 1.0 && amount >= 0.25) {
-        this.splatDecal(point.x + dx * 0.25, floor, point.z + dz * 0.25, _c.r, _c.g, _c.b, r.range(0.6, 0.9) * (0.6 + amount * 0.5));
+        this.splatDecal(point.x + dx * 0.25, floor, point.z + dz * 0.25, _c.r, _c.g, _c.b, r.range(0.6, 0.9) * (0.6 + amount * 0.5), -1, 0.28);
       }
     }
 
@@ -270,10 +295,21 @@ export class Fx {
     const kind = liquidKind(color);
     const bloody = kind !== null;
     const n = Math.min(24, Math.max(0, Math.round(count)));
+    // Only a couple of chunks per burst leave a real splat (they'd all land in the same
+    // spot anyway); some of the rest leave drip spots. Keeps the decal ring from churning.
+    let splats = bloody ? Math.min(GIB_SPLATS_PER_CALL, Math.ceil(n / 3)) : 0;
     for (let i = 0; i < n; i++) {
       // Gore is mostly lumpy meat; other colours (skin, bone, glass, clods) a mix with shards.
       const meat = bloody ? r.chance(0.8) : r.chance(0.5);
       const s = size * r.range(0.6, 1.5);
+      let flags = 0;
+      if (bloody) {
+        flags = GIB_FLAG.BLOODY;
+        if (splats > 0 && s >= size * 0.8) {
+          flags |= GIB_FLAG.SPLAT;
+          splats--;
+        } else if (r.chance(0.25)) flags |= GIB_FLAG.DRIP;
+      }
       let sx = s * r.range(0.75, 1.3);
       const sy = s * r.range(0.6, 1.05);
       let sz = s * r.range(0.75, 1.35);
@@ -294,7 +330,7 @@ export class Fx {
         sz,
         bloody ? r.range(4, 7) : r.range(2.8, 4.5),
         floor,
-        bloody ? GIB_FLAG.BLOODY : 0,
+        flags,
         r,
       );
     }
@@ -345,7 +381,7 @@ export class Fx {
 
   /** Bullet hitting scenery. */
   impact(point: THREE.Vector3, normal: THREE.Vector3 | null, surface: string = 'concrete') {
-    const S = SURFACES[surface] ?? SURFACES.concrete;
+    let S = SURFACES[surface] ?? SURFACES.concrete;
     const r = this.rng;
     const lod = this.lod(point);
     const nrm = normal ? _n.copy(normal) : _n.copy(UP);
@@ -355,8 +391,13 @@ export class Fx {
     const onGround = nrm.y > 0.7 && Math.abs(point.y - floor) < 0.3;
 
     if (surface === 'water') {
-      this.splash(point, lod);
-      return;
+      // Only the water itself splashes; rocks, trees and vehicles standing in it
+      // get a plain (wet-dirt) hit instead of a ripple ring floating in the air.
+      if (onGround) {
+        this.splash(point, lod);
+        return;
+      }
+      S = SURFACES.dirt;
     }
 
     // Dust puff blown out along the normal.
@@ -413,13 +454,17 @@ export class Fx {
     if (onGround && S.decal >= 0 && this.decalBudget > 0) {
       this.decalBudget--;
       _c.setHex(S.tint);
+      // The ground ray reports a flat "up" normal: follow the actual terrain slope.
+      let lift = 0;
+      if (nrm.y > 0.999) lift = this.terrainFrame(point.x, point.z, floor, 0.25);
+      else _tn.copy(nrm);
       this.decals.add(
-        point.x + nrm.x * DECAL_LIFT,
-        floor + DECAL_LIFT,
-        point.z + nrm.z * DECAL_LIFT,
-        nrm.x,
-        nrm.y,
-        nrm.z,
+        point.x + _tn.x * DECAL_LIFT,
+        floor + lift + _tn.y * DECAL_LIFT,
+        point.z + _tn.z * DECAL_LIFT,
+        _tn.x,
+        _tn.y,
+        _tn.z,
         S.decalSize * r.range(0.8, 1.25),
         r.next() * 6.28,
         _c.r,
@@ -665,9 +710,12 @@ export class Fx {
       );
     }
 
-    // Scorch mark.
+    // Scorch mark, tilted to the terrain (and lifted over any bulge) so hills don't swallow it.
     if (height < 2.5) {
-      this.decals.add(point.x, floor + DECAL_LIFT + 0.002, point.z, 0, 1, 0, r.range(2.8, 3.6) * s, r.next() * 6.28, 0.045, 0.04, 0.035, 0.92, r.range(24, 30), DF.SCORCH, 0.12);
+      const size = r.range(2.8, 3.6) * s;
+      const lift = this.terrainFrame(point.x, point.z, floor, size * 0.3);
+      const k = DECAL_LIFT + 0.002;
+      this.decals.add(point.x + _tn.x * k, floor + lift + _tn.y * k, point.z + _tn.z * k, _tn.x, _tn.y, _tn.z, size, r.next() * 6.28, 0.045, 0.04, 0.035, 0.92, r.range(24, 30), DF.SCORCH, 0.12);
     }
   }
 
@@ -767,13 +815,18 @@ export class Fx {
 
   /**
    * Short warm light burst near the camera when the player fires (lights up
-   * nearby ground and enemies, very visible at night). Needs `attachCamera`.
-   * `strength` ≈ 1 for a pistol, 1.6 shotgun/magnum, 0.7 SMG/turret.
+   * nearby ground and enemies, very visible at night). Needs the camera: call
+   * `attachCamera` (otherwise it only works once Fx has adopted the render camera).
+   * `strength` ≈ 1 for a pistol, 1.6 shotgun/magnum, 0.7 SMG. `ahead` is how far
+   * in front of the eye the light sits: keep the default on foot; for a vehicle
+   * mounted gun use ~3.5 (and strength ~0.35) so the hood / gun model in the lower
+   * screen isn't washed out on every shot.
    */
-  muzzleFlash(strength = 1, color = 0xffb35a) {
+  muzzleFlash(strength = 1, color = 0xffb35a, ahead = 1.6) {
     if (!this.camera || this.flashT > 0.08) return;
     this.muzzleT = 0.07;
     this.muzzlePeak = 16 * Math.max(0, strength);
+    this.muzzleAhead = Math.max(0.5, ahead);
     this.muzzleColor.setHex(color);
     this.flashLight.color.copy(this.muzzleColor);
     this.flashLight.distance = 26;
@@ -788,6 +841,7 @@ export class Fx {
 
   update(dt: number) {
     if (this.particleTexPending || this.decalTexPending) this.pumpAtlases();
+    if (!this.camera) this.camera = this.soft.lastCamera ?? this.glow.lastCamera;
     this.decalBudget = DECAL_BUDGET;
     this.updateLighting(dt);
     // Gibs first (they spawn trail particles/decals), then particles (landing → decals), then decals.
@@ -849,9 +903,39 @@ export class Fx {
 
   /** 1 near the camera → 0.45 far away (fewer particles where nobody can see them). */
   private lod(p: THREE.Vector3): number {
+    return this.lodAt(p.x, p.y, p.z);
+  }
+
+  private lodAt(x: number, y: number, z: number): number {
     if (!this.camera) return 1;
-    const d = this.camera.position.distanceTo(p);
+    const c = this.camera.position;
+    const dx = x - c.x;
+    const dy = y - c.y;
+    const dz = z - c.z;
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
     return Math.min(1, Math.max(0.45, 1.25 - d / 45));
+  }
+
+  /**
+   * Terrain normal at (x, z) into `_tn`, from `groundAt` differences over ±h. The
+   * minmod limiter makes steps (curbs, pads, bridge ends), ridges and valleys read
+   * as flat instead of as steep fake slopes. Returns how far a flat decal of
+   * half-size ~h must be lifted to clear gentle curvature (bulges between the samples).
+   */
+  private terrainFrame(x: number, z: number, y0: number, h: number): number {
+    const g = this.groundAt;
+    const xl = g(x - h, z);
+    const xr = g(x + h, z);
+    const zl = g(x, z - h);
+    const zr = g(x, z + h);
+    const sx = minmod(y0 - xl, xr - y0);
+    const sz = minmod(y0 - zl, zr - y0);
+    _tn.set(-sx / h, 1, -sz / h).normalize();
+    // Terrain above the tilted plane at the samples (valleys, concave slopes). Capped
+    // small: a big residual is usually a step like a curb, where a large lift would
+    // leave the decal hovering over the low side.
+    const e = Math.max(xl - (y0 - sx), xr - (y0 + sx), zl - (y0 - sz), zr - (y0 + sz));
+    return e > 0 ? Math.min(e, 0.12, h * 0.15) : 0;
   }
 
   private placeMuzzleLight() {
@@ -859,7 +943,7 @@ export class Fx {
     if (!cam) return;
     // Just ahead of the eye, slightly right/low (where the gun would be) — lights the
     // ground around the player and puts a warm kick on enemies in front.
-    this.flashLight.position.set(0.25, -0.1, -1.6).applyMatrix4(cam.matrixWorld);
+    this.flashLight.position.set(0.25, -0.1, -this.muzzleAhead).applyMatrix4(cam.matrixWorld);
   }
 
   private splash(point: THREE.Vector3, lod: number) {
@@ -903,41 +987,57 @@ export class Fx {
     this.soft.spawn(_sp);
   }
 
-  /** A blood drop landed (LAND_EVENT particle): leave a splat. */
-  private landSplat(x: number, floor: number, z: number, r: number, g: number, b: number, size: number) {
-    this.splatDecal(x, floor, z, r, g, b, size);
+  /** A blood drop landed (LAND_EVENT particle): leave a splat. ev = [x, floor, z, r, g, b, size]. */
+  private landSplat(ev: Float32Array) {
+    this.splatDecal(ev[0], ev[1], ev[2], ev[3], ev[4], ev[5], ev[6], -1, 0.28);
   }
 
-  private splatDecal(x: number, floor: number, z: number, r: number, g: number, b: number, size: number) {
+  /**
+   * Liquid decal on the ground (frame -1 = a random splat shape). A new mark close to a
+   * fresh one of the same colour thickens that one instead (pools build up under a
+   * body without filling the decal ring).
+   */
+  private splatDecal(x: number, floor: number, z: number, r: number, g: number, b: number, size: number, frame: number, spread: number) {
     if (this.decalBudget <= 0) return;
+    const drips = frame === DF.DRIPS;
+    const near = this.decals.findNear(x, z, Math.max(0.3, size * 0.45), 3, LIQUID_MASK, r, g, b);
+    if (near >= 0) {
+      this.decals.grow(near, drips ? 1.03 : 1.08, 1.1);
+      return;
+    }
     this.decalBudget--;
     const rng = this.rng;
-    this.decals.add(x, floor + DECAL_LIFT, z, 0, 1, 0, size, rng.next() * 6.28, r, g, b, 0.94, rng.range(17, 23), rng.int(DF.SPLAT0, DF.SPLAT3), 0.28);
+    const lift = this.terrainFrame(x, z, floor, Math.max(0.2, size * 0.35));
+    this.decals.add(
+      x + _tn.x * DECAL_LIFT,
+      floor + lift + _tn.y * DECAL_LIFT,
+      z + _tn.z * DECAL_LIFT,
+      _tn.x,
+      _tn.y,
+      _tn.z,
+      size,
+      rng.next() * 6.28,
+      r,
+      g,
+      b,
+      drips ? 0.9 : 0.94,
+      rng.range(17, 23),
+      frame >= 0 ? frame : rng.int(DF.SPLAT0, DF.SPLAT3),
+      spread,
+    );
   }
 
-  private gibLanded(x: number, floor: number, z: number, r: number, g: number, b: number, size: number, flags: number) {
-    if (flags & GIB_FLAG.BLOODY) {
-      if (this.decalBudget <= 0) return;
-      this.decalBudget--;
-      const rng = this.rng;
-      const big = size > 0.07;
-      this.decals.add(
-        x,
-        floor + DECAL_LIFT,
-        z,
-        0,
-        1,
-        0,
-        Math.min(0.75, Math.max(0.22, size * (big ? 5 : 4))),
-        rng.next() * 6.28,
-        r,
-        g,
-        b,
-        0.92,
-        rng.range(16, 22),
-        big ? rng.int(DF.SPLAT0, DF.SPLAT3) : DF.DRIPS,
-        0.18,
-      );
+  /** A chunk's first floor contact. ev = [x, floor, z, r, g, b, size, flags]. */
+  private gibLanded(ev: Float32Array) {
+    const flags = ev[7];
+    const x = ev[0];
+    const floor = ev[1];
+    const z = ev[2];
+    const size = ev[6];
+    if (flags & GIB_FLAG.SPLAT) {
+      this.splatDecal(x, floor, z, ev[3], ev[4], ev[5], Math.min(0.75, Math.max(0.25, size * 5)), -1, 0.18);
+    } else if (flags & GIB_FLAG.DRIP) {
+      this.splatDecal(x, floor, z, ev[3], ev[4], ev[5], Math.min(0.42, Math.max(0.22, size * 4)), DF.DRIPS, 0.12);
     } else if (flags & GIB_FLAG.HOT) {
       // Hot debris thuds down with a little puff of smoke.
       _sp.reset().vel(0, 0.4, 0).rgb0(0.25, 0.23, 0.21).rgb1(0.3, 0.3, 0.3);
@@ -955,24 +1055,36 @@ export class Fx {
     }
   }
 
-  private gibTrail(x: number, y: number, z: number, vx: number, vy: number, vz: number, r: number, g: number, b: number, flags: number) {
+  /** Trail tick of a flying chunk. ev = [x, y, z, vx, vy, vz, r, g, b, flags, floor]. */
+  private gibTrail(ev: Float32Array) {
     const rng = this.rng;
+    const flags = ev[9];
+    const x = ev[0];
+    const y = ev[1];
+    const z = ev[2];
     if (flags & GIB_FLAG.BLOODY) {
-      _sp.reset().vel(vx * 0.15 + rng.spread(0.3), vy * 0.15, vz * 0.15 + rng.spread(0.3)).rgb0(r, g, b).rgb1(r, g, b);
+      // Far away the drops would be sub-pixel specks (they read as grey dots): skip.
+      if (this.lodAt(x, y, z) < 0.8) return;
+      // Short falling streaks (stretched along velocity), a bit brighter than the
+      // chunk so they read as blood rather than dark specks against the sky.
+      const k = 1.35;
+      _sp.reset().vel(ev[3] * 0.15 + rng.spread(0.3), ev[4] * 0.15, ev[5] * 0.15 + rng.spread(0.3));
+      _sp.rgb0(ev[6] * k, ev[7] * k, ev[8] * k).rgb1(ev[6] * k, ev[7] * k, ev[8] * k);
       _sp.x = x;
       _sp.y = y;
       _sp.z = z;
       _sp.frame = PF.DROP;
-      _sp.size(rng.range(0.035, 0.055), 0.025);
+      _sp.stretch = 0.04;
+      _sp.size(rng.range(0.045, 0.065), 0.035);
       _sp.life = rng.range(0.4, 0.65);
       _sp.grav = 9;
       _sp.fadeIn = 0.01;
       _sp.fadeOut = 0.7;
       _sp.flags = PFLAG.DIE_ON_FLOOR;
-      _sp.floor = y - 3;
+      _sp.floor = ev[10];
       this.soft.spawn(_sp);
     } else if (flags & GIB_FLAG.HOT) {
-      _sp.reset().vel(vx * 0.1, vy * 0.1, vz * 0.1).rgb0(1.6, 0.8, 0.25).rgb1(0.7, 0.12, 0.02);
+      _sp.reset().vel(ev[3] * 0.1, ev[4] * 0.1, ev[5] * 0.1).rgb0(1.6, 0.8, 0.25).rgb1(0.7, 0.12, 0.02);
       _sp.x = x;
       _sp.y = y;
       _sp.z = z;
@@ -1051,7 +1163,6 @@ export class Fx {
     // Fire light spills onto the smoke for a moment.
     const f = this.flashT > 0 ? (this.flashT / this.flashDur) * Math.min(2, this.flashPeak / 40) : 0;
     const k = 1 / Math.PI;
-    const clampL = (x: number) => Math.min(1.6, Math.max(0.06, x));
     this.soft.lightUniform.setRGB(clampL(sr * k + f * 0.4), clampL(sg * k + f * 0.22), clampL(sb * k + f * 0.08));
     this.decals.lightUniform.setRGB(clampL(ur * k), clampL(ug * k), clampL(ub * k));
   }

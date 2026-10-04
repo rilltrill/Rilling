@@ -92,8 +92,8 @@ export const C = {
   // Fabric.
   sheet: 0xc8d2cc,
   sheetBlue: 0x8fb4c4,
-  curtain: 0x6f9e98,
-  curtainAlt: 0x8aa6b8,
+  curtain: 0xc49a7a,
+  curtainAlt: 0xb8a882,
   // Glows.
   panel: 0xe6fff2,
   panelWarm: 0xfff1d0,

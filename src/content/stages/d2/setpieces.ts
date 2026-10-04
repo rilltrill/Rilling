@@ -179,18 +179,18 @@ export class GlassWall {
       }
     });
     // Crack lines (hidden until crack()).
-    const crackMat = glow(0xe0f4ff, 1.2);
+    const crackMat = glow(0xcfe8f8, 0.75);
     const rays = 9;
     for (let i = 0; i < rays; i++) {
       const a = (i / rays) * Math.PI * 2 + 0.3 * Math.sin(i * 7.1);
-      const len = (0.6 + 0.5 * Math.abs(Math.sin(i * 3.7))) * Math.min(w, h) * 0.45;
-      Kit.add(this.cracks, Kit.box(len, 0.025, 0.1), crackMat, Math.cos(a) * len * 0.5, h * 0.48 + Math.sin(a) * len * 0.5, 0.0, 0, 0, a);
+      const len = (0.6 + 0.5 * Math.abs(Math.sin(i * 3.7))) * Math.min(w, h, 4) * 0.4;
+      Kit.add(this.cracks, Kit.box(len, 0.016, 0.1), crackMat, Math.cos(a) * len * 0.5, h * 0.48 + Math.sin(a) * len * 0.5, 0.0, 0, 0, a);
     }
     for (let i = 0; i < 2; i++) {
       const r = 0.35 + i * 0.4;
       for (let k = 0; k < 8; k++) {
         const a = (k / 8) * Math.PI * 2;
-        Kit.add(this.cracks, Kit.box(r * 0.8, 0.02, 0.1), crackMat, Math.cos(a) * r, h * 0.48 + Math.sin(a) * r, 0, 0, 0, a + Math.PI / 2);
+        Kit.add(this.cracks, Kit.box(r * 0.8, 0.014, 0.1), crackMat, Math.cos(a) * r, h * 0.48 + Math.sin(a) * r, 0, 0, 0, a + Math.PI / 2);
       }
     }
     bake(this.cracks);
@@ -212,12 +212,32 @@ export class GlassWall {
     this.c.copy(o.center).setY(o.center.y + h / 2);
   }
 
+  /** Already smashed when the player arrives (no FX). */
+  setBroken() {
+    this.broken = true;
+    this.pane.visible = false;
+    this.cracks.visible = false;
+    this.teeth.visible = true;
+  }
+
+  /** Static spider-web cracks (no FX). */
+  setCracked(level = 1) {
+    this.crackLevel = level;
+    this.cracks.visible = true;
+    this.cracks.scale.setScalar(Math.min(1.25, 0.55 + level * 0.3));
+  }
+
+  /** World-space centre of the pane. */
+  get centre(): THREE.Vector3 {
+    return this.c;
+  }
+
   /** Spider-web cracks (a warning before something comes through). */
   crack(world: World) {
     if (this.broken) return;
     this.crackLevel++;
     this.cracks.visible = true;
-    this.cracks.scale.setScalar(Math.min(1.6, 0.6 + this.crackLevel * 0.45));
+    this.cracks.scale.setScalar(Math.min(1.25, 0.55 + this.crackLevel * 0.3));
     world.audio.play('glass', { volume: 0.45, pitch: 0.6 + this.crackLevel * 0.1, vary: 0.05 });
     world.audio.play('hit_world', { volume: 0.8, pitch: 0.5 });
     world.rig.shake(0.18);
@@ -321,18 +341,17 @@ export class SkeletonDisplay {
   private buildPlinth() {
     const g = new THREE.Group();
     const granite = mat(0x34343c, 'concrete', 1, 0.5);
-    box(g, granite, 0, 0.4, 0, 14, 0.8, 5.4);
-    box(g, mat(0x24242a), 0, 0.86, 0, 14.3, 0.12, 5.7);
+    box(g, granite, -0.3, 0.4, 0, 13, 0.8, 5.4);
+    box(g, mat(0x24242a), -0.3, 0.86, 0, 13.3, 0.12, 5.7);
     box(g, mat(0xb08a3a, 'metal', 2, 0.5), 1.5, 0.45, 2.71, 1.6, 0.5, 0.04);
     // Rope stanchions around the display.
     const brass = mat(0xc0a050, 'metal', 2, 0.4);
     const rope = mat(0x8a1a1e, 'cloth', 2);
     const posts: [number, number][] = [
-      [-7.6, 3.4],
-      [-3, 3.6],
-      [1.6, 3.6],
-      [6.2, 3.4],
-      [7.8, 0],
+      [-7.2, 3.3],
+      [-3, 3.5],
+      [1.4, 3.5],
+      [5.2, 3.3],
     ];
     for (const [x, z] of posts) {
       Kit.add(g, Kit.cyl(0.05, 0.05, 1.0, 6), brass, x, 0.5, z);
@@ -475,11 +494,11 @@ export class SkeletonDisplay {
     );
 
     // Tail in three pieces.
-    const tailPts = [V(-1.4, 4.05, 0), V(-2.8, 3.7, 0), V(-4.2, 3.1, 0), V(-5.6, 2.4, 0), V(-6.9, 1.7, 0), V(-8.1, 1.1, 0), V(-9.0, 0.9, 0)];
+    const tailPts = [V(-1.4, 4.05, 0), V(-2.75, 3.7, 0), V(-4.1, 3.1, 0), V(-5.4, 2.4, 0), V(-6.6, 1.7, 0), V(-7.7, 1.15, 0), V(-8.5, 0.95, 0)];
     const tailPieces: [number, number, { to: [number, number, number]; rot: [number, number, number]; delay: number }][] = [
       [0, 2, { to: [-2.9, 1.15, 0.7], rot: [0.3, -0.15, 0.1], delay: 0.15 }],
       [2, 4, { to: [-5.8, 0.25, 3.0], rot: [0, -0.5, -0.05], delay: 0.05 }],
-      [4, 6, { to: [-8.6, 0.2, 3.6], rot: [0, -0.9, 0], delay: 0.0 }],
+      [4, 6, { to: [-7.9, 0.2, 3.6], rot: [0, -0.9, 0], delay: 0.0 }],
     ];
     for (const [a, b, rest] of tailPieces) {
       const c = tailPts[a].clone().add(tailPts[b]).multiplyScalar(0.5);

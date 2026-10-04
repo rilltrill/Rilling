@@ -53,6 +53,9 @@ export class Shooter {
     }
     const def = res.def;
     w.audio.play(def.sfx, { vary: 0.06, volume: 0.9 });
+    // Turret flash sits further ahead so it doesn't wash out the vehicle view-model.
+    if (def.id === 'turret') w.fx.muzzleFlash(0.4, undefined, 3.5);
+    else w.fx.muzzleFlash(def.id === 'shotgun' || def.id === 'magnum' ? 1.6 : def.id === 'smg' ? 0.7 : 1);
     w.rig.shake(def.shake);
     w.hud.shotFired(x, y);
     w.haptic(def.id === 'shotgun' || def.id === 'magnum' ? 35 : 12);
@@ -84,7 +87,8 @@ export class Shooter {
   reload(): boolean {
     const w = this.world;
     if (w.weapons.reload()) {
-      w.audio.play('reload');
+      const id = w.weapons.def.id;
+      w.audio.play(id === 'shotgun' ? 'reload_shotgun' : id === 'magnum' ? 'reload_magnum' : 'reload');
       w.hud.prompt(null);
       return true;
     }
@@ -208,7 +212,8 @@ export class Shooter {
 
   private impactWorld(blocker: THREE.Intersection | null) {
     const w = this.world;
-    const surface = w.env?.surface ?? 'concrete';
+    // Occluders can tag their own surface (userData.surface = 'metal' | 'wood' | …).
+    const surface = (blocker?.object.userData.surface as string | undefined) ?? w.env?.surface ?? 'concrete';
     if (blocker) {
       const n = blocker.face ? _tmp.copy(blocker.face.normal).transformDirection(blocker.object.matrixWorld) : null;
       w.fx.impact(blocker.point, n, surface);

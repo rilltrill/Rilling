@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Rng } from '../core/Rng';
+import { FxRng } from './FxRng';
 import { newRange, uploadRange } from './upload';
 
 /**
@@ -10,11 +10,20 @@ import { newRange, uploadRange } from './upload';
  */
 
 export const GIB_FLAG = {
-  /** Leaves a blood trail and a splat where it lands. */
+  /** Drips a short blood trail while flying. */
   BLOODY: 1,
   /** Glows hot for a moment (explosion debris) — leaves an ember trail. */
   HOT: 2,
+  /** Leaves a blood splat where it first lands. */
+  SPLAT: 4,
+  /** Leaves a few drip spots where it first lands. */
+  DRIP: 8,
 } as const;
+
+const TRAIL_FLAGS = GIB_FLAG.BLOODY | GIB_FLAG.HOT;
+/** Bloody chunks only drip while flung fast or just after the hit (no dotted arcs). */
+const BLOOD_TRAIL_TIME = 0.35;
+const BLOOD_TRAIL_SPEED2 = 3 * 3;
 
 // CPU layout.
 const S = 24;
@@ -41,8 +50,17 @@ const PX = 0,
   REST = 20,
   BOUNCES = 21;
 
-export type GibLandFn = (x: number, y: number, z: number, r: number, g: number, b: number, size: number, flags: number) => void;
-export type GibTrailFn = (x: number, y: number, z: number, vx: number, vy: number, vz: number, r: number, g: number, b: number, flags: number) => void;
+/**
+ * First floor contact. Payload in `GibMesh.ev` (reused, read synchronously):
+ * [x, floorY, z, r, g, b, size, flags].
+ */
+export type GibLandFn = (ev: Float32Array) => void;
+/**
+ * Trail tick while flying. Payload in `GibMesh.ev`:
+ * [x, y, z, vx, vy, vz, r, g, b, flags, floorY].
+ * (One typed array instead of ten numbers: doubles passed to a non-inlined call get boxed.)
+ */
+export type GibTrailFn = (ev: Float32Array) => void;
 
 /** Irregular jittered polyhedron: vertices displaced consistently by position hash (stays watertight). */
 function jitterGeo(base: THREE.BufferGeometry, amount: number, seed: number): THREE.BufferGeometry {
@@ -72,6 +90,9 @@ export class GibMesh {
   readonly mesh: THREE.InstancedMesh;
   onLand: GibLandFn | null = null;
   onTrail: GibTrailFn | null = null;
+  /** Event payload for `onLand` / `onTrail`. */
+  readonly ev = new Float32Array(11);
+  private rng: FxRng;
   private d: Float32Array;
   private col: Float32Array;
   private n = 0;
@@ -83,6 +104,7 @@ export class GibMesh {
     readonly capacity: number,
     shape: 'meat' | 'shard',
   ) {
+    this.rng = new FxRng(shape === 'meat' ? 0x5eed1 : 0x5eed2);
     this.d = new Float32Array(capacity * S);
     const geo =
       shape === 'meat'
@@ -116,7 +138,7 @@ export class GibMesh {
     life: number,
     floor: number,
     flags: number,
-    rng: Rng,
+    rng: FxRng,
   ) {
     let i = this.n;
     if (i >= this.capacity) i = this.recycle = (this.recycle + 1) % this.capacity;
@@ -182,11 +204,20 @@ export class GibMesh {
         let py = d[o + PY] + vy * dt;
         let pz = d[o + PZ] + vz * dt;
         const flags = d[o + FLAGS];
-        if (py < contact) {
+        if (py < contact && vy <= 0) {
           py = contact;
           const impact = -vy;
           if (d[o + BOUNCES] === 0 && this.onLand) {
-            this.onLand(px, d[o + FLOOR], pz, col[i * 3], col[i * 3 + 1], col[i * 3 + 2], Math.max(d[o + SX], sy, d[o + SZ]), flags);
+            const ev = this.ev;
+            ev[0] = px;
+            ev[1] = d[o + FLOOR];
+            ev[2] = pz;
+            ev[3] = col[i * 3];
+            ev[4] = col[i * 3 + 1];
+            ev[5] = col[i * 3 + 2];
+            ev[6] = Math.max(d[o + SX], sy, d[o + SZ]);
+            ev[7] = flags;
+            this.onLand(ev);
           }
           d[o + BOUNCES]++;
           if (impact < 1.6 || d[o + BOUNCES] > 3) {
@@ -206,11 +237,26 @@ export class GibMesh {
             d[o + WY] *= 0.5;
             d[o + WZ] *= 0.5;
           }
-        } else if (flags !== 0 && this.onTrail) {
+        } else if ((flags & TRAIL_FLAGS) !== 0 && this.onTrail) {
           d[o + TRAIL] -= dt;
           if (d[o + TRAIL] <= 0) {
-            d[o + TRAIL] = flags & GIB_FLAG.HOT ? 0.028 : 0.05;
-            this.onTrail(px, py, pz, vx, vy, vz, col[i * 3], col[i * 3 + 1], col[i * 3 + 2], flags);
+            const hot = (flags & GIB_FLAG.HOT) !== 0;
+            d[o + TRAIL] = hot ? 0.028 : this.rng.range(0.03, 0.08);
+            if (hot || age < BLOOD_TRAIL_TIME || vx * vx + vy * vy + vz * vz > BLOOD_TRAIL_SPEED2) {
+              const ev = this.ev;
+              ev[0] = px;
+              ev[1] = py;
+              ev[2] = pz;
+              ev[3] = vx;
+              ev[4] = vy;
+              ev[5] = vz;
+              ev[6] = col[i * 3];
+              ev[7] = col[i * 3 + 1];
+              ev[8] = col[i * 3 + 2];
+              ev[9] = flags;
+              ev[10] = d[o + FLOOR];
+              this.onTrail(ev);
+            }
           }
         }
         d[o + VX] = vx;

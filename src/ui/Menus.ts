@@ -2,7 +2,7 @@ import type { CampaignDef, StageDef } from '../gameplay/StageTypes';
 import type { Save } from '../core/Save';
 import type { AudioSystem } from '../audio/Audio';
 import type { SfxName } from '../audio/names';
-import type { CampaignId, Grade, QualityLevel, Settings, StageResult } from '../core/types';
+import type { CampaignId, Grade, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
 import { haptic } from '../core/Haptics';
 import { el, escapeHtml, onTap } from './dom';
 import { cityCardArt, jungleCardArt, LOCK_ICON, SKULL_ICON, TUTORIAL_ART } from './art';
@@ -41,6 +41,17 @@ interface TallyStep {
 
 const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
 const GRADE_ORDER: Grade[] = ['D', 'C', 'B', 'A', 'S'];
+/** Tap-arming delay for buttons on screens that can appear mid-action. */
+const ARM_MS = 600;
+const CONTINUE_ARM_MS = 700;
+
+/**
+ * Show the DISPLAY (CRT / PIXEL / OFF) setting and apply Settings.retro to the
+ * renderer. Off until the arcade-monitor look (core/RetroPass) ships: turning it
+ * on changes every screen's look (and what renderer.info reports), so the lead
+ * flips this once the retro pass is signed off. Game.applySettings reads it too.
+ */
+export const RETRO_SETTING_ENABLED = false;
 
 /**
  * All full-screen menus (title, campaign/stage select, settings, pause, results,
@@ -113,8 +124,19 @@ export class Menus {
     if (this.save.settings.haptics) haptic(10);
   }
 
-  private button(parent: HTMLElement, label: string, fn: () => void, cls = '', sub?: string) {
-    const b = el('button', `btn ${cls}`, parent, `<span class="btn-label">${label}</span>${sub ? `<span class="btn-sub">${sub}</span>` : ''}`);
+  /**
+   * `armMs` > 0: the button ignores taps for that long after the screen opens.
+   * Used on screens that pop up mid-action (continue, results, game over…) so a
+   * shot already in flight can't press GIVE UP / MENU by accident.
+   */
+  private button(parent: HTMLElement, label: string, fn: () => void, cls = '', sub?: string, armMs = 0) {
+    const b = el(
+      'button',
+      `btn ${cls}${armMs > 0 ? ' disabled arming' : ''}`,
+      parent,
+      `<span class="btn-label">${label}</span>${sub ? `<span class="btn-sub">${sub}</span>` : ''}`,
+    );
+    if (armMs > 0) this.later(armMs, () => b.classList.remove('disabled', 'arming'));
     onTap(b, () => {
       if (b.classList.contains('disabled')) return;
       this.feedback(cls.includes('back') ? 'ui_back' : 'ui_click');
@@ -158,7 +180,8 @@ export class Menus {
     el('div', 'logo-slash', logo);
     el('div', 'logo-sub', logo, 'ARCADE RAIL SHOOTER');
     el('div', 'tap-start', s, 'TAP TO START');
-    el('div', 'title-foot', s, 'ZOMBIES &bull; DINOSAURS &bull; NO QUARTERS REQUIRED');
+    // Two halves so narrow (portrait) screens break it cleanly onto two lines.
+    el('div', 'title-foot', s, '<span>ZOMBIES &bull; DINOSAURS</span><span class="tf-sep"> &bull; </span><span>NO QUARTERS REQUIRED</span>');
     let started = false;
     const go = (e: Event) => {
       e.preventDefault();
@@ -376,8 +399,9 @@ export class Menus {
       set(st[key]);
     };
 
+    // The whole row is the touch target (label included), not just the small switch.
     const toggleRow = (parent: HTMLElement, label: string, key: 'haptics' | 'aimAssist' | 'autoReload' | 'leftHanded' | 'showFps') => {
-      const row = el('div', 'set-row', parent);
+      const row = el('div', 'set-row toggle-row', parent);
       el('span', 'set-label', row, label);
       const b = el('button', 'set-toggle', row, '<span class="sw-knob"></span><span class="sw-txt"></span>');
       b.setAttribute('role', 'switch');
@@ -388,7 +412,7 @@ export class Menus {
         (b.lastElementChild as HTMLElement).textContent = st[key] ? 'ON' : 'OFF';
       };
       paint();
-      onTap(b, () => {
+      onTap(row, () => {
         st[key] = !st[key];
         paint();
         commit();
@@ -396,20 +420,35 @@ export class Menus {
       });
     };
 
+    const segRow = <K extends 'quality' | 'retro'>(parent: HTMLElement, label: string, key: K, opts: [Settings[K], string][]) => {
+      const row = el('div', 'set-row', parent);
+      el('span', 'set-label', row, label);
+      const wrap = el('div', 'set-seg', row);
+      for (const [value, text] of opts) {
+        const b = el('button', `seg ${st[key] === value ? 'on' : ''}`, wrap, text);
+        onTap(b, () => {
+          st[key] = value;
+          wrap.querySelectorAll('.seg').forEach((x) => x.classList.remove('on'));
+          b.classList.add('on');
+          this.feedback('ui_click');
+          commit();
+        });
+      }
+    };
+
     slider(colA, 'SOUND FX', 'sfxVolume');
     slider(colA, 'MUSIC', 'musicVolume');
-    const qrow = el('div', 'set-row', colA);
-    el('span', 'set-label', qrow, 'GRAPHICS');
-    const qwrap = el('div', 'set-seg', qrow);
-    for (const q of ['low', 'medium', 'high'] as QualityLevel[]) {
-      const b = el('button', `seg ${st.quality === q ? 'on' : ''}`, qwrap, q === 'medium' ? 'MED' : q.toUpperCase());
-      onTap(b, () => {
-        st.quality = q;
-        qwrap.querySelectorAll('.seg').forEach((x) => x.classList.remove('on'));
-        b.classList.add('on');
-        this.feedback('ui_click');
-        commit();
-      });
+    segRow(colA, 'GRAPHICS', 'quality', [
+      ['low', 'LOW'],
+      ['medium', 'MED'],
+      ['high', 'HIGH'],
+    ] as [QualityLevel, string][]);
+    if (RETRO_SETTING_ENABLED) {
+      segRow(colA, 'DISPLAY', 'retro', [
+        ['crt', 'CRT'],
+        ['pixel', 'PIXEL'],
+        ['off', 'OFF'],
+      ] as [RetroMode, string][]);
     }
     toggleRow(colA, 'SHOW FPS', 'showFps');
     toggleRow(colB, 'AIM ASSIST', 'aimAssist');
@@ -513,8 +552,7 @@ export class Menus {
       el('div', 'tut-title', c, title);
       el('div', 'tut-text', c, text);
     });
-    const go = this.button(s, "GOT IT — LET'S GO!", () => onDone(), 'primary big tut-go disabled');
-    this.later(900, () => go.classList.remove('disabled'));
+    this.button(s, "GOT IT — LET'S GO!", () => onDone(), 'primary big tut-go', undefined, 900);
   }
 
   showResults(r: StageResult, isBest: boolean, nextLabel: string) {
@@ -554,9 +592,9 @@ export class Menus {
       isBest ? 'NEW BEST!' : prev ? `BEST ${fmtInt(prev.score)}` : '',
     );
     const actions = el('div', 'menu-row results-actions', s);
-    this.button(actions, nextLabel, () => this.actions.nextStage(), 'primary');
-    this.button(actions, 'RETRY', () => this.actions.restart());
-    this.button(actions, 'MENU', () => this.actions.quit(), 'back');
+    this.button(actions, nextLabel, () => this.actions.nextStage(), 'primary', undefined, ARM_MS);
+    this.button(actions, 'RETRY', () => this.actions.restart(), '', undefined, ARM_MS);
+    this.button(actions, 'MENU', () => this.actions.quit(), 'back', undefined, ARM_MS);
     const finish = () => {
       grade.classList.add('stamp');
       gradeBox.classList.add('shown');
@@ -627,8 +665,9 @@ export class Menus {
     const count = el('div', 'continue-count', dial, String(seconds));
     el('div', 'continue-hint', s, 'Continuing resets your combo and lowers your rank.');
     const row = el('div', 'menu-row', s);
-    this.button(row, 'CONTINUE', () => this.actions.continueYes(), 'primary pulse');
-    this.button(row, 'GIVE UP', () => this.actions.continueNo(), 'back');
+    // The screen opens the instant the last heart goes — usually mid-tap.
+    this.button(row, 'CONTINUE', () => this.actions.continueYes(), 'primary pulse', undefined, CONTINUE_ARM_MS);
+    this.button(row, 'GIVE UP', () => this.actions.continueNo(), 'back', undefined, CONTINUE_ARM_MS);
     let n = seconds;
     this.audio.play('continue_tick');
     this.timers.push(
@@ -659,8 +698,8 @@ export class Menus {
     const sc = el('div', 'gameover-score', s, 'SCORE ');
     const v = el('b', '', sc, '0');
     const row = el('div', 'menu-row', s);
-    this.button(row, 'RETRY', () => this.actions.restart(), 'primary');
-    this.button(row, 'MENU', () => this.actions.quit(), 'back');
+    this.button(row, 'RETRY', () => this.actions.restart(), 'primary', undefined, ARM_MS);
+    this.button(row, 'MENU', () => this.actions.quit(), 'back', undefined, ARM_MS);
     const skip = this.runTally([{ row: sc, val: v, to: score, fmt: fmtInt, dur: 1.1 }], () => {}, 900);
     s.addEventListener('pointerdown', () => skip());
   }
@@ -692,7 +731,7 @@ export class Menus {
     const v = el('b', '', sc, '0');
     const nb = isBest ? el('div', 'new-best', s, 'NEW HIGH SCORE!') : null;
     const row = el('div', 'menu-row', s);
-    this.button(row, 'MENU', () => this.actions.quit(), 'primary');
+    this.button(row, 'MENU', () => this.actions.quit(), 'primary', undefined, ARM_MS);
     const skip = this.runTally([{ row: sc, val: v, to: total, fmt: fmtInt, dur: 1.6 }], () => nb?.classList.add('pop'), 1100);
     s.addEventListener('pointerdown', () => skip());
   }

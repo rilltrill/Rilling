@@ -1,7 +1,9 @@
 import { SFX, offlineCtor, renderSfx, type SfxContext } from './Sfx';
 import { PREWARM, SFX_META } from './sfxMeta';
 import { MusicPlayer } from './Music';
-import { makeImpulse, makeNoiseBank, type NoiseBank } from './dsp';
+import { Baker } from './bake';
+import { BED_NAMES, BED_RATE, bedData, bedLoop, drumData, kitFrom, type BedName, type DrumData, type DrumKit } from './drums';
+import { impulseData, impulseFrom, makeImpulse, makeNoiseBank, noiseBankFrom, noiseData, runSync, toBuffer, type NoiseBank, type NoiseData } from './dsp';
 import type { MusicId, PlayOptions, SfxName } from './names';
 
 /**
@@ -23,6 +25,12 @@ import type { MusicId, PlayOptions, SfxName } from './names';
  * pointerdown/keydown by the game, and this class also listens for
  * touchend/click itself (older iOS only unlocks on those) and resumes the
  * context after iOS interruptions (calls, Siri, backgrounding).
+ *
+ * The sample math (noise bank, reverb impulse, music drum kit, ambience loops)
+ * is baked from boot in a few ms per update() and in idle time (bake.ts), so
+ * the first tap only wraps finished arrays into buffers. Anything not ready
+ * yet simply joins later: music starts on its synths and the drums come in
+ * when the kit is done, the reverb and ambience beds fade in.
  */
 
 interface Channel {
@@ -41,10 +49,38 @@ interface Channel {
 const WORLD_CHANNELS = 24;
 const UI_CHANNELS = 8;
 const MAX_FADING = 48;
-/** Major-scale steps for rising tick sequences (score count-up). */
-const SCALE = [0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19, 21, 23, 24];
+/**
+ * Major-scale steps for rising tick sequences (score count-up). One octave,
+ * wrapping: long tallies roll up the scale again instead of climbing into
+ * shrill territory.
+ */
+const SCALE = [0, 2, 4, 5, 7, 9, 11, 12];
+/**
+ * Rate the background bake assumes (most phones run at 48 kHz). Buffer sources
+ * resample if the device differs; only the reverb impulse must match exactly,
+ * and is re-baked at the real rate when it doesn't.
+ */
+const BAKE_RATE = 48000;
+/**
+ * Bake time slice per update(), as a share of the frame time (so slow devices
+ * don't take proportionally longer) within [min, max] ms: generous on the
+ * title screen (nothing to hear yet) and while music plays without its drums,
+ * lighter otherwise.
+ */
+const BAKE_IDLE = { share: 0.2, min: 3, max: 10 };
+const BAKE_URGENT = { share: 0.35, min: 5, max: 16 };
+const BAKE_LIVE = { share: 0.12, min: 2, max: 6 };
+/** Pre-rendering waits this long after unlock so it never piles onto the first tap. */
+const RENDER_DELAY_MS = 400;
 
 type AcGlobal = { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
+
+function acCtor(): typeof AudioContext | null {
+  const g = globalThis as unknown as AcGlobal;
+  return g.AudioContext || g.webkitAudioContext || null;
+}
+
+const perfNow = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
 export class AudioSystem {
   ctx: AudioContext | null = null;
@@ -79,6 +115,13 @@ export class AudioSystem {
   private paused = false;
   private comboAt = -10;
   private gestureBound = false;
+  // Background-baked samples.
+  private baker: Baker | null = null;
+  private idleQueued = false;
+  private kit: DrumKit | null = null;
+  private beds: Partial<Record<BedName, AudioBuffer>> = {};
+  private verb: ConvolverNode | null = null;
+  private impulseKey: string | null = null;
   // Pre-render cache.
   private buffers = new Map<SfxName, AudioBuffer[]>();
   private queue: SfxName[] = [];
@@ -86,11 +129,42 @@ export class AudioSystem {
   private rendering = false;
   private canRender = false;
   private renderFailures = 0;
+  private renderAfter = 0;
   private cacheBytes = 0;
   muted = false;
 
   constructor() {
     this.bindGestures();
+    this.startBake();
+  }
+
+  /** Queue the background sample synthesis (browser only; node tests stay inert). */
+  private startBake() {
+    if (typeof window === 'undefined' || !acCtor()) return;
+    const b = new Baker();
+    b.add('noise', noiseData(BAKE_RATE));
+    b.add('drums', drumData(BAKE_RATE));
+    b.add('impulse@' + BAKE_RATE, impulseData(BAKE_RATE, 1.7, 2.8));
+    for (const n of BED_NAMES) b.add(n, bedData(n));
+    this.baker = b;
+    this.idleBake();
+  }
+
+  /**
+   * Where the browser reports idle time (Chrome/Android/Firefox), also bake in
+   * it, so slow frames don't slow the bake down; update() covers the rest (iOS).
+   */
+  private idleBake() {
+    if (this.idleQueued || typeof window === 'undefined' || typeof window.requestIdleCallback !== 'function') return;
+    const b = this.baker;
+    if (!b || b.idle) return;
+    this.idleQueued = true;
+    window.requestIdleCallback((dl) => {
+      this.idleQueued = false;
+      const left = dl.timeRemaining() - 1;
+      if (left > 1) this.baker?.step(Math.min(8, left));
+      this.idleBake();
+    });
   }
 
   get ready() {
@@ -114,8 +188,7 @@ export class AudioSystem {
 
   private init() {
     if (typeof window === 'undefined') return;
-    const g = globalThis as unknown as AcGlobal;
-    const AC = g.AudioContext || g.webkitAudioContext;
+    const AC = acCtor();
     if (!AC) return;
     let ctx: AudioContext;
     try {
@@ -138,6 +211,8 @@ export class AudioSystem {
       this.ctx = null;
       this.bank = null;
       this.music = null;
+      this.verb = null;
+      this.impulseKey = null;
       this.world = [];
       this.ui = [];
       try {
@@ -178,12 +253,23 @@ export class AudioSystem {
     this.uiBus.connect(this.comp);
     this.comp.connect(this.limiter).connect(this.master).connect(ctx.destination);
 
-    this.bank = makeNoiseBank(ctx);
+    // Noise is needed by the very first sound: finish it now if the bake hasn't yet (~10 ms).
+    const nd = this.baker?.takeNow<NoiseData>('noise');
+    this.bank = nd ? noiseBankFrom(ctx, nd, BAKE_RATE) : makeNoiseBank(ctx);
     this.noise = this.bank.white;
 
     // Shared reverb (sfx sends + music sends), scaled by the respective volumes.
+    // A convolver needs its impulse at the context's own rate; until that is
+    // baked the reverb is simply silent.
     const verb = ctx.createConvolver();
-    verb.buffer = makeImpulse(ctx, 1.7, 2.8);
+    this.verb = verb;
+    if (this.baker) {
+      const key = 'impulse@' + ctx.sampleRate;
+      if (key !== 'impulse@' + BAKE_RATE) this.baker.drop('impulse@' + BAKE_RATE);
+      this.baker.add(key, impulseData(ctx.sampleRate, 1.7, 2.8), true);
+      this.impulseKey = key;
+      this.idleBake();
+    } else verb.buffer = makeImpulse(ctx, 1.7, 2.8);
     this.verbIn = ctx.createGain();
     this.musicVerb = ctx.createGain();
     const verbOut = ctx.createGain();
@@ -200,7 +286,11 @@ export class AudioSystem {
       // Resumed after an interruption: fade in to avoid a pop.
       if (ctx.state === 'running') this.fadeInMaster();
     };
-    this.music = new MusicPlayer(ctx, this.musicBus, this.bank, this.musicVerb);
+    this.music = new MusicPlayer(ctx, this.musicBus, this.bank, this.musicVerb, {
+      // Without a baker (never in practice) fall back to building synchronously.
+      kit: () => this.kit ?? (this.baker ? null : (this.kit = kitFrom(ctx, runSync(drumData(ctx.sampleRate)), ctx.sampleRate))),
+      bed: (n) => this.beds[n] ?? (this.baker ? null : (this.beds[n] = bedLoop(ctx, n))),
+    });
     this.music.setIntensity(this.pendingIntensity, true);
     if (this.pendingMusic) this.music.play(this.pendingMusic);
 
@@ -216,7 +306,49 @@ export class AudioSystem {
     }
 
     this.canRender = !!offlineCtor();
+    this.renderAfter = perfNow() + RENDER_DELAY_MS;
     for (const n of PREWARM) this.requestRender(n);
+  }
+
+  /**
+   * Wrap one finished bake result into buffers for the live context per call
+   * (copies are cheap but not free, so they are spread over frames): drums
+   * first (the music is missing them), then the reverb, then the ambience beds.
+   */
+  private adoptBaked(): boolean {
+    const ctx = this.ctx;
+    const b = this.baker;
+    if (!ctx || !b) return false;
+    if (!this.kit) {
+      const d = b.take<DrumData>('drums');
+      if (d) {
+        this.kit = kitFrom(ctx, d, BAKE_RATE);
+        return true;
+      }
+    }
+    if (this.verb && this.impulseKey) {
+      const d = b.take<Float32Array[]>(this.impulseKey);
+      if (d) {
+        this.impulseKey = null;
+        try {
+          this.verb.buffer = impulseFrom(ctx, d, ctx.sampleRate);
+        } catch (err) {
+          console.warn('[audio] reverb unavailable', err);
+        }
+        return true;
+      }
+    }
+    for (const n of BED_NAMES) {
+      if (this.beds[n]) continue;
+      const d = b.take<Float32Array>(n);
+      if (d) {
+        this.beds[n] = toBuffer(ctx, d, BED_RATE[n]);
+        return true;
+      }
+    }
+    // Everything adopted: the baker has done its job.
+    if (this.kit && !this.impulseKey && this.beds.wind && this.beds.insects) this.baker = null;
+    return false;
   }
 
   private channel(bus: GainNode): Channel {
@@ -277,19 +409,26 @@ export class AudioSystem {
     const t = ctx.currentTime;
     const f = this.muffle.frequency;
     f.cancelScheduledValues(t);
+    // Hold the current cutoff (e.g. mid hurt-muffle recovery) so the glide starts from where it is.
+    f.setValueAtTime(f.value, t);
     f.setTargetAtTime(p ? 800 : Math.min(20000, ctx.sampleRate * 0.45), t, p ? 0.06 : 0.12);
     this.applyVolumes();
   }
 
   /** Quickly fade out every playing sound effect (stage quit/restart). Music is untouched. */
   stopSfx() {
+    this.stopPool(this.world);
+    this.stopPool(this.ui);
+  }
+
+  private stopPool(pool: Channel[]) {
     const ctx = this.ctx;
     if (!ctx) return;
     const now = ctx.currentTime;
-    for (const ch of this.world) this.release(ch, now);
-    for (const ch of this.ui) this.release(ch, now);
-    for (const ch of this.world) ch.end = 0;
-    for (const ch of this.ui) ch.end = 0;
+    for (const ch of pool) {
+      this.release(ch, now);
+      ch.end = 0;
+    }
   }
 
   /** Pause everything (app backgrounded). */
@@ -477,7 +616,7 @@ export class AudioSystem {
     st.n = now - st.t < win ? st.n + 1 : 0;
     st.t = now;
     this.seq.set(name, st);
-    if (name === 'score_tick') return Math.pow(2, SCALE[Math.min(st.n, SCALE.length - 1)] / 12);
+    if (name === 'score_tick') return Math.pow(2, SCALE[st.n % SCALE.length] / 12);
     return Math.pow(2, Math.min(st.n, 12) / 12);
   }
 
@@ -525,9 +664,14 @@ export class AudioSystem {
     f.exponentialRampToValueAtTime(open, now + 1.1);
   }
 
-  /** Switch the music track (null = silence). Cross-fades. */
+  /**
+   * Switch the music track (null = silence). Cross-fades. Switching to the menu
+   * track also fades out lingering world sounds (alarms, roars, helicopters):
+   * the stage is gone. UI sounds (the button click that got us here) keep playing.
+   */
   playMusic(id: MusicId | null) {
     this.pendingMusic = id;
+    if (id === 'menu' && this.music?.current !== 'menu') this.stopPool(this.world);
     if (!this.music) return;
     if (id) this.music.play(id);
     else this.music.stop();
@@ -540,12 +684,20 @@ export class AudioSystem {
   }
 
   update(dt: number) {
+    // Music first, then at most one bake adoption or slice, so the costs spread over frames.
+    if (this.ctx) this.music?.update(Math.min(0.25, Math.max(0, dt)));
+    const b = this.baker;
+    if (b && !this.adoptBaked() && !b.idle) {
+      const p = !this.ctx ? BAKE_IDLE : this.music?.current && !this.kit ? BAKE_URGENT : BAKE_LIVE;
+      const frameMs = dt > 0 && dt < 1 ? dt * 1000 : 16;
+      b.step(Math.max(p.min, Math.min(p.max, frameMs * p.share)));
+    }
     if (!this.ctx) return;
-    this.music?.update(Math.min(0.25, Math.max(0, dt)));
     if (this.fading.length) {
       const now = this.ctx.currentTime;
       while (this.fading.length && this.fading[0].at < now) this.disconnect(this.fading.shift()!.node);
     }
+    if (this.queue.length && !this.rendering) this.pump();
   }
 
   // ─── Pre-render cache ───────────────────────────────────────────────────────
@@ -554,12 +706,12 @@ export class AudioSystem {
     if (!this.canRender || this.queued.has(name) || SFX_META[name].cache <= 0) return;
     this.queued.add(name);
     this.queue.push(name);
-    this.pump();
   }
 
+  /** Start the next pre-render (one at a time; driven from update() and render completion). */
   private pump() {
     const ctx = this.ctx;
-    if (this.rendering || !this.queue.length || !ctx || !this.canRender) return;
+    if (this.rendering || !this.queue.length || !ctx || !this.canRender || perfNow() < this.renderAfter) return;
     const name = this.queue.shift()!;
     const meta = SFX_META[name];
     this.rendering = true;
@@ -599,6 +751,10 @@ export class AudioSystem {
       queued: this.queue.length,
       cacheKB: Math.round(this.cacheBytes / 1024),
       music: this.music?.current ?? null,
+      /** The music's drum kit is ready (it is baked in the background after boot). */
+      drums: !!this.kit,
+      /** Background sample jobs not yet adopted (0 once everything is baked). */
+      baking: this.baker?.pending ?? 0,
     };
   }
 }

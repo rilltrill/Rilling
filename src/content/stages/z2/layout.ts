@@ -53,10 +53,10 @@ export const STAIR_TOP = -58;
 export const STAIR_BOT = -67;
 
 /** Boss pool centre. */
-export const POOL: V3 = [36, B, -121];
+export const POOL: V3 = [35, B, -121];
 
 export const RAIL: V3[] = [
-  [0, 0, 24],
+  [0, 0, 29],
   [0, 0, 12],
   [0, 0, 0],
   [0, 0, -14],
@@ -87,8 +87,8 @@ export const RAIL: V3[] = [
   [71, B, -121],
   [64, B, -121],
   [57, B, -121],
-  [51, B, -121],
-  [46, B, -121],
+  [51.5, B, -121],
+  [47, B, -121],
 ];
 
 /** Ground height at world (x, z). */

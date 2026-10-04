@@ -1,6 +1,6 @@
 import type { MusicId } from './names';
-import { TRACKS, PARTS, type Part, type SectionDef, type TrackDef } from './tracks';
-import { drumKit, type DrumKey, type DrumKit } from './drums';
+import { TRACKS, PARTS, parseChords, validateTracks, type Chord, type Part, type SectionDef, type TrackDef } from './tracks';
+import { bedLoop, drumKit, type BedName, type DrumKey, type DrumKit } from './drums';
 import { shaperCurve, type NoiseBank } from './dsp';
 import { SFX, type SfxContext } from './Sfx';
 import type { SfxName } from './names';
@@ -20,17 +20,6 @@ const LOOKAHEAD = 0.22;
 const RECYCLE_BARS = 8;
 const mtof = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
-
-const QUAL: Record<string, number[]> = {
-  m: [0, 3, 7], M: [0, 4, 7], '5': [0, 7, 12], d: [0, 3, 6], s4: [0, 5, 7], s2: [0, 2, 7],
-  m7: [0, 3, 7, 10], M7: [0, 4, 7, 11], '7': [0, 4, 7, 10], a: [0, 4, 8],
-};
-
-interface Chord {
-  root: number;
-  iv: number[];
-  key: string;
-}
 
 const DRUM_LAYER: Record<DrumKey, Part> = { k: 'kick', T: 'kick', b: 'kick', s: 'beat', c: 'beat', h: 'beat', o: 'beat', p: 'beat', r: 'beat', x: 'beat', t: 'perc', m: 'perc' };
 const DRUM_VOL: Record<DrumKey, number> = { k: 0.38, T: 0.42, b: 0.4, s: 0.5, c: 0.4, h: 0.16, o: 0.13, p: 0.16, r: 0.22, x: 0.18, t: 0.28, m: 0.25 };
@@ -211,18 +200,6 @@ interface BarRef {
   last: boolean;
 }
 
-function parseChords(str: string): Chord[] {
-  return str
-    .trim()
-    .split(/\s+/)
-    .map((tok) => {
-      const m = /^(-?\d+)(.*)$/.exec(tok);
-      const root = m ? Number(m[1]) : 0;
-      const q = m && m[2] ? m[2] : 'M';
-      return { root, iv: QUAL[q] ?? QUAL.M, key: tok };
-    });
-}
-
 function parseLead(str: string): Sec['lead'] {
   const notes: ({ semi: number; len: number } | undefined)[] = [];
   let pos = 0;
@@ -274,6 +251,28 @@ export interface MusicDebug {
   solo: Part | null;
 }
 
+/**
+ * Where the player gets its pre-synthesised samples. The live game bakes them
+ * in the background (AudioSystem), so either may be null for the first moments:
+ * a track starts straight away on its synths and the drums join as soon as
+ * the kit exists; ambience beds fade in once they exist.
+ */
+export interface MusicAssets {
+  kit(): DrumKit | null;
+  bed(name: BedName): AudioBuffer | null;
+}
+
+/** Ambience beds per ambience kind: [bed, level, playback rate]. */
+const BEDS: Record<NonNullable<TrackDef['amb']>, [BedName, number, number][]> = {
+  city: [['wind', 0.11, 1]],
+  storm: [['wind', 0.15, 0.7]],
+  wind: [['wind', 0.15, 0.7]],
+  jungle: [
+    ['insects', 0.07, 1],
+    ['wind', 0.06, 1.3],
+  ],
+};
+
 class TrackPlayer {
   readonly out: GainNode;
   private parts = {} as Record<Part, GainNode>;
@@ -290,6 +289,8 @@ class TrackPlayer {
   private readonly loopBar: number;
   private stopped = false;
   private beds: AudioBufferSourceNode[] = [];
+  /** Beds still waiting for their loop to be baked. */
+  private bedsTodo: [BedName, number, number][] = [];
   private nextEvent = 0;
   private nextBigEvent = 0;
   killAt = Infinity;
@@ -299,10 +300,10 @@ class TrackPlayer {
     readonly id: MusicId,
     private def: TrackDef,
     dest: AudioNode,
-    private kit: DrumKit,
     verb: AudioNode | null,
     private dbg: MusicDebug,
     private noise: { white: AudioBuffer; bank?: NoiseBank } | null,
+    private assets: MusicAssets,
   ) {
     this.stepDur = 60 / def.bpm / 4;
     const c = compile(id, def);
@@ -357,7 +358,8 @@ class TrackPlayer {
     this.nextTime = t;
     this.step = startBar * 16;
     this.makeVoices(t);
-    this.startBeds(t);
+    this.bedsTodo = this.def.amb ? BEDS[this.def.amb].slice() : [];
+    this.startBeds(t, 0.05);
     this.nextEvent = t + 2 + Math.random() * 4;
     this.nextBigEvent = t + 10 + Math.random() * 10;
     const g = this.out.gain;
@@ -467,6 +469,7 @@ class TrackPlayer {
       this.hit(k, t, VEL[c] ?? 0.8);
     }
     if (bar.first && s16 === 0 && barN > 0 && sd.crash !== false) this.hit('x', t, 0.8);
+    if (s16 === 0 && this.bedsTodo.length) this.startBeds(t, 2);
     if (s16 === 0 && def.amb && this.on('amb')) this.ambience(t, sDur * 16);
     if (sd.riser && bar.last && s16 === 0 && this.on('beat')) this.riser(t, sDur * 16);
 
@@ -525,32 +528,31 @@ class TrackPlayer {
 
   // ─── Ambience ───────────────────────────────────────────────────────────────
 
-  private startBeds(t: number) {
-    const amb = this.def.amb;
-    if (!amb) return;
-    const bed = (buf: AudioBuffer, level: number, rate = 1) => {
+  /** Start whichever ambience loops are available (the rest retry each bar), fading in over `fade` s. */
+  private startBeds(t: number, fade: number) {
+    for (let i = this.bedsTodo.length - 1; i >= 0; i--) {
+      const [name, level, rate] = this.bedsTodo[i];
+      const buf = this.assets.bed(name);
+      if (!buf) continue;
+      this.bedsTodo.splice(i, 1);
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
       src.loop = true;
       src.playbackRate.value = rate;
       const g = this.ctx.createGain();
-      g.gain.value = level;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(level, t + fade);
       src.connect(g).connect(this.parts.amb);
       src.start(t, Math.random() * buf.duration);
       this.beds.push(src);
       this.fxNodes.push(g);
-    };
-    if (amb === 'city') bed(this.kit.wind, 0.11);
-    else if (amb === 'storm') bed(this.kit.wind, 0.15, 0.7);
-    else {
-      bed(this.kit.insects, 0.07);
-      bed(this.kit.wind, 0.06, 1.3);
     }
   }
 
   /** Occasional distant events, rolled once per bar. */
   private ambience(t: number, barDur: number) {
     const amb = this.def.amb!;
+    if (amb === 'wind') return;
     if (t >= this.nextEvent) {
       const at = t + Math.random() * barDur;
       const r = Math.random();
@@ -677,9 +679,10 @@ class TrackPlayer {
 
   private hit(k: DrumKey, t: number, vel: number) {
     const layer = DRUM_LAYER[k];
-    if (!this.on(layer)) return;
+    const kit = this.assets.kit();
+    if (!kit || !this.on(layer)) return;
     const src = this.ctx.createBufferSource();
-    src.buffer = this.kit[k];
+    src.buffer = kit[k];
     const g = this.ctx.createGain();
     g.gain.value = DRUM_VOL[k] * vel * (0.94 + Math.random() * 0.06);
     src.connect(g).connect(this.parts[layer]);
@@ -687,8 +690,10 @@ class TrackPlayer {
   }
 
   private riser(t: number, dur: number) {
+    const kit = this.assets.kit();
+    if (!kit) return;
     const src = this.ctx.createBufferSource();
-    src.buffer = this.kit.riser;
+    src.buffer = kit.riser;
     src.playbackRate.value = Math.max(0.5, Math.min(2.5, 2 / dur));
     const g = this.ctx.createGain();
     g.gain.value = 0.22;
@@ -844,7 +849,7 @@ function bassOffset(c: string | undefined, chord: Chord): number | null {
 export class MusicPlayer {
   private cur: TrackPlayer | null = null;
   private dying: TrackPlayer[] = [];
-  private kit: DrumKit | null = null;
+  private readonly assets: MusicAssets;
   private target = 0;
   private level = 0;
   private lastApplied = -1;
@@ -853,16 +858,22 @@ export class MusicPlayer {
 
   private noise: { white: AudioBuffer; bank?: NoiseBank } | null;
 
-  /** `noise`: the SFX noise bank (or a white-noise buffer) used by ambience events. */
+  /**
+   * `noise`: the SFX noise bank (or a white-noise buffer) used by ambience events.
+   * `assets`: sample source; default builds the kit/beds synchronously on first use
+   * (offline renders, tests).
+   */
   constructor(
     private ctx: BaseAudioContext,
     private out: AudioNode,
     noise?: NoiseBank | AudioBuffer | null,
     private verb: AudioNode | null = null,
+    assets?: MusicAssets,
   ) {
     if (!noise) this.noise = null;
     else if ('white' in noise) this.noise = { white: noise.white, bank: noise };
     else this.noise = { white: noise };
+    this.assets = assets ?? { kit: () => drumKit(ctx), bed: (n) => bedLoop(ctx, n) };
   }
 
   get current(): MusicId | null {
@@ -874,13 +885,15 @@ export class MusicPlayer {
     if (this.cur?.id === id) return;
     const def = TRACKS[id];
     if (!def) return;
+    // Resolve the kit (may synthesise it, offline) before reading the clock, so
+    // the track never starts in the past and drops its first steps.
+    this.assets.kit();
     const t = this.ctx.currentTime;
     if (this.cur) {
       this.cur.fadeOut(t, 1.1);
       this.dying.push(this.cur);
     }
-    this.kit ??= drumKit(this.ctx);
-    const tp = new TrackPlayer(this.ctx, id, def, this.out, this.kit, this.verb, this.debug, this.noise);
+    const tp = new TrackPlayer(this.ctx, id, def, this.out, this.verb, this.debug, this.noise, this.assets);
     tp.setIntensity(this.level, t, true);
     tp.start(t + 0.06, def.fadeIn ?? (this.cur ? 0.9 : 0.5), startBar);
     this.cur = tp;
@@ -934,4 +947,17 @@ export class MusicPlayer {
     this.dying.length = 0;
     this.cur = null;
   }
+}
+
+/** Arrangement + instrument sanity check (unit tests): empty when every track is playable. */
+export function validateMusic(): string[] {
+  const errs = validateTracks();
+  for (const [id, t] of Object.entries(TRACKS)) {
+    if (!MONO[t.bass]) errs.push(`${id}: unknown bass preset "${t.bass}"`);
+    if (t.arp && !MONO[t.arp]) errs.push(`${id}: unknown arp preset "${t.arp}"`);
+    if (t.lead && t.lead !== 'bell' && !MONO[LEAD_ALIAS[t.lead] ?? t.lead]) errs.push(`${id}: unknown lead preset "${t.lead}"`);
+    if (t.pad && !PADS[t.pad]) errs.push(`${id}: unknown pad preset "${t.pad}"`);
+    for (const [name, sec] of Object.entries(t.sections)) if (typeof sec.pad === 'string' && !PADS[sec.pad]) errs.push(`${id}.${name}: unknown pad "${sec.pad}"`);
+  }
+  return errs;
 }

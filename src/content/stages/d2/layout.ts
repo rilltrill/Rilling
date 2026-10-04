@@ -55,7 +55,7 @@ export interface Room {
 }
 
 export const ROOMS = {
-  lobby: { id: 'lobby', x0: -15, x1: 15, z0: 8, z1: -56, h: 12 },
+  lobby: { id: 'lobby', x0: -15, x1: 15, z0: 8, z1: -56, h: 15 },
   shop: { id: 'shop', x0: -8, x1: 8, z0: -56, z1: -80, h: 4.4 },
   green: { id: 'green', x0: -14, x1: 14, z0: -80, z1: -124, h: 11 },
   hatch: { id: 'hatch', x0: -10, x1: 10, z0: -124, z1: -162, h: 4.8 },
@@ -105,6 +105,16 @@ export function railXAtZ(z: number): number {
   return _p.x;
 }
 
+/** Tunnel landmarks (rail distances): ceiling ducts the compys drop from, the side alcove. */
+export const TUNNEL_SPOTS = {
+  vents: [dAtZ(-231), dAtZ(-238.5)],
+  alcove: dAtZ(-251),
+  ambush: dAtZ(-243.5),
+};
+
+/** Pump room side-tunnel openings (z). */
+export const PUMP_SIDE_Z = -287;
+
 /** Rail distances of every hold / landmark. */
 export const D = {
   LOBBY_IN: dAtZ(-6),
@@ -119,7 +129,7 @@ export const D = {
   SERVER_HOLD: dAtZ(-198),
   TUNNEL_IN: dAtZ(-221),
   TUNNEL_MID: dAtZ(-246),
-  PUMP_HOLD: dAtZ(-281),
+  PUMP_HOLD: dAtZ(-277.6),
   WING_HOLD: dAtZ(-299),
   WING_EXIT: dAtZ(-322),
   END: Math.floor(RAIL_LEN * 100) / 100,

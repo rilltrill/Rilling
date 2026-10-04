@@ -148,6 +148,8 @@ export interface Z2Scene {
   fleshGlow: number;
   /** Extra global flicker (power surge) 0..1 set by set pieces. */
   surge: number;
+  /** Pulsing flesh cocoon in the atrium fountain (hidden when the boss emerges). */
+  cocoon: THREE.Object3D | null;
   root: THREE.Group;
 }
 

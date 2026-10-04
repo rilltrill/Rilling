@@ -86,6 +86,8 @@ export class Hud implements HudApi {
   private bossLagFrac = 1;
   private shownScore = 0;
   private popupPool: HTMLDivElement[] = [];
+  /** A banner with exactly this text is swallowed once (see suppressBanner). */
+  private bannerSuppress: string | null = null;
 
   constructor(parent: HTMLElement, private cb: HudCallbacks) {
     this.overlay = new Overlay2D(parent);
@@ -238,7 +240,20 @@ export class Hud implements HudApi {
     setTimeout(() => p.isConnected && done(), 2000);
   }
 
+  /**
+   * Swallow the next banner whose text equals `text` (null = stop). Game uses it
+   * while a stage starts behind its intro card, so the stage's opening title
+   * banner doesn't repeat the name the card just showed.
+   */
+  suppressBanner(text: string | null) {
+    this.bannerSuppress = text;
+  }
+
   banner(text: string, sub = '', duration = 2.5) {
+    if (this.bannerSuppress !== null && text.trim().toUpperCase() === this.bannerSuppress.trim().toUpperCase()) {
+      this.bannerSuppress = null;
+      return;
+    }
     setText(this.bannerText, text);
     setText(this.bannerSub, sub);
     this.bannerEl.classList.remove('show');

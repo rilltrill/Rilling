@@ -2,11 +2,11 @@ import * as THREE from 'three';
 import { Engine } from '../core/Engine';
 import { Input } from '../core/Input';
 import { Save } from '../core/Save';
-import type { CampaignId, Settings, StageResult } from '../core/types';
+import type { CampaignId, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
 import { AudioSystem } from '../audio/Audio';
 import type { MusicId } from '../audio/names';
 import { Hud } from '../ui/Hud';
-import { Menus, type MenuActions } from '../ui/Menus';
+import { Menus, RETRO_SETTING_ENABLED, type MenuActions } from '../ui/Menus';
 import { MenuBackdrop, type BackdropTheme } from '../ui/MenuBackdrop';
 import { World } from './World';
 import { StageRunner } from './StageRunner';
@@ -16,6 +16,10 @@ import { Kit } from '../content/kit/ModelKit';
 import { AutoPlayer } from '../debug/AutoPlayer';
 import type { WeaponId } from '../core/types';
 import { zooStage } from '../content/stages/zoo';
+import { Enemy } from './Enemy';
+import type { Entity } from './Entity';
+import { Projectile } from './Projectile';
+import { prewarmFxAtlases } from '../fx/Fx';
 
 export interface DebugFlags {
   stage?: string;
@@ -63,6 +67,15 @@ export class Game implements MenuActions {
   private backdropTheme: BackdropTheme | null = null;
   /** The first-run tutorial is open (the stage is paused underneath). */
   private tutorialOpen = false;
+  /** Renderer settings last applied (re-applying resizes the canvas, which clears it). */
+  private appliedQuality: QualityLevel;
+  private appliedRetro: RetroMode | null = null;
+  /** Canvas size / pixel ratio of the last world render (a frozen frame is redrawn when they change). */
+  private renderedW = 0;
+  private renderedH = 0;
+  private renderedDpr = 0;
+  /** Keep redrawing a frozen frame until this time (ms): resizes clear the canvas, some arrive late. */
+  private redrawUntil = 0;
   lastResult: StageResult | null = null;
   /** Exposed for tests / debugging. */
   stats = { frames: 0, stagesCleared: 0, errors: 0 };
@@ -74,6 +87,7 @@ export class Game implements MenuActions {
   ) {
     const s = this.save.settings;
     this.engine = new Engine(root.querySelector('#stage') as HTMLElement, s.quality);
+    this.appliedQuality = s.quality;
     const surface = root.querySelector('#play-surface') as HTMLElement;
     this.input = new Input(surface);
     this.hud = new Hud(root.querySelector('#hud-layer') as HTMLElement, {
@@ -110,11 +124,20 @@ export class Game implements MenuActions {
     window.addEventListener('pointerdown', unlock, { capture: true });
     window.addEventListener('keydown', unlock, { capture: true });
 
+    // Any resize clears the WebGL canvas (even to the same size). Engine applies
+    // some of them late (orientationchange), so redraw frozen frames for a moment.
+    const redraw = () => (this.redrawUntil = performance.now() + 500);
+    window.addEventListener('resize', redraw);
+    window.addEventListener('orientationchange', redraw);
+    window.visualViewport?.addEventListener('resize', redraw);
+
     this.engine.onFrame = (dt) => this.frame(dt);
   }
 
   boot() {
     this.engine.start();
+    // Paint the FX sprite/decal atlases behind the title screen so stages never stall on it.
+    setTimeout(() => prewarmFxAtlases(), 300);
     if (this.flags.stage) {
       const st = this.findStage(this.flags.stage);
       if (st) {
@@ -142,7 +165,18 @@ export class Game implements MenuActions {
     this.audio.setVolumes(s.sfxVolume, s.musicVolume);
     this.hud.setLeftHanded(s.leftHanded);
     this.hud.showFps(s.showFps);
-    this.engine.setQuality(s.quality);
+    // Only touch the renderer when these actually change: every call resizes the
+    // canvas (clearing a paused frame) and undoes dynamic-resolution scaling.
+    if (s.quality !== this.appliedQuality) {
+      this.appliedQuality = s.quality;
+      this.engine.setQuality(s.quality);
+      this.redrawUntil = performance.now() + 100;
+    }
+    if (RETRO_SETTING_ENABLED && s.retro !== this.appliedRetro) {
+      this.appliedRetro = s.retro;
+      this.engine.setRetro(s.retro);
+      this.redrawUntil = performance.now() + 100;
+    }
   }
 
   private music(id: MusicId | null) {
@@ -162,24 +196,32 @@ export class Game implements MenuActions {
     this.world = w;
     this.shooter = new Shooter(w);
     this.runner = new StageRunner(w, stage);
+    const showIntro = !(skipIntro || this.flags.autoplay);
     // HUD wiring first: the opening beat (usually a banner, or a boss when
     // debugging with ?beat=) talks to the HUD from inside runner.start().
     this.hud.reset();
     w.events.on('boss-start', ({ boss }) => this.hud.bossIntro(boss.title));
-    w.events.on('player-hurt', () => this.showHurtDirection());
+    w.events.on('player-hurt', ({ from }) => this.showHurtDirection(from));
+    // The intro card already names the stage: don't repeat it as the opening banner.
+    this.hud.suppressBanner(showIntro ? stage.name : null);
     try {
       this.runner.start(this.flags.beat ?? 0);
     } catch (err) {
       console.error('[game] stage failed to start', err);
       this.stats.errors++;
     }
+    this.hud.suppressBanner(null);
     this.autoplay = this.flags.autoplay ? new AutoPlayer(w, this.shooter) : null;
     this.clearTimer = -1;
     w.weapons.onChange = () => this.audio.play('ui_click', { volume: 0.4 });
-    w.weapons.onReloadDone = () => this.audio.play('reload_done', { volume: 0.7 });
+    w.weapons.onReloadDone = () => {
+      const id = w.weapons.def.id;
+      this.audio.play(id === 'shotgun' ? 'reload_done_shotgun' : id === 'magnum' ? 'reload_done_magnum' : 'reload_done', { volume: 0.7 });
+    };
     w.score.onMultiplier = (m) => {
       this.hud.popup(`x${m} COMBO`, this.engine.size.width / 2, this.engine.size.height * 0.28, 'combo');
-      this.audio.play('combo');
+      // The ding climbs a whole tone per multiplier step (x1.5 → 1.0 … x4 → 1.78).
+      this.audio.play('combo', { pitch: Math.pow(2, (((m - 1.5) / 0.5) * 2) / 12) });
     };
     w.events.on('player-dead', () => this.onPlayerDead());
     w.events.on('stage-clear', () => (this.clearTimer = 1.8));
@@ -187,8 +229,8 @@ export class Game implements MenuActions {
     const campaign = this.run?.campaign ?? this.findStage(stage.id)!.campaign;
     this.music(stage.music ?? (campaign.id === 'zombie' ? 'zombie' : 'dino'));
     // Render one frame so the intro card has the scene behind it.
-    this.engine.render(w.scene);
-    if (skipIntro || this.flags.autoplay) {
+    this.renderWorld(w);
+    if (!showIntro) {
       this.beginPlay();
     } else {
       this.state = 'intro';
@@ -226,12 +268,15 @@ export class Game implements MenuActions {
   }
 
   /** Red wedge on the screen edge facing the nearest hostile when the player is hit. */
-  private showHurtDirection() {
+  private showHurtDirection(from?: Entity) {
     const w = this.world;
     if (!w) return;
     const cam = w.camera;
     let best = Infinity;
-    for (const e of w.entities) {
+    if (from && !from.removed) {
+      from.root.getWorldPosition(_hurtBest);
+      best = _hurtBest.distanceToSquared(cam.position);
+    } else for (const e of w.entities) {
       if (!e.hostile || e.removed) continue;
       e.root.getWorldPosition(_hurtV);
       const d = _hurtV.distanceToSquared(cam.position);
@@ -250,6 +295,9 @@ export class Game implements MenuActions {
   }
 
   private teardownWorld() {
+    // Don't let a stage's roars/alarms carry into menus or restarts.
+    this.audio.stopSfx();
+    this.audio.setPaused(false);
     if (this.world) {
       this.world.dispose();
       this.world = null;
@@ -319,6 +367,7 @@ export class Game implements MenuActions {
     this.state = 'paused';
     this.input.reset();
     this.audio.play('ui_click');
+    this.audio.setPaused(true);
     this.menus.showPause({
       stage: this.runner?.stage.name ?? '',
       campaign: this.run?.campaign.name,
@@ -330,6 +379,7 @@ export class Game implements MenuActions {
     if (this.tutorialOpen) return this.closeTutorial();
     if (this.state !== 'paused') return;
     this.menus.hide();
+    this.audio.setPaused(false);
     this.state = 'playing';
   }
 
@@ -380,8 +430,17 @@ export class Game implements MenuActions {
     w.player.revive();
     w.score.continues++;
     w.score.breakCombo();
-    // Clear the immediate threats so the player isn't killed instantly.
-    for (const e of w.entities) if (e.telegraph) e.telegraph.progress = 0;
+    // Clear the immediate threats so the player isn't killed instantly: regular
+    // attackers are knocked out of their wind-up, incoming projectiles vanish,
+    // and boss attacks restart their telegraph (revive also grants i-frames).
+    for (const e of w.entities) {
+      if (e instanceof Projectile) {
+        e.removed = true;
+      } else if (e instanceof Enemy && e.state !== 'dying') {
+        if (e.isBoss) e.stateTime = 0;
+        else if (e.state === 'windup' || e.state === 'recover') e.stagger();
+      }
+    }
     this.menus.hide();
     this.hud.show(true);
     const st = this.runner!.stage;
@@ -457,15 +516,36 @@ export class Game implements MenuActions {
       }
       this.hud.sync(w, dt, this.runner.progress, this.engine.fps);
       if (this.flags.debug) this.hud.setDebug(`${this.runner.label}  d=${w.rig.d.toFixed(1)}/${w.rig.length.toFixed(0)}  hostiles=${w.hostileCount()}  ents=${w.entities.length}`);
-      this.engine.render(w.scene);
+      this.renderWorld(w);
       this.hud.drawOverlay(w, dt);
     } else if (w && (this.state === 'intro' || this.state === 'results' || this.state === 'continue')) {
       // Keep the world visible (but frozen) behind menus.
-      this.engine.render(w.scene);
+      this.renderWorld(w);
       this.hud.drawOverlay(null, dt);
+    } else if (w && (this.state === 'paused' || this.state === 'gameover')) {
+      // Pause / tutorial / game over: the canvas keeps the last frame, but a resize
+      // (dynamic resolution, rotation, a settings change) clears it — redraw then.
+      const { width, height } = this.engine.size;
+      if (
+        width !== this.renderedW ||
+        height !== this.renderedH ||
+        this.engine.pixelRatio !== this.renderedDpr ||
+        performance.now() < this.redrawUntil
+      ) {
+        this.renderWorld(w);
+        if (this.state === 'paused') this.hud.drawOverlay(w, 0);
+      }
     } else if (!w) {
       this.renderBackdrop(dt);
     }
+  }
+
+  private renderWorld(w: World) {
+    const { width, height } = this.engine.size;
+    this.renderedW = width;
+    this.renderedH = height;
+    this.renderedDpr = this.engine.pixelRatio;
+    this.engine.render(w.scene);
   }
 
   private renderBackdrop(dt: number) {
@@ -475,7 +555,12 @@ export class Game implements MenuActions {
     }
     this.backdrop.setTheme(this.backdropTheme);
     const { width, height } = this.engine.size;
-    this.backdrop.update(dt, width, height);
-    this.backdrop.render(this.engine.renderer);
+    const bd = this.backdrop;
+    const retro = this.engine.retro;
+    const px = retro.enabled ? retro.targetSize(width, height).height : height * this.engine.pixelRatio;
+    bd.update(dt, width, height, px);
+    // Same arcade-monitor post effect as gameplay when it's switched on.
+    if (this.engine.retro.enabled) this.engine.render(bd.scene, bd.camera);
+    else bd.render(this.engine.renderer);
   }
 }

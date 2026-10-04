@@ -94,7 +94,7 @@ export class Projectile extends Entity {
     if (this.telegraph) this.telegraph.progress = k;
     if (k >= 1) {
       this.removed = true;
-      this.world.hurtPlayer(this.opts.damage, this.opts.source);
+      this.world.hurtPlayer(this.opts.damage, this.opts.source, this);
       if (this.opts.burst === 'goo') this.world.fx.screenSplat(this.opts.color);
     }
   }

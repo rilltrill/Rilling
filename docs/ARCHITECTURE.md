@@ -140,6 +140,42 @@ id from the stage folder (e.g. `registerEnemy('butcher', …)`).
   ≤ 4 dynamic lights (hemisphere + directional + a couple of point lights),
   no shadow maps. Use fog to limit view distance.
 
+## Retro look (textures + arcade monitor)
+
+- `content/kit/Textures.ts` generates 26 tiny procedural pixel textures (brick,
+  asphalt, metal, tiles, bark, leaves, scales, hide, skin, cloth, hazard…) as
+  DataTextures: limited grey levels, ordered dithering, NEAREST magnification.
+  They are detail maps multiplied with the material colour.
+- Use them with `Kit.mat(color, { tex: 'brick', texScale: 1 })` or
+  `Kit.tex('brick', color)`. Projection is object-space planar on the dominant
+  normal axis, so **no UVs are needed** and texel density stays constant in world
+  units (also inside `EnvKit.mergeStatic` groups). `texScale` > 1 = smaller texels
+  (characters typically 2–4). `Kit.retro.grain` adds a subtle grit to every
+  untextured `Kit.mat`.
+- `core/RetroPass.ts` renders the scene into a ~288-line target (by quality:
+  224/288/360) and upscales it with 15-bit-style dithered colour quantisation and,
+  in 'crt' mode, scanlines, curvature, convergence error, phosphor bloom and
+  vignette. Settings → DISPLAY: CRT / PIXEL / OFF (`Settings.retro`).
+
+## Audio
+
+`audio/`: `Audio.ts` (buses, voice pool, pre-render cache, ducking, iOS unlock,
+background sample bake), `Sfx.ts` (recipes) + `sfxMeta.ts` (per-sound limits /
+caching / trim), `Music.ts` + `tracks.ts` (sequencer + compositions; chord
+notation, `validateTracks()`; layers follow `setIntensity`), `drums.ts` /
+`dsp.ts` / `bake.ts` (time-sliced sample synthesis + DSP helpers). New sounds:
+add the name to `names.ts`, a recipe to `Sfx.ts` and a row to `sfxMeta.ts`. Use
+`pitch < 1` for bigger creatures; sounds are loudness-matched, so use `volume`
+only for distance/emphasis. Enemy sounds are panned by screen position.
+
+## FX
+
+`fx/`: pooled particles with a generated sprite atlas, instanced gibs with blood
+trails, ground decals (blood, scorch, bullet marks) that fade, explosions with
+fireball/shockwave/smoke, `muzzleFlash()` (wired in `Shooter.fire`). Occluders may
+set `userData.surface = 'metal' | 'wood' | 'concrete' | 'dirt' | 'grass' | 'water'`
+to pick impact effects per object.
+
 ## Performance & feel checklist
 
 - Telegraph everything that can hurt the player.

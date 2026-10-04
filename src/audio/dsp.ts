@@ -17,22 +17,54 @@ export interface NoiseBank {
 
 export type NoiseKind = keyof NoiseBank;
 
-/** Small, fast, seedable PRNG so generated buffers are reproducible. */
-export function mulberry(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
+/** Mulberry32 state in an object field (a captured `let` would box a heap number per call). */
+class Mulberry {
+  a = 0;
+  constructor(seed: number) {
+    this.a = seed >>> 0;
+  }
+  next(): number {
+    const a = (this.a = (this.a + 0x6d2b79f5) >>> 0);
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
+  }
+}
+
+/** Small, fast, seedable PRNG so generated buffers are reproducible. */
+export function mulberry(seed: number): () => number {
+  const m = new Mulberry(seed);
+  return () => m.next();
+}
+
+// ─── Resumable synthesis jobs ─────────────────────────────────────────────────
+
+/**
+ * A resumable sample-synthesis job. Generators yield every CHUNK samples so the
+ * heavy JS sample math can be time-sliced across frames (see bake.ts) instead
+ * of stalling the first tap; `runSync` drives one to completion.
+ */
+export type Job<T> = Generator<void, T, void>;
+export const CHUNK = 1024;
+const MASK = CHUNK - 1;
+
+export function runSync<T>(job: Job<T>): T {
+  for (;;) {
+    const r = job.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** Mono AudioBuffer holding `data` at sample rate `sr` (any rate: sources resample). */
+export function toBuffer(ctx: BaseAudioContext, data: Float32Array, sr = ctx.sampleRate): AudioBuffer {
+  const buf = ctx.createBuffer(1, Math.max(1, data.length), sr);
+  buf.getChannelData(0).set(data);
+  return buf;
 }
 
 /** Make the end of `d` flow into its start so the buffer can loop without a click. */
 function loopify(src: Float32Array, len: number, fade: number): Float32Array {
-  const out = new Float32Array(len);
-  for (let i = 0; i < len; i++) out[i] = src[i];
+  const out = src.slice(0, len);
   for (let i = 0; i < fade; i++) {
     const a = i / fade;
     out[i] = src[i] * a + src[len + i] * (1 - a);
@@ -49,91 +81,122 @@ function normalise(d: Float32Array, peak = 0.95) {
   }
 }
 
-function toBuffer(ctx: BaseAudioContext, data: Float32Array): AudioBuffer {
-  const buf = ctx.createBuffer(1, data.length, ctx.sampleRate);
-  buf.getChannelData(0).set(data);
-  return buf;
-}
+export type NoiseData = Record<NoiseKind, Float32Array>;
 
-export function makeNoiseBank(ctx: BaseAudioContext, seconds = 2, seed = 0x5eed): NoiseBank {
-  const sr = ctx.sampleRate;
+/** Sample data for a NoiseBank at `sr` (time-sliced). */
+export function* noiseData(sr: number, seconds = 2, seed = 0x5eed): Job<NoiseData> {
   const len = Math.floor(sr * seconds);
   const fade = Math.floor(sr * 0.05);
   const total = len + fade;
   const rnd = mulberry(seed);
 
   const white = new Float32Array(total);
-  for (let i = 0; i < total; i++) white[i] = rnd() * 2 - 1;
+  for (let i = 0; i < total; i++) {
+    white[i] = rnd() * 2 - 1;
+    if ((i & MASK) === MASK) yield;
+  }
 
-  // Paul Kellet's economy pink filter.
+  // Paul Kellet's economy pink filter + a leaky integrator (brown) with DC blocking.
   const pink = new Float32Array(total);
+  const brown = new Float32Array(total);
   let b0 = 0, b1 = 0, b2 = 0;
+  let acc = 0, prevIn = 0, prevOut = 0;
   for (let i = 0; i < total; i++) {
     const w = white[i];
     b0 = 0.99765 * b0 + w * 0.099046;
     b1 = 0.963 * b1 + w * 0.2965164;
     b2 = 0.57 * b2 + w * 1.0526913;
     pink[i] = b0 + b1 + b2 + w * 0.1848;
-  }
-  normalise(pink);
-
-  // Leaky integrator (brown) with DC blocking.
-  const brown = new Float32Array(total);
-  let acc = 0, prevIn = 0, prevOut = 0;
-  for (let i = 0; i < total; i++) {
-    acc = acc * 0.997 + white[i] * 0.06;
-    // one-pole DC blocker
+    acc = acc * 0.997 + w * 0.06;
     const y = acc - prevIn + 0.999 * prevOut;
     prevIn = acc;
     prevOut = y;
     brown[i] = y;
+    if ((i & MASK) === MASK) yield;
   }
+  normalise(pink);
   normalise(brown);
+  yield;
 
   // Crackle: random little impulses with short noisy decays.
   const crackle = new Float32Array(total);
   let i = 0;
+  let next = CHUNK;
   while (i < total) {
     i += 20 + Math.floor(rnd() * rnd() * sr * 0.03);
     const amp = (0.25 + rnd() * 0.75) * (rnd() < 0.5 ? -1 : 1);
     const n = 8 + Math.floor(rnd() * 90);
     for (let k = 0; k < n && i + k < total; k++) crackle[i + k] += amp * Math.exp(-k / (n * 0.25)) * (rnd() * 2 - 1);
+    if (i >= next) {
+      next = i + CHUNK;
+      yield;
+    }
   }
   normalise(crackle);
 
   return {
-    white: toBuffer(ctx, loopify(white, len, fade)),
-    pink: toBuffer(ctx, loopify(pink, len, fade)),
-    brown: toBuffer(ctx, loopify(brown, len, fade)),
-    crackle: toBuffer(ctx, loopify(crackle, len, fade)),
+    white: loopify(white, len, fade),
+    pink: loopify(pink, len, fade),
+    brown: loopify(brown, len, fade),
+    crackle: loopify(crackle, len, fade),
   };
 }
 
-/** Stereo reverb impulse: decaying filtered noise, decorrelated per channel. */
-export function makeImpulse(ctx: BaseAudioContext, seconds = 1.8, decay = 2.6, seed = 77): AudioBuffer {
-  const sr = ctx.sampleRate;
+/** Wrap NoiseData (computed at `sr`) into buffers. */
+export function noiseBankFrom(ctx: BaseAudioContext, d: NoiseData, sr: number): NoiseBank {
+  return { white: toBuffer(ctx, d.white, sr), pink: toBuffer(ctx, d.pink, sr), brown: toBuffer(ctx, d.brown, sr), crackle: toBuffer(ctx, d.crackle, sr) };
+}
+
+export function makeNoiseBank(ctx: BaseAudioContext, seconds = 2, seed = 0x5eed): NoiseBank {
+  return noiseBankFrom(ctx, runSync(noiseData(ctx.sampleRate, seconds, seed)), ctx.sampleRate);
+}
+
+/** Stereo reverb impulse data: decaying filtered noise, decorrelated per channel (time-sliced). */
+export function* impulseData(sr: number, seconds = 1.8, decay = 2.6, seed = 77): Job<Float32Array[]> {
   const len = Math.max(1, Math.floor(sr * seconds));
-  const buf = ctx.createBuffer(2, len, sr);
+  const out: Float32Array[] = [];
   for (let ch = 0; ch < 2; ch++) {
     const rnd = mulberry(seed + ch * 101);
-    const d = buf.getChannelData(ch);
+    const d = new Float32Array(len);
     let lp = 0;
+    // The (1 - t)^decay tail is evaluated every 64 samples and interpolated (pow is slow).
+    let e0 = 1, e1 = 1;
     for (let i = 0; i < len; i++) {
       const t = i / len;
+      if ((i & 63) === 0) {
+        e0 = Math.pow(1 - t, decay);
+        e1 = Math.pow(Math.max(0, 1 - (i + 64) / len), decay);
+      }
       // Darken over time (air absorption): the one-pole coefficient grows.
       const k = 0.35 + 0.6 * t;
       lp = lp * k + (rnd() * 2 - 1) * (1 - k);
       // Short pre-delay ramp and exponential tail.
       const pre = Math.min(1, i / (sr * 0.012));
-      d[i] = lp * pre * Math.pow(1 - t, decay) * 2.2;
+      d[i] = lp * pre * (e0 + (e1 - e0) * ((i & 63) / 64)) * 2.2;
+      if ((i & MASK) === MASK) yield;
     }
     // A few early reflections for a sense of space.
     for (let r = 0; r < 6; r++) {
       const at = Math.floor(sr * (0.011 + rnd() * 0.06));
       if (at < len) d[at] += (rnd() * 0.5 + 0.2) * (rnd() < 0.5 ? -1 : 1);
     }
+    out.push(d);
   }
+  return out;
+}
+
+/**
+ * Stereo impulse buffer. A ConvolverNode needs its buffer at the context's own
+ * sample rate, so `sr` must equal ctx.sampleRate when used for reverb.
+ */
+export function impulseFrom(ctx: BaseAudioContext, chans: Float32Array[], sr = ctx.sampleRate): AudioBuffer {
+  const buf = ctx.createBuffer(chans.length, chans[0].length, sr);
+  chans.forEach((d, ch) => buf.getChannelData(ch).set(d));
   return buf;
+}
+
+export function makeImpulse(ctx: BaseAudioContext, seconds = 1.8, decay = 2.6, seed = 77): AudioBuffer {
+  return impulseFrom(ctx, runSync(impulseData(ctx.sampleRate, seconds, decay, seed)), ctx.sampleRate);
 }
 
 const curves = new Map<number, Float32Array>();
@@ -223,15 +286,67 @@ export class JsBiquad {
   }
 }
 
-/** Build a mono AudioBuffer by evaluating `fn(i, t)` for `seconds`. */
-export function synthBuffer(ctx: BaseAudioContext, seconds: number, fn: (t: number, i: number) => number, peak = 0.9): AudioBuffer {
-  const sr = ctx.sampleRate;
+/**
+ * Sine oscillator by complex rotation: four multiplies per sample instead of a
+ * Math.sin call. Accurate to ~1e-12 over the few seconds of a baked sample.
+ * (Fields start as numbers so V8 keeps them as in-place doubles: no boxing per sample.)
+ */
+export class RotOsc {
+  private c = 0;
+  private s = 0;
+  private readonly cw: number = 0;
+  private readonly sw: number = 0;
+  constructor(freq: number, sr: number, phase = 0) {
+    const w = (2 * Math.PI * freq) / sr;
+    this.cw = Math.cos(w);
+    this.sw = Math.sin(w);
+    this.c = Math.cos(phase);
+    this.s = Math.sin(phase);
+  }
+  /** sin(phase + 2π·f·n/sr) for n = 0, 1, 2, … */
+  next(): number {
+    const s = this.s, c = this.c;
+    this.s = s * this.cw + c * this.sw;
+    this.c = c * this.cw - s * this.sw;
+    return s;
+  }
+}
+
+/** exp(-t / tau) evaluated sample by sample as a running product (no Math.exp per sample). */
+export class Decay {
+  private v = 1;
+  private readonly k: number = 0;
+  constructor(tau: number, sr: number) {
+    this.k = Math.exp(-1 / (tau * sr));
+  }
+  next(): number {
+    const r = this.v;
+    this.v *= this.k;
+    return r;
+  }
+}
+
+/** Running phase accumulator (radians) for swept oscillators. */
+export class Phase {
+  ph = 0;
+  add(freq: number, sr: number): number {
+    return (this.ph += (2 * Math.PI * freq) / sr);
+  }
+}
+
+/**
+ * Evaluate `fn(t, i)` for `seconds` at `sr` (time-sliced), fade the last 5 ms
+ * to avoid an end click and normalise to `peak`.
+ */
+export function* synth(sr: number, seconds: number, fn: (t: number, i: number) => number, peak = 0.9): Job<Float32Array> {
   const len = Math.max(1, Math.floor(sr * seconds));
   const d = new Float32Array(len);
-  for (let i = 0; i < len; i++) d[i] = fn(i / sr, i);
-  // Fade the last 5 ms to avoid an end click.
+  for (let i = 0; i < len; i++) {
+    d[i] = fn(i / sr, i);
+    if ((i & MASK) === MASK) yield;
+  }
   const f = Math.min(len, Math.floor(sr * 0.005));
   for (let i = 0; i < f; i++) d[len - 1 - i] *= i / f;
   normalise(d, peak);
-  return toBuffer(ctx, d);
+  return d;
 }

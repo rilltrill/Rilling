@@ -324,7 +324,9 @@ export function buildOR(ctx: ZoneCtx): THREE.Group {
   for (let k = 0; k < 4; k++) box(g, 0.08, 1.8, 0.08, M(0x5a6260), r.x1, ga.y + 0.9, ga.z0 + 1.8 + k * 1.8);
   box(g, 0.1, 0.06, ga.z1 - ga.z0, M(0x8a908c), ga.x0 + 0.5, ga.y + 0.95, (ga.z0 + ga.z1) / 2);
   for (const z of [-114, -116.5, -119]) box(g, 0.5, 0.45, 1.6, M(0x2a3a4a), ga.x0 + 2.4, ga.y + 0.22, z);
-  box(g, 0.6, 0.03, 1.2, G(0x6a2020, 0.6), ga.x0 + 2.0, ga.y + ga.h - 0.03, -117);
+  box(g, 0.6, 0.03, 1.2, G(0xd8e8d0, 0.9), ga.x0 + 2.0, ga.y + ga.h - 0.03, -114.5);
+  box(g, 0.6, 0.03, 1.2, G(0xd8e8d0, 0.9), ga.x0 + 2.0, ga.y + ga.h - 0.03, -119.5);
+  box(g, 0.05, 1.0, 6, G(0x3a5a50, 0.7), ga.x1 - 0.05, ga.y + 1.2, -117);
   // Theatre kit.
   opTable(g, 82.6, B, -118.2, 0, rng);
   surgicalLamp(g, 82.6, r.y + r.h, -118.2, B + 3.0);
@@ -369,7 +371,7 @@ export function buildOR(ctx: ZoneCtx): THREE.Group {
 export const WALL_BREAK = { x: 60, w: 3.2, h: 2.7 };
 export const GAS_CYL: [number, number][] = [
   [54.6, -119.4],
-  [67.4, -122.7],
+  [56.4, -122.8],
 ];
 
 export function buildCorrC(ctx: ZoneCtx): THREE.Group {
@@ -432,7 +434,7 @@ export function buildCorrC(ctx: ZoneCtx): THREE.Group {
   pipe(g, 52, r.z0 + 0.4, 71, r.z0 + 0.4, B + 3.05, 0.12, M(0x7a6a4a));
   for (let x = 54; x < 71; x += 3.6) {
     if (x > 60 && x < 62) flickerPanel(ctx, g, x, B + r.h, -121, Math.PI / 2, 'blink');
-    else if (x > 64 && x < 66) danglingPanel(ctx, g, x, B + r.h, -121, Math.PI / 2 - 0.3);
+    else if (x > 64 && x < 66) danglingPanel(ctx, g, x, B + r.h, -121, 0.3);
     else panel(g, x, B + r.h, -121, Math.PI / 2, x < 56);
   }
   emergencyLamp(g, 53, B + 2.7, r.z1 - 0.18, Math.PI);
@@ -624,9 +626,48 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
   return g;
 }
 
+/** Pulsing flesh cocoon in the fountain — Patient Zero bursts out of it. */
+export function buildCocoon(ctx: ZoneCtx) {
+  const { rng } = ctx;
+  const c = new THREE.Group();
+  c.position.set(POOL[0], B, POOL[2]);
+  ctx.dyn.add(c);
+  bakeInto(c, (g) => {
+    const mats = [M(C.flesh, 'skin', 1, 0.7), M(C.fleshDark), M(0x9a2a26, 'skin', 1.4, 0.6)];
+    cyl(g, 4.9, 5.0, 0.16, M(0x4a0a0a, 'skin', 0.8, 0.6), 0, 0.1, 0, 24);
+    const lumps: [number, number, number, number][] = [
+      [0, 1.2, 0, 2.0],
+      [0.3, 2.6, -0.2, 1.4],
+      [-1.2, 0.8, 0.9, 1.0],
+      [1.3, 0.7, 0.8, 0.9],
+      [-0.4, 3.5, 0.1, 0.9],
+      [1.0, 0.6, -1.2, 1.0],
+    ];
+    lumps.forEach(([x, y, z, r], i) => {
+      const m = new THREE.Mesh(Kit.jitter(Kit.ico(r, 1), r * 0.22, 40 + i), mats[i % 3]);
+      m.position.set(x, y, z);
+      m.scale.set(1, i === 0 ? 0.75 : 1, 1);
+      g.add(m);
+    });
+    // Glowing veins over the surface.
+    for (let i = 0; i < 10; i++) {
+      const a = rng.next() * Math.PI * 2;
+      const y = rng.range(0.6, 3.4);
+      const r = 1.9 - Math.abs(y - 1.6) * 0.35;
+      box(g, 0.07, rng.range(0.6, 1.4), 0.07, G(0xff4a24, 1.2), Math.cos(a) * r, y, Math.sin(a) * r, 0, rng.spread(0.6), rng.spread(0.6));
+    }
+    // An arm and a face pressed against the membrane.
+    box(g, 0.12, 0.7, 0.12, M(0xa8948a), 1.6, 1.8, 1.0, 0, 0.5, -0.8);
+    box(g, 0.24, 0.3, 0.1, M(0xa8948a), 0.2, 2.5, 1.55, 0.2, 0, 0);
+  });
+  ctx.sc.cocoon = c;
+}
+
 /** Additive light shafts from the skylight (separate transparent mesh, not baked). */
-export function buildShafts(ctx: ZoneCtx) {
+export function buildShafts(ctx: ZoneCtx): THREE.Group {
   const r = R.atrium;
+  const holder = new THREE.Group();
+  ctx.dyn.add(holder);
   const mat = Kit.track(
     new THREE.MeshBasicMaterial({ color: 0x4a6aa8, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
   );
@@ -636,6 +677,7 @@ export function buildShafts(ctx: ZoneCtx) {
     m.position.set(sx, r.y + r.h / 2, sz);
     m.rotation.z = tilt;
     m.renderOrder = 2;
-    ctx.dyn.add(m);
+    holder.add(m);
   }
+  return holder;
 }

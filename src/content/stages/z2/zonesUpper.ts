@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
-import { C, G, M, MD } from './mats';
+import { C, G, M } from './mats';
 import {
   ambulance,
   bed,
@@ -68,7 +68,7 @@ export function buildBay(ctx: ZoneCtx): THREE.Group {
   const yellow = M(0xb8962a);
   for (const sx of [-4.6, 4.6]) box(g, 0.14, 0.012, 28, yellow, sx, 0.008, -8);
   for (let i = 0; i < 7; i++) box(g, 0.25, 0.012, 3.2, yellow, -3 + i, 0.009, -20, 0.6);
-  pixelText(g, 'AMBULANCE', 0, 0.012, -4, 0, { px: 0.16, mat: M(0xa8a8a0), depth: 0.01 }).rotation.set(-Math.PI / 2, 0, 0);
+  pixelText(g, 'AMBULANCE', 0, 0.012, -9.5, 0, { px: 0.1, mat: M(0x6a6a64), depth: 0.01 }).rotation.set(-Math.PI / 2, 0, 0);
   // Puddles.
   for (let i = 0; i < 9; i++) {
     const r = rng.range(0.6, 1.6);
@@ -291,7 +291,7 @@ export function buildER(ctx: ZoneCtx): THREE.Group {
       else panel(g, x, r.h, z, 0, !(k === '4,-29' || k === '-8,-29'));
     }
   }
-  danglingPanel(ctx, g, -4, r.h, -36.2, 0.3);
+  danglingPanel(ctx, g, -4, r.h, -36.2, Math.PI / 2 + 0.3);
   vent(ctx, g, 2.4, r.h, -39.5, 0);
   vent(ctx, g, -2.2, r.h, -45.5, 0);
 
@@ -400,7 +400,7 @@ export function buildCorrA(ctx: ZoneCtx): THREE.Group {
     blk(g, 0.9, 0.6, 2.0, M(0x3a4440), x + 0.6, 0, zb, Math.PI / 2);
     box(g, 1.2, 0.9, 0.02, G(0x2a3a5a, 0.6), x - 0.4, 1.8, side < 0 ? zw - 3.38 : zw + 3.38);
     // Room number plate.
-    plateSign(g, `3${Math.round(x)}`, x + 1.0, 2.0, zw - side * 0.17, side < 0 ? 0 : Math.PI, 0.025, 0x1a1a1a, 0xd8d8cc);
+    plateSign(g, `3${Math.round(x)}`, x + 0.95, 1.75, zw - side * 0.17, side < 0 ? 0 : Math.PI, 0.016, 0x1a1a1a, 0xd8d8cc);
     // Door slot: hinge at the left edge (as seen from the corridor).
     const ry = side < 0 ? 0 : Math.PI;
     const hingeX = side < 0 ? x - 0.65 : x + 0.65;
@@ -417,7 +417,7 @@ export function buildCorrA(ctx: ZoneCtx): THREE.Group {
   // Ceiling panels every 2.8 m; some faulty.
   let i = 0;
   for (let x = 13; x < 53; x += 2.8, i++) {
-    if (i === 5) danglingPanel(ctx, g, x, r.h, -44, Math.PI / 2 + 0.2);
+    if (i === 5) danglingPanel(ctx, g, x, r.h, -44, 0.25);
     else if (i === 2 || i === 9) flickerPanel(ctx, g, x, r.h, -44, Math.PI / 2, 'blink');
     else if (i === 7 || i === 12) flickerPanel(ctx, g, x, r.h, -44, Math.PI / 2, 'dying');
     else if (i === 11) panel(g, x, r.h, -44, Math.PI / 2, false);
@@ -468,7 +468,6 @@ export const WARD_CURTAINS: [number, 'n' | 's'][] = [
   [2, 's'],
   [3, 'n'],
   [4, 's'],
-  [0, 's'],
 ];
 
 export function buildWard(ctx: ZoneCtx): THREE.Group {
@@ -512,16 +511,23 @@ export function buildWard(ctx: ZoneCtx): THREE.Group {
       bedside(g, bx + 1.3, 0, wallZ - (north ? 0.45 : -0.45), ry);
       monitor(g, bx - 0.9, 1.6, wallZ - (north ? 0.2 : -0.2), ry, rng.chance(0.6));
       if (rng.chance(0.6)) ivStand(g, bx - 0.95, 0, cz + (north ? -0.4 : 0.4));
-      // Side partitions (static curtains) between beds.
+      // Curtain rails above every bed; closed cubicles get full side partitions,
+      // open beds just have their curtains bunched against the wall.
       const zA = wallZ - (north ? 0.15 : -0.15);
       const zB = north ? WARD_CURTAIN_Z.n : WARD_CURTAIN_Z.s;
       const len = Math.abs(zB - zA);
       const zc = (zA + zB) / 2;
-      if (i === 0 || rng.chance(0.75)) curtainPanel(g, bx - 2.0, zc, len, 'z', i % 2 ? C.curtain : C.curtainAlt, 0.4, 3.3);
-      // Front rail.
-      box(g, 4.0, 0.04, 0.04, M(0xb0b4b0), bx, 3.33, zB);
-      // Partly drawn static front curtain on open beds.
-      if (!isClosed && rng.chance(0.5)) curtainPanel(g, bx + 1.45, zB, 1.0, 'x', C.curtain, 0.4, 3.3);
+      const col = i % 2 ? C.curtain : C.curtainAlt;
+      for (const sx of [-2.0, 2.0]) box(g, 0.04, 0.04, len, M(0xb0b4b0), bx + sx, 2.8, zc);
+      box(g, 4.0, 0.04, 0.04, M(0xb0b4b0), bx, 2.8, zB);
+      for (const sx of [-1.9, 1.9]) box(g, 0.02, 0.8, 0.02, M(0x7a7e7a), bx + sx, 3.2, zB);
+      if (isClosed) {
+        curtainPanel(g, bx - 2.0, zc, len, 'z', col, 0.62, 2.75);
+        curtainPanel(g, bx + 2.0, zc, len, 'z', col, 0.62, 2.75);
+      } else if (rng.chance(0.6)) {
+        const sx = rng.chance(0.5) ? -1.95 : 1.95;
+        curtainPanel(g, bx + sx, zA + (north ? -0.5 : 0.5), 0.9, 'z', col, 0.62, 2.75);
+      }
     }
   });
   // Toppled bed in the aisle.
@@ -533,13 +539,13 @@ export function buildWard(ctx: ZoneCtx): THREE.Group {
     const holder = new THREE.Group();
     holder.position.set(bx - 1.95, 0, z);
     ctx.dyn.add(holder);
-    const color = rng.pick([C.curtain, C.curtainAlt, 0x7d9e8a]);
+    const color = rng.pick([C.curtain, C.curtainAlt, 0xc8b8a0]);
     bakeInto(holder, (h) => {
       const mat = M(color, 'cloth', 1, 0.6);
       const n = 12;
       const w = 3.9 / n;
-      for (let k = 0; k < n; k++) box(h, w + 0.03, 2.9, 0.04, mat, (k + 0.5) * w, 0.4 + 1.45, k % 2 ? 0.05 : -0.05);
-      // Blood hand smear on some.
+      for (let k = 0; k < n; k++) box(h, w + 0.03, 2.13, 0.04, mat, (k + 0.5) * w, 0.62 + 1.065, k % 2 ? 0.05 : -0.05);
+      // Bloody hand smear and a silhouette shadow.
       box(h, 0.5, 0.4, 0.06, M(C.blood), 2.0 + rng.spread(0.8), 1.4, row === 'n' ? -0.04 : 0.04);
     });
     sc.curtains.push({

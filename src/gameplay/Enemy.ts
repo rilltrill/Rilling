@@ -217,9 +217,17 @@ export abstract class Enemy extends Entity {
 
   play(name: SfxName | null, volume = 1, vary = 0.1) {
     if (!name) return;
-    // Quieter with distance.
+    // Quieter with distance, panned by where the enemy is on screen.
     const vol = volume * clamp(1.4 - this.distToPlayer / 30, 0.25, 1);
-    this.world.audio.play(name, { volume: vol, vary });
+    this.anchor.getWorldPosition(_w);
+    _w.project(this.world.camera);
+    const pan = _w.z < 1 ? clamp(_w.x * 0.6, -0.6, 0.6) : 0;
+    this.world.audio.play(name, { volume: vol, vary, pan });
+  }
+
+  /** Stereo pan for a hit at screen x. */
+  protected hitPan(hit: ShotHit): number {
+    return clamp((hit.screenX / Math.max(1, this.world.viewport.width)) * 1.2 - 0.6, -0.6, 0.6);
   }
 
   // ─── Hooks ────────────────────────────────────────────────────────────────
@@ -231,7 +239,7 @@ export abstract class Enemy extends Entity {
 
   /** The attack lands. Default: melee damage to the player. */
   protected strike(): void {
-    this.world.hurtPlayer(this.damage, this.name);
+    this.world.hurtPlayer(this.damage, this.name, this);
   }
 
   /** Called after damage is applied but before death/stagger handling. */
@@ -482,14 +490,14 @@ export abstract class Enemy extends Entity {
     if (this.state === 'dying') return { kind: 'enemy', counts: true };
     if (hit.part === 'armor') {
       this.world.fx.sparks(hit.point, hit.normal);
-      this.world.audio.play('hit_armor', { vary: 0.15, volume: 0.7 });
+      this.world.audio.play('hit_armor', { vary: 0.15, volume: 0.7, pan: this.hitPan(hit) });
       this.onArmorHit(hit);
       return { kind: 'armor', counts: true };
     }
     const mult = PART_MULT[hit.part] * this.damageMultiplier(hit);
     if (mult <= 0) {
       this.world.fx.sparks(hit.point, hit.normal);
-      this.world.audio.play('hit_armor', { vary: 0.15, volume: 0.7 });
+      this.world.audio.play('hit_armor', { vary: 0.15, volume: 0.7, pan: this.hitPan(hit) });
       return { kind: 'armor', counts: true };
     }
     const amount = hit.damage * mult;
@@ -497,7 +505,7 @@ export abstract class Enemy extends Entity {
     this.lastHit = hit;
     this.flash(hit.part === 'head' || hit.part === 'weak');
     this.world.fx.blood(hit.point, hit.dir, { color: this.bloodColor, amount: Math.min(2, 0.6 + amount * 0.3) });
-    this.world.audio.play(hit.part === 'head' ? 'hit_head' : this.sfxHit, { vary: 0.12, volume: 0.8 });
+    this.world.audio.play(hit.part === 'head' ? 'hit_head' : this.sfxHit, { vary: 0.12, volume: 0.8, pan: this.hitPan(hit) });
     this.onDamaged(hit, amount);
     const headshot = hit.part === 'head';
     if (this.hp <= 0) {

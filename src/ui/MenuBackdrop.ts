@@ -127,8 +127,11 @@ function jitter(g: THREE.BufferGeometry, amount: number, rng: Lcg): THREE.Buffer
   if (out !== g) g.dispose();
   const pos = out.getAttribute('position') as THREE.BufferAttribute;
   const seen = new Map<string, [number, number, number]>();
+  // `|| 0` folds -0 into 0: a cylinder's seam has x = sin(2π)·r ≈ -1e-15, which must
+  // share its offset with the x = 0 column or the surface cracks open along the seam.
+  const q = (v: number) => Math.round(v * 100) || 0;
   for (let i = 0; i < pos.count; i++) {
-    const key = `${pos.getX(i).toFixed(2)},${pos.getY(i).toFixed(2)},${pos.getZ(i).toFixed(2)}`;
+    const key = `${q(pos.getX(i))},${q(pos.getY(i))},${q(pos.getZ(i))}`;
     let d = seen.get(key);
     if (!d) {
       d = [rng.range(-amount, amount), rng.range(-amount, amount) * 0.6, rng.range(-amount, amount)];
@@ -846,6 +849,11 @@ function buildCity(sh: Shared): Vignette {
 
 // ─── JUNGLE ──────────────────────────────────────────────────────────────────
 
+/** The raptor's crag (right of the track, ahead of the camera). */
+const CRAG_X = 10.5;
+const CRAG_Z = -36;
+const CRAG_TOP = 14;
+
 function buildJungle(sh: Shared): Vignette {
   const own = sh.own;
   const rng = new Lcg(65);
@@ -949,9 +957,16 @@ function buildJungle(sh: Shared): Vignette {
   for (let z = 12; z > -110; z -= rng.range(5, 9)) {
     for (const s of [-1, 1]) {
       const x = s * rng.range(5.5, 16);
-      // keep the sky clear behind the raptor's rock
-      if (s > 0 && z < -4 && z > -34) {
+      // keep the sky clear in front of / behind the raptor's crag
+      if (s > 0 && z < -4 && z > CRAG_Z - 8) {
         if (rng.chance(0.5)) bush(s * rng.range(7, 14), z, rng.range(0.8, 1.5), 0x1e3016);
+        continue;
+      }
+      // keep the volcano clear: near the camera the left side only has low
+      // palms well off the track, leaning away from it (and bushes)
+      if (s < 0 && z > -48) {
+        if (rng.chance(0.6)) palm(s * rng.range(9.5, 16), z, rng.range(4.5, 6.5), rng.range(0.15, 0.4), s);
+        if (rng.chance(0.8)) bush(s * rng.range(2.8, 6), z + rng.range(-3, 3), rng.range(0.6, 1.4), rng.chance(0.5) ? 0x1e3016 : 0x283a1c);
         continue;
       }
       if (rng.chance(0.55) || (z > -12 && Math.abs(x) < 11)) palm(x, z, rng.range(6, 10), rng.range(0.2, 0.6), -s);
@@ -968,9 +983,15 @@ function buildJungle(sh: Shared): Vignette {
       }
     }
   }
-  // the raptor's rock + fallen log
-  veg.add(jitter(new THREE.IcosahedronGeometry(2.6, 1), 0.5, rng), 0x3a3430, 5.6, 0.6, -16, 0, 0.4, 0, 1.4, 0.95, 1.2);
-  veg.add(jitter(new THREE.IcosahedronGeometry(1.6, 1), 0.35, rng), 0x332e2a, 7.6, 0.4, -14.5, 0, 1.2, 0, 1.2, 0.8, 1);
+  // The raptor's crag: a tall rock outcrop right of the track. Its top sits in
+  // the upper-right sky, the one area the title logo and the main-menu buttons
+  // both leave clear, so the silhouette reads behind every menu.
+  veg.add(jitter(new THREE.CylinderGeometry(2.1, 4.8, CRAG_TOP - 1, 7, 5), 0.8, rng), 0x34302e, CRAG_X, (CRAG_TOP - 1) / 2, CRAG_Z, 0, 0.3, 0.04, 1, 1, 1, 0x1a1816);
+  veg.add(jitter(new THREE.CylinderGeometry(1.2, 2.6, CRAG_TOP * 0.55, 6, 2), 0.5, rng), 0x2e2a28, CRAG_X + 2.4, CRAG_TOP * 0.27, CRAG_Z - 1.2, 0, 1.1, -0.06, 1, 1, 1, 0x181614);
+  veg.add(jitter(new THREE.IcosahedronGeometry(2.4, 1), 0.4, rng), 0x3a3532, CRAG_X - 0.2, CRAG_TOP - 1.2, CRAG_Z, 0, 0.6, 0, 1.15, 0.62, 1.05);
+  veg.add(jitter(new THREE.IcosahedronGeometry(3.6, 1), 0.6, rng), 0x26221f, CRAG_X + 2.6, 2.2, CRAG_Z + 2.4, 0, 1.1, 0, 1.2, 0.85, 1);
+  veg.add(jitter(new THREE.IcosahedronGeometry(2.2, 1), 0.4, rng), 0x2c2825, CRAG_X - 3, 0.9, CRAG_Z + 3.5, 0, 0.2, 0, 1.3, 0.75, 1.1);
+  // fallen log by the track
   veg.add(new THREE.CylinderGeometry(0.45, 0.55, 7, 7), 0x2e2218, 2.6, 0.4, -10, 0, 0.9, Math.PI / 2 - 0.08);
   // broken electric fence on the right: posts, sagging wires, warning sign
   for (let i = 0; i < 10; i++) {
@@ -1048,8 +1069,8 @@ function buildJungle(sh: Shared): Vignette {
   tail2.position.set(0, -0.06, -1.05);
   tail1.add(tail2);
   mk(new THREE.ConeGeometry(0.15, 1.7, 6), rMat, tail2, 0, 0, -0.8, -Math.PI / 2 - 0.05);
-  raptor.position.set(5.4, 2.55, -16);
-  raptor.scale.setScalar(1.25);
+  raptor.position.set(CRAG_X - 0.3, CRAG_TOP - 0.2, CRAG_Z);
+  raptor.scale.setScalar(2.1);
   scene.add(raptor);
 
   // ── pterosaurs circling the volcano (one instanced draw call) ──
@@ -1103,18 +1124,21 @@ function buildJungle(sh: Shared): Vignette {
       const ease = p * p * (3 - 2 * p);
       // bumpy jeep ride along the track
       cam.position.set(-0.4 + ease * 0.9 + Math.sin(t * 0.5) * 0.15, 2.05 + Math.sin(t * 6.3) * 0.025 + Math.sin(t * 2.1) * 0.03, 8 - ease * 13);
-      _look.set(1.5 + Math.sin(t * 0.25) * 2 - ease * 2.5, 3.6 + ease * 0.8, -60);
+      // Volcano left of centre, the raptor's crag up in the right-hand sky; tilt up as we close in.
+      _look.set(-3 + Math.sin(t * 0.25) * 1.0, 3.6 + ease * 2.5, -60);
       cam.lookAt(_look);
       cam.rotateZ(Math.sin(t * 1.3) * 0.008);
 
       // Raptor: breathe, sway tail, look around, screech at ~45 % of the shot.
       const sc = p > 0.4 && p < 0.62 ? Math.sin(((p - 0.4) / 0.22) * Math.PI) : 0;
-      raptor.rotation.y = -1.2 + Math.sin(t * 0.4) * 0.08;
-      hips.rotation.x = -0.08 + Math.sin(t * 2.2) * 0.02 - sc * 0.18;
+      // Side-on to the camera (a profile reads best as a silhouette); the screech
+      // thrusts the head forward and up with the jaws wide, turned a little toward us.
+      raptor.rotation.y = -1.7 + Math.sin(t * 0.4) * 0.08;
+      hips.rotation.x = -0.08 + Math.sin(t * 2.2) * 0.02 - sc * 0.12;
       hips.position.y = 1.05 + Math.sin(t * 2.2) * 0.02;
-      neck.rotation.x = -0.05 - sc * 0.3 + Math.sin(t * 1.1) * 0.05;
-      neck.rotation.y = 0.55 * Math.sin(t * 0.6) * (1 - sc) + sc * 0.7;
-      head.rotation.x = 0.35 - sc * 0.55;
+      neck.rotation.x = -0.05 - sc * 0.22 + Math.sin(t * 1.1) * 0.05;
+      neck.rotation.y = 0.5 * Math.sin(t * 0.6) * (1 - sc) + sc * 0.3;
+      head.rotation.x = 0.35 - sc * 0.4;
       head.rotation.z = Math.sin(t * 3.3) * 0.08 * (1 - sc);
       jaw.rotation.x = sc * 0.8 + Math.max(0, Math.sin(t * 9)) * 0.08 * sc;
       tail1.rotation.y = Math.sin(t * 1.4) * 0.25;
@@ -1297,7 +1321,12 @@ export class MenuBackdrop {
     if (theme && theme !== this.current && this.t < SHOT - FADE) this.t = SHOT - FADE; // fade out now
   }
 
-  update(dt: number, width: number, height: number) {
+  /**
+   * `width`/`height`: CSS size of the view. `pixelHeight`: height in pixels of the
+   * target actually rendered to (CSS height × pixel ratio, or a post pass's
+   * low-res target) — point sprites are sized in those pixels.
+   */
+  update(dt: number, width: number, height: number, pixelHeight = height) {
     if (this.disposed) return;
     this.clock += dt;
     this.t += dt;
@@ -1318,7 +1347,7 @@ export class MenuBackdrop {
       cam.fov = fov;
       cam.updateProjectionMatrix();
     }
-    const scale = height / (2 * Math.tan(THREE.MathUtils.degToRad(fov) / 2));
+    const scale = pixelHeight / (2 * Math.tan(THREE.MathUtils.degToRad(fov) / 2));
     for (const m of v.pointMats) m.uniforms.scale.value = scale;
     v.update(this.t, dt, SHOT, cam);
 
@@ -1351,9 +1380,14 @@ export class MenuBackdrop {
     }
   }
 
+  /** The scene of the shot on screen (render it with `camera`, e.g. through a post pass). */
+  get scene(): THREE.Scene {
+    return this.shot(this.current).scene;
+  }
+
   render(renderer: THREE.WebGLRenderer) {
     if (this.disposed) return;
-    renderer.render(this.shot(this.current).scene, this.camera);
+    renderer.render(this.scene, this.camera);
   }
 
   dispose() {

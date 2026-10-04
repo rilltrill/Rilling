@@ -27,13 +27,25 @@ const _col = new THREE.Color();
 const _em = new THREE.Color();
 const _o = new THREE.Vector3();
 
-interface Bucket {
-  geos: THREE.BufferGeometry[];
+interface BucketMeta {
+  key: string;
   tex: string;
   side: THREE.Side;
   sway: boolean;
   glow: boolean;
 }
+
+interface Bucket extends BucketMeta {
+  geos: THREE.BufferGeometry[];
+}
+
+/** A baked plant/prop variant: raw per-bucket vertex data in its own local space. */
+export interface Prefab {
+  buckets: { meta: BucketMeta; pos: Float32Array; nrm: Float32Array; col: Float32Array; w: Float32Array | null }[];
+}
+
+const _nm = new THREE.Matrix3();
+const _pv = new THREE.Vector3();
 
 export class Baker {
   /** Shared wind uniforms: uTime (s), uWind.xz = direction, uWind.y = gust offset. */
@@ -145,7 +157,7 @@ export class Baker {
           const key = `${basic ? 'glow' : tex}|${side}|${swaying ? 1 : 0}`;
           let b = buckets.get(key);
           if (!b) {
-            b = { geos: [], tex: tex === 'grain' ? '' : tex, side, sway: swaying, glow: basic };
+            b = { key, geos: [], tex: tex === 'grain' ? '' : tex, side, sway: swaying, glow: basic };
             buckets.set(key, b);
           }
           b.geos.push(geo);
@@ -169,19 +181,118 @@ export class Baker {
       b.geos.forEach((g) => g.dispose());
       if (!geo) continue;
       geo.computeBoundingSphere();
-      let mat: THREE.Material;
-      if (b.glow) mat = this.glowMaterial();
-      else if (b.sway) mat = this.swayMaterial(b.tex, b.side);
-      else
-        mat = b.tex
-          ? Kit.mat(0xffffff, { vertexColors: true, tex: b.tex as TexName, side: b.side })
-          : Kit.mat(0xffffff, { vertexColors: true, side: b.side });
-      const mesh = new THREE.Mesh(Kit.track(geo), mat);
+      const mesh = new THREE.Mesh(Kit.track(geo), this.materialFor(b));
+      mesh.userData.bucket = { key: b.key, tex: b.tex, side: b.side, sway: b.sway, glow: b.glow } satisfies BucketMeta;
       mesh.matrixAutoUpdate = false;
       mesh.updateMatrix();
       group.add(mesh);
       out.push(mesh);
     }
+    return out;
+  }
+
+  materialFor(b: BucketMeta): THREE.Material {
+    if (b.glow) return this.glowMaterial();
+    if (b.sway) return this.swayMaterial(b.tex, b.side);
+    return b.tex
+      ? Kit.mat(0xffffff, { vertexColors: true, tex: b.tex as TexName, side: b.side })
+      : Kit.mat(0xffffff, { vertexColors: true, side: b.side });
+  }
+
+  /** Bake a plant/prop (built at the origin) into a reusable vertex-data prefab. */
+  prefab(group: THREE.Object3D): Prefab {
+    group.position.set(0, 0, 0);
+    const meshes = this.bake(group);
+    const buckets: Prefab['buckets'] = [];
+    for (const m of meshes) {
+      const g = m.geometry;
+      const sw = g.getAttribute('aSway') as THREE.BufferAttribute | undefined;
+      buckets.push({
+        meta: m.userData.bucket as BucketMeta,
+        pos: (g.getAttribute('position') as THREE.BufferAttribute).array as Float32Array,
+        nrm: (g.getAttribute('normal') as THREE.BufferAttribute).array as Float32Array,
+        col: (g.getAttribute('color') as THREE.BufferAttribute).array as Float32Array,
+        w: sw ? (sw.array as Float32Array) : null,
+      });
+    }
+    return { buckets };
+  }
+}
+
+/**
+ * Collects prefab placements (prefab + transform) and builds one mesh per
+ * bucket — the fast path for thousands of plants (no temporary Object3Ds).
+ */
+export class Sink {
+  private items: { p: Prefab; m: THREE.Matrix4 }[] = [];
+
+  add(p: Prefab, m: THREE.Matrix4) {
+    this.items.push({ p, m: m.clone() });
+  }
+
+  get empty(): boolean {
+    return this.items.length === 0;
+  }
+
+  build(baker: Baker): THREE.Mesh[] {
+    const groups = new Map<string, { meta: BucketMeta; parts: { b: Prefab['buckets'][number]; m: THREE.Matrix4 }[]; n: number }>();
+    for (const it of this.items) {
+      for (const b of it.p.buckets) {
+        let g = groups.get(b.meta.key);
+        if (!g) {
+          g = { meta: b.meta, parts: [], n: 0 };
+          groups.set(b.meta.key, g);
+        }
+        g.parts.push({ b, m: it.m });
+        g.n += b.pos.length / 3;
+      }
+    }
+    const out: THREE.Mesh[] = [];
+    for (const g of groups.values()) {
+      const pos = new Float32Array(g.n * 3);
+      const nrm = new Float32Array(g.n * 3);
+      const col = new Float32Array(g.n * 3);
+      const w = g.meta.sway ? new Float32Array(g.n) : null;
+      let o = 0;
+      for (const { b, m } of g.parts) {
+        const e = m.elements;
+        _nm.getNormalMatrix(m);
+        const ne = _nm.elements;
+        const cnt = b.pos.length / 3;
+        for (let i = 0; i < cnt; i++) {
+          const x = b.pos[i * 3];
+          const y = b.pos[i * 3 + 1];
+          const z = b.pos[i * 3 + 2];
+          const j = (o + i) * 3;
+          pos[j] = e[0] * x + e[4] * y + e[8] * z + e[12];
+          pos[j + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+          pos[j + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+          const nx = b.nrm[i * 3];
+          const ny = b.nrm[i * 3 + 1];
+          const nz = b.nrm[i * 3 + 2];
+          _pv.set(ne[0] * nx + ne[3] * ny + ne[6] * nz, ne[1] * nx + ne[4] * ny + ne[7] * nz, ne[2] * nx + ne[5] * ny + ne[8] * nz).normalize();
+          nrm[j] = _pv.x;
+          nrm[j + 1] = _pv.y;
+          nrm[j + 2] = _pv.z;
+          col[j] = b.col[i * 3];
+          col[j + 1] = b.col[i * 3 + 1];
+          col[j + 2] = b.col[i * 3 + 2];
+          if (w) w[o + i] = b.w ? b.w[i] : 0;
+        }
+        o += cnt;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      if (w) geo.setAttribute('aSway', new THREE.BufferAttribute(w, 1));
+      geo.computeBoundingSphere();
+      const mesh = new THREE.Mesh(Kit.track(geo), baker.materialFor(g.meta));
+      mesh.matrixAutoUpdate = false;
+      mesh.updateMatrix();
+      out.push(mesh);
+    }
+    this.items.length = 0;
     return out;
   }
 }

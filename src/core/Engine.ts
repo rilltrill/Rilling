@@ -48,6 +48,8 @@ export class Engine {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.shadowMap.enabled = false;
+    // The retro pass renders twice per frame; count stats per frame, not per render call.
+    this.renderer.info.autoReset = false;
     this.canvas = this.renderer.domElement;
     this.canvas.id = 'game-canvas';
     container.appendChild(this.canvas);
@@ -120,6 +122,7 @@ export class Engine {
       const dt = Math.min(Math.max(raw, 0), 1 / 20);
       this.lastDt = dt;
       this.trackPerf(raw);
+      this.renderer.info.reset();
       this.onFrame(dt);
     };
     this.rafId = requestAnimationFrame(tick);
@@ -130,9 +133,9 @@ export class Engine {
     cancelAnimationFrame(this.rafId);
   }
 
-  render(scene: THREE.Scene) {
-    if (this.retro.enabled) this.retro.render(scene, this.camera, this.lastDt);
-    else this.renderer.render(scene, this.camera);
+  render(scene: THREE.Scene, camera: THREE.Camera = this.camera) {
+    if (this.retro.enabled) this.retro.render(scene, camera, this.lastDt);
+    else this.renderer.render(scene, camera);
   }
 
   /** Dynamic resolution: drop pixel ratio when frames are slow, recover when fast. */

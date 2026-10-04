@@ -282,13 +282,22 @@ const FRAG_GLOW = /* glsl */ `
   }
 `;
 
-export type LandFn = (x: number, y: number, z: number, r: number, g: number, b: number, tag: number) => void;
+/**
+ * Landing callback. The event data is in `ev` (reused, read it synchronously):
+ * [x, floorY, z, r, g, b, tag]. Passing one typed array instead of seven numbers
+ * keeps the call allocation-free (doubles passed to a non-inlined call get boxed).
+ */
+export type LandFn = (ev: Float32Array) => void;
 
 export class ParticleSystem {
   readonly mesh: THREE.Mesh;
   readonly mat: THREE.ShaderMaterial;
-  /** Called when a LAND_EVENT particle touches its floor. */
+  /** Called when a LAND_EVENT particle touches its floor (see `LandFn`). */
   onLand: LandFn | null = null;
+  /** Event payload for `onLand`. */
+  readonly ev = new Float32Array(7);
+  /** The camera this pool was last rendered with (lets Fx find the player camera by itself). */
+  lastCamera: THREE.Camera | null = null;
   private cpu: Float32Array;
   private gpu: Float32Array;
   private buf: THREE.InstancedInterleavedBuffer;
@@ -296,6 +305,8 @@ export class ParticleSystem {
   private n = 0;
   private recycle = 0;
   private range = newRange();
+  private viewport = new THREE.Vector4();
+  private lastH = 400;
 
   constructor(
     readonly capacity: number,
@@ -351,6 +362,15 @@ export class ParticleSystem {
     this.mesh.renderOrder = additive ? 6 : 5;
     this.mesh.visible = false;
     this.mesh.name = additive ? 'fx-glow' : 'fx-soft';
+    // Track the real pixel height of whatever we're drawn into (the canvas at the
+    // current dynamic-resolution pixel ratio, or a low-res post-process target) so
+    // the minimum-pixel-size clamp stays right without anyone calling setViewport.
+    this.mesh.onBeforeRender = (renderer, _scene, camera) => {
+      this.lastCamera = camera;
+      renderer.getCurrentViewport(this.viewport);
+      const h = this.viewport.w;
+      if (h > 0 && h !== this.lastH) this.setViewport(h * 0.5);
+    };
   }
 
   get count(): number {
@@ -361,7 +381,9 @@ export class ParticleSystem {
     return this.mat.uniforms.uLight.value as THREE.Color;
   }
 
+  /** Half the render target height in pixels (also tracked automatically at render time). */
   setViewport(halfHeightPx: number) {
+    this.lastH = halfHeightPx * 2;
     this.mat.uniforms.uHalfH.value = halfHeightPx;
   }
 
@@ -443,7 +465,15 @@ export class ParticleSystem {
       const floor = d[o + FLOOR];
       if (flags !== 0 && py < floor && vy < 0) {
         if (flags & PFLAG.LAND_EVENT && this.onLand) {
-          this.onLand(px, floor, pz, d[o + R0], d[o + G0], d[o + B0], d[o + TAG]);
+          const ev = this.ev;
+          ev[0] = px;
+          ev[1] = floor;
+          ev[2] = pz;
+          ev[3] = d[o + R0];
+          ev[4] = d[o + G0];
+          ev[5] = d[o + B0];
+          ev[6] = d[o + TAG];
+          this.onLand(ev);
           d[o + FLAGS] = flags & ~PFLAG.LAND_EVENT;
         }
         if (flags & PFLAG.DIE_ON_FLOOR) {
@@ -512,6 +542,8 @@ export class ParticleSystem {
   }
 
   dispose() {
+    this.lastCamera = null;
+    this.mesh.onBeforeRender = () => {};
     this.geo.dispose();
     this.mat.dispose();
   }

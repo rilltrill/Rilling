@@ -1,0 +1,1284 @@
+import * as THREE from 'three';
+import { Boss } from '../../../gameplay/Boss';
+import type { EnemySpawn } from '../../../gameplay/Enemy';
+import type { ShotHit } from '../../../gameplay/Entity';
+import type { World } from '../../../gameplay/World';
+import { createEnemy, registerEnemy } from '../../registry';
+import { Kit } from '../../kit/ModelKit';
+import { M, Sculpt, buildTheropod, dgeo, poseTheroLeg, ARM_REST, type Palette, type TheroRig, type TheroSpec } from '../../enemies/dinoKit';
+import { angleDelta, clamp, damp, lerp, TAU } from '../../../core/math';
+import { HALL } from './containment';
+import { labs } from './env';
+
+/**
+ * SPECIMEN X — an escaped engineered hybrid: a huge albino raptor (~6 m) with
+ * a crest of dorsal quills, scythe claws and glowing blue bioluminescent
+ * stripes. It fights in the holding hall, using the four pillars as cover.
+ *
+ *   weak points : glowing eyes (+ halo) and the bioluminescent stripes
+ *                 (head crest, neck, flanks, tail base) — they keep glowing
+ *                 even when it fades into the dark.
+ *   armour      : dorsal quills (spark, no damage).
+ *   attacks     : POUNCE       crouch + wiggle, leaps at the camera     (ring on the head)
+ *                 TAIL WHIP    sidles up, turns, whips the tail          (ring on the tail tip)
+ *                 QUILL VOLLEY rattles the quills, fires shootable darts (projectiles)
+ *                 FADE         (phase 2+) cloaks, slips behind a pillar, ambushes with a
+ *                              short-fuse pounce from close range         (ring on the head)
+ *   Enough damage during a wind-up (or mid-leap) knocks it down: free hits.
+ *   phase 2 : roar, summons a raptor pack.  phase 3 : enraged — faster
+ *   pounces, double pounces, compys.  death: staggers back and crashes
+ *   through the specimen tank glass.
+ */
+
+type XState =
+  | 'intro'
+  | 'stalk'
+  | 'watch'
+  | 'pounceWind'
+  | 'pounce'
+  | 'retreat'
+  | 'tailMove'
+  | 'tailWind'
+  | 'tailWhip'
+  | 'quillWind'
+  | 'quillFire'
+  | 'fade'
+  | 'hide'
+  | 'ambush'
+  | 'roar'
+  | 'stun'
+  | 'getUp';
+
+const S = 1.8;
+
+const PAL: Palette = {
+  key: 'albino',
+  base: 0xd6d0c2,
+  back: 0xb2aca0,
+  belly: 0xf2eee4,
+  stripe: 0x8e98a8,
+  accent: 0xe8e2d4,
+  accent2: 0x7a746c,
+  claw: 0x24262c,
+  teeth: 0xf4f0e4,
+  mouth: 0x6a1a2a,
+  eye: 0x60e8ff,
+};
+
+const SPEC: TheroSpec = {
+  key: 'specx',
+  pal: PAL,
+  hipGap: 0.17,
+  thigh: 0.5,
+  shin: 0.56,
+  meta: 0.32,
+  toe: 0.22,
+  legR: 1.25,
+  footH: 0.05,
+  hips: [0.26, 0.32, 0.42],
+  torso: { len: 0.92, r0: [0.27, 0.34], r1: [0.22, 0.29], rise: 0.14 },
+  neck: { lens: [0.36, 0.3], r0: [0.14, 0.16], r1: [0.1, 0.12], rest: [-0.95, 0.5] },
+  headRest: 0.5,
+  skull: { len: 0.26, r: [0.13, 0.145] },
+  snout: { len: 0.4, r1: [0.055, 0.06], drop: 0.03 },
+  jaw: { len: 0.6, r0: [0.095, 0.055], r1: [0.042, 0.03] },
+  tail: { lens: [0.46, 0.44, 0.4, 0.38, 0.34], r0: [0.2, 0.24], taper: 0.7, rest: [-0.04, -0.02, 0, 0.02, 0.03] },
+  arm: { upper: 0.3, fore: 0.32, r: 0.06, claw: 0.14 },
+  stripes: 2.1,
+  teeth: 10,
+  sickle: true,
+  quills: 1.4,
+  eyeSize: 0.04,
+  texDensity: 1.2,
+};
+
+const STRIPE = new THREE.Color(0x5ae0ff);
+const STRIPE_RAGE = new THREE.Color(0xc070ff);
+const EYE = new THREE.Color(0x8af0ff);
+const EYE_RAGE = new THREE.Color(0xff4060);
+
+const _v = new THREE.Vector3();
+const _w = new THREE.Vector3();
+const _p = new THREE.Vector3();
+const _u = new THREE.Vector3();
+
+interface Flash {
+  mesh: THREE.Mesh;
+  t: number;
+}
+
+export class SpecimenX extends Boss {
+  override title = 'SPECIMEN X';
+  override phases = [0.66, 0.33];
+
+  private r!: TheroRig;
+  private bodyMeshes: THREE.Mesh[] = [];
+  private quillPivots: THREE.Group[] = [];
+  private weakMeshes: THREE.Mesh[] = [];
+  private tailTip!: THREE.Object3D;
+  private focus = new THREE.Object3D();
+  private skinMatRef!: THREE.Material;
+  private cloakMat!: THREE.MeshLambertMaterial;
+  private stripeMat!: THREE.MeshBasicMaterial;
+  private eyeMat!: THREE.MeshBasicMaterial;
+  private haloMat!: THREE.MeshBasicMaterial;
+  private flashMat!: THREE.Material;
+  private flashes: Flash[] = [];
+
+  // Pose.
+  private gaitPhase = 0;
+  private runAmt = 0;
+  private crouch = 0;
+  private air = 0;
+  private jawOpen = 0;
+  private dip = 0;
+  private rear = 0;
+  private tailLift = 0;
+  private recoil = 0;
+  private armReach = 0;
+  private lookYaw = 0;
+  private lookPitch = 0;
+  private tailWhipAmt = 0;
+  private quillRaise = 0;
+  private roll = 0;
+  private flinch = 0;
+  private flinchSide = 1;
+  private lift = 0;
+  private wiggle = 0;
+  private tg = { crouch: 0, air: 0, jaw: 0.08, dip: 0, rear: 0, tail: 0, recoil: 0, arm: 0, whip: 0, quill: 0, roll: 0 };
+  private prevPos = new THREE.Vector3();
+  private speedNow = 0;
+  private stepPhase = 0;
+
+  // Fight.
+  private cloak = 0;
+  private cloakTarget = 0;
+  private cloaked = false;
+  private target = new THREE.Vector3();
+  private via: THREE.Vector3 | null = null;
+  private cooldown = 1.5;
+  private winding = false;
+  private interruptDmg = 0;
+  private lastAttack = '';
+  private chain = 0;
+  private pendingRoar = -1;
+  private roarsDone = new Set<number>();
+  private roaringFor = 0;
+  private enraged = false;
+  private minionT = 8;
+  private minionsCalled = 0;
+  private volley = 0;
+  private volleyT = 0;
+  private windTime = 1.4;
+  private leapTime = 0.5;
+  private pFrom = new THREE.Vector3();
+  private pTo = new THREE.Vector3();
+  private sideSign = 1;
+  private entering = true;
+  private hissT = 0;
+  private shortFuse = false;
+  private breathT = 0;
+
+  // Death.
+  private deathFrom = new THREE.Vector3();
+  private deathTo = new THREE.Vector3();
+  private deathPane = -1;
+  private crashed = false;
+  private deathYaw = 0;
+  private deathReach = 1.6;
+
+  constructor(world: World, spawn: EnemySpawn) {
+    super(world, spawn);
+  }
+
+  protected override configure(): void {
+    this.name = 'specimen_x';
+    // `opts.hp` lets a stage (or a quick test) tune the fight length.
+    this.maxHp = typeof this.spawn.opts.hp === 'number' ? this.spawn.opts.hp : 205;
+    this.speed = 9;
+    this.points = 25000;
+    this.sfxHit = 'hit_flesh';
+    this.sfxDie = null;
+    this.bloodColor = 0x5a0a1a;
+    this.telegraphRadius = 0.9;
+    this.knockback = 0;
+    this.deathDuration = 5.5;
+  }
+
+  // ─── Model ────────────────────────────────────────────────────────────────
+
+  protected override build(): void {
+    this.r = buildTheropod(this.model, SPEC);
+    this.model.scale.setScalar(S);
+    const r = this.r;
+    this.stripeMat = Kit.track(new THREE.MeshBasicMaterial({ color: STRIPE.clone(), toneMapped: false, fog: false }));
+    this.eyeMat = Kit.track(new THREE.MeshBasicMaterial({ color: EYE.clone().multiplyScalar(1.6), toneMapped: false, fog: false }));
+    this.haloMat = Kit.track(new THREE.MeshBasicMaterial({ color: 0x40c8ff, transparent: true, opacity: 0.32, depthWrite: false, toneMapped: false, fog: false }));
+    this.cloakMat = Kit.track(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+    this.flashMat = Kit.glow(0xffffff, 1.2);
+    this.skinMatRef = r.torso.material as THREE.Material;
+
+    // Eyes first: the autoplayer (and players) aim for these.
+    const sk = SPEC.skull;
+    const eyeZ = sk.len * 0.42;
+    for (const sx of [1, -1]) {
+      const eye = Kit.add(r.head, Kit.box(0.06, 0.045, 0.09), this.eyeMat, sx * sk.r[0] * 0.92, sk.r[1] * 0.34, eyeZ, 0, sx * 0.35, 0);
+      const halo = Kit.add(r.head, Kit.sphere(0.11, 8, 6), this.haloMat, sx * sk.r[0] * 0.95, sk.r[1] * 0.34, eyeZ, 0, 0, 0, 0.9, 0.75, 1.3);
+      halo.renderOrder = 3;
+      this.hitbox(eye, 'weak');
+      this.hitbox(halo, 'weak');
+      this.weakMeshes.push(eye, halo);
+    }
+
+    // Bioluminescent stripes: one mesh per side per body part, so each one's
+    // centre sits on the surface it glows on.
+    const stripeBand = (key: string, side: number, pts: { z: number; rx: number; ry: number; y: number }[], a0: number, a1: number, w: number) =>
+      dgeo(`specx|stripe|${key}|${side}`, () => {
+        const sc = new Sculpt(0, 5);
+        for (const p of pts) {
+          const n = 5;
+          for (let i = 0; i < n; i++) {
+            const a = a0 + ((a1 - a0) * (i + 0.5)) / n;
+            const x = side * Math.cos(a) * p.rx * 1.03;
+            const y = p.y + Math.sin(a) * p.ry * 1.03;
+            const len = ((a1 - a0) / n) * Math.hypot(p.rx, p.ry) * 0.75;
+            sc.box(0.02, len * 1.25, w, 0xffffff, M(x, y, p.z, 0, 0, side * a));
+          }
+        }
+        return sc.build();
+      });
+    const T = SPEC.torso;
+    const torsoPts = [0.18, 0.4, 0.62, 0.82].map((t) => ({
+      z: -0.02 + t * T.len,
+      rx: lerp(T.r0[0], T.r1[0], t) * 1.05,
+      ry: lerp(T.r0[1], T.r1[1], t) * 1.05,
+      y: T.rise * t * t,
+    }));
+    for (const side of [1, -1]) {
+      const m = Kit.add(r.chest, stripeBand('torso', side, torsoPts, -0.5, 0.9, 0.07), this.stripeMat);
+      this.hitbox(m, 'weak');
+      this.weakMeshes.push(m);
+    }
+    const neckPts = [0.1, 0.45].map((t) => ({ z: t * SPEC.neck.lens[0], rx: lerp(SPEC.neck.r0[0], SPEC.neck.r1[0], 0.25) * 1.05, ry: lerp(SPEC.neck.r0[1], SPEC.neck.r1[1], 0.25) * 1.05, y: 0 }));
+    for (const side of [1, -1]) {
+      const m = Kit.add(r.neck[0], stripeBand('neck', side, neckPts, -0.4, 1.0, 0.06), this.stripeMat);
+      this.hitbox(m, 'weak');
+      this.weakMeshes.push(m);
+    }
+    const tr = SPEC.tail.r0;
+    const tailPts = [0.15, 0.5, 0.85].map((t) => ({ z: -t * SPEC.tail.lens[0], rx: tr[0] * (1 - t * 0.3), ry: tr[1] * (1 - t * 0.3), y: 0 }));
+    for (const side of [1, -1]) {
+      const m = Kit.add(r.tail[0], stripeBand('tail', side, tailPts, -0.3, 1.1, 0.06), this.stripeMat);
+      this.hitbox(m, 'weak');
+      this.weakMeshes.push(m);
+    }
+    // Glowing crest line down the skull.
+    {
+      const g = dgeo('specx|crest', () => {
+        const sc = new Sculpt(0, 6);
+        for (let i = 0; i < 5; i++) sc.box(0.035, 0.03, 0.07, 0xffffff, M(0, sk.r[1] * 0.98 - i * 0.004, sk.len * 0.7 - i * 0.075, 0.1, 0, 0));
+        return sc.build();
+      });
+      const m = Kit.add(r.head, g, this.stripeMat);
+      this.hitbox(m, 'weak');
+      this.weakMeshes.push(m);
+    }
+
+    // Dorsal quills (armour) on neck, chest, hips and tail base.
+    const quillGeo = (key: string, n: number, len: number, spread: number, z0: number, z1: number, y: number) =>
+      dgeo(`specx|quills|${key}`, () => {
+        const sc = new Sculpt(0.05, 9);
+        for (let i = 0; i < n; i++) {
+          const t = n > 1 ? i / (n - 1) : 0;
+          const z = lerp(z0, z1, t);
+          const l = len * (0.75 + 0.35 * Math.sin(Math.PI * t));
+          for (const side of [1, -1]) {
+            const paint = (_x: number, yy: number) => (yy > y + l * 0.62 ? PAL.accent2 : PAL.accent);
+            sc.cone(0.022, l, paint, M(side * spread, y, z, -1.05, 0, side * 0.3), 4);
+          }
+          sc.cone(0.026, l * 1.1, (_x: number, yy: number) => (yy > y + l * 0.7 ? PAL.accent2 : PAL.accent), M(0, y + 0.01, z - 0.02, -1.15, 0, 0), 4);
+        }
+        return sc.build();
+      });
+    const qp = (parent: THREE.Object3D, geo: THREE.BufferGeometry) => {
+      const p = Kit.pivot(parent, 0, 0, 0, 'quills');
+      const m = Kit.add(p, geo, this.skinMatRef);
+      this.hitbox(m, 'armor');
+      this.bodyMeshes.push(m);
+      this.quillPivots.push(p);
+    };
+    qp(r.neck[0], quillGeo('neck', 3, 0.22, 0.05, 0.05, 0.3, SPEC.neck.r0[1] * 0.8));
+    qp(r.chest, quillGeo('chest', 6, 0.42, 0.09, T.len - 0.05, 0.02, T.r0[1] * 0.92));
+    qp(r.body, quillGeo('hips', 3, 0.36, 0.08, 0.15, -0.3, SPEC.hips[1] * 0.92));
+    qp(r.tail[0], quillGeo('tail', 3, 0.26, 0.06, -0.05, -0.38, SPEC.tail.r0[1] * 0.85));
+
+    // Scythe claws on the hands.
+    for (const a of r.arms) {
+      const g = dgeo('specx|scythes', () => {
+        const sc = new Sculpt(0.04, 12);
+        for (const dx of [-0.03, 0, 0.03]) sc.cone(0.022, 0.3, PAL.claw, M(dx, -SPEC.arm.fore - 0.02, 0.03, Math.PI - 0.5, 0, dx * 3), 4);
+        return sc.build();
+      });
+      const m = Kit.add(a.elbow, g, this.skinMatRef);
+      this.hitbox(m, 'limb');
+      this.bodyMeshes.push(m);
+    }
+
+    // Hit zones for the stock theropod meshes.
+    for (const m of r.meshes.head) this.hitbox(m, 'head');
+    for (const m of r.meshes.torso) this.hitbox(m, 'torso');
+    for (const m of r.meshes.limb) this.hitbox(m, 'limb');
+    for (const m of r.meshes.tail) this.hitbox(m, 'tail');
+    this.bodyMeshes.push(...r.meshes.head, ...r.meshes.torso, ...r.meshes.limb, ...r.meshes.tail);
+    for (const m of this.bodyMeshes) m.userData.baseMat = m.material;
+    this.model.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && !m.userData.baseMat) m.userData.baseMat = m.material;
+    });
+    this.tailTip = Kit.pivot(r.tail[r.tail.length - 1], 0, 0, -SPEC.tail.lens[SPEC.tail.lens.length - 1]);
+    this.anchor = r.chest;
+    this.headAnchor = r.headMesh;
+  }
+
+  // ─── Lifecycle ────────────────────────────────────────────────────────────
+
+  override onAdded(): void {
+    super.onAdded();
+    this.prevPos.copy(this.root.position);
+    this.cloak = this.cloakTarget = 1;
+    this.applyCloak(true);
+    this.go('intro');
+    this.crouch = 0.6;
+    this.playerPos(_p);
+    this.root.rotation.y = Math.atan2(_p.x - this.root.position.x, _p.z - this.root.position.z);
+    this.world.scene.add(this.focus);
+    this.updateFocus(1);
+    this.world.rig.lookAtObject(this.focus, 1.8);
+  }
+
+  override dispose(): void {
+    this.focus.parent?.remove(this.focus);
+    super.dispose();
+  }
+
+  // ─── Damage ───────────────────────────────────────────────────────────────
+
+  protected override damageMultiplier(hit: ShotHit): number {
+    const vuln = this.state === 'stun' || this.state === 'roar' ? 1.5 : 1;
+    switch (hit.part) {
+      case 'weak':
+        return 1 * vuln;
+      case 'head':
+        return 0.5 * vuln;
+      case 'torso':
+        return 0.35 * vuln;
+      case 'limb':
+        return 0.3 * vuln;
+      case 'tail':
+        return 0.3 * vuln;
+      default:
+        return 0.3 * vuln;
+    }
+  }
+
+  override flash(critical = false): void {
+    if (!critical) return;
+    this.flashMesh(this.r.headMesh, 0.06);
+  }
+
+  private flashMesh(mesh: THREE.Mesh, t: number) {
+    const e = this.flashes.find((f) => f.mesh === mesh);
+    if (e) {
+      e.t = Math.max(e.t, t);
+      return;
+    }
+    mesh.material = this.flashMat;
+    this.flashes.push({ mesh, t });
+  }
+
+  private updateFlashes(dt: number) {
+    for (let i = this.flashes.length - 1; i >= 0; i--) {
+      const f = this.flashes[i];
+      f.t -= dt;
+      if (f.t <= 0) {
+        f.mesh.material = f.mesh.userData.baseMat as THREE.Material;
+        this.flashes.splice(i, 1);
+      }
+    }
+  }
+
+  protected override onDamaged(hit: ShotHit, amount: number): void {
+    super.onDamaged(hit, amount);
+    const obj = hit.object as THREE.Mesh;
+    if (obj.isMesh) this.flashMesh(obj, hit.part === 'weak' ? 0.07 : 0.035);
+    if (hit.part === 'weak') this.world.fx.sparkle(hit.point, 0x80e8ff);
+    const e = this.model.matrixWorld.elements;
+    const d = hit.dir.x * e[0] + hit.dir.y * e[1] + hit.dir.z * e[2];
+    this.flinchSide = d >= 0 ? 1 : -1;
+    this.flinch = Math.min(1.2, this.flinch + 0.25 + amount * 0.08);
+    if (this.winding) {
+      // Every solid hit counts: shooting the ring (even on the tail) can stop the attack.
+      this.interruptDmg += Math.max(amount, 1);
+      if (this.interruptDmg >= this.interruptThreshold()) this.interrupt();
+    }
+    // Being shot while faded gives away its position.
+    if (this.cloaked && (this.state === 'hide' || this.state === 'fade')) {
+      this.interruptDmg += amount;
+      if (this.interruptDmg >= this.interruptThreshold()) {
+        this.world.audio.play('raptor_screech', { volume: 0.9, pitch: 0.6 });
+        this.go('ambush');
+      }
+    }
+  }
+
+  private interruptThreshold() {
+    if (this.state === 'tailWind') return [4, 4.5, 5][this.phase] ?? 5;
+    return [5, 6, 7][this.phase] ?? 7;
+  }
+
+  private interrupt() {
+    const w = this.world;
+    this.telegraph = null;
+    this.winding = false;
+    w.audio.play('raptor_screech', { volume: 1, pitch: 0.5 });
+    w.audio.play('stomp', { volume: 0.8, pitch: 1.1 });
+    w.rig.shake(0.3);
+    const sp = this.screenPos(this.r.headMesh);
+    if (sp) w.hud.popup('STAGGERED!', sp.x, sp.y - 40, 'combo');
+    w.score.add(300);
+    this.go('stun');
+  }
+
+  protected override onPhase(phase: number): void {
+    this.pendingRoar = Math.max(this.pendingRoar, phase);
+  }
+
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+
+  private go(s: XState) {
+    this.telegraph = null;
+    this.winding = false;
+    this.interruptDmg = 0;
+    this.entering = true;
+    this.setState(s);
+  }
+
+  private yawToPlayer() {
+    this.playerPos(_p);
+    return Math.atan2(_p.x - this.root.position.x, _p.z - this.root.position.z);
+  }
+
+  private faceYaw(yaw: number, dt: number, rate = 6) {
+    this.root.rotation.y += angleDelta(this.root.rotation.y, yaw) * (1 - Math.exp(-rate * dt));
+  }
+
+  /** Move toward (x, z) at up to `speed`, easing in on arrival. Returns remaining distance. */
+  private steer(x: number, z: number, speed: number, dt: number, face = true): number {
+    const p = this.root.position;
+    const dx = x - p.x;
+    const dz = z - p.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 1e-3) return 0;
+    const step = Math.min(d, speed * dt, d * (1 - Math.exp(-4 * dt)) + speed * 0.25 * dt);
+    p.x += (dx / d) * step;
+    p.z += (dz / d) * step;
+    if (face && d > 0.4) this.faceYaw(Math.atan2(dx, dz), dt, 7);
+    return d - step;
+  }
+
+  private clampArena(v: THREE.Vector3) {
+    v.x = clamp(v.x, HALL.x0, HALL.x1);
+    v.z = clamp(v.z, HALL.zFar, HALL.zNear);
+    return v;
+  }
+
+  /** Plan a dash to `to`, detouring around a pillar if the straight line clips one. */
+  private planPath(to: THREE.Vector3) {
+    this.target.copy(this.clampArena(to));
+    this.via = null;
+    const p = this.root.position;
+    for (const c of HALL.pillars) {
+      _v.subVectors(this.target, p).setY(0);
+      const len = _v.length();
+      if (len < 0.01) break;
+      _v.divideScalar(len);
+      _w.subVectors(c, p).setY(0);
+      const along = _w.dot(_v);
+      if (along < 0 || along > len) continue;
+      const perp = _w.x * _v.z - _w.z * _v.x;
+      if (Math.abs(perp) < 2.1) {
+        const s = perp >= 0 ? -1 : 1;
+        this.via = new THREE.Vector3(c.x + _v.z * s * 2.8, 0, c.z - _v.x * s * 2.8);
+        this.clampArena(this.via);
+        break;
+      }
+    }
+  }
+
+  /** Follow the planned path. Returns true on arrival. */
+  private followPath(speed: number, dt: number): boolean {
+    if (this.via) {
+      if (this.steer(this.via.x, this.via.z, speed, dt) < 0.8) this.via = null;
+      return false;
+    }
+    return this.steer(this.target.x, this.target.z, speed, dt) < 0.3;
+  }
+
+  /** A point `dist` metres from the player at `angle` radians off the rail axis (+ = right). */
+  private ring(dist: number, angle: number, out: THREE.Vector3) {
+    this.playerPos(_p);
+    out.set(_p.x + Math.sin(angle) * dist, 0, _p.z - Math.cos(angle) * dist);
+    return this.clampArena(out);
+  }
+
+  private dashSpeed() {
+    return [8.5, 10, 11.5][this.phase] ?? 11.5;
+  }
+
+  private applyCloak(force = false) {
+    const on = this.cloak > 0.02;
+    if (on === this.cloaked && !force) return;
+    this.cloaked = on;
+    const mat = on ? this.cloakMat : this.skinMatRef;
+    for (const m of this.bodyMeshes) {
+      m.userData.baseMat = mat;
+      if (!this.flashes.some((f) => f.mesh === m)) m.material = mat;
+    }
+  }
+
+  private updateFocus(k: number) {
+    this.r.chest.getWorldPosition(_v);
+    this.r.headMesh.getWorldPosition(_w);
+    _v.lerp(_w, 0.4);
+    _u.copy(HALL.center).setY(2.0).lerp(_v, 0.72);
+    _u.y = clamp(_u.y, 1.5, 2.6);
+    this.focus.position.lerp(_u, k);
+  }
+
+  private raptorCount() {
+    let n = 0;
+    for (const e of this.world.enemies()) if (!e.isBoss && e.state !== 'dying' && e.hostile) n++;
+    return n;
+  }
+
+  private summon(type: string, n: number, variant?: string) {
+    const w = this.world;
+    for (let i = 0; i < n; i++) {
+      const left = (this.minionsCalled + i) % 2 === 0;
+      const pos = new THREE.Vector3(left ? -5.5 : 27.5, 0, HALL.gateZ + (i % 2) * 1.2);
+      if (type === 'compy') pos.set(2 + (i % 3) * 0.8, 0, HALL.tankZ + 1.5);
+      const e = createEnemy(type, w, { pos, frame: 'world', entry: 'leap', hpMul: 1, speedMul: 1, opts: variant ? { variant: i % 2 ? 'tan' : variant } : {} });
+      w.add(e);
+      this.minionsCalled++;
+    }
+    w.audio.play(type === 'compy' ? 'compy_chirp' : 'raptor_screech', { volume: 0.8, pitch: type === 'compy' ? 1 : 1.1 });
+  }
+
+  private chooseAttack(): XState {
+    const r = this.world.rng.next();
+    const p = this.phase;
+    let pick: XState;
+    if (p === 0) pick = r < 0.5 ? 'pounceWind' : r < 0.75 ? 'tailMove' : 'quillWind';
+    else if (p === 1) pick = r < 0.3 ? 'pounceWind' : r < 0.5 ? 'tailMove' : r < 0.72 ? 'quillWind' : 'fade';
+    else pick = r < 0.32 ? 'pounceWind' : r < 0.47 ? 'tailMove' : r < 0.65 ? 'quillWind' : 'fade';
+    if (pick === this.lastAttack && pick !== 'pounceWind') pick = 'pounceWind';
+    this.lastAttack = pick;
+    return pick;
+  }
+
+  private quillDart(): THREE.Object3D {
+    const g = new THREE.Group();
+    const spike = Kit.add(g, Kit.cone(0.07, 0.9, 5), Kit.mat(0xe8e2d4), 0, 0, 0, Math.PI / 2, 0, 0);
+    spike.userData.noFlash = true;
+    Kit.add(g, Kit.sphere(0.09, 6, 4), Kit.glow(0x60e8ff, 1.6), 0, 0, 0.42);
+    Kit.add(g, Kit.cone(0.1, 0.2, 4), Kit.mat(0x7a746c), 0, 0, -0.42, -Math.PI / 2, 0, 0);
+    return g;
+  }
+
+  // ─── Fight ────────────────────────────────────────────────────────────────
+
+  protected override customUpdate(dt: number): void {
+    const w = this.world;
+    const t = this.stateTime;
+    const st = this.state as XState;
+    const first = this.entering;
+    this.entering = false;
+    const p = this.root.position;
+    const T = this.tg;
+
+    // Phase check (explosions / bombs bypass onDamaged).
+    const ph = this.phaseFor();
+    if (ph > this.phase) {
+      this.phase = ph;
+      this.onPhase(ph);
+    }
+    const busy = st === 'intro' || st === 'roar' || st === 'pounce' || st === 'stun' || st === 'getUp';
+    if (this.pendingRoar > 0 && !busy && !this.roarsDone.has(this.pendingRoar)) {
+      this.go('roar');
+      return;
+    }
+
+    T.crouch = 0;
+    T.air = 0;
+    T.jaw = 0.1;
+    T.dip = 0;
+    T.rear = 0;
+    T.tail = 0;
+    T.recoil = 0;
+    T.arm = 0;
+    T.whip = 0;
+    T.quill = 0;
+    T.roll = 0;
+    this.wiggle = 0;
+    this.playerPos(_p);
+    const toPlayer = this.yawToPlayer();
+
+    // Phase 2+: keep a couple of raptors in play.
+    if (this.phase >= 1 && st !== 'intro' && st !== 'roar') {
+      this.minionT -= dt;
+      if (this.minionT <= 0) {
+        this.minionT = this.enraged ? 11 : 14;
+        if (this.raptorCount() < 2 && this.minionsCalled < 10) this.summon('raptor', 1, 'green');
+      }
+    }
+
+    switch (st) {
+      case 'intro': {
+        // Eyes in the dark… a leap out of the broken tank… a scream.
+        const leapAt = 1.2;
+        const landAt = 1.95;
+        this.faceYaw(toPlayer, dt, t < leapAt ? 3 : 6);
+        if (t < leapAt) {
+          this.cloakTarget = 1;
+          T.crouch = 0.6;
+          T.dip = 0.5;
+          T.jaw = 0.25;
+          this.wiggle = t / leapAt;
+          if (first) {
+            w.audio.play('dilo_hiss', { volume: 0.9, pitch: 0.55 });
+            this.pFrom.copy(p);
+          }
+        } else if (t < landAt) {
+          if (t - dt < leapAt) {
+            this.pFrom.copy(p);
+            this.pTo.set(8.5, 0, -348.5);
+            w.audio.play('raptor_screech', { volume: 1, pitch: 0.55 });
+            w.audio.play('whoosh', { volume: 0.9, pitch: 0.6 });
+          }
+          const k = clamp((t - leapAt) / (landAt - leapAt), 0, 1);
+          p.x = lerp(this.pFrom.x, this.pTo.x, k);
+          p.z = lerp(this.pFrom.z, this.pTo.z, k);
+          this.lift = Math.sin(Math.PI * k) * 2.4;
+          this.cloakTarget = 0;
+          T.air = 1;
+          T.jaw = 0.9;
+          T.arm = 1;
+        } else {
+          if (t - dt < landAt) {
+            this.lift = 0;
+            w.audio.play('stomp', { volume: 1, pitch: 0.8 });
+            w.fx.dust(this.worldPos(_v), 2.6, 0x8a8a8a);
+            w.rig.shake(0.6);
+          }
+          T.rear = t > landAt + 0.25 ? 1 : 0.3;
+          T.jaw = t > landAt + 0.25 ? 1 : 0.4;
+          T.quill = t > landAt + 0.25 ? 1 : 0;
+          if (t - dt < landAt + 0.3 && t >= landAt + 0.3) {
+            w.audio.play('boss_roar', { volume: 1, pitch: 1.25 });
+            w.audio.play('raptor_screech', { volume: 1, pitch: 0.5 });
+            w.rig.shake(0.5);
+            const lab = labs(w);
+            if (lab) lab.dimTarget = 0.15;
+          }
+          if (t > landAt + 0.3 && Math.floor((t - dt) * 5) !== Math.floor(t * 5)) w.rig.shake(0.12);
+        }
+        if (t > landAt + 1.9) {
+          this.cooldown = 0.5;
+          this.planPath(this.ring(9.5, 0.35, _v));
+          this.go('stalk');
+        }
+        break;
+      }
+      case 'stalk': {
+        // Dash to the next spot (often slipping behind a pillar on the way).
+        this.cloakTarget = 0;
+        T.dip = 0.25;
+        T.tail = 0.15;
+        if (this.followPath(this.dashSpeed(), dt) || t > 3.5) this.go('watch');
+        break;
+      }
+      case 'watch': {
+        // Head low, tail lashing, sizing you up.
+        this.faceYaw(toPlayer, dt, 5);
+        T.crouch = 0.25;
+        T.dip = 0.35;
+        T.jaw = 0.15 + Math.max(0, Math.sin(this.age * 2.3)) * 0.25;
+        T.tail = 0.25;
+        if (first) {
+          this.hissT = 0;
+          if (w.rng.chance(0.5)) w.audio.play('raptor_bark', { volume: 0.7, pitch: 0.55 });
+        }
+        this.cooldown -= dt;
+        if (this.cooldown <= 0) this.go(this.chooseAttack());
+        break;
+      }
+      case 'ambush': {
+        // Dart out of cover onto a close flank, half-faded, then a short-fuse pounce.
+        if (first) {
+          this.sideSign = p.x > _p.x ? 1 : -1;
+          this.planPath(this.ring(7, this.sideSign * 0.45, _v));
+          w.audio.play('raptor_screech', { volume: 0.9, pitch: 0.7 });
+        }
+        this.cloakTarget = 0.55;
+        T.dip = 0.35;
+        if (this.followPath(this.dashSpeed() * 1.15, dt) || t > 1.4) {
+          this.shortFuse = true;
+          this.go('pounceWind');
+        }
+        break;
+      }
+      case 'pounceWind': {
+        if (first) {
+          const base = this.shortFuse ? [1.15, 1.0, 0.85] : [1.5, 1.3, 1.05];
+          this.windTime = base[this.phase] ?? 1.05;
+          this.shortFuse = false;
+          w.audio.play('raptor_screech', { volume: 0.8, pitch: 0.75 });
+        }
+        this.winding = true;
+        this.cloakTarget = 0;
+        const total = this.windTime + this.leapTime;
+        if (!this.telegraph) this.telegraph = { progress: 0, anchor: this.r.headMesh, radius: this.telegraphRadius };
+        this.telegraph.progress = clamp(t / total, 0, 1);
+        this.faceYaw(toPlayer, dt, 8);
+        // Creep a little closer if far away.
+        if (p.distanceTo(_p) > 9.5) this.steer(_p.x, _p.z, 2.5, dt, false);
+        const k = clamp(t / this.windTime, 0, 1);
+        T.crouch = 0.35 + 0.45 * k;
+        T.dip = 0.7;
+        T.jaw = 0.3 + 0.6 * k;
+        T.tail = 0.4;
+        T.arm = 0.3;
+        this.wiggle = k;
+        if (t >= this.windTime) {
+          // Leap!
+          this.pFrom.copy(p);
+          _v.subVectors(p, _p).setY(0).normalize();
+          this.pTo.copy(_p).addScaledVector(_v, 2.9);
+          w.audio.play('raptor_screech', { volume: 1, pitch: 0.6 });
+          w.audio.play('whoosh', { volume: 0.8, pitch: 0.7 });
+          const prog = this.telegraph.progress;
+          this.setState('pounce');
+          this.entering = false;
+          this.winding = true;
+          this.telegraph = { progress: prog, anchor: this.r.headMesh, radius: this.telegraphRadius };
+        }
+        break;
+      }
+      case 'pounce': {
+        const k = clamp(t / this.leapTime, 0, 1);
+        p.x = lerp(this.pFrom.x, this.pTo.x, k);
+        p.z = lerp(this.pFrom.z, this.pTo.z, k);
+        this.lift = Math.sin(Math.PI * k) * 1.3 + k * 0.4;
+        this.faceYaw(toPlayer, dt, 12);
+        T.air = 1;
+        T.jaw = 1;
+        T.arm = 1;
+        const total = this.windTime + this.leapTime;
+        if (this.telegraph) this.telegraph.progress = clamp((this.windTime + t) / total, 0, 1);
+        if (k >= 1) {
+          this.telegraph = null;
+          this.winding = false;
+          w.hurtPlayer(1, this.title);
+          w.audio.play('bite', { volume: 1, pitch: 0.7 });
+          w.rig.shake(0.8);
+          w.hitStop(0.06);
+          if (this.phase >= 2 && this.chain === 0 && w.rng.chance(0.5)) {
+            this.chain = 1;
+          } else this.chain = 0;
+          this.pFrom.copy(p);
+          this.go('retreat');
+        }
+        break;
+      }
+      case 'retreat': {
+        // Spring back out of reach.
+        const k = clamp(t / 0.6, 0, 1);
+        if (first) {
+          this.sideSign = w.rng.chance(0.5) ? 1 : -1;
+          this.ring(8.5, this.sideSign * 0.4, this.pTo);
+        }
+        const e = 1 - (1 - k) * (1 - k);
+        p.x = lerp(this.pFrom.x, this.pTo.x, e);
+        p.z = lerp(this.pFrom.z, this.pTo.z, e);
+        this.lift = lerp(this.lift, 0, Math.min(1, dt * 8)) + Math.sin(Math.PI * k) * 0.25;
+        this.faceYaw(toPlayer, dt, 10);
+        T.air = 0.5 * (1 - k);
+        T.jaw = 0.3;
+        if (k >= 1) {
+          this.lift = 0;
+          w.fx.dust(this.worldPos(_v), 1.2, 0x8a8a8a);
+          if (this.chain === 1) {
+            this.chain = 2;
+            this.go('pounceWind');
+          } else {
+            this.chain = 0;
+            this.cooldown = [1.2, 0.9, 0.6][this.phase] ?? 0.6;
+            this.planPath(this.ring(w.rng.range(8, 11), w.rng.range(-0.75, 0.75), _v));
+            this.go('stalk');
+          }
+        }
+        break;
+      }
+      case 'tailMove': {
+        // Sidle up on one flank.
+        if (first) {
+          this.sideSign = w.rng.chance(0.5) ? 1 : -1;
+          this.planPath(this.ring(6.4, this.sideSign * 0.6, _v));
+        }
+        T.dip = 0.3;
+        if (this.followPath(this.dashSpeed() * 0.85, dt) || t > 2.6) this.go('tailWind');
+        break;
+      }
+      case 'tailWind': {
+        // Turn side-on, coil the tail away, ring on the tail tip.
+        const dur = [1.4, 1.2, 1.0][this.phase] ?? 1.0;
+        this.winding = true;
+        const side = this.sideSign;
+        this.faceYaw(toPlayer + side * 1.45, dt, 5);
+        const k = clamp(t / dur, 0, 1);
+        T.whip = -0.8 * k;
+        T.crouch = 0.3;
+        T.tail = 0.3;
+        T.jaw = 0.25;
+        if (first) w.audio.play('raptor_bark', { volume: 0.8, pitch: 0.5 });
+        const done = this.telegraphAttack(
+          dur,
+          () => {
+            w.hurtPlayer(1, this.title);
+            w.audio.play('whoosh', { volume: 1, pitch: 0.6 });
+            w.audio.play('hit_world', { volume: 0.8, pitch: 0.6 });
+            w.rig.shake(0.7);
+            w.hitStop(0.05);
+          },
+          this.tailTip,
+        );
+        if (done) this.go('tailWhip');
+        break;
+      }
+      case 'tailWhip': {
+        const side = this.sideSign;
+        this.faceYaw(toPlayer + side * (1.45 + Math.min(1, t * 4) * 1.2), dt, 9);
+        T.whip = 1.2 * Math.max(0, 1 - t * 2);
+        T.crouch = 0.2;
+        if (t > 0.7) {
+          this.cooldown = [1.0, 0.8, 0.5][this.phase] ?? 0.5;
+          this.planPath(this.ring(w.rng.range(8.5, 11), w.rng.range(-0.7, 0.7), _v));
+          this.go('stalk');
+        }
+        break;
+      }
+      case 'quillWind': {
+        // Rattle the quills.
+        this.faceYaw(toPlayer, dt, 6);
+        T.quill = 1;
+        T.crouch = 0.2;
+        T.rear = 0.25;
+        T.jaw = 0.5;
+        this.wiggle = 0.5;
+        if (first) {
+          w.audio.play('dilo_hiss', { volume: 0.9, pitch: 0.75 });
+          this.volley = [2, 3, 4][this.phase] ?? 4;
+          this.volleyT = 0;
+        }
+        if (t > 0.75) this.go('quillFire');
+        break;
+      }
+      case 'quillFire': {
+        this.faceYaw(toPlayer, dt, 6);
+        T.quill = 1;
+        T.rear = 0.15;
+        this.volleyT -= dt;
+        if (this.volley > 0 && this.volleyT <= 0) {
+          this.volley--;
+          this.volleyT = 0.32;
+          const piv = this.quillPivots[1 + (this.volley % 2)];
+          piv.getWorldPosition(_v);
+          _v.y += 0.6;
+          this.throwProjectile(_v.clone(), {
+            mesh: this.quillDart(),
+            flightTime: 1.55,
+            arc: 1.4,
+            damage: 1,
+            hp: 1,
+            points: 120,
+            color: 0xe8e2d4,
+            size: 0.3,
+            spin: 0,
+            source: this.title,
+            sfxDestroy: 'hit_projectile',
+            burst: 'debris',
+          });
+          w.audio.play('whoosh', { volume: 0.7, pitch: 1.3 });
+          this.recoil = 0.6;
+        }
+        if (this.volley <= 0 && this.volleyT <= -0.3) {
+          this.cooldown = [1.2, 0.9, 0.6][this.phase] ?? 0.6;
+          this.planPath(this.ring(w.rng.range(9.5, 12), w.rng.range(-0.8, 0.8), _v));
+          this.go('stalk');
+        }
+        break;
+      }
+      case 'fade': {
+        // Hiss, melt into the shadows, slip behind a pillar.
+        if (first) {
+          w.audio.play('dilo_hiss', { volume: 1, pitch: 0.5 });
+          // Pillar farthest from where it is now, offset to hide behind it.
+          let best = HALL.pillars[0];
+          let bd = -1;
+          for (const c of HALL.pillars) {
+            const dd = c.distanceTo(p);
+            if (dd > bd) {
+              bd = dd;
+              best = c;
+            }
+          }
+          _v.subVectors(best, _p).setY(0).normalize().multiplyScalar(2.3).add(best);
+          this.planPath(_v);
+        }
+        this.cloakTarget = 1;
+        T.dip = 0.4;
+        if (this.followPath(this.dashSpeed() * 1.1, dt) || t > 3) this.go('hide');
+        break;
+      }
+      case 'hide': {
+        this.cloakTarget = 1;
+        this.faceYaw(toPlayer, dt, 4);
+        T.crouch = 0.5;
+        T.dip = 0.5;
+        if (first) this.hissT = w.rng.range(0.9, 1.5);
+        if (t > this.hissT) this.go('ambush');
+        break;
+      }
+      case 'roar': {
+        const dur = 2.4;
+        this.cloakTarget = 0;
+        this.faceYaw(toPlayer, dt, 4);
+        T.rear = t > 0.3 ? 1 : 0.4;
+        T.jaw = t > 0.3 ? 1 : 0.3;
+        T.quill = 1;
+        T.tail = 0.5;
+        if (first) {
+          this.roaringFor = this.pendingRoar;
+          w.audio.play('boss_roar', { volume: 1, pitch: this.roaringFor >= 2 ? 1.35 : 1.2 });
+          w.audio.play('raptor_screech', { volume: 1, pitch: 0.45 });
+          if (this.roaringFor === 1) w.hud.prompt('IT CALLED THE PACK!');
+          if (this.roaringFor >= 2) {
+            w.hud.prompt('SPECIMEN X IS ENRAGED!');
+            this.enraged = true;
+          }
+          const lab = labs(w);
+          if (lab) lab.alarm = this.roaringFor >= 2 ? 1 : 0.6;
+        }
+        if (t > 0.3 && Math.floor((t - dt) * 4) !== Math.floor(t * 4)) {
+          w.rig.shake(0.22);
+          w.fx.dust(this.worldPos(_v), 1.4, 0x8a8a8a);
+        }
+        if (t >= dur) {
+          const which = this.roaringFor;
+          this.roarsDone.add(which);
+          if (which === 1) this.summon('raptor', 3, 'blue');
+          if (which >= 2) {
+            this.roarsDone.add(1);
+            this.summon('raptor', 2, 'red');
+            this.summon('compy', 4);
+          }
+          this.pendingRoar = -1;
+          w.later(2.5, () => w.hud.prompt(null));
+          this.cooldown = 1.2;
+          this.planPath(this.ring(9.5, w.rng.range(-0.6, 0.6), _v));
+          this.go('stalk');
+        }
+        break;
+      }
+      case 'stun': {
+        // Knocked flat: thrashing on its side — free hits.
+        this.cloakTarget = 0;
+        if (first) {
+          this.pFrom.copy(p);
+          _v.subVectors(p, _p).setY(0).normalize();
+          this.pTo.copy(p).addScaledVector(_v, 2.2);
+          this.clampArena(this.pTo);
+          w.fx.dust(this.worldPos(_w), 2, 0x8a8a8a);
+        }
+        const k = clamp(t / 0.35, 0, 1);
+        p.x = lerp(this.pFrom.x, this.pTo.x, k);
+        p.z = lerp(this.pFrom.z, this.pTo.z, k);
+        this.lift = damp(this.lift, 0, 10, dt);
+        T.roll = 1;
+        T.recoil = 1;
+        T.jaw = 0.6 + Math.sin(t * 9) * 0.2;
+        if (t > 0.35 && t - dt <= 0.35) {
+          w.audio.play('stomp', { volume: 0.9, pitch: 0.8 });
+          w.rig.shake(0.35);
+        }
+        if (t > [2.0, 1.7, 1.4][this.phase]!) this.go('getUp');
+        break;
+      }
+      case 'getUp': {
+        T.roll = Math.max(0, 1 - t * 2);
+        T.crouch = 0.4;
+        this.faceYaw(toPlayer, dt, 4);
+        if (t > 0.6) {
+          w.audio.play('raptor_screech', { volume: 0.9, pitch: 0.55 });
+          this.cooldown = 0.5;
+          this.planPath(this.ring(w.rng.range(8.5, 11), w.rng.range(-0.8, 0.8), _v));
+          this.go('stalk');
+        }
+        break;
+      }
+      default:
+        this.go('watch');
+    }
+  }
+
+  // ─── Per-frame (after AI) ───────────────────────────────────────────────
+
+  override update(dt: number): void {
+    super.update(dt);
+    if (this.removed) return;
+    this.updateFlashes(dt);
+    // Speed for the gait.
+    if (dt > 0) {
+      const sp = Math.hypot(this.root.position.x - this.prevPos.x, this.root.position.z - this.prevPos.z) / dt;
+      this.speedNow = damp(this.speedNow, Math.min(sp, 16), 10, dt);
+    }
+    this.prevPos.copy(this.root.position);
+    // Cloak blend.
+    this.cloak = damp(this.cloak, this.cloakTarget, this.cloakTarget > this.cloak ? 4 : 2.5, dt);
+    const c = 1 - this.cloak * 0.86;
+    this.cloakMat.color.setRGB(c * 0.9, c * 0.95, c * 1.1);
+    this.applyCloak();
+    // Glow: stripes pulse (faster when enraged), flare while cloaked.
+    const t = this.age;
+    const pulse = 0.5 + 0.5 * Math.sin(t * (this.enraged ? 7 : 3.2));
+    const base = this.enraged ? STRIPE_RAGE : STRIPE;
+    const dyingK = this.state === 'dying' ? clamp(1 - (this.stateTime - 2.5) / 2.5, 0, 1) : 1;
+    this.stripeMat.color.copy(base).multiplyScalar((1.1 + pulse * 0.7 + this.cloak * 0.4) * dyingK);
+    this.eyeMat.color.copy(this.enraged ? EYE_RAGE : EYE).multiplyScalar((1.7 + pulse * 0.4) * dyingK);
+    this.haloMat.color.copy(this.enraged ? EYE_RAGE : EYE);
+    this.haloMat.opacity = (0.22 + 0.15 * pulse + this.cloak * 0.15) * dyingK;
+    this.breathT += dt;
+    // Camera focus.
+    if (this.state !== 'dying') this.updateFocus(1 - Math.exp(-dt * 3));
+    else this.updateFocus(1 - Math.exp(-dt * 1.5));
+    // Footfalls.
+    if (this.runAmt > 0.3 && this.lift < 0.05) {
+      const s = Math.floor(this.gaitPhase / Math.PI);
+      if (s !== this.stepPhase) {
+        this.stepPhase = s;
+        this.world.audio.play('stomp', { volume: 0.25 * this.runAmt, pitch: 1.5, vary: 0.15 });
+      }
+    }
+  }
+
+  // ─── Animation ────────────────────────────────────────────────────────────
+
+  protected override animate(dt: number): void {
+    const r = this.r;
+    const s = SPEC;
+    const T = this.tg;
+    if (this.state === 'dying') {
+      this.poseDeath(dt);
+      return;
+    }
+    const gs = this.speedNow / S;
+    const freq = gs > 0.15 ? Math.min(3.2, gs / 1.45 + 0.35) : 0;
+    this.gaitPhase += dt * freq * TAU;
+    this.runAmt = damp(this.runAmt, clamp(gs / 4.5, 0, 1), 8, dt);
+    this.crouch = damp(this.crouch, T.crouch, 9, dt);
+    this.air = damp(this.air, T.air, 12, dt);
+    this.jawOpen = damp(this.jawOpen, T.jaw, 14, dt);
+    this.dip = damp(this.dip, T.dip, 6, dt);
+    this.rear = damp(this.rear, T.rear, 5, dt);
+    this.tailLift = damp(this.tailLift, T.tail, 6, dt);
+    this.recoil = damp(this.recoil, T.recoil, 10, dt);
+    this.armReach = damp(this.armReach, T.arm, 10, dt);
+    this.tailWhipAmt = damp(this.tailWhipAmt, T.whip, T.whip > this.tailWhipAmt ? 22 : 6, dt);
+    this.quillRaise = damp(this.quillRaise, T.quill, 8, dt);
+    this.roll = damp(this.roll, T.roll, 6, dt);
+    this.flinch = Math.max(0, this.flinch - dt * 3);
+    if (this.state !== 'pounce' && this.state !== 'retreat' && this.state !== 'stun' && this.state !== 'intro') this.lift = damp(this.lift, 0, 8, dt);
+
+    const ph = this.gaitPhase;
+    const run = this.runAmt * (1 - this.air);
+    const h0 = poseTheroLeg(s, r.legs[0], ph, run, this.crouch + this.roll * 0.4, this.air, 0.6);
+    const h1 = poseTheroLeg(s, r.legs[1], ph + Math.PI, run, this.crouch + this.roll * 0.2, this.air, 0.6);
+    r.pelvis.position.y = lerp(Math.max(h0, h1), r.hipH, this.air);
+    this.model.position.y = this.lift - this.roll * 0.55;
+    this.model.rotation.z = this.roll * 1.25 * this.flinchSide - this.flinchSide * this.flinch * 0.05;
+
+    // Breathing.
+    const b = Math.sin(this.breathT * (this.state === 'watch' ? 2.6 : 1.8)) * (1 - run * 0.7);
+    r.torso.scale.set(1 + b * 0.035, 1 + b * 0.045, 1);
+
+    const bob2 = Math.sin(ph * 2);
+    const fl = this.flinch;
+    r.body.rotation.x = 0.04 + this.crouch * 0.2 - this.rear * 0.55 - this.recoil * 0.25 + run * 0.08 + bob2 * 0.03 * run - fl * 0.1;
+    r.body.rotation.z = Math.sin(ph) * 0.05 * run - this.flinchSide * fl * 0.18;
+    const wig = this.wiggle > 0 ? Math.sin(this.age * 15) * 0.09 * this.wiggle : 0;
+    r.pelvis.rotation.y = Math.sin(ph) * 0.07 * run + wig;
+    r.legs[0].hip.rotation.z = 0.3 * this.air;
+    r.legs[1].hip.rotation.z = -0.3 * this.air;
+
+    // Head tracks the camera.
+    this.playerPos(_p);
+    const pos = this.root.position;
+    const yawTo = angleDelta(this.root.rotation.y, Math.atan2(_p.x - pos.x, _p.z - pos.z));
+    const headY = r.headH * S + this.lift;
+    const dist = Math.max(1, Math.hypot(_p.x - pos.x, _p.z - pos.z));
+    const pitchTo = Math.atan2(this.world.rig.eyeHeight - headY, dist);
+    this.lookYaw = damp(this.lookYaw, clamp(yawTo, -1.1, 1.1), 7, dt);
+    this.lookPitch = damp(this.lookPitch, clamp(pitchTo, -0.8, 0.8), 5, dt);
+    const nr = s.neck.rest;
+    for (let i = 0; i < r.neck.length; i++) {
+      const firstN = i === 0;
+      r.neck[i].rotation.x =
+        nr[i] +
+        this.dip * (firstN ? 0.55 : -0.3) -
+        this.rear * (firstN ? 0.55 : 0.4) -
+        this.lookPitch * 0.25 +
+        this.air * (firstN ? 0.7 : -0.15) +
+        this.recoil * (firstN ? -0.25 : 0.1) -
+        bob2 * 0.05 * run;
+      r.neck[i].rotation.y = this.lookYaw * 0.3;
+    }
+    r.head.rotation.x = s.headRest - this.lookPitch * 0.45 - this.dip * 0.15 + this.rear * 0.35 - this.air * 0.15 - fl * 0.35 - this.recoil * 0.25;
+    r.head.rotation.y = this.lookYaw * 0.35;
+    r.head.rotation.z = this.recoil * 0.2 * this.flinchSide + (this.state === 'roar' ? Math.sin(this.age * 22) * 0.06 : 0);
+    if (r.jaw) r.jaw.rotation.x = this.jawOpen * 0.85;
+
+    // Tail: lashing while hunting, whips on attack.
+    const tl = r.tail;
+    for (let i = 0; i < tl.length; i++) {
+      tl[i].rotation.x = (s.tail.rest[i] ?? 0) + this.tailLift * (i === 0 ? 0.25 : 0.05) + bob2 * 0.035 * run * (i + 1) * 0.5 + this.air * (i === 0 ? 0.2 : 0.04);
+      tl[i].rotation.y =
+        this.tailWhipAmt * this.sideSign * (0.25 + i * 0.12) +
+        Math.sin(this.age * (1.6 + this.tailLift * 2) - i * 0.7) * (0.06 + this.tailLift * 0.12) * (1 - run * 0.5) +
+        Math.sin(ph - i * 0.8) * 0.06 * run;
+    }
+    // Arms + scythes.
+    for (let i = 0; i < r.arms.length; i++) {
+      const a = r.arms[i];
+      const side = i === 0 ? 1 : -1;
+      a.shoulder.rotation.x = ARM_REST.shoulder + Math.sin(ph + i * Math.PI) * 0.15 * run - this.armReach * 1.3 + this.recoil * 0.4 - this.rear * 0.6;
+      a.shoulder.rotation.z = side * (0.08 + this.armReach * 0.45 + this.rear * 0.3);
+      a.elbow.rotation.x = ARM_REST.elbow + this.armReach * 1.0 + this.rear * 0.4;
+    }
+    // Quills bristle.
+    for (let i = 0; i < this.quillPivots.length; i++) {
+      const q = this.quillPivots[i];
+      const rattle = this.quillRaise > 0.3 ? Math.sin(this.age * 40 + i) * 0.04 * this.quillRaise : 0;
+      q.rotation.x = -this.quillRaise * 0.25 + rattle;
+      q.scale.set(1, 1 + this.quillRaise * 0.45, 1 + this.quillRaise * 0.2);
+    }
+  }
+
+  // ─── Death: staggers back through the tank glass ────────────────────────
+
+  protected override onDeath(_hit: ShotHit | null): void {
+    this.telegraph = null;
+    const lab = labs(this.world);
+    const p = this.root.position;
+    this.deathFrom.copy(p);
+    this.deathYaw = this.root.rotation.y;
+    // Nearest intact pane.
+    let best = -1;
+    let bd = Infinity;
+    const panes = lab?.panes ?? [];
+    for (let i = 0; i < panes.length; i++) {
+      if (panes[i].broken) continue;
+      const dd = Math.abs(HALL.paneXs[i] - p.x);
+      if (dd < bd) {
+        bd = dd;
+        best = i;
+      }
+    }
+    this.deathPane = best;
+    const x = best >= 0 ? HALL.paneXs[best] : p.x;
+    this.deathTo.set(x, 0, HALL.tankZ - 2.6);
+    const dist = Math.hypot(x - p.x, HALL.tankZ + 1 - p.z);
+    this.deathReach = clamp(dist / 8, 1.1, 2.8);
+    this.deathDuration = this.deathReach + 3.8;
+    this.cloakTarget = 0;
+    this.world.audio.play('raptor_screech', { volume: 1, pitch: 0.42 });
+    this.world.audio.play('dino_die', { volume: 1, pitch: 0.8 });
+    if (lab) lab.alarm = 0;
+  }
+
+  private poseDeath(dt: number) {
+    const r = this.r;
+    const k = 1 - Math.exp(-dt * 6);
+    const t = this.stateTime;
+    // Reeling: head thrown back, jaw slack, arms flailing.
+    for (let i = 0; i < r.neck.length; i++) r.neck[i].rotation.x += (SPEC.neck.rest[i] - (i === 0 ? 0.5 : 0.6) - r.neck[i].rotation.x) * k;
+    r.head.rotation.x += (SPEC.headRest - 0.7 - r.head.rotation.x) * k;
+    if (r.jaw) r.jaw.rotation.x += (0.7 - r.jaw.rotation.x) * k;
+    for (const a of r.arms) a.shoulder.rotation.x += (-0.4 + Math.sin(t * 12) * 0.4 - a.shoulder.rotation.x) * k;
+    const stagger = Math.sin(t * 7) * (this.crashed ? 0 : 0.4);
+    poseTheroLeg(SPEC, r.legs[0], t * 6, this.crashed ? 0 : 0.7, 0.3 + stagger * 0.3, 0, 0.5);
+    poseTheroLeg(SPEC, r.legs[1], t * 6 + Math.PI, this.crashed ? 0 : 0.7, 0.3 - stagger * 0.3, 0, 0.5);
+    for (let i = 0; i < r.tail.length; i++) r.tail[i].rotation.y += (Math.sin(t * 5 - i) * 0.15 - r.tail[i].rotation.y) * k;
+  }
+
+  protected override updateDeath(dt: number): boolean {
+    const w = this.world;
+    const t = this.stateTime;
+    const p = this.root.position;
+    const reach = this.deathReach;
+    if (!this.crashed) {
+      // Stumble backwards (facing the player) toward the glass.
+      const k = clamp(t / reach, 0, 1);
+      const e = k * k * (3 - 2 * k);
+      const glassZ = HALL.tankZ + 1.0;
+      p.x = lerp(this.deathFrom.x, this.deathTo.x, e);
+      p.z = lerp(this.deathFrom.z, glassZ, e);
+      this.root.rotation.y += angleDelta(this.root.rotation.y, this.deathYaw) * Math.min(1, dt * 3);
+      this.model.rotation.z = Math.sin(t * 6) * 0.12;
+      this.model.rotation.x = -e * 0.25;
+      if (Math.floor((t - dt) * 3) !== Math.floor(t * 3)) {
+        w.audio.play('stomp', { volume: 0.7, pitch: 1.0 });
+        w.fx.blood(this.r.chest.getWorldPosition(_v), null, { color: this.bloodColor, amount: 1.4 });
+      }
+      const lab = labs(w);
+      if (lab && this.deathPane >= 0 && p.z < HALL.tankZ + 3.4 && !lab.panes[this.deathPane].broken) {
+        lab.panes[this.deathPane].shatter(w, this.worldPos(_v));
+      }
+      if (k >= 1) {
+        this.crashed = true;
+        w.audio.play('crash', { volume: 1, pitch: 0.6 });
+        w.rig.shake(0.8);
+        this.deathFrom.copy(p);
+      }
+      return false;
+    }
+    // Through the glass: topple backwards into the tank, sliding on the wet floor.
+    const tc = t - reach;
+    const k = clamp(tc / 0.9, 0, 1);
+    const e = k * k;
+    p.x = lerp(this.deathFrom.x, this.deathTo.x, Math.min(1, tc / 1.4));
+    p.z = lerp(this.deathFrom.z, this.deathTo.z, Math.min(1, tc / 1.4));
+    this.model.rotation.x = -0.25 - e * 1.1;
+    this.model.rotation.z = damp(this.model.rotation.z, 0.4, 3, dt);
+    this.model.position.y = -e * 0.6;
+    if (k >= 1 && tc - dt < 0.9) {
+      w.audio.play('stomp', { volume: 1, pitch: 0.6 });
+      w.audio.play('splash', { volume: 0.8, pitch: 0.6 });
+      w.fx.dust(this.worldPos(_v), 3, 0x6a8aa0);
+      w.rig.shake(0.6);
+    }
+    if (tc > 2.6) this.model.position.y -= dt * 0.5;
+    return t > this.deathDuration;
+  }
+}
+
+registerEnemy('specimen_x', (w, s) => new SpecimenX(w, s));
