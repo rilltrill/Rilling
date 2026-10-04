@@ -14,6 +14,7 @@ import { Sculpt, M, type Paint } from './sculpt';
 import { bakedLambert, clean, tx, type TexSpec } from './retro';
 import { D } from './layout';
 import { park } from './env';
+import { ventGun } from './alpha';
 
 /**
  * THE TYRANT — a 12 m, 5–6 m tall Tyrannosaurus and the signature chase.
@@ -45,7 +46,10 @@ import { park } from './env';
  *                       giant blast.
  *   fairness    : an attack only starts with the head inside the playable view
  *                 (Enemy.inPlayArea: clear of the HUD corners and the boss bar),
- *                 so its ring is readable and shootable from the first frame.
+ *                 so its ring is readable and shootable from the first frame;
+ *                 a debris volley vents a hot mounted gun like a windup does;
+ *                 a minion whose ring the Tyrant's body hides from the gun is
+ *                 knocked out of its attack (clearSightlines).
  *   death       : stumbles, crashes onto its side and slides along the road.
  */
 
@@ -1142,6 +1146,10 @@ export class Tyrant extends Boss {
           if (t >= at) {
             this.flingThrown++;
             if (i === 0) {
+              // The volley has no boss ring of its own (each piece carries one), so it
+              // vents a hot mounted gun itself, like a windup does: a held trigger is
+              // never locked out while the debris flies.
+              ventGun(w);
               (this.phase === 1 ? this.head : this.tailTip).getWorldPosition(_v);
               _v.y = Math.max(_v.y, 1.5);
               w.fx.debris(_v, 0x3d6a2c);

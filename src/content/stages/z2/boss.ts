@@ -82,8 +82,6 @@ const CRAWL_PTS: [number, number][] = [
 const CRAWL_RANGE = 4.8;
 /** At most this many pool crawlers alive at once. */
 const CRAWL_MAX = 3;
-/** Extra windup on the fight's first slam (a learning slam, like the first single glob). */
-const FIRST_SLAM_EASE = 0.4;
 /** Lateral slot (−1 … 1) of each glob in a volley, in launch order. */
 const VOLLEY_SLOTS = [-1, 1, 0];
 /** Seconds without a new attack (boss or minion) after the player loses a heart. */
@@ -136,8 +134,8 @@ interface MercyTier {
  * Pressure by mercy tier. 0: the full fight. 1 (MERCY_AFTER hearts lost this
  * fight, or ≤ 2 left): one minion ring at a time, no combos, pairs of globs at
  * most, a little more time on every ring. 2 (DEEP_MERCY_AFTER hearts, or a
- * second continue): slow, easy-to-break slams, single globs, no new crawlers and long
- * gaps between minion attacks.
+ * second continue): slow, easy-to-break slams, single globs, no new crawlers
+ * and long gaps between minion attacks.
  */
 const TIERS: MercyTier[] = [
   { ease: 0, gap: 0, interrupt: null, crawlCap: 2, volleyMax: 3, combos: true, minionSlots: 3, minionSpacing: 0, waitForMinion: 0.6, grace: 0.35 },
@@ -409,8 +407,6 @@ export class PatientZero extends Boss {
   private globs: Projectile[] = [];
   /** Spit attacks so far. */
   private spits = 0;
-  /** Slams so far (the first one is a slower one to learn on). */
-  private slams = 0;
   /** Continues the player has used during this fight. */
   private continues = 0;
   /** End of the current windup's opening grace (state time; see MercyTier.grace). */
@@ -1007,8 +1003,6 @@ export class PatientZero extends Boss {
     this.slamTent = t;
     t.dmg = 0;
     this.setState(ST.slam);
-    // (The fight's first slam gives a little longer to find the glowing tip / an eye.)
-    if (this.slams++ === 0) this.windupEase += FIRST_SLAM_EASE;
     t.mode = 'raise';
     this.armTip(t, true);
     this.world.audio.play('whoosh', { volume: 0.7, pitch: 0.6 });

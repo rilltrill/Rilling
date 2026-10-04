@@ -51,9 +51,10 @@ const PROMPT_TIME = 1.6;
  * A pack pounce (and the alpha's crouch) asks for a sustained burst, so — like a
  * boss windup (World.checkBossWindup) — it vents an overheated or nearly
  * overheated mounted gun: holding the trigger never leaves you locked out for
- * the rings. (No-op for guns without heat and for a cool barrel.)
+ * the rings. (No-op for guns without heat and for a cool barrel.) The Tyrant's
+ * debris volleys use it too.
  */
-function ventGun(w: World) {
+export function ventGun(w: World) {
   const locked = w.weapons.overheated;
   if (w.weapons.vent()) {
     w.audio.play('reload_done', { volume: 0.55, pitch: 0.8 });
