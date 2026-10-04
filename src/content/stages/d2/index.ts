@@ -8,6 +8,7 @@ import { buildLabs, labs } from './env';
 import { propaneTank } from './setpieces';
 
 import './boss';
+import './hybrid';
 
 /**
  * PRIMAL ISLAND · STAGE 2 — RESEARCH LABS
@@ -294,7 +295,8 @@ const beats: Beat[] = [
       {
         start: { remaining: 1 },
         spawns: [
-          at('raptor', 0, 0, -165, { opts: { variant: 'red' } }),
+          // One of Specimen X's brood: shrugs off body hits — aim for the head.
+          at('raptor_hybrid', 0, 0, -165),
           at('raptor', -2, 0, -160, { t: 0.8, opts: { variant: 'tan' } }),
         ],
       },
@@ -338,7 +340,7 @@ const beats: Beat[] = [
         // kitchen is a juggling act (and the gas tanks earn their keep).
         start: { remaining: 2, after: 6 },
         spawns: [
-          at('raptor', freezerSpawn[0], 0, freezerSpawn[1], { entry: 'burst', t: 1.2, opts: { variant: 'blue' } }),
+          at('raptor_hybrid', freezerSpawn[0], 0, freezerSpawn[1], { entry: 'burst', t: 1.2 }),
           at('raptor', -4.6, 0.95, -184, { entry: 'leap', t: 2.6, opts: { variant: 'red' } }),
         ],
       },
@@ -391,7 +393,7 @@ const beats: Beat[] = [
       },
       {
         start: { remaining: 1 },
-        spawns: [at('raptor', 0, 0, -216.5, { entry: 'leap', opts: { variant: 'red' } })],
+        spawns: [at('raptor_hybrid', 0, 0, -216.5, { entry: 'leap' })],
       },
     ],
   },
@@ -465,7 +467,7 @@ const beats: Beat[] = [
           // The pack springs the trap together: both side tunnels and the far door at once.
           at('raptor', 2.4, 0, PUMP_SIDE_Z - 0.4, { entry: 'leap', opts: { variant: 'blue' } }),
           at('raptor', 19.6, 0, PUMP_SIDE_Z - 0.4, { entry: 'leap', t: 0.2, opts: { variant: 'blue' } }),
-          at('raptor', 11, 0, -295, { t: 0.5, opts: { variant: 'red' } }),
+          at('raptor_hybrid', 11, 0, -295, { t: 0.5 }),
         ],
       },
     ],
@@ -535,7 +537,7 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           at('raptor', 18.6, 0, -324.5, { entry: 'leap', opts: { variant: 'blue' } }),
-          at('raptor', 11, 0, -332, { t: 1.2, opts: { variant: 'red' } }),
+          at('raptor_hybrid', 11, 0, -332, { t: 1.2 }),
         ],
       },
     ],
