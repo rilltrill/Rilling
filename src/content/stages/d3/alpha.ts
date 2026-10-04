@@ -75,8 +75,10 @@ export function ventGun(w: World) {
  *   - when it screeches into its crouch, the pack-mates at striking range join
  *     in: a PACK POUNCE — two or three rings closing together.
  *
- * PACK-MATE ('raptor_pack') — a stock raptor that answers the alpha's call; a
- * pack pounce takes a short burst to break (`rallyGuard`) instead of one round.
+ * PACK-MATE ('raptor_pack') — a tougher raptor (`packHp`) that answers the
+ * alpha's call; a pack pounce takes a short burst to break (`rallyGuard`: three
+ * head hits, or eight to the body) instead of one round — two or three rings
+ * at once ask for aimed fire, not a spray at the bodies.
  *
  * CHARGE (`opts.charge`, pack-mates): it runs in like the alpha does — every
  * hit flinches and bloodies it, none pins it in place (a heavy hit still does)
