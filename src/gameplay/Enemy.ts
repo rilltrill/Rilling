@@ -31,6 +31,10 @@ const _w = new THREE.Vector3();
 const _p = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const GROUND_STATES = new Set<string>(['advance', 'windup', 'recover', 'stagger']);
+/** A grounded walker deeper than the step-up under the floor for this long climbs back out. */
+const BURIED_GRACE = 0.25;
+/** Seconds an old (> 45 s) enemy may keep its body and head out of the play area before it quietly leaves. */
+const LOST_MAX = 8;
 /** Minimum seconds between hit flashes with Settings.reduceFlashes (≤ 3 flashes/s). */
 export const REDUCED_FLASH_COOLDOWN = 0.34;
 
@@ -101,6 +105,9 @@ export abstract class Enemy extends Entity {
   private lastFlashAge = -1;
   private falling = false;
   private wasOnGround = false;
+  /** Engine-wide safety nets (see `update`): seconds buried in the floor / unframed when old. */
+  private netBuriedT = 0;
+  private netLostT = 0;
 
   state: EnemyState = 'entry';
   stateTime = 0;
@@ -575,7 +582,18 @@ export abstract class Enemy extends Entity {
         }
       } else if (y < g + 0.5) {
         // Step up small rises only; anything taller acts like a wall, not a lift.
-        if (g - y < 0.6) this.root.position.y = g;
+        if (g - y < 0.6) {
+          this.root.position.y = g;
+          this.netBuriedT = 0;
+        } else if (GROUND_STATES.has(this.state)) {
+          // ...but never leave a walker buried (a lunge / knock-back that ignored a
+          // slope): unseen and unshootable, it would hold its beat forever.
+          this.netBuriedT += dt;
+          if (this.netBuriedT > BURIED_GRACE) {
+            this.root.position.y = g;
+            this.netBuriedT = 0;
+          }
+        }
       } else if (y - g > 0.5 && this.wasOnGround && GROUND_STATES.has(this.state)) {
         // Only the stock walk/attack states fall; custom leap/pounce states own their arc.
         this.falling = true;
@@ -591,9 +609,15 @@ export abstract class Enemy extends Entity {
         this.despawn();
         return;
       }
-      if (this.age > 45 && !this.onScreen(1.2)) {
-        this.despawn();
-        return;
+      if (this.age > 45) {
+        // Old and well off screen — or loitering just outside the play area
+        // (under the bottom edge, behind a HUD panel) where it can never attack.
+        const seen = this.telegraph !== null || this.inPlayArea(this.anchor, 1) || (this.headAnchor !== null && this.inPlayArea(this.headAnchor, 1));
+        this.netLostT = seen ? 0 : this.netLostT + dt;
+        if (!this.onScreen(1.2) || this.netLostT > LOST_MAX) {
+          this.despawn();
+          return;
+        }
       }
     }
 
