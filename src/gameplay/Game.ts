@@ -330,7 +330,8 @@ export class Game implements MenuActions {
       if (typeof location !== 'undefined') this.sprites.look = parseLook(new URLSearchParams(location.search).get('spriteLook'));
       // Switched on mid-stage: compile the bake variants of what is already on stage now (no hitch on the first bakes).
       for (const e of w.entities) if (!e.removed && isSpriteEntity(e)) this.sprites.precompile(e.root);
-      this.redrawUntil = performance.now() + 100;
+      // Paused: keep redrawing a moment so every character gets its first sprite frame.
+      this.redrawUntil = performance.now() + 400;
     } else if (!want && this.sprites) {
       this.sprites.dispose();
       this.sprites = null;

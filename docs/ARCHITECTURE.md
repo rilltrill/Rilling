@@ -193,13 +193,13 @@ sprite, the way 90s arcade shooters used pre-rendered sprites; gibs become pixel
   when the view direction to it turned > 4° or the retro grid changed.
 - **Bake.** The bake camera is the main camera with its projection *cropped* to the
   source's on-screen bounds (no perspective mismatch). Texels are a WHOLE number of
-  retro pixels (`autoTexelScale`: 1, or 2 once a character is > 220 px tall; bosses 1;
+  retro pixels (`autoTexelScale`: 1, or 2 once a character is > 300 px tall; bosses 1;
   more only to stay under the 256 / 512-texel caps; never finer than 1.2 cm of model),
   aligned to the retro pixel grid, 2× supersampled into a 512² HDR scratch target with
   a depth texture. Lights are mirrored into a tiny bake scene (+ a cool back light,
   intensity 0 in daylight, so dark-stage silhouettes separate from the night);
   `precompile` warms those variants. `RETRO_DETAIL` (ModelKit) boosts the
-  characters' pixel textures ×1.35 during bakes only, so surface detail survives.
+  characters' pixel textures ×1.25 during bakes only, so surface detail survives.
 - **Live 3D parts.** Alpha-blended meshes (glow halos, IV tubes, spray), lines and
   very thin geometry (`keepLive`), or anything with `userData.spriteKeep3D = true`,
   are not baked: they stay real meshes drawn over the sprite (the baked parts are
