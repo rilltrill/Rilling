@@ -1052,8 +1052,8 @@ export class Game implements MenuActions {
       this.engine.render(w.scene);
       return;
     }
-    sp.beginFrame();
     try {
+      sp.beginFrame();
       this.engine.render(w.scene);
     } finally {
       sp.endFrame();

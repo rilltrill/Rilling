@@ -3,6 +3,8 @@ import type { World } from './World';
 import type { Entity } from './Entity';
 import { Enemy } from './Enemy';
 import { Civilian } from './Civilian';
+import { Projectile } from './Projectile';
+import { Pickup } from './Pickup';
 
 /**
  * ART: SPRITES — every character (enemies, bosses, civilians) is drawn as a
@@ -283,6 +285,9 @@ const _ss = new THREE.Vector3();
 const _sc = new THREE.Color();
 
 interface Sprite {
+  /** What is drawn: an entity's root, or a part it threw into the world (a severed limb). */
+  obj: THREE.Object3D;
+  /** The entity it belongs to (hit flashes, shadows, lifetime). */
   e: Entity;
   mesh: THREE.Mesh;
   mat: THREE.ShaderMaterial;
@@ -298,8 +303,10 @@ interface Sprite {
   hidden: boolean;
   /** Last frame the entity was seen in the world (GC). */
   seen: number;
-  /** Ground shadow radius (m, smoothed) and floor height override. */
+  /** Ground shadow radius (m, smoothed). */
   shadowR: number;
+  /** Last bake found it off screen / empty: re-check on the normal schedule, not every frame. */
+  away: boolean;
 }
 
 export interface SpriteStats {
@@ -324,9 +331,20 @@ function sizeClass(n: number): number {
   return s;
 }
 
-/** Characters that become sprites. */
+/** Characters (they get ground shadows). */
 export function isCharacter(e: Entity): boolean {
   return e instanceof Enemy || e instanceof Civilian;
+}
+
+/** Everything drawn as a sprite: characters plus the things they throw and the pickups they drop. */
+export function isSpriteEntity(e: Entity): boolean {
+  return isCharacter(e) || e instanceof Projectile || e instanceof Pickup;
+}
+
+/** Parts an entity has flung into the world (zombie limbs tumbling away) — sprites of their own. */
+function looseParts(e: Entity): readonly { obj: THREE.Object3D }[] | null {
+  const fl = (e as unknown as { flyers?: { obj: THREE.Object3D }[] }).flyers;
+  return Array.isArray(fl) && fl.length ? fl : null;
 }
 
 /**
@@ -339,7 +357,7 @@ export class SpriteArt {
   look: SpriteLook = { ...DEFAULT_LOOK };
   readonly stats: SpriteStats = { sprites: 0, drawn: 0, bakes: 0, cpuMs: 0, cpuPeakMs: 0, lastMs: 0, rtBytes: 0, bakesPerSec: 0 };
 
-  private sprites = new Map<Entity, Sprite>();
+  private sprites = new Map<THREE.Object3D, Sprite>();
   private free = new Map<string, THREE.WebGLRenderTarget[]>();
   private scratch: THREE.WebGLRenderTarget;
   private bakeScene = new THREE.Scene();
@@ -485,9 +503,9 @@ export class SpriteArt {
     due.length = 0;
     let firsts = 0;
     for (const s of this.sprites.values()) {
-      if (!s.e.root.visible || this.modelHidden(s.e)) continue;
-      if (this.flashing(s.e) > 0 && s.ready) continue; // keep the frame; the billboard flashes instead
-      if (!s.ready) {
+      if (!s.obj.visible || this.modelHidden(s)) continue;
+      if (this.flashing(s) > 0 && s.ready) continue; // keep the frame; the billboard flashes instead
+      if (!s.ready && !s.away) {
         due.push(s);
         firsts++;
       } else if (w.time >= s.next) due.push(s);
@@ -507,6 +525,7 @@ export class SpriteArt {
           const s = due[i];
           // Spread the next bakes over the interval (phase kept, never bunching up).
           s.next = Math.max(s.next + 1 / SPRITE_FPS, w.time + 0.5 / SPRITE_FPS);
+          if (s.away) s.next = w.time + 0.5 / SPRITE_FPS; // off-screen re-checks at 24 Hz
           this.bake(s, cam);
           bakes++;
         }
@@ -520,31 +539,32 @@ export class SpriteArt {
     let drawn = 0;
     let shadows = 0;
     for (const s of this.sprites.values()) {
-      const root = s.e.root;
+      const root = s.obj;
       s.hidden = false;
       if (!root.visible) {
         s.mesh.visible = false;
         continue;
       }
-      root.visible = false;
-      s.hidden = true;
-      if (!s.ready || this.modelHidden(s.e)) {
+      if (!s.ready || this.modelHidden(s)) {
+        // No image (off screen, or not baked yet): the 3D model stays as a fallback — never invisible.
         s.mesh.visible = false;
         continue;
       }
+      root.visible = false;
+      s.hidden = true;
       _v.setFromMatrixPosition(root.matrixWorld).add(s.offset);
       s.mesh.position.copy(_v);
       s.mesh.updateMatrix();
       s.mesh.matrixWorld.copy(s.mesh.matrix);
       s.mesh.visible = true;
-      const f = this.flashing(s.e);
+      const f = this.flashing(s);
       const u = s.mat.uniforms.uFlash.value as THREE.Vector4;
       if (f > 0) {
         const c = f === 2 ? this.flashRed : this.flashWhite;
         u.set(c.r, c.g, c.b, 1);
       } else u.w = 0;
       drawn++;
-      if (shadows < MAX_SHADOWS && this.look.shadows > 0 && s.shadowR > 0) this.placeShadow(s, shadows++);
+      if (shadows < MAX_SHADOWS && this.look.shadows > 0 && s.shadowR > 0 && s.obj === s.e.root && isCharacter(s.e)) this.placeShadow(s, shadows++);
     }
     this.shadows.count = shadows;
     if (shadows) {
@@ -574,7 +594,10 @@ export class SpriteArt {
 
   /** Re-bake every sprite on the next frame (look changes, debug captures). */
   invalidate() {
-    for (const s of this.sprites.values()) s.ready = false;
+    for (const s of this.sprites.values()) {
+      s.ready = false;
+      s.away = false;
+    }
   }
 
   /** After the main render: show the real models again (raycasts, AI and tools see them as usual). */
@@ -582,7 +605,7 @@ export class SpriteArt {
     this.world.scene.matrixWorldAutoUpdate = true;
     for (const s of this.sprites.values()) {
       if (s.hidden) {
-        s.e.root.visible = true;
+        s.obj.visible = true;
         s.hidden = false;
       }
     }
@@ -590,44 +613,53 @@ export class SpriteArt {
 
   // ─── Internals ────────────────────────────────────────────────────────────
 
-  private flashing(e: Entity): number {
-    return e instanceof Enemy ? e.flashKind : 0;
+  private flashing(s: Sprite): number {
+    return s.e instanceof Enemy && s.obj === s.e.root ? s.e.flashKind : 0;
   }
 
-  private modelHidden(e: Entity): boolean {
-    return e instanceof Enemy && !e.model.visible;
+  /** The entity hides its model (blinking pickup, a boss off stage) while the root stays visible. */
+  private modelHidden(s: Sprite): boolean {
+    if (s.obj !== s.e.root) return false;
+    const m = (s.e as unknown as { model?: unknown }).model;
+    return m instanceof THREE.Object3D && !m.visible;
   }
 
   private syncEntities() {
     const f = this.frame;
     for (const e of this.world.entities) {
-      if (e.removed || !isCharacter(e)) continue;
-      let s = this.sprites.get(e);
-      if (!s) {
-        const mat = this.showMat.clone();
-        mat.uniforms.uFlash.value = new THREE.Vector4(1, 1, 1, 0);
-        const mesh = new THREE.Mesh(this.quad, mat);
-        mesh.matrixAutoUpdate = false;
-        mesh.matrixWorldAutoUpdate = false;
-        mesh.visible = false;
-        mesh.name = 'sprite';
-        this.group.add(mesh);
-        s = { e, mesh, mat, rt: null, rtKey: '', next: 0, ready: false, offset: new THREE.Vector3(), hidden: false, seen: f, shadowR: 0 };
-        this.sprites.set(e, s);
-      }
-      s.seen = f;
+      if (e.removed || !isSpriteEntity(e)) continue;
+      this.track(e.root, e, f);
+      const parts = looseParts(e);
+      if (parts) for (const p of parts) if (p.obj.parent) this.track(p.obj, e, f);
     }
-    for (const [e, s] of this.sprites) {
-      if (s.seen !== f) this.release(e, s);
+    for (const [obj, s] of this.sprites) {
+      if (s.seen !== f) this.release(obj, s);
     }
   }
 
-  private release(e: Entity, s: Sprite) {
-    if (s.hidden) e.root.visible = true;
+  private track(obj: THREE.Object3D, e: Entity, f: number) {
+    let s = this.sprites.get(obj);
+    if (!s) {
+      const mat = this.showMat.clone();
+      mat.uniforms.uFlash.value = new THREE.Vector4(1, 1, 1, 0);
+      const mesh = new THREE.Mesh(this.quad, mat);
+      mesh.matrixAutoUpdate = false;
+      mesh.matrixWorldAutoUpdate = false;
+      mesh.visible = false;
+      mesh.name = 'sprite';
+      this.group.add(mesh);
+      s = { obj, e, mesh, mat, rt: null, rtKey: '', next: 0, ready: false, offset: new THREE.Vector3(), hidden: false, seen: f, shadowR: 0, away: false };
+      this.sprites.set(obj, s);
+    }
+    s.seen = f;
+  }
+
+  private release(obj: THREE.Object3D, s: Sprite) {
+    if (s.hidden) obj.visible = true;
     this.group.remove(s.mesh);
     s.mat.dispose();
     if (s.rt) this.giveBack(s.rtKey, s.rt);
-    this.sprites.delete(e);
+    this.sprites.delete(obj);
   }
 
   private takeTarget(w: number, h: number): { rt: THREE.WebGLRenderTarget; key: string } {
@@ -650,7 +682,8 @@ export class SpriteArt {
   private giveBack(key: string, rt: THREE.WebGLRenderTarget) {
     let list = this.free.get(key);
     if (!list) this.free.set(key, (list = []));
-    if (list.length < 4) list.push(rt);
+    // Keep a few spares per size (big ones: one).
+    if (list.length < (rt.width * rt.height >= 256 * 256 ? 1 : 4)) list.push(rt);
     else rt.dispose();
   }
 
@@ -686,8 +719,10 @@ export class SpriteArt {
   /** Re-render one character into its sprite image and frame its billboard. */
   private bake(s: Sprite, cam: THREE.PerspectiveCamera) {
     const e = s.e;
-    if (!this.bounds(e.root, _box)) {
+    const src = s.obj;
+    if (!this.bounds(src, _box)) {
       s.ready = false;
+      s.away = true;
       return;
     }
     // On-screen rectangle (NDC) and depth range of the bounds.
@@ -719,6 +754,7 @@ export class SpriteArt {
     }
     if (dMax === 0) {
       s.ready = false;
+      s.away = true;
       return;
     }
     if (behind) {
@@ -735,11 +771,12 @@ export class SpriteArt {
     y1 = Math.min(y1, 1 + EDGE);
     if (x1 <= x0 || y1 <= y0) {
       s.ready = false;
+      s.away = true;
       return;
     }
     // Texel grid: ~pxPerTexel retro pixels per texel, snapped to the screen so still sprites don't shimmer.
     const g = this.grid();
-    const cap = (e as Enemy).isBoss ? MAX_TEX_BOSS : MAX_TEX;
+    const cap = e instanceof Enemy && e.isBoss && src === e.root ? MAX_TEX_BOSS : MAX_TEX;
     let k = this.look.pxPerTexel;
     let tx = 0;
     let ty = 0;
@@ -789,7 +826,7 @@ export class SpriteArt {
     bs.fog = this.world.scene.fog;
     const kids = bs.children;
     const nMirrors = kids.length;
-    kids.push(e.root); // not re-parented: matrices were computed in the stage scene
+    kids.push(src); // not re-parented: matrices were computed in the stage scene
     try {
       r.render(bs, bc);
     } finally {
@@ -842,7 +879,7 @@ export class SpriteArt {
     const foot = Math.max(_box.max.x - _box.min.x, _box.max.z - _box.min.z);
     const want = THREE.MathUtils.clamp(foot * 0.42, 0.22, 7);
     s.shadowR = s.shadowR > 0 ? s.shadowR + (want - s.shadowR) * 0.35 : want;
-    _c.setFromMatrixPosition(e.root.matrixWorld);
+    _c.setFromMatrixPosition(src.matrixWorld);
     s.offset.subVectors(m.position, _c);
     const u = s.mat.uniforms;
     u.map.value = dst.texture;
@@ -850,6 +887,7 @@ export class SpriteArt {
     (u.uRt.value as THREE.Vector2).set(cw, ch);
     (u.uDepth.value as THREE.Vector3).set(d0, d1, D);
     s.ready = true;
+    s.away = false;
   }
 
   /** Blob shadow under a sprite: on the floor it stands on, fading as it leaves the ground. */
@@ -930,7 +968,7 @@ export class SpriteArt {
   }
 
   dispose() {
-    for (const [e, s] of [...this.sprites]) this.release(e, s);
+    for (const [obj, s] of [...this.sprites]) this.release(obj, s);
     for (const list of this.free.values()) for (const rt of list) rt.dispose();
     this.free.clear();
     for (const m of this.mirrors) m.dispose();
