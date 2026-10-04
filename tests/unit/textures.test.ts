@@ -46,3 +46,26 @@ describe('retro procedural textures', () => {
     Kit.disposeAll();
   });
 });
+
+describe('Kit.applyTexture on custom materials', () => {
+  it('chains an existing onBeforeCompile and is idempotent', async () => {
+    const THREE = await import('three');
+    const m = new THREE.MeshLambertMaterial({ vertexColors: true });
+    let prevRan = false;
+    m.onBeforeCompile = () => {
+      prevRan = true;
+    };
+    Kit.applyTexture(m, 'skin', 3);
+    Kit.applyTexture(m, 'cloth', 3); // second call ignored
+    expect(m.userData.retroTex).toBe('skin');
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      vertexShader: '#include <common>\n#include <begin_vertex>',
+      fragmentShader: '#include <common>\n#include <color_fragment>',
+    };
+    m.onBeforeCompile(shader as never, undefined as never);
+    expect(prevRan).toBe(true);
+    expect(shader.fragmentShader).toContain('uRetroMap');
+    m.dispose();
+  });
+});

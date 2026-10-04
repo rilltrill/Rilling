@@ -68,7 +68,12 @@ export interface MatOptions {
  * The dominant axis of the object-space normal picks the projection plane —
  * hard switches (no blending) for a crisp, period-accurate look.
  */
-function applyRetroTexture(m: THREE.MeshLambertMaterial, name: TexName, scale: number, strength: number) {
+function applyRetroTexture(
+  m: THREE.MeshLambertMaterial | THREE.MeshStandardMaterial | THREE.MeshBasicMaterial | THREE.MeshPhongMaterial,
+  name: TexName,
+  scale: number,
+  strength: number,
+) {
   const rt = Textures.get(name);
   const uniforms = {
     uRetroMap: { value: rt.texture },
@@ -77,7 +82,11 @@ function applyRetroTexture(m: THREE.MeshLambertMaterial, name: TexName, scale: n
     uRetroGain: { value: rt.gain },
   };
   m.userData.retroTex = name;
-  m.onBeforeCompile = (shader) => {
+  // Chain any hook the material already had (e.g. custom emission masks).
+  const prev = m.onBeforeCompile;
+  const prevKey = m.customProgramCacheKey?.();
+  m.onBeforeCompile = (shader, renderer) => {
+    prev?.call(m, shader, renderer);
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vRetroPos;\nvarying vec3 vRetroNrm;')
@@ -110,7 +119,8 @@ function applyRetroTexture(m: THREE.MeshLambertMaterial, name: TexName, scale: n
         }`,
       );
   };
-  m.customProgramCacheKey = () => 'retroTex1';
+  m.customProgramCacheKey = () => `retroTex1|${prevKey ?? ''}`;
+  m.needsUpdate = true;
 }
 
 export const Kit = {
@@ -137,6 +147,22 @@ export const Kit = {
       if (tex) applyRetroTexture(m, tex, texScale, texStrength);
       return m;
     });
+  },
+
+  /**
+   * Add the retro pixel-texture projection to a material you created yourself
+   * (vertex-coloured baked meshes, self-lit skins, Standard/Basic materials).
+   * Chains any existing onBeforeCompile. Call once per material, before first render.
+   */
+  applyTexture(
+    mat: THREE.MeshLambertMaterial | THREE.MeshStandardMaterial | THREE.MeshBasicMaterial | THREE.MeshPhongMaterial,
+    name: TexName,
+    scale = 1,
+    strength = 1,
+  ) {
+    if (mat.userData.retroTex) return mat;
+    applyRetroTexture(mat, name, scale, strength);
+    return mat;
   },
 
   /** Shorthand: textured flat-shaded material, e.g. Kit.tex('brick', 0x8a3a2a). */
