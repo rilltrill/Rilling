@@ -44,6 +44,8 @@ import {
  * (and with ?beat= debugging).
  */
 
+const POLICE_RED = new THREE.Color(0xff1a10);
+const POLICE_BLUE = new THREE.Color(0x2a50ff);
 const FOG_NEAR = 28;
 const FOG_FAR = 185;
 const CULL = FOG_FAR + 15;
@@ -342,7 +344,11 @@ export class Z3Scene {
 
     // Tunnel darkness.
     const inside = smoothstep(D.TUNNEL_FROM - 4, D.TUNNEL_FROM + 12, d) * (1 - smoothstep(D.TUNNEL_TO - 14, D.TUNNEL_TO + 2, d));
-    if (this.stalled) {
+    const rf = w.settings.reduceFlashes;
+    if (this.stalled && rf) {
+      // REDUCE FLASHING: the power just dies (no stutter).
+      this.power = 0;
+    } else if (this.stalled) {
       this.flickerT -= dt;
       if (this.flickerT <= 0) {
         this.stallSeq++;
@@ -376,7 +382,7 @@ export class Z3Scene {
       const spin = Math.max(0, Math.sin(t * 9));
       a.color.setHex(0xff3018);
       a.distance = 40;
-      a.intensity = this.beacon * (40 + 70 * spin * spin);
+      a.intensity = this.beacon * (rf ? 60 + 15 * spin : 40 + 70 * spin * spin);
     } else if (inside > 0.05) {
       if (this.stalled) {
         // Truck headlights sputtering in the dark.
@@ -385,7 +391,7 @@ export class Z3Scene {
         w.rig.space.localToWorld(a.position);
         a.color.setHex(0xfff0c8);
         a.distance = 24;
-        a.intensity = this.power > 0.5 ? 24 : 9 + 5 * Math.sin(t * 31);
+        a.intensity = this.power > 0.5 ? 24 : rf ? 9 : 9 + 5 * Math.sin(t * 31);
       } else {
         // Snap to the nearest fixture ahead; flare as each one passes overhead.
         let best = -1;
@@ -407,10 +413,15 @@ export class Z3Scene {
       }
     } else if (d > D.PILEUP - 70 && d < D.PILEUP + 40) {
       a.position.copy(this.police);
-      const red = Math.floor(t * 5) % 2 === 0;
-      a.color.setHex(red ? 0xff1a10 : 0x2a50ff);
       a.distance = 18;
-      a.intensity = 22 * (0.6 + 0.4 * Math.abs(Math.sin(t * 15.7)));
+      if (rf) {
+        a.color.copy(POLICE_RED).lerp(POLICE_BLUE, 0.5 + 0.5 * Math.sin(t * 1.6));
+        a.intensity = 18;
+      } else {
+        const red = Math.floor(t * 5) % 2 === 0;
+        a.color.setHex(red ? 0xff1a10 : 0x2a50ff);
+        a.intensity = 22 * (0.6 + 0.4 * Math.abs(Math.sin(t * 15.7)));
+      }
     } else a.intensity = 0;
   }
 }

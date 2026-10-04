@@ -17,6 +17,12 @@ import './minions';
  * → billboard alley chase → an overturned tanker (shoot it!) → a tunnel where
  * the engine stalls in the dark → an overrun army barricade on the suspension
  * bridge → THE BEHEMOTH climbs onto the bridge and chases the truck.
+ *
+ * As the campaign finale it is the hardest DEAD ZONE stage, tuned with the
+ * human-like bot (tests/unit/humanbot.test.ts, σ 0.03) across aim styles:
+ * ≈ 3–3.5 hearts lost for a bot that goes for heads half the time, ≈ 4.5–5 for
+ * one that only ever aims at the body — spread over the stops and the boss,
+ * never 3+ in one regular fight.
  */
 
 /** World position at rail distance d, x metres right, y up (for `world: true` spawns/looks). */
@@ -31,20 +37,26 @@ let viewModel: TruckViewModel | null = null;
  * FINALE TOUGHNESS. The truck's twin gun (0.8 a round, ~14 rounds/s) shreds the
  * stock roster before most of it can strike, which left the campaign finale's
  * regular fights harmless. Out here the dead are tougher (spawn hp multipliers,
- * unless a spawn sets its own) and they come in pincers — runners leaping at
- * both sides of the truck at once, spitters on the overpass deck, a brute
- * shouldering out of the wrecks at every stop — so a player who just hosepipes
- * the nearest target gets punished, while one who answers the warning rings in
- * order (and feathers the trigger to keep the barrels cool) stays clean.
- * Every attack still starts framed in the middle band of the screen.
+ * unless a spawn sets its own) and they come in pincers (minions.ts): runner
+ * packs that creep up both flanks out of sight and rush together, spitters on
+ * the overpass deck, and at every stop a riot brute that can't be staggered by
+ * the light rounds. Its pack slips aboard first and lies in wait; the brute
+ * vaults in close and the pack comes round both sides with it, so the short
+ * runner rings land while the big one soaks fire and heats the barrels. The
+ * brute's smash ring closes on its split, glowing skull ("SHOOT THE HEAD!"):
+ * the head takes ×2.5, the riot plates only dent (RIOT_ARMOR_DENT), so a
+ * body-aimer still gets there, just slower. A player who hosepipes the nearest
+ * target gets punished; one who answers the rings in order (and feathers the
+ * trigger to keep the barrels cool) stays clean. Every attack still starts
+ * framed in the middle band of the screen with a clear line of fire.
  */
 const TOUGH: Record<string, number> = {
   walker: 1.6,
   truck_runner: 1.6,
-  pack_runner: 1.6,
+  pack_runner: 2,
   crawler: 1.4,
   roadside_crawler: 1.4,
-  riot_brute: 2.1,
+  riot_brute: 1.8,
   bloater: 1.4,
   spitter: 1.4,
   deck_spitter: 1.4,
@@ -98,7 +110,7 @@ const beats: Beat[] = toughen([
         ],
       },
       {
-        // The first real pincer: two over the tailgate, two off the verges ahead.
+        // The first pincer: three climb over the tailgate, creep up the flanks out of sight and come round together.
         start: { atD: 92 },
         spawns: [
           { type: 'pack_runner', pos: [4, 0, -8], entry: 'leap', opts: { variant: 'worker', pack: 'city' } },
@@ -138,12 +150,14 @@ const beats: Beat[] = toughen([
         ],
       },
       {
-        // A brute shoulders out between the wrecks while runners vault the cars.
+        // A pack slips aboard and lies in wait beside the truck; then a brute vaults the police
+        // cruiser, lands a few metres off the bumper, and the pack comes round both sides with it.
         start: { remaining: 1 },
         spawns: [
-          { type: 'riot_brute', pos: [-4.6, 0, 8.4], entry: 'leap', opts: { land: 4.4, leapArc: 2.8 } },
-          { type: 'pack_runner', pos: [-4.5, 0, -6], entry: 'leap', t: 0.2, opts: { pack: 'pile2', cue: 'brute', wait: 9 } },
-          { type: 'pack_runner', pos: [5, 0, -7], entry: 'leap', t: 0.5, opts: { variant: 'worker', pack: 'pile2', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [-4.5, 0, -6], entry: 'leap', opts: { pack: 'pile2', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [5, 0, -7], entry: 'leap', t: 0.3, opts: { variant: 'worker', pack: 'pile2', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [4, 0, -9], entry: 'leap', t: 0.6, opts: { variant: 'nurse', pack: 'pile2', cue: 'brute', wait: 9 } },
+          { type: 'riot_brute', pos: [-4.6, 0, 8.4], entry: 'leap', t: 2.2, opts: { landAt: [-1.6, 0, 4.1], leapArc: 2.8 } },
           { type: 'walker', pos: [-3.4, 0, 16], t: 0.3, opts: { variant: 'patient' } },
           { type: 'walker', pos: [4.4, 0, 15.5], t: 0.6, opts: { variant: 'doctor' } },
           { type: 'bloater', pos: [3.7, 0, 17.5], t: 2.4 },
@@ -313,11 +327,13 @@ const beats: Beat[] = toughen([
         ],
       },
       {
+        // A pack creeps aboard, then a brute vaults the median from the oncoming lanes and they rush with it.
         start: { remaining: 1 },
         spawns: [
-          { type: 'riot_brute', pos: [-8.4, 0, 10], entry: 'leap', opts: { land: 4.6, leapArc: 3 } },
-          { type: 'pack_runner', pos: [5, 0, -6], entry: 'leap', t: 0.2, opts: { variant: 'worker', pack: 'tank1', cue: 'brute', wait: 9 } },
-          { type: 'pack_runner', pos: [-5, 0, -7], entry: 'leap', t: 0.5, opts: { variant: 'biker', pack: 'tank1', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [5, 0, -6], entry: 'leap', opts: { variant: 'worker', pack: 'tank1', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [-5, 0, -7], entry: 'leap', t: 0.3, opts: { variant: 'biker', pack: 'tank1', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [4.5, 0, -9], entry: 'leap', t: 0.6, opts: { variant: 'cop', pack: 'tank1', cue: 'brute', wait: 9 } },
+          { type: 'riot_brute', pos: [-8.6, 0, 9.5], entry: 'leap', t: 2.2, opts: { landAt: [-2, 0, 3.8], leapArc: 3 } },
           { type: 'walker', pos: [-11, 0, 15], t: 0.5, opts: { variant: 'nurse' } },
           { type: 'walker', pos: [-12.5, 0, 19], t: 0.9, opts: { variant: 'soldier' } },
           { type: 'walker', pos: [-9.6, 0, 21], t: 1.3, opts: { variant: 'patient' } },
@@ -414,14 +430,15 @@ const beats: Beat[] = toughen([
         ],
       },
       {
-        // Out of the dark: a brute right in the headlight while crawlers drop from the ceiling.
+        // Out of the dark: a brute leaps off the walkway into the headlight while crawlers drop from the ceiling.
         start: { remaining: 1 },
         spawns: [
           { type: 'crawler', pos: [-2.5, 6.5, 9], entry: 'drop' },
           { type: 'crawler', pos: [2.5, 6.5, 11], entry: 'drop', t: 0.4 },
-          { type: 'riot_brute', pos: [-5.8, 0, 9.5], t: 0.8, entry: 'leap', opts: { land: 4.5, leapArc: 2.6 } },
-          { type: 'pack_runner', pos: [4.5, 0, -8], t: 0.6, opts: { variant: 'nurse', pack: 'stall2', cue: 'brute', wait: 9 } },
-          { type: 'pack_runner', pos: [-4, 0, -9], t: 0.9, opts: { variant: 'worker', pack: 'stall2', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [4.5, 0, -8], t: 0.2, opts: { variant: 'nurse', pack: 'stall2', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [-4, 0, -9], t: 0.5, opts: { variant: 'worker', pack: 'stall2', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [3.5, 0, -10], t: 0.8, opts: { variant: 'office', pack: 'stall2', cue: 'brute', wait: 9 } },
+          { type: 'riot_brute', pos: [-5.8, 0, 9.5], t: 2.6, entry: 'leap', opts: { landAt: [-1.4, 0, 3.9], leapArc: 2.6 } },
           { type: 'walker', pos: [-4, 0, 16], t: 1.2, opts: { variant: 'worker' } },
           { type: 'walker', pos: [4, 0, 17], t: 1.5, opts: { variant: 'soldier' } },
         ],
@@ -476,11 +493,13 @@ const beats: Beat[] = toughen([
         ],
       },
       {
+        // Over the sandbags on the left (the cop is on the right), pack in tow.
         start: { remaining: 1 },
         spawns: [
-          { type: 'riot_brute', pos: [-6.5, 0, 9.5], entry: 'leap', opts: { land: 4.5, leapArc: 2.8 } },
-          { type: 'pack_runner', pos: [-4.5, 0, -7], entry: 'leap', t: 0.3, opts: { variant: 'soldier', pack: 'barr1', cue: 'brute', wait: 9 } },
-          { type: 'pack_runner', pos: [4.5, 0, -6], entry: 'leap', t: 0.6, opts: { variant: 'soldier', pack: 'barr1', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [-4.5, 0, -7], entry: 'leap', opts: { variant: 'soldier', pack: 'barr1', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [4.5, 0, -6], entry: 'leap', t: 0.3, opts: { variant: 'soldier', pack: 'barr1', cue: 'brute', wait: 9 } },
+          { type: 'pack_runner', pos: [-4, 0, -8.5], entry: 'leap', t: 0.6, opts: { variant: 'soldier', pack: 'barr1', cue: 'brute', wait: 9 } },
+          { type: 'riot_brute', pos: [-6.5, 0, 9.5], entry: 'leap', t: 2.2, opts: { landAt: [-1.8, 0, 4.1], leapArc: 2.8 } },
           { type: 'walker', pos: [-9.5, 0, 14], t: 0.4, opts: { variant: 'soldier' } },
           { type: 'walker', pos: [-12, 0, 16], t: 0.8, opts: { variant: 'biker' } },
           { type: 'spitter', pos: [7, 0, 20], t: 1.2 },
@@ -495,7 +514,7 @@ const beats: Beat[] = toughen([
           { type: 'pack_runner', pos: [5, 0, -9], entry: 'leap', t: 0.8, opts: { variant: 'soldier', pack: 'barr' } },
           { type: 'bloater', pos: [-1.5, 0, 16], t: 0.9 },
           { type: 'walker', pos: [1, 0, 19], t: 1.3, opts: { variant: 'soldier' } },
-          { type: 'riot_brute', pos: [3, 0, 13], t: 1.8 },
+          { type: 'walker', pos: [-3, 0, 17], t: 1.8, opts: { variant: 'soldier' } },
         ],
       },
     ],
@@ -538,7 +557,6 @@ const beats: Beat[] = toughen([
         start: { after: 18 },
         spawns: [
           { type: 'tail_runner', pos: [-5, 0, -11], entry: 'leap', opts: { variant: 'worker' } },
-          { type: 'tail_runner', pos: [5, 0, -13], entry: 'leap', t: 0.6, opts: { variant: 'soldier' } },
         ],
       },
     ],

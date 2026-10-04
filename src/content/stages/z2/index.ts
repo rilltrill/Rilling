@@ -5,7 +5,8 @@ import { B, POOL, RAIL, RAIL_LENGTH, dAt } from './layout';
 import { D, buildEnv } from './env';
 import { z2Scene } from './scene';
 import { burstWall, crashAmbulance, ensureAmbulanceCrashed, spawnProps, ventRattle, wallThuds } from './setpieces';
-import { CORR_C_VENT, drawerFront } from './zonesLower';
+import { CORR_B_DOOR, CORR_B_VENT, CORR_C_VENT, drawerFront } from './zonesLower';
+import { CORR_A_VENT } from './zonesUpper';
 import './boss';
 
 /**
@@ -51,6 +52,17 @@ function behindDoor(door: [number, number], from: [number, number], depth: numbe
   return [door[0] + (dx / l) * depth, door[1] + (dz / l) * depth];
 }
 
+/**
+ * A walker vaulting the far (back-wall) balcony rail of the atrium, on the
+ * boss camera's left (side 1) or right (−1), `t` s into its wave. It lands
+ * ~16 m out at a ~22° bearing and walks straight in (so it stays near the
+ * middle of the frame, clear of PATIENT ZERO's body), then winds up from 2.9 m
+ * (its opening ring stays clear of the bomb button and the weapon panel).
+ */
+function balconyWalker(side: 1 | -1, variant: string, t = 0): SpawnDef {
+  return S('walker', 25, POOL[2] + side * 9, { y: 0.02, entry: 'leap', t, speed: 1.4, opts: { variant, attackRange: 2.9, leapMax: 7, leapArc: 1.8 } });
+}
+
 function popup(w: World, text: string, x = 0.5, y = 0.3) {
   w.hud.popup(text, w.viewport.width * x, w.viewport.height * y, 'warning');
 }
@@ -63,11 +75,20 @@ const DOOR = {
   a44: [44.5, -41.7] as [number, number],
 };
 
+/** Seconds of pounding before the boiler-room wall gives (the brute comes through). */
+const WALL_GIVES = 2.3;
+
+/** Rail x of the corridor-A stops (the rail runs along z −44 there). */
+const HOLD_X = { corrVent: 31 };
+
 const HOLD = {
   bay: dAt(0, 0.5),
   corrA: dAt(20.5, -44),
-  /** Stop short of the corridor-A vent (x 41.5) so its crawler lands ~7 m ahead. */
-  corrVent: dAt(34, -44),
+  /**
+   * Stop 7 m short of door a38 (its doctor walks in down the middle of the
+   * frame) and 6 m short of the corridor-A vent (its crawler lands well ahead).
+   */
+  corrVent: dAt(HOLD_X.corrVent, -44),
   ward: dAt(54, -44),
   morgue: dAt(79, -76.6),
   /** Mouth of the service corridor: its vent (z −100.6) is ~5 m ahead. */
@@ -75,8 +96,10 @@ const HOLD = {
 };
 
 /** Vents crawlers drop out of (x, z) — must match the vents built in zonesUpper/zonesLower. */
-const VENT_A: [number, number] = [41.5, -43.4];
-const VENT_B: [number, number] = [79.6, -100.6];
+const VENT_A = CORR_A_VENT;
+const VENT_B = CORR_B_VENT;
+/** Service-corridor DANGER door (breakable, see zonesLower CORR_B_DOOR). */
+const DOOR_B: [number, number] = [CORR_B_DOOR.x, CORR_B_DOOR.z];
 
 const dr = (side: 'e' | 'w', col: number, row: number): [number, number, number] => drawerFront(side, col, row);
 const dE1 = dr('e', 1, 1);
@@ -233,25 +256,37 @@ const beats: Beat[] = [
     label: 'down the corridor',
     to: HOLD.corrVent,
     speed: 3.0,
-    // A doctor bursts out of the ward door ahead as you walk.
+    // A doctor bursts out of the ward door ahead as you walk; you stop 7 m short
+    // of it, so it comes at you down the middle of the corridor. (It keeps a
+    // longer stand-off than a stock walker: if you let it get close, its ring
+    // stays clear of the HUD panels.)
     waves: [
       {
-        start: { atD: dAt(29, -44) },
-        spawns: [S('walker', ...behindDoor(DOOR.a38, [33, -44], 1.6), { frame: 'world', entry: 'burst', opts: { variant: 'doctor' } })],
+        start: { atD: dAt(26, -44) },
+        spawns: [
+          S('walker', ...behindDoor(DOOR.a38, [28, -44], 1.6), { frame: 'world', entry: 'burst', opts: { variant: 'doctor', attackRange: 2.4 } }),
+        ],
       },
     ],
   },
   {
-    // Something scrabbles in the vent ahead: stop, it drops ~7 m in front of you
-    // (never onto the rail under a walking camera).
+    // (Only once the doctor is down: the vent crawler is never a second threat on top of it.)
+    kind: 'action',
+    label: 'corridor A clear',
+    run: () => {},
+    until: (w) => w.hostileCount() === 0,
+  },
+  {
+    // Something scrabbles in the vent ahead: it drops ~6 m in front of the
+    // stopped camera (never onto the rail under a walking one).
     kind: 'hold',
     label: 'corridor vent',
-    look: L(41, 0.9, -44, 1.1),
+    look: L(37.5, 0.95, -44, 1.1),
     onStart: (w) => ventRattle(w, VENT_A[0], VENT_A[1], [0.15, 0.45, 0.7]),
     waves: [
       { spawns: [S('crawler', VENT_A[0], VENT_A[1], { y: 2.85, entry: 'drop', t: 0.95 })] },
-      // Then a runner crashes out of the door ahead on the right (~11 m out).
-      { start: { remaining: 0, after: 4.5 }, spawns: [S('runner', ...behindDoor(DOOR.a44, [40.5, -44], 1.4), { t: 0.3 })] },
+      // Then a runner crashes out of the door ahead on the right (~13 m out).
+      { start: { remaining: 0, after: 4.5 }, spawns: [S('runner', ...behindDoor(DOOR.a44, [HOLD_X.corrVent, -44], 1.4), { t: 0.3 })] },
     ],
   },
   // ── 4. Ward 3: something behind every curtain ───────────────────────────
@@ -401,12 +436,21 @@ const beats: Beat[] = [
   // ── 8. Service corridor → surgery ───────────────────────────────────────
   { kind: 'move', label: 'to the service corridor', to: HOLD.corrB, speed: 3.4 },
   {
-    // The vent rattles; the crawler drops ~5 m ahead of the stopped camera.
+    // The vent rattles and a crawler drops ~5 m ahead (left of the rail) — and
+    // while it drags itself at you, the DANGER door on the right bursts open and
+    // a runner charges from ~9 m out: two threats, one from each side.
     kind: 'hold',
     label: 'service corridor',
-    look: L(79.4, B + 0.9, -102.5, 1.0),
+    look: L(79.3, B + 1.0, -102.5, 1.0),
     onStart: (w) => ventRattle(w, VENT_B[0], VENT_B[1], [0.1, 0.4, 0.62]),
-    waves: [{ spawns: [S('crawler', VENT_B[0], VENT_B[1], { y: B + 2.85, entry: 'drop', t: 0.85 })] }],
+    waves: [
+      {
+        spawns: [
+          S('crawler', VENT_B[0], VENT_B[1], { y: B + 2.85, entry: 'drop', t: 0.85 }),
+          S('runner', ...behindDoor(DOOR_B, [79.6, -98], 1.5), { t: 1.5, opts: { variant: 'worker' } }),
+        ],
+      },
+    ],
   },
   { kind: 'move', label: 'into surgery', to: D.orHold, speed: 3.3 },
   {
@@ -447,39 +491,30 @@ const beats: Beat[] = [
   // ── 9. Basement corridor: the brute comes through the wall ──────────────
   { kind: 'move', label: 'towards the atrium', to: D.corrCHold, speed: 3.8 },
   {
-    // A crawler drops out of the corridor vent ~5 m ahead once you've stopped.
-    kind: 'hold',
-    label: 'corridor C',
-    look: L(60.5, B + 1.0, -120.6, 1.0),
-    onStart: (w) => ventRattle(w, CORR_C_VENT[0], CORR_C_VENT[1], [0.1, 0.38, 0.6]),
-    waves: [{ spawns: [S('crawler', CORR_C_VENT[0], CORR_C_VENT[1], { y: B + 3.05, entry: 'drop', t: 0.8 })] }],
-  },
-  {
-    kind: 'action',
-    label: 'pounding',
-    look: L(60.5, B + 1.4, -123.2, 1.0),
-    run: (w) => {
-      wallThuds(w, [0.2, 0.95, 1.6]);
-      w.later(2.3, () => burstWall(w));
-    },
-  },
-  { kind: 'wait', label: 'the wall shakes', duration: 2.3 },
-  {
+    // Something pounds on the boiler-room wall (the lights die with the first
+    // thud); the vent overhead rattles loose and a crawler drops ~5 m ahead of
+    // the stopped camera — and while you deal with it, the wall gives.
     kind: 'hold',
     label: 'brute',
-    look: L(59, B + 1.5, -122, 1.2),
-    // (No-op unless a debug start skipped the pounding.)
-    onStart: (w) => burstWall(w),
-    pickups: [P('shotgun', 61, B + 1.4, -120, 0), P('bomb', 55.6, B + 1.6, -121.8, 4)],
+    look: L(60, B + 1.0, -122.2, 1.0),
+    onStart: (w) => {
+      wallThuds(w, [0.2, 0.95, 1.6]);
+      ventRattle(w, CORR_C_VENT[0], CORR_C_VENT[1], [0.5, 0.78, 1.0]);
+      w.later(WALL_GIVES, () => burstWall(w));
+    },
+    pickups: [P('shotgun', 61, B + 1.4, -120, WALL_GIVES), P('bomb', 55.6, B + 1.6, -121.8, WALL_GIVES + 4)],
     waves: [
+      { spawns: [S('crawler', CORR_C_VENT[0], CORR_C_VENT[1], { y: B + 3.05, entry: 'drop', t: 1.25 })] },
       {
+        start: { after: WALL_GIVES },
         spawns: [
           // (Tougher and faster than stock: it comes for you through the dust, and
-          // its long super-armoured windup has to be out-shot.)
+          // only headshots stop its long super-armoured windup.)
           S('brute', 58.9, -124.3, { entry: 'burst', hp: 1.6, speed: 1.4 }),
-          // Runners pour through the breach behind it: split your fire.
-          S('runner', 59.6, -124.8, { entry: 'burst', t: 1.4 }),
-          S('runner', 58.2, -124.8, { entry: 'burst', t: 2.0 }),
+          // Runners pour through the breach behind it, timed to reach you while
+          // it winds up: split your fire.
+          S('runner', 59.6, -124.8, { entry: 'burst', t: 2.6 }),
+          S('runner', 58.2, -124.8, { entry: 'burst', t: 3.4 }),
           W(52.6, -120.2, 'patient', { t: 2.4 }),
           W(52.8, -121.9, 'nurse', { t: 3.2 }),
         ],
@@ -525,19 +560,12 @@ const beats: Beat[] = [
       P('health', 42.6, B + 1.8, -118.6, 52),
       P('magnum', 42.8, B + 1.8, -123.4, 64),
     ],
+    // Stragglers vault the far balcony rail behind PATIENT ZERO (~22 m out,
+    // ±9 m) and come at you through the middle of the frame, one at a time:
+    // their stand-off keeps the windup ring clear of the HUD panels.
     waves: [
-      {
-        start: { after: 21 },
-        // Over the balcony rails, ~11 m ahead: they drop in at the edges of the view.
-        spawns: [W(35.5, -110.1, 'patient', { y: 0.6, entry: 'drop' }), W(36.2, -131.9, 'nurse', { y: 0.6, entry: 'drop', t: 1.2 })],
-      },
-      {
-        start: { after: 44 },
-        spawns: [
-          W(32.5, -110.1, 'doctor', { y: 0.6, entry: 'drop' }),
-          W(33.5, -131.9, 'patient', { y: 0.6, entry: 'drop', t: 0.8 }),
-        ],
-      },
+      { start: { after: 21 }, spawns: [balconyWalker(1, 'patient'), balconyWalker(-1, 'nurse', 4.5)] },
+      { start: { after: 44 }, spawns: [balconyWalker(-1, 'doctor'), balconyWalker(1, 'patient', 4.5)] },
     ],
   },
 ];

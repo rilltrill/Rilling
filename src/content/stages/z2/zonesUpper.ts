@@ -377,6 +377,9 @@ export function curtainPanel(g: THREE.Object3D, x: number, z: number, len: numbe
 // Corridor A
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Corridor A's third ceiling vent (x, z): a crawler drops out of it in the "corridor vent" hold. */
+export const CORR_A_VENT: [number, number] = [37, -43.4];
+
 /** Door slots in corridor A: [x, side (−1 = zMin wall / left, +1 = zMax wall / right)]. */
 export const CORR_A_DOORS: [number, -1 | 1][] = [
   [24, -1],
@@ -434,7 +437,8 @@ export function buildCorrA(ctx: ZoneCtx): THREE.Group {
   }
   vent(ctx, g, 27, r.h, -43.2, 0);
   vent(ctx, g, 33.4, r.h, -44.7, 0);
-  vent(ctx, g, 41.5, r.h, -43.4, 0);
+  // (The "corridor vent" crawler's: ~6 m ahead of the corridor-vent stop at x 31.)
+  vent(ctx, g, CORR_A_VENT[0], r.h, CORR_A_VENT[1], 0);
   // Furniture along the walls.
   gurney(g, 20.5, 0, -45.6, Math.PI / 2, { body: true, blood: true });
   gurney(g, 34.5, 0, -42.4, Math.PI / 2 + 0.08, { sheet: C.sheetBlue });

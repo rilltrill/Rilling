@@ -5,6 +5,7 @@ import { buildEnv, z1Scene } from './env';
 import { GlassPane } from './setpieces';
 import { explosiveBarrel } from '../../../gameplay/Props';
 import './boss';
+import './straggler';
 import { bakeMerge } from './bake';
 import type { Destructible } from '../../../gameplay/Props';
 
@@ -37,7 +38,10 @@ const beats: Beat[] = [
   // ── 1. First contact: one at a time, out of the fog ──────────────────────
   // (Pacing: every walk between fights has something to shoot — a straggler
   // shambling out of a doorway or the fog — so no stretch of the street is dead
-  // air; they're lone walkers, so the opening stage stays gentle.)
+  // air; they're lone walkers, so the opening stage stays gentle. Walk stragglers
+  // appear ~21 m ahead, ≈4 s before they'd reach you, and use the 'straggler'
+  // type (straggler.ts): one you stroll past without shooting is left behind
+  // for good instead of circling back round the camera into the next fight.)
   {
     kind: 'move',
     label: 'through the barricade',
@@ -71,7 +75,7 @@ const beats: Beat[] = [
     to: 46,
     speed: 3.6,
     // A cook stumbles out ahead-left, on the diner's side of the street.
-    waves: [{ start: { atD: 27 }, spawns: [{ type: 'walker', pos: [-2.6, 0, 16], frame: 'world', opts: { variant: 'worker' } }] }],
+    waves: [{ start: { atD: 25 }, spawns: [{ type: 'straggler', pos: [-2.6, 0, 21], frame: 'world', opts: { variant: 'worker' } }] }],
   },
   {
     kind: 'hold',
@@ -104,8 +108,8 @@ const beats: Beat[] = [
     to: 84,
     speed: 3.5,
     waves: [
-      { start: { atD: 58 }, spawns: [{ type: 'walker', pos: [-3, 0, 15], frame: 'world', opts: { variant: 'office' } }] },
-      { start: { atD: 71 }, spawns: [{ type: 'walker', pos: [2.6, 0, 15], frame: 'world', opts: { variant: 'nurse' } }] },
+      { start: { atD: 56 }, spawns: [{ type: 'straggler', pos: [-3, 0, 21], frame: 'world', opts: { variant: 'office' } }] },
+      { start: { atD: 69 }, spawns: [{ type: 'straggler', pos: [2.6, 0, 21], frame: 'world', opts: { variant: 'nurse' } }] },
     ],
   },
   {
@@ -246,7 +250,7 @@ const beats: Beat[] = [
     to: 250,
     speed: 3.4,
     // One wanders over from the forecourt on the left.
-    waves: [{ start: { atD: 231 }, spawns: [{ type: 'walker', pos: [-3.2, 0, 15], frame: 'world', opts: { variant: 'civilian' } }] }],
+    waves: [{ start: { atD: 229 }, spawns: [{ type: 'straggler', pos: [-3.2, 0, 21], frame: 'world', opts: { variant: 'civilian' } }] }],
   },
   {
     kind: 'hold',
@@ -297,8 +301,8 @@ const beats: Beat[] = [
     speed: 3.8,
     // Stragglers drawn by the blast, one at a time.
     waves: [
-      { start: { atD: 256 }, spawns: [{ type: 'walker', pos: [-2.2, 0, 15], frame: 'world', opts: { variant: 'worker' } }] },
-      { start: { atD: 268 }, spawns: [{ type: 'walker', pos: [1.6, 0, 16], frame: 'world', opts: { variant: 'office' } }] },
+      { start: { atD: 253 }, spawns: [{ type: 'straggler', pos: [-2.2, 0, 21], frame: 'world', opts: { variant: 'worker' } }] },
+      { start: { atD: 266 }, spawns: [{ type: 'straggler', pos: [1.6, 0, 21], frame: 'world', opts: { variant: 'office' } }] },
     ],
   },
   {
@@ -348,8 +352,8 @@ const beats: Beat[] = [
     to: 319,
     speed: 3.7,
     waves: [
-      { start: { atD: 287 }, spawns: [{ type: 'walker', pos: [-2.4, 0, 15], frame: 'world', opts: { variant: 'nurse' } }] },
-      { start: { atD: 300 }, spawns: [{ type: 'walker', pos: [2.8, 0, 16], frame: 'world', opts: { variant: 'civilian' } }] },
+      { start: { atD: 284 }, spawns: [{ type: 'straggler', pos: [-2.4, 0, 21], frame: 'world', opts: { variant: 'nurse' } }] },
+      { start: { atD: 298 }, spawns: [{ type: 'straggler', pos: [2.8, 0, 21], frame: 'world', opts: { variant: 'civilian' } }] },
     ],
   },
   {
