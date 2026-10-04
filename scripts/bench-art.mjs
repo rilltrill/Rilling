@@ -70,11 +70,12 @@ for (const [stage, beat] of shots) {
         const right = fwd.clone().set(-fwd.z, 0, fwd.x);
         let k = 0;
         for (const part of spawn.split(',')) {
-          const [id, n] = part.split(':');
+          const [idv, n] = part.split(':');
+          const [id, variant] = idv.split('@');
           for (let i = 0; i < Number(n); i++, k++) {
             const pos = cam.position.clone().addScaledVector(fwd, 5 + (k % 5) * 2.2).addScaledVector(right, ((k * 1.7) % 9) - 4.5);
             pos.y = w.groundAt(pos.x, pos.z);
-            w.add(reg.createEnemy(id, w, { pos, frame: 'world', entry: 'walk', hpMul: 1, speedMul: 1, opts: {} }));
+            w.add(reg.createEnemy(id, w, { pos, frame: 'world', entry: 'walk', hpMul: 1, speedMul: 1, opts: variant ? { variant } : { variant: 'random' } }));
           }
         }
         // Let them settle into the scene for a few frames.
@@ -100,7 +101,8 @@ for (const [stage, beat] of shots) {
           g.renderWorld(w);
           const b = performance.now();
           gl.finish();
-          if (i >= 30) rows.push({ ms: b - a, calls: r.info.render.calls, tris: r.info.render.triangles, bakes: g.sprites?.stats.bakes ?? 0, spriteMs: g.sprites?.stats.lastMs ?? 0 });
+          const st = g.sprites?.stats;
+          if (i >= 30) rows.push({ ms: b - a, calls: r.info.render.calls, tris: r.info.render.triangles, bakes: st?.bakes ?? 0, spriteMs: st?.lastMs ?? 0, paints: st?.paints ?? 0, paintMs: st?.paintMsFrame ?? 0, figureMs: st?.figureMsFrame ?? 0, prims: st?.prims ?? 0 });
           // Style pops: characters drawn as 3D models while SPRITES is on (whole pass, warm-up frames included).
           if (g.sprites) {
             fallbacks += g.sprites.stats.fallbacks;
@@ -125,6 +127,13 @@ for (const [stage, beat] of shots) {
           trisMax: max('tris'),
           bakesPerFrame: avg('bakes'),
           bakesMax: max('bakes'),
+          paintsPerFrame: avg('paints'),
+          paintsMax: max('paints'),
+          paintMsAvg: avg('paintMs'),
+          paintMsMax: max('paintMs'),
+          figureMsAvg: avg('figureMs'),
+          figureMsMax: max('figureMs'),
+          primsMax: max('prims'),
           characters: w.entities.filter((e) => e.constructor && (e.hostile || e.isBoss || e.constructor.name.includes('Civilian'))).length,
           sprites: g.sprites ? g.sprites.stats.drawn : 0,
           rtMB: g.sprites ? +(g.sprites.stats.rtBytes / 1048576).toFixed(2) : 0,

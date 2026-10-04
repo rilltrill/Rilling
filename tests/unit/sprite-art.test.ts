@@ -3,6 +3,22 @@ import * as THREE from 'three';
 import { autoTexelScale, DEFAULT_LOOK, keepLive, parseLook } from '../../src/gameplay/SpriteArt';
 import { buildPalette, linearToOklab, oklchToLinear, PALETTE_MAX } from '../../src/gameplay/spritePalette';
 import { DEFAULT_SETTINGS } from '../../src/core/types';
+import { Save } from '../../src/core/Save';
+
+/** In-memory Storage for the ART migration check. */
+function memStorage(init: Record<string, string>): Storage {
+  const m = new Map(Object.entries(init));
+  return {
+    get length() {
+      return m.size;
+    },
+    clear: () => m.clear(),
+    getItem: (k: string) => m.get(k) ?? null,
+    key: (i: number) => [...m.keys()][i] ?? null,
+    removeItem: (k: string) => void m.delete(k),
+    setItem: (k: string, v: string) => void m.set(k, String(v)),
+  };
+}
 
 describe('ART: SPRITES', () => {
   it('parses look overrides (debug URL &spriteLook=)', () => {
@@ -16,8 +32,14 @@ describe('ART: SPRITES', () => {
     expect(parseLook(null)).toEqual(DEFAULT_LOOK);
   });
 
-  it('defaults ART to 3D (sprites are opt-in)', () => {
-    expect(DEFAULT_SETTINGS.art).toBe('3d');
+  it('defaults ART to SPRITES (PixelCast pixel art; 3D stays one tap away)', () => {
+    expect(DEFAULT_SETTINGS.art).toBe('sprites');
+    // A save from before stored '3d' as the old default: it moves to SPRITES once…
+    const old = new Save(memStorage({ 'overrun.save.v1': JSON.stringify({ version: 1, settings: { art: '3d' } }) }), false);
+    expect(old.settings.art).toBe('sprites');
+    // …while a 3D choice made since sticks.
+    const chosen = new Save(memStorage({ 'overrun.save.v1': JSON.stringify({ version: 1, settings: { art: '3d', artV: 2 } }) }), false);
+    expect(chosen.settings.art).toBe('3d');
   });
 
   it('picks whole pixel scales by size, with hysteresis', () => {

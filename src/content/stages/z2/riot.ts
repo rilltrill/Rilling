@@ -21,6 +21,9 @@ const STRAP = 0x1e1a18;
  * sparks + clank on the first body shot (and a one-off hint) say "aim higher".
  */
 export class RiotWalker extends Walker {
+  /** ART: SPRITES — its riot plates (armor hit zones) aren't painted yet: impostor bake until they are. */
+  protected override pixelArt = false;
+
   protected override configure() {
     super.configure();
     this.name = 'riot';

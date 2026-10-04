@@ -459,7 +459,7 @@ function paintHead(f: PixelFigure, r: HumanoidRig, L: HumanLook, M: Mats, st: Hu
       if (side < 0.12) continue;
       if (L.dead) {
         // Sunken socket + a glowing pin of an eye.
-        f.decal(f.at(h, sd * 0.05 * hs, ey + 0.004, ez), f.at(h, sd * 0.044 * hs, ey - 0.006, ez), 0.022 * hs * s, 0.018 * hs * s, M.skin, { ...F, tone: -0.42, flags: D | PF.SHADE_ONLY });
+        f.decal(f.at(h, sd * 0.05 * hs, ey + 0.004, ez), f.at(h, sd * 0.044 * hs, ey - 0.006, ez), 0.022 * hs * s, 0.018 * hs * s, M.skin, { ...F, tone: -0.55, flags: D | PF.SHADE_ONLY });
         f.decal(eye, eye, 0.009 * hs * s, 0.009 * hs * s, Mat.glow(L.eyes), { ...F, flags: D | PF.GLOW, minPx: 0.5 });
       } else {
         const wide = st.face === 'scream' ? 1.25 : 1;
@@ -568,9 +568,9 @@ export function paintArm(f: PixelFigure, sh: THREE.Object3D, elbow: THREE.Object
   const A: PrimOpts = { part: PART.LIMB };
   const upperMat = L.sleeves === 'none' ? M.skin : M.sleeve;
   // Deltoid + upper arm (short sleeves end halfway down).
-  f.cone(f.at(sh, 0, 0.035, 0), f.at(sh, 0.004 * side, -0.13 * a, 0.004), 0.064 * s, 0.057 * s, upperMat, A);
+  f.cone(f.at(sh, 0, 0.035, 0), f.at(sh, 0.004 * side, -0.13 * a, 0.004), 0.059 * s, 0.053 * s, upperMat, A);
   const shortSleeve = L.sleeves === 'short';
-  f.cone(f.at(sh, 0, -0.06 * a, 0), f.at(sh, 0, -0.3 * a, 0), 0.056 * s, 0.048 * s, upperMat, {
+  f.cone(f.at(sh, 0, -0.06 * a, 0), f.at(sh, 0, -0.3 * a, 0), 0.052 * s, 0.046 * s, upperMat, {
     ...A,
     matB: shortSleeve ? M.skin : upperMat,
     split: shortSleeve ? 0.42 : 2,
@@ -594,7 +594,7 @@ export function paintArm(f: PixelFigure, sh: THREE.Object3D, elbow: THREE.Object
   }
   const foreMat = L.sleeves === 'long' ? M.sleeve : M.skin;
   // Forearm: muscle bulge below the elbow, tapering to the wrist.
-  f.cone(f.at(elbow, 0, 0.02, 0), f.at(elbow, 0, -0.1 * a, 0.004), 0.05 * s, 0.052 * s, foreMat, A);
+  f.cone(f.at(elbow, 0, 0.02, 0), f.at(elbow, 0, -0.1 * a, 0.004), 0.048 * s, 0.05 * s, foreMat, A);
   f.cone(f.at(elbow, 0, -0.07 * a, 0), f.at(elbow, 0, -0.245 * a, 0), 0.049 * s, 0.036 * s, foreMat, {
     ...A,
     matB: L.sleeves === 'long' ? M.skin : foreMat,

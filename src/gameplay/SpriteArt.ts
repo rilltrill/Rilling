@@ -628,6 +628,10 @@ export interface SpriteStats {
   /** PixelCast paints (hand-drawn pixel art) this frame, and CPU ms they took (smoothed). */
   paints: number;
   paintMs: number;
+  /** CPU ms of the last frame's paints (figure building + GPU submission). */
+  paintMsFrame: number;
+  /** Of that, ms spent building figures (painters + layout, pure JS). */
+  figureMsFrame: number;
   /** Primitives in the last painted figure (and table overflows since creation). */
   prims: number;
   primOverflow: number;
@@ -761,6 +765,8 @@ export class SpriteArt {
     live3d: 0,
     paints: 0,
     paintMs: 0,
+    paintMsFrame: 0,
+    figureMsFrame: 0,
     prims: 0,
     primOverflow: 0,
   };
@@ -778,6 +784,7 @@ export class SpriteArt {
   private night = 0;
   private framePaints = 0;
   private framePaintMs = 0;
+  private frameFigureMs = 0;
 
   private sprites = new Map<THREE.Object3D, Sprite>();
   private free = new Map<string, THREE.WebGLRenderTarget[]>();
@@ -1001,6 +1008,7 @@ export class SpriteArt {
     let bakes = 0;
     this.framePaints = 0;
     this.framePaintMs = 0;
+    this.frameFigureMs = 0;
     if (due.length) {
       due.sort((a, b) => (a.ready === b.ready ? a.next - b.next : a.ready ? 1 : -1));
       const cap = Math.max(MAX_BAKES_PER_FRAME, Math.min(firsts, MAX_FIRST_BAKES));
@@ -1102,6 +1110,8 @@ export class SpriteArt {
     st.fallbacksTotal += fallbacks;
     st.live3d = live;
     st.paints = this.framePaints;
+    st.paintMsFrame = this.framePaintMs;
+    st.figureMsFrame = this.frameFigureMs;
     st.paintMs = st.paintMs * 0.9 + this.framePaintMs * 0.1;
     st.cpuMs = st.cpuMs * 0.9 + ms * 0.1;
     st.lastMs = ms;
@@ -1613,6 +1623,7 @@ export class SpriteArt {
       return false;
     }
     s.k = f.kpx;
+    this.frameFigureMs += performance.now() - t0;
     // Live 3D parts under the model (blood pools, halos) stay real meshes.
     const keep = this.bakeKeep;
     keep.length = 0;

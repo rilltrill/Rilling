@@ -215,15 +215,15 @@ export function paintTheropod(f: PixelFigure, r: TheroRig, s: TheroSpec, p: Pale
       f.cone(b, f.at(to, x * 1.3, -fh * 1.1, s.toe + 0.045 * L), 0.012 * L * sc, 0.004 * sc, claw, { ...P, k: 0.004 * sc, minPx: 0.5 });
     }
     if (st.sickle) {
-      // Raised inner toe + the big hooked killing claw.
+      // Raised inner toe + the big killing claw, held UP off the ground and hooked forward.
       const x = 0.05 * side;
       const k0 = f.at(to, x, -fh * 0.3, 0.0);
-      const k1 = f.at(to, x * 1.2, 0.03, 0.05);
-      f.cone(k0, k1, 0.02 * sc, 0.017 * sc, lp, { ...P, k: 0.01 * sc });
-      const c1 = f.at(to, x * 1.4, 0.06, 0.1);
-      const c2 = f.at(to, x * 1.4, 0.035, 0.17);
-      f.cone(k1, c1, 0.016 * sc, 0.011 * sc, claw, { ...P, k: 0.006 * sc });
-      f.cone(c1, c2, 0.011 * sc, 0.004 * sc, claw, { ...P, k: 0.004 * sc, minPx: 0.5 });
+      const k1 = f.at(to, x * 1.1, 0.04, 0.045);
+      f.cone(k0, k1, 0.021 * sc, 0.018 * sc, lp, { ...P, k: 0.01 * sc });
+      const c1 = f.at(to, x * 1.4, 0.12, 0.085);
+      const c2 = f.at(to, x * 1.4, 0.14, 0.14);
+      f.cone(k1, c1, 0.019 * sc, 0.012 * sc, claw, { ...P, k: 0.006 * sc });
+      f.cone(c1, c2, 0.012 * sc, 0.004 * sc, claw, { ...P, k: 0.004 * sc, minPx: 0.5 });
     }
   }
 

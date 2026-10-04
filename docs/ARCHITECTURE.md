@@ -46,7 +46,9 @@ src/
     stages/index.ts        CAMPAIGNS
   fx/Fx.ts                 pooled particles, gibs, explosions
   audio/                   names.ts (sfx/music ids), Audio.ts, Sfx.ts, Music.ts
-  gameplay/SpriteArt.ts    ART: SPRITES — live pixel-art impostors of characters
+  gameplay/SpriteArt.ts    ART: SPRITES — sprite scheduling, billboards, impostor bake
+  gameplay/pixel/          PixelCast: figure builder, GPU paint/resolve passes, materials
+  content/pixel/           PixelCast painters (humanoid, theropod)
   ui/                      Hud.ts, Overlay2D.ts, Menus.ts, dom.ts
   debug/AutoPlayer.ts      aimbot for ?autoplay=1 and the stage simulator
 tests/unit/                vitest — includes the headless stage simulator
@@ -177,71 +179,114 @@ id from the stage folder (e.g. `registerEnemy('butcher', …)`).
   in 'crt' mode, scanlines, curvature, convergence error, phosphor bloom and
   vignette. Settings → DISPLAY: CRT / PIXEL / OFF (`Settings.retro`).
 
-## Art style: SPRITES (pixel-art characters, `gameplay/SpriteArt.ts`)
+## Art style: SPRITES — PixelCast pixel art (`gameplay/pixel/`, `content/pixel/`)
 
-Settings → ART: **3D | SPRITES** (`Settings.art`, default **3D**; URL `&art=sprites|3d`
-overrides it until the player changes ART). Live, also mid-stage: the pause screen
-has a one-tap ART chip under RESUME. In SPRITES every character — enemies, bosses,
-civilians — plus projectiles, pickups and severed limbs is drawn as a 2D pixel-art
-sprite, the way 90s arcade shooters used pre-rendered sprites; gibs become pixel blobs.
+Settings → ART: **SPRITES | 3D** (`Settings.art`, default **SPRITES** on this branch; `artV`
+migrates saves that only stored the old '3d' default; URL `&art=sprites|3d` overrides it
+until the player changes ART; live mid-stage via the pause screen's ART chip). ART: 3D is
+the procedural-model look, unchanged.
 
-- **Live impostors.** `SpriteArt.beginFrame()` (called by `Game.renderWorld`
-  around `engine.render`) re-renders each visible sprite source about 12×/s of
-  game time (`SPRITE_FPS`, round-robin, ≤ 6 bakes and ≤ ~90 bake draw calls per
-  frame; characters with no image yet first, with a bigger budget) — so animation
-  is choppy like sprite frames while positions stay smooth. A sprite also re-bakes
-  when the view direction to it turned > 4° or the retro grid changed.
-- **Bake.** The bake camera is the main camera with its projection *cropped* to the
-  source's on-screen bounds (no perspective mismatch). Texels are a WHOLE number of
-  retro pixels (`autoTexelScale`: 1, or 2 once a character is > 300 px tall; bosses 1;
-  more only to stay under the 256 / 512-texel caps; never finer than 1.2 cm of model),
-  aligned to the retro pixel grid, 2× supersampled into a 512² HDR scratch target with
-  a depth texture. Lights are mirrored into a tiny bake scene (+ a cool back light,
-  intensity 0 in daylight, so dark-stage silhouettes separate from the night);
-  `precompile` warms those variants. `RETRO_DETAIL` (ModelKit) boosts the
-  characters' pixel textures ×1.25 during bakes only, so surface detail survives.
-- **Live 3D parts.** Alpha-blended meshes (glow halos, IV tubes, spray), lines and
-  very thin geometry (`keepLive`), or anything with `userData.spriteKeep3D = true`,
-  are not baked: they stay real meshes drawn over the sprite (the baked parts are
-  moved to an unused layer for the main draw instead of hiding the root).
-- **Pixel-art pass** (`BAKE_FRAG`) into the sprite's own small RGBA8 target (pooled
-  by power-of-two size), stored in *display* space (after the retro pass's tone
-  curve; the billboard inverts it): per texel the subsample nearest the median
-  brightness (texture survives; no mean-to-mush), unbiased coverage, local contrast,
-  a selective outline drawn on the silhouette's own edge texels (a dark, richer shade
-  of the local colour; lighter on top edges and on parts ≤ 3 texels thick; never on
-  1-texel runs — no bloat: the sprite covers what the model and its hitbox cover),
-  knocked-out box corners, inner contours, a top light, dithered luminance bands,
-  hue-shifted shading relative to the stage's light level, and the campaign's
-  64-colour palette (`spritePalette.ts`: hue-shifted ramps; a texel picks its ramp
-  by hue, then its step by lightness). Unlit (glow) materials are baked through a
-  twin that tags alpha, and those texels (eyes, weak points, hearts) skip all of it.
-  Each texel's view depth goes into alpha.
-- **Display.** A quad per sprite at the entity's root + bake offset, laid out in the
-  vertex shader at the baked pixel size with its corner snapped to the pixel grid
-  (texels always land on whole pixels; no crawl), writing **per-texel depth**
-  (`gl_FragDepth`, biased back ~2 cm so live parts on the surface win), so scenery
-  occludes sprites as the 3D models would. Hit flashes tint the sprite white/red
-  (`Enemy.flashKind`). Characters get a pixel blob shadow (one instanced draw),
-  capped on screen and gone once they are 0.8 m off the ground.
-- **Gameplay is untouched.** The 3D models keep animating and are the hitboxes;
-  they are only hidden for the main camera's draw and restored in `endFrame()`, so
-  raycasts, aim assist, AutoPlayer and the simulator see exactly what they saw
-  before. A character on screen without an image yet is hidden for ≤ 3 frames,
-  then falls back to its 3D model (`stats.fallbacks`, 0 in the bench scenes).
-- Tuning: `&spriteLook=pal:0,k:2,bands:0,outline:0.6,dirs:8,…` (see `SpriteLook`;
-  `dirs:8` = Doom-style turning in 45° steps). Look-dev captures with enemies placed
-  in front of the camera: `node scripts/look-art.mjs --url "/?stage=zoo&zoo=compy"
-  --place "runner:1.2:3,raptor:-2:7" --modes "3d,sprites,sprites@pal=0"`; A/B of a
-  frozen stage instant: `node scripts/snap-art.mjs --shots "z1:4,d3:16:6000"`;
-  deterministic draw-call / bake numbers, style-pop count and a silhouette-area
-  check (sprite vs model, per type): `node scripts/bench-art.mjs`.
-- Cost: a bake is the source's own draw calls + 1 (plus 2 render-target
-  switches); characters are drawn ~12×/s instead of 60×/s, so average draw calls
-  drop a lot in crowds, while a frame that bakes a 100-mesh boss costs about what
-  3D did (the bake budget keeps such frames from stacking). The bake pass is a
-  few hundred ALU ops and ~100 texel fetches per sprite texel, on ~15k texels per
-  frame. Memory: 3 MB scratch + a few KB–1 MB per sprite (≈ 3–5 MB total).
+In SPRITES, characters that have a **painter** are drawn as hand-made pixel art by
+**PixelCast**; every other sprite entity (bosses, runners, crawlers, brutes, spitters,
+bloaters, compys, dilos, pteros, trikes, projectiles, pickups) still uses the older live
+**impostor bake** (its 3D model re-rendered into pixels) until someone paints it.
+Pilots painted today: **walker** (every outfit; office / worker / nurse are the reference),
+**civilian** (all variants; the z1 worker is the reference) and **raptor** (all palettes
+incl. the red alpha; d1/d2/d3 subclasses inherit it). `RiotWalker` opts out (its armour
+plates aren't painted yet).
+
+### How it works
+- The invisible 3D rig keeps animating and stays the hitbox (raycasts, aim assist,
+  AutoPlayer, simulator see exactly what they saw before; the model is only hidden for
+  the main camera's draw).
+- About **12×/s** per character (`SPRITE_FPS`, round-robin, ≤ 6 redraws per frame, first
+  frames first) SpriteArt calls `entity.paintPixels(figure)`. The painter reads the rig's
+  joint matrices and adds **2D primitives in world space** to a `PixelFigure`: tapered round
+  cones (`cone`), elliptical-section cones (`coneE`: the half-width across the screen is the
+  projected ellipse, so torsos/tails are wide from the front and slim from the side),
+  projected `ellipsoid`s (skulls, hips, hats), `ball`s and `decal`s. The figure projects
+  them through the main camera onto the retro pixel grid — radii in metres become texels
+  at their depth — so every shape lands exactly where the rig's joints (and hitboxes) are.
+- **Layers**: primitives in one layer melt together (polynomial smooth-min, blend radius
+  `k`), giving one continuous silhouette whose shading normal is the gradient of the
+  blended field (shoulders flow into arms, snout into neck into tail). Layers composite by
+  per-texel depth. Inside a layer the front-most covering primitive picks the material
+  (`zBias` nudges it: a hair cap wins over the forehead it sits on). **Decals** paint
+  material (or just shade, `PF.SHADE_ONLY`) onto their own layer where it is covered —
+  faces, ties, badges, wounds — and never change the silhouette.
+- Two GPU passes per redraw, no readbacks (`PixelCast.ts`): **paint** (G-buffer: walk the
+  primitives — a float data texture uploaded per redraw — union, shade, run the material's
+  pattern; writes material id, tone, packed depth, layer/flags) and **resolve** (the pixel-art
+  pass: ramps, dither, outline, contours, cast shadows, stage tint, night rim, fog; writes the
+  same display-space sprite + depth-in-alpha format as the impostor bake). Billboards,
+  per-texel depth occlusion, hit flashes and blob shadows are shared with the impostor path.
+- `PixelFigure.sample()` is a CPU reference of the paint pass's coverage (node-safe), used by
+  the alignment tests.
+
+### Adding pixel art for a character
+1. Expose what the painter needs (a look record + per-frame pose values) **without new
+   `world.rng` draws** — gameplay must be identical in both ART modes (see how `zombieKit`
+   records outfit/gore choices into `ZBody.look`).
+2. Implement `override paintPixels(f: PixelFigure): boolean` (and `paintPart` for flung
+   limbs) on the entity; call a painter from `content/pixel/` (`paintHuman`,
+   `paintTheropod`) or write a new one with the same building blocks. Return false to fall
+   back to the impostor bake. Subclasses that add meshes the painter doesn't know about
+   (armour, glowing weak spots) must paint them or set `pixelArt = false`.
+3. Look-dev: `node scripts/pixel-look.mjs --place "walker@office:-1:3.5,raptor@red:1.5:7:-30:windup=0.8,civ@worker:0:5"`
+   (actions: `windup= stagger= sever=L|R|l|r pop die= pounce= walk= hit`; `--stage "zoo&zooEnv=night"`).
+   It writes `-3d.png`, `-sprites.png`, a 3D|SPRITES `-montage.png` of zoomed crops and
+   `-texels.png` (each sprite's raw texels ×4 — judge the pixels there).
+4. Add the type to `tests/unit/pixelcast.test.ts` (alignment) and check
+   `node scripts/bench-art.mjs`.
+
+### Style guide (keep new characters consistent)
+- **Pixel density**: 1 texel = 1 retro pixel (≈ 288 lines) until the figure is
+  `maxTexels` tall (humans 190, theropods 200 — a mid-range human is ~90–130 texels);
+  closer than that texels grow by whole pixels (arcade sprite scaling). Never mix texel
+  sizes inside a sprite.
+- **Proportions**: classic sprite chunkiness — heads, hands and feet slightly big, limbs
+  about as thick as their hitbox boxes (radii ≈ the boxes' half-widths, a little inside),
+  hands fanned out on screen (spread axis ⟂ arm and view) so they read as hands.
+- **Palette**: every surface is a material (`Mat.*`, `materials.ts`) with a 6-step
+  hand-built ramp: base colour on step 3, shadows darker, richer and hue-shifted toward
+  violet, highlights paler and toward warm yellow; step 0 is the outline shade. Pick base
+  colours from the character's 3D palette so both ART modes match. No gradients, no
+  anti-aliasing, no per-texel noise: texture comes from designed patterns (cloth grime,
+  denim fade, buffalo check, rot patches + veins, hair strands, reptile scale seams,
+  stripes along `u`, gown print, camo, ribs) and drawn details (folds near joints, seams,
+  stains, wounds as decals).
+- **Light**: a fixed sprite-artist light from the upper left and front (screen space
+  (−0.55, 0.62, 0.56)), hard terminator, flattened profile (broad lit planes, not
+  pillow shading); far-side limbs one notch darker (`layer({ tone: -0.1 })`). Stages only
+  tint (night ≈ 0.68 brightness + a faint sky tint) and add a cool rim on the back-lit edge.
+- **Outlines**: 1 texel on the silhouette's own edge texels (no bloat — the sprite covers
+  what the hitboxes cover): step 0 of the local ramp, step 1 on a lit top/left edge;
+  1-texel runs (fingers, claws, quills) are never outlined. Inner contour (step 0) where a
+  nearer layer overlaps one > 7 cm behind; one step of cast shadow below/right of
+  overlaps and under hems, cuffs and collars. Dither (Bayer 4×4) only in the narrow band
+  between two steps (`dither` per material).
+- **Animation**: redraws at 12 fps of game time (positions stay smooth at 60). Secondary
+  motion is drawn by the painter from `time`/state: jaws (groan, gape in the windup, snap
+  on the bite), claws twitching, rags/hair/quills swaying, squash & stretch on hits
+  (`f.warp`, ≤ 7 %), the impostor/painted sprite flashes white/red on hits.
+- **Gore**: `Mat.blood / gore / bone / ribs`; wounds and stains are decals only drawn while
+  that side faces the camera; stumps are a ragged gore ball + a bone knob; a popped head
+  leaves a neck stump; severed limbs are painted on their own (`paintPart`). Blood squirts
+  and chunks are FX pixel particles (gib sprites).
+- **Budgets**: ≤ 160 primitives per figure (pilots use 60–90), 2 draws + one 12 KB upload
+  per redraw, ≤ 6 redraws per frame, painter CPU ~0.1–0.4 ms per redraw on desktop.
+  Memory: a 256² RGBA8 G-buffer + per-sprite RGBA8 targets pooled by power-of-two size.
+
+### Impostor bake (characters without a painter)
+`SpriteArt.bakeNow` re-renders the source's 3D model with the main camera's projection
+cropped to its on-screen bounds into a 512² HDR scratch target (2× supersampled, mirrored
+stage lights + a cool back light in dark stages, `RETRO_DETAIL` ×1.25), then `BAKE_FRAG`
+turns it into pixel art (median subsample, selective outline, inner contours, top light,
+dithered bands, hue-shifted shading, the campaign's 64-colour palette from
+`spritePalette.ts`). Alpha-blended / very thin parts (`keepLive`, `userData.spriteKeep3D`)
+stay live 3D meshes over the sprite (blood pools too). Tuning: `&spriteLook=pal:0,k:2,…`;
+captures: `scripts/snap-art.mjs`, `scripts/look-art.mjs`; numbers: `scripts/bench-art.mjs`
+(draw calls, redraws, paint ms, primitives, sprite vs model silhouette area, style pops).
 
 ## Audio
 
@@ -326,7 +371,7 @@ or new material types mid-stage still compile then: add such lights at build tim
 
 ## Debug URL flags
 
-`?stage=z1` jump into a stage · `&art=sprites|3d` character art (Settings ART, default 3D) ·
+`?stage=z1` jump into a stage · `&art=sprites|3d` character art (Settings ART, default SPRITES) ·
 `&spriteLook=pal:0,dirs:8` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
 overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor

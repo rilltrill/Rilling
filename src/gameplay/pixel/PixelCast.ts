@@ -408,6 +408,8 @@ const RESOLVE_FRAG = /* glsl */ `
         // Under a hem / cuff / collar of another material on the same part: a step of shadow.
         if (!eU && layerOf(nU) == L && abs(nU.r - c.r) > 0.5 / 255.0 && abs(nU.b - c.b) < uGap) sh = true;
         if (sh) st = max(1.0, st - 1.0);
+        // Lit rim: one texel inside a top / left silhouette edge, a step of light.
+        else if (st >= 2.0 && ((G(p + ivec2(0, 2)).r < 0.5 / 255.0 && layerOf(nU) == L) || (G(p - ivec2(2, 0)).r < 0.5 / 255.0 && layerOf(nL) == L))) st = min(st + 1.0, ${STEPS - 1}.0);
       }
     }
     vec3 col = ramp(mat, st) * uTint;
