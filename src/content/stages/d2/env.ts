@@ -96,6 +96,8 @@ export class LabScene {
   private lightning = 0;
   private boltT = 3;
   private bolt2 = -1;
+  /** Seconds into a reduced-flashing lightning swell (-1 = none). */
+  private swellT = -1;
   private occKey = -1;
   private fx = new Rng(4242);
   private ambience: Ambience[] = [];
@@ -280,11 +282,14 @@ export class LabScene {
     for (const c of this.cullables) c.obj.visible = c.d > d - 16 && c.d < d + 60;
 
     // Animated materials.
+    // Settings.reduceFlashes ("calm"): no dropouts on the flickering panels, the
+    // red beacons / alarm wash only swell gently, lightning is a soft glow.
+    const calm = !!w.settings.reduceFlashes;
     const am = this.am;
     const pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 1.1);
-    const k = 0.18 + 1.25 * pulse * pulse;
+    const k = calm ? 0.5 + 0.55 * pulse : 0.18 + 1.25 * pulse * pulse;
     am.strobe.color.setRGB(1.0 * k + 0.08, 0.1 * k, 0.06 * k);
-    const fl = noise1(t * 9) > 0.8 || noise1(t * 1.7 + 30) > 0.86 ? 0.12 : 0.95 + noise1(t * 40) * 0.25;
+    const fl = calm ? 0.95 + noise1(t * 3) * 0.06 : noise1(t * 9) > 0.8 || noise1(t * 1.7 + 30) > 0.86 ? 0.12 : 0.95 + noise1(t * 40) * 0.25;
     am.flicker.color.setRGB(0.92 * fl, 0.96 * fl, 1.05 * fl);
     for (let i = 0; i < 3; i++) {
       const on = noise1(t * (2.2 + i * 1.3) + i * 17) > 0.45;
@@ -305,8 +310,11 @@ export class LabScene {
     if (d > gFrom && d < gTo) {
       this.boltT -= dt;
       if (this.boltT <= 0) {
-        this.lightning = 1;
-        this.bolt2 = 0.14;
+        if (calm) this.swellT = 0;
+        else {
+          this.lightning = 1;
+          this.bolt2 = 0.14;
+        }
         this.boltT = this.fx.range(5, 9);
         const delay = this.fx.range(0.4, 1.1);
         w.later(delay, () => w.audio.play('thunder', { volume: 0.75, vary: 0.15 }));
@@ -317,7 +325,16 @@ export class LabScene {
       if (this.bolt2 <= 0) this.lightning = Math.max(this.lightning, 0.8);
     }
     this.lightning = Math.max(0, this.lightning - dt * 6);
-    am.sky.color.copy(this.skyBase).lerp(_c.setRGB(0.75, 0.82, 1.0), this.lightning);
+    // Calm: a single soft swell (~25 % of the peak, 0.3 s rise, 1 s fade) instead of a double white-out.
+    let swell = 0;
+    if (this.swellT >= 0) {
+      this.swellT += dt;
+      const st = this.swellT;
+      swell = 0.25 * (st < 0.3 ? st / 0.3 : Math.max(0, 1 - (st - 0.3)));
+      if (st > 1.3) this.swellT = -1;
+    }
+    const bolt = calm ? Math.min(swell + this.lightning * 0.25, 0.3) : Math.max(this.lightning, swell);
+    am.sky.color.copy(this.skyBase).lerp(_c.setRGB(0.75, 0.82, 1.0), bolt);
 
     // Ambience (hemisphere + fog) blended along the rail.
     const amb = this.ambience;
@@ -330,11 +347,11 @@ export class LabScene {
     const dimK = 1 - this.dim * 0.55;
     this.hemi.color.set(a.sky).lerp(_c.set(b.sky), f);
     this.hemi.groundColor.set(a.ground).lerp(_c.set(b.ground), f);
-    this.hemi.intensity = lerp(a.hemi, b.hemi, f) * dimK + this.lightning * 1.6;
+    this.hemi.intensity = lerp(a.hemi, b.hemi, f) * dimK + bolt * 1.6;
     this.sun.intensity = 1.25 * dimK;
     const fog = w.scene.fog as THREE.Fog;
     fog.color.set(a.fog).lerp(_c.set(b.fog), f);
-    fog.color.lerp(_c2.setRGB(0.35, 0.4, 0.55), this.lightning * 0.35);
+    fog.color.lerp(_c2.setRGB(0.35, 0.4, 0.55), bolt * 0.35);
     fog.near = lerp(a.near, b.near, f);
     fog.far = lerp(a.far, b.far, f);
     (w.scene.background as THREE.Color).copy(fog.color);
@@ -358,17 +375,17 @@ export class LabScene {
         ik = 0.35 + 0.65 * pulse;
         break;
       case 'strobe':
-        ik = 0.1 + 0.9 * pulse * pulse;
+        ik = calm ? 0.45 + 0.35 * pulse : 0.1 + 0.9 * pulse * pulse;
         break;
       case 'flicker':
-        ik = fl > 0.5 ? 0.8 + noise1(t * 20) * 0.3 : 0.2;
+        ik = calm ? 0.85 : fl > 0.5 ? 0.8 + noise1(t * 20) * 0.3 : 0.2;
         break;
       case 'rotate':
         ik = 0.25 + 0.75 * rot;
         break;
     }
     _c.set(acc.color);
-    if (this.alarm > 0) _c.lerp(_c2.set(0xff2010), this.alarm * (0.5 + 0.5 * pulse));
+    if (this.alarm > 0) _c.lerp(_c2.set(0xff2010), this.alarm * (calm ? 0.5 + 0.15 * pulse : 0.5 + 0.5 * pulse));
     this.accent.color.copy(_c);
     this.accent.intensity = acc.intensity * ik * dimK;
     this.accent.distance = acc.distance;

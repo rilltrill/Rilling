@@ -1,6 +1,11 @@
 import * as THREE from 'three';
-import { Crawler, Runner, Spitter, Walker } from '../../enemies/zombies';
+import { Brute, Crawler, Runner, Spitter, Walker } from '../../enemies/zombies';
 import type { EnemyState } from '../../../gameplay/Enemy';
+import type { EntryKind } from '../../../core/types';
+import type { ShotHit, ShotOutcome } from '../../../gameplay/Entity';
+import type { World } from '../../../gameplay/World';
+import { PART_MULT } from '../../../core/types';
+import { Civilian } from '../../../gameplay/Civilian';
 import { clamp } from '../../../core/math';
 import { registerEnemy } from '../../registry';
 
@@ -117,12 +122,211 @@ export class TruckRunner extends Runner {
 }
 
 /**
+ * THE PINCER (finale). Pack runners leap aboard over the tailgate, creep along
+ * both flanks of the truck just outside the camera's field of view and wait
+ * there for the rest of their pack; then, with a shriek, they come round both
+ * sides together and attack at once. Each still starts its warning ring only
+ * once framed in the middle band (TruckRunner), so every attack stays visible
+ * and shootable — the test is answering two or three rings in quick order.
+ *
+ *   opts.pack  pack id: spawns sharing it rush together
+ *   opts.wait  max seconds a staged runner waits for its pack (default 3)
+ *   opts.side  force the flank to stage on (−1 left, 1 right); by default the
+ *              side it landed on — but never the side a civilian stands on, so
+ *              the rush never comes in across a survivor's line of fire
+ *   opts.cue   'brute': hold the rush until a brute in the fight starts its
+ *              smash (or none is left) — the pack strikes while you're busy
+ */
+export class PackRunner extends TruckRunner {
+  private packId = '';
+  private waitMax = 3;
+  private waitT = 0;
+  private side = 0;
+  private cue = '';
+  /** In position beside the truck, out of view. */
+  staged = false;
+  /** Rushing: plain truck-runner AI from here on (after rounding the front corner). */
+  released = false;
+  private rushing = false;
+
+  override onAdded(): void {
+    super.onAdded();
+    const id = this.spawn.opts.pack;
+    this.packId = typeof id === 'string' || typeof id === 'number' ? String(id) : '';
+    if (typeof this.spawn.opts.wait === 'number') this.waitMax = this.spawn.opts.wait;
+    if (this.spawn.opts.side === 1 || this.spawn.opts.side === -1) this.side = this.spawn.opts.side;
+    if (typeof this.spawn.opts.cue === 'string') this.cue = this.spawn.opts.cue;
+    if (!this.packId) this.released = true;
+  }
+
+  /** Is a survivor standing out on this flank, in front of the player? */
+  private civilianOn(side: number): boolean {
+    if (this.frame !== 'world') return false;
+    for (const e of this.world.entities) {
+      if (!(e instanceof Civilian) || e.removed || e.rescued) continue;
+      this.toView(e.root.position, _n);
+      if (-_n.z > 0 && -_n.z < 16 && _n.x * side > 0.8) return true;
+    }
+    return false;
+  }
+
+  /** The rush's cue (see opts.cue). */
+  private cued(): boolean {
+    if (this.cue !== 'brute') return true;
+    let any = false;
+    for (const e of this.world.enemies()) {
+      if (!(e instanceof RiotBrute) || e.state === 'dying') continue;
+      any = true;
+      // Its fists are up: the pack's rings land on top of the smash.
+      if (e.state === 'windup') return true;
+    }
+    return !any;
+  }
+
+  private forPack(fn: (m: PackRunner) => void) {
+    for (const e of this.world.enemies()) {
+      if (e instanceof PackRunner && e.packId === this.packId && e.state !== 'dying' && !e.removed) fn(e);
+    }
+  }
+
+  /** The pack goes: everyone rushes, the first one shrieks the warning. */
+  private releasePack() {
+    let first = true;
+    this.forPack((m) => {
+      if (m.released) first = false;
+    });
+    if (first) this.world.audio.play('runner_shriek', { volume: 1, pitch: 0.9, vary: 0.1 });
+    this.forPack((m) => {
+      if (m.released) return;
+      m.released = true;
+      m.rushing = true;
+      m.speed *= 1.25;
+    });
+  }
+
+  protected override advanceUpdate(dt: number) {
+    if (this.released) {
+      if (this.rushing) {
+        // Round the front quarter of its own flank (never across the truck), then the
+        // stock truck-runner approach takes over once it is out in front.
+        const local = this.toView(this.root.position, _t);
+        if (-local.z < 2.4) {
+          _t.set(this.side * 1.7, 0, -3.2);
+          this.fromView(_t);
+          this.moveToward(_t, this.speed, dt);
+          this.separate(dt);
+          return;
+        }
+        this.rushing = false;
+      }
+      super.advanceUpdate(dt);
+      return;
+    }
+    this.waitT += dt;
+    const local = this.toView(this.root.position, _t);
+    if (!this.side) {
+      this.side = local.x >= 0 ? 1 : -1;
+      if (this.civilianOn(this.side) && !this.civilianOn(-this.side)) this.side = -this.side;
+    }
+    if (local.x * this.side < 0.6) {
+      // Landed on the other flank: cross over BEHIND the truck, out of view.
+      if (local.z < 2.6) _t.set(local.x, 0, 3.2);
+      else _t.set(this.side * 3.3, 0, 3.2);
+      this.fromView(_t);
+      this.moveToward(_t, this.speed, dt);
+      this.separate(dt);
+      return;
+    }
+    // Staging spot (view space): beside the truck, a little ahead of the eye — ~70° off the
+    // view axis, so hidden even on a wide phone screen.
+    _t.set(this.side * 3.3, 0, -1.2);
+    this.fromView(_t);
+    const rem = this.moveToward(_t, this.speed, dt);
+    this.separate(dt);
+    if (rem < 0.6) this.staged = true;
+    this.playerPos(_p);
+    if (this.staged) this.faceToward(_p, dt);
+    let ready = this.staged;
+    this.forPack((m) => {
+      if (m.state === 'entry' || (!m.staged && !m.released)) ready = false;
+    });
+    if ((ready && this.cued()) || this.waitT > this.waitMax) this.releasePack();
+  }
+}
+
+/**
  * Boss-fight runner: leaps onto the bridge deck behind the truck and attacks
  * from ~5 m out, where the look-back camera (pitched up at the giant) still
  * frames it above the tailgate.
  */
 export class TailRunner extends TruckRunner {
   protected override reach = 5.2;
+}
+
+/** Worlds that have already shown the "kill the brute" hint. */
+const brutesSeen = new WeakSet<World>();
+
+/**
+ * Finale brute. Same riot-armoured hulk, but the twin gun's light rounds can't
+ * rock it: it shrugs off headshots and only a heavy hit (≥ `heavyHit`, e.g. a
+ * bomb blast) staggers it. Stock brutes flinch back on every headshot, which a
+ * 14-rounds/s mounted gun turns into a permanent stun; this one keeps coming,
+ * so it has to be focused down on its slow, stomping approach — and once its
+ * fists go up (2 s ring) only killing it stops the smash. The first one of the
+ * stage flashes a "KILL THE BRUTE!" hint.
+ */
+export class RiotBrute extends Brute {
+  private hitNow = false;
+  private heavyNow = false;
+
+  override onAdded(): void {
+    super.onAdded();
+    const w = this.world;
+    if (!brutesSeen.has(w)) {
+      brutesSeen.add(w);
+      w.later(0.6, () => {
+        if (this.state === 'dying' || this.removed) return;
+        w.hud.prompt('KILL THE BRUTE!');
+        w.later(2.2, () => w.hud.prompt(null));
+      });
+    }
+  }
+
+  /** `opts.land` (metres): a 'leap' entry vaults whatever is in the way and lands this far from the player. */
+  protected override beginEntry(kind: EntryKind) {
+    super.beginEntry(kind);
+    const land = this.spawn.opts.land;
+    if (kind !== 'leap' || typeof land !== 'number') return;
+    this.playerPos(_p);
+    _t.subVectors(this.root.position, _p).setY(0);
+    const d = _t.length();
+    if (d <= land) return;
+    this.entryTo.copy(_p).addScaledVector(_t.normalize(), land);
+    this.entryTo.y = this.groundY(this.entryTo.x, this.entryTo.z);
+  }
+
+  /** A 300 kg landing: the truck rocks. */
+  protected override onLand() {
+    super.onLand();
+    this.world.rig.shake(0.3);
+    this.world.fx.dust(this.worldPos(_n), 1.6, 0x6a6058);
+    this.world.audio.play('stomp', { volume: 1, pitch: 0.7, vary: 0.05 });
+  }
+
+  override onShot(hit: ShotHit): ShotOutcome {
+    this.hitNow = true;
+    this.heavyNow = hit.damage * (PART_MULT[hit.part] ?? 1) >= this.heavyHit;
+    try {
+      return super.onShot(hit);
+    } finally {
+      this.hitNow = false;
+    }
+  }
+
+  override stagger() {
+    if (this.hitNow && !this.heavyNow) return;
+    super.stagger();
+  }
 }
 
 /**
@@ -150,3 +354,5 @@ registerEnemy('roadside_walker', (w, s) => new RoadsideWalker(w, s));
 registerEnemy('roadside_crawler', (w, s) => new RoadsideCrawler(w, s));
 registerEnemy('truck_runner', (w, s) => new TruckRunner(w, s));
 registerEnemy('tail_runner', (w, s) => new TailRunner(w, s));
+registerEnemy('riot_brute', (w, s) => new RiotBrute(w, s));
+registerEnemy('pack_runner', (w, s) => new PackRunner(w, s));

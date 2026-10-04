@@ -178,9 +178,9 @@ const beats: Beat[] = [
         // A pack vaults the desk one after another.
         spawns: [
           S('runner', -5.2, -37.3, { entry: 'leap' }),
-          S('runner', -3.9, -37.0, { entry: 'leap', t: 0.5 }),
-          S('runner', -7.2, -37.6, { entry: 'leap', t: 1.0 }),
-          S('crawler', 2.4, -39.5, { y: 3.85, entry: 'drop', t: 2.4 }),
+          S('runner', -3.9, -37.0, { entry: 'leap', t: 0.3 }),
+          S('runner', -7.2, -37.6, { entry: 'leap', t: 0.6 }),
+          S('crawler', 2.4, -39.5, { y: 3.85, entry: 'drop', t: 1.5 }),
         ],
       },
       {
@@ -317,8 +317,10 @@ const beats: Beat[] = [
         // Pincer: runners crash in through the north AND south doors together.
         spawns: [
           S('spitter', 84.6, -42.2, { opts: { variant: 'patient' } }),
-          S('runner', 83.5, -37.2, { t: 1.0 }),
-          S('runner', 79.3, -51.8, { t: 1.15 }),
+          S('runner', 83.5, -37.2, { t: 0.8 }),
+          S('runner', 79.3, -51.8, { t: 0.95 }),
+          // …and a crawler drags itself in through the south door behind its runner.
+          S('crawler', 79.3, -52.6, { t: 1.7, opts: { variant: 'nurse' } }),
           W(79.3, -51.6, 'doctor', { t: 2.2 }),
         ],
       },
@@ -376,9 +378,10 @@ const beats: Beat[] = [
       {
         start: { remaining: 1 },
         spawns: [
+          // Drawers bang open on BOTH walls at once: a pincer of crawlers.
           S('crawler', dE1[0], dE1[2], { y: dE1[1], entry: 'drop', opts: { variant: 'patient' } }),
-          S('crawler', dW4[0], dW4[2], { y: dW4[1], entry: 'drop', t: 1.3, opts: { variant: 'patient' } }),
-          W(79, -97, 'patient', { t: 2.0 }),
+          S('crawler', dW4[0], dW4[2], { y: dW4[1], entry: 'drop', t: 0.25, opts: { variant: 'patient' } }),
+          W(79, -97, 'patient', { t: 1.2 }),
         ],
       },
       {
@@ -389,8 +392,8 @@ const beats: Beat[] = [
           W(80.6, -94.2, 'nurse', { t: 0.9 }),
           S('bloater', 82.4, -92.4, { t: 1.2 }),
           W(76.2, -93.4, 'doctor', { t: 1.6 }),
-          S('crawler', dE4[0], dE4[2], { y: dE4[1], entry: 'drop', t: 2.4 }),
-          S('crawler', dE6[0], dE6[2], { y: dE6[1], entry: 'drop', t: 4.0 }),
+          S('crawler', dE4[0], dE4[2], { y: dE4[1], entry: 'drop', t: 1.4 }),
+          S('crawler', dE6[0], dE6[2], { y: dE6[1], entry: 'drop', t: 2.3 }),
         ],
       },
     ],
@@ -427,9 +430,12 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           S('spitter', 88.4, -119.6, { y: B + 2.4, opts: { variant: 'nurse' } }),
+          // Something was hiding under the operating table.
+          S('crawler', 84.0, -117.6, { entry: 'burst', t: 0.9, opts: { variant: 'patient' } }),
           W(84.8, -125.1, 'patient', { t: 0.6 }),
           W(86.2, -123.2, 'doctor', { t: 1.1 }),
-          S('runner', 69.6, -121, { t: 2.0 }),
+          // (From the back right: its charge never lines up with the doctor on the left.)
+          S('runner', 86.2, -125, { t: 2.0 }),
         ],
       },
       {
@@ -471,8 +477,11 @@ const beats: Beat[] = [
           // (Tougher and faster than stock: it comes for you through the dust, and
           // its long super-armoured windup has to be out-shot.)
           S('brute', 58.9, -124.3, { entry: 'burst', hp: 1.6, speed: 1.4 }),
-          W(52.6, -120.2, 'patient', { t: 1.8 }),
-          W(52.8, -121.9, 'nurse', { t: 2.6 }),
+          // Runners pour through the breach behind it: split your fire.
+          S('runner', 59.6, -124.8, { entry: 'burst', t: 1.4 }),
+          S('runner', 58.2, -124.8, { entry: 'burst', t: 2.0 }),
+          W(52.6, -120.2, 'patient', { t: 2.4 }),
+          W(52.8, -121.9, 'nurse', { t: 3.2 }),
         ],
       },
       {

@@ -6,6 +6,7 @@ import { skyClouds } from './retro';
 
 const _v = new THREE.Vector3();
 const _c = new THREE.Color();
+const smooth = (k: number) => k * k * (3 - 2 * k);
 const _m = new THREE.Matrix4();
 const SPLASHES = 48;
 
@@ -31,7 +32,14 @@ export const STORM = {
  * a ~40 ms rise and a slow decay, then optionally one weaker echo (≤ 50 %)
  * ≥ 0.22 s later that barely re-brightens the still-decaying first pulse — and
  * any strike within 3 s of the last flash (scripted set pieces included) shows
- * only its bolt and thunder. Automatic strikes are 7–13 s apart.
+ * only its bolt and thunder. A bolt is drawn at most once per 1.25 s (a strike
+ * sooner than that is thunder only), so the storm never exceeds 2 flashes/s.
+ * Automatic strikes are 7–13 s apart.
+ *
+ * Settings.reduceFlashes ("calm"): no full-screen brightening — the sky and
+ * fill lights swell gently (~25 % of the normal peak, a 0.3 s rise and a ~1 s
+ * fade, no echo pulse) and the bolt is drawn dimmer with soft edges; the
+ * thunder is unchanged.
  */
 export class Storm {
   readonly group = new THREE.Group();
@@ -55,6 +63,12 @@ export class Storm {
   private pulseN = 0;
   /** Time of the last scene-brightening flash (−∞ = never). */
   private lastFlash = -1e9;
+  /** Time the last bolt was drawn (−∞ = never). */
+  private lastBolt = -1e9;
+  /** The current flash uses the soft reduced-flashing envelope. */
+  private calm = false;
+  /** Peak opacity of the current bolt. */
+  private boltPeak = 1;
   /** Seconds the current bolt has been visible (< 0 = none). */
   private boltAge = -1;
   /** 0..1 current flash brightness (read by the environment for its own accents). */
@@ -196,35 +210,45 @@ export class Storm {
    */
   strike(world: World, close = false, dir?: THREE.Vector3) {
     const r = this.rng;
+    const calm = !!world.settings.reduceFlashes;
     // At most one scene flash per 3 s; a strike inside that window is bolt + thunder only.
     const bright = this.t - this.lastFlash >= 3;
     if (bright) {
       const peak = close ? 1 : r.range(0.55, 0.8);
+      const echo = r.chance(close ? 0.7 : 0.45);
       this.lastFlash = this.t;
+      this.calm = calm;
       this.pulseN = 1;
       this.pulseT[0] = this.t;
-      this.pulseK[0] = peak;
-      if (r.chance(close ? 0.7 : 0.45)) {
+      // Reduced flashing: a gentle swell instead of a white-out, no echo.
+      this.pulseK[0] = calm ? peak * 0.25 : peak;
+      if (echo && !calm) {
         this.pulseN = 2;
         this.pulseT[1] = this.t + r.range(0.22, 0.32);
         this.pulseK[1] = peak * r.range(0.35, 0.5);
       }
     }
-    // Bolt on the horizon, in front of the camera (or toward `dir`).
-    const bolt = this.bolts[r.int(0, this.bolts.length - 1)];
-    for (const b of this.bolts) b.visible = false;
-    const cam = world.camera.position;
-    if (dir) _v.copy(dir).setY(0).normalize();
-    else {
-      world.camera.getWorldDirection(_v).setY(0).normalize();
-      _v.applyAxisAngle(THREE.Object3D.DEFAULT_UP, r.spread(0.9));
+    // Bolt on the horizon, in front of the camera (or toward `dir`) — at most one per 1.25 s.
+    if (this.t - this.lastBolt >= 1.25) {
+      this.lastBolt = this.t;
+      const bolt = this.bolts[r.int(0, this.bolts.length - 1)];
+      for (const b of this.bolts) b.visible = false;
+      const cam = world.camera.position;
+      if (dir) _v.copy(dir).setY(0).normalize();
+      else {
+        world.camera.getWorldDirection(_v).setY(0).normalize();
+        _v.applyAxisAngle(THREE.Object3D.DEFAULT_UP, r.spread(0.9));
+      }
+      const dist = close ? 120 : r.range(170, 230);
+      bolt.position.set(cam.x + _v.x * dist, close ? -20 : r.range(-10, 20), cam.z + _v.z * dist);
+      bolt.lookAt(cam.x, bolt.position.y, cam.z);
+      bolt.scale.setScalar(close ? 1.6 : r.range(0.9, 1.4));
+      bolt.visible = true;
+      this.boltAge = 0;
+      this.boltPeak = calm ? 0.4 : 1;
+      // Fades in from zero (never a frame at a stale full opacity before update runs).
+      this.boltMat.opacity = 0;
     }
-    const dist = close ? 120 : r.range(170, 230);
-    bolt.position.set(cam.x + _v.x * dist, close ? -20 : r.range(-10, 20), cam.z + _v.z * dist);
-    bolt.lookAt(cam.x, bolt.position.y, cam.z);
-    bolt.scale.setScalar(close ? 1.6 : r.range(0.9, 1.4));
-    bolt.visible = true;
-    this.boltAge = 0;
     const delay = close ? 0.05 : r.range(0.5, 1.6);
     const vol = close ? 1 : r.range(0.55, 0.85);
     world.later(delay, () => world.audio.play('thunder', { volume: vol, vary: 0.15, pitch: close ? 0.9 : 1 }));
@@ -242,11 +266,13 @@ export class Storm {
     if (this.rate > 0 && this.t >= this.next) this.strike(world);
 
     // Flash envelope: ~40 ms rise, then a soft ~0.45 s decay (no hard strobe edges).
+    // Reduced flashing: a 0.3 s swell and a ~1 s fade (never reads as a flash).
     let f = 0;
+    const calm = this.calm;
     for (let i = 0; i < this.pulseN; i++) {
       const a = this.t - this.pulseT[i];
-      if (a < 0 || a > 1.2) continue;
-      const e = a < 0.04 ? a / 0.04 : Math.exp(-(a - 0.04) * 5);
+      if (a < 0 || a > (calm ? 2.5 : 1.2)) continue;
+      const e = calm ? (a < 0.3 ? smooth(a / 0.3) : Math.exp(-(a - 0.3) * 2.2)) : a < 0.04 ? a / 0.04 : Math.exp(-(a - 0.04) * 5);
       f = Math.max(f, this.pulseK[i] * e);
     }
     this.flash = f;
@@ -254,8 +280,9 @@ export class Storm {
     if (this.boltAge >= 0) {
       this.boltAge += dt;
       const a = this.boltAge;
-      this.boltMat.opacity = a < 0.03 ? a / 0.03 : Math.min(1, 1.3 * Math.exp(-(a - 0.03) * 6));
-      if (a > 0.5) {
+      const rise = this.boltPeak < 1 ? 0.12 : 0.03;
+      this.boltMat.opacity = this.boltPeak * (a < rise ? a / rise : Math.min(1, 1.3 * Math.exp(-(a - rise) * 6)));
+      if (a > 0.5 + rise) {
         this.boltAge = -1;
         for (const b of this.bolts) b.visible = false;
       }

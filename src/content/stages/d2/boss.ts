@@ -27,9 +27,11 @@ import { labs } from './env';
  *                 FADE         (phase 2+) cloaks, slips behind a pillar, ambushes with a
  *                              short-fuse pounce from close range         (ring on the chest)
  *   Enough HITS during a wind-up (or mid-leap) knock it down: free hits
- *   (3–4 stop a pounce, 2–3 a tail whip; glowing weak points count double).
+ *   (3–4 stop a pounce, 3 a tail whip — an enraged pounce takes one more
+ *   against a healthy player; glowing weak points count double).
  *   Fairness: attacks only start framed in the play area, never on top of two
- *   other live warnings, the pack arrives in waves; last-heart grace.
+ *   other live warnings; while it attacks at most one raptor may lunge and
+ *   darts wait their turn; the pack arrives in waves; last-heart grace.
  *   phase 2 : roar, summons a raptor pack.  phase 3 : enraged — faster
  *   pounces, double pounces, compys.  death: staggers back and crashes
  *   through the specimen tank glass.
@@ -106,7 +108,7 @@ const EYE_RAGE = new THREE.Color(0xff4060);
 /** Dash / ring targets keep the boss's hips this far from pillar centres (body + tail clearance). */
 const PILLAR_CLEAR = 3.5;
 /** Where a pounce lands, in front of the camera (keeps head + ring in the middle of the view). */
-const POUNCE_STOP = 3.7;
+const POUNCE_STOP = 4.4;
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -158,7 +160,9 @@ export class SpecimenX extends Boss {
   private flinchSide = 1;
   private lift = 0;
   private wiggle = 0;
-  private tg = { crouch: 0, air: 0, jaw: 0.08, dip: 0, rear: 0, tail: 0, recoil: 0, arm: 0, whip: 0, quill: 0, roll: 0 };
+  private tg = { crouch: 0, air: 0, jaw: 0.08, dip: 0, rear: 0, tail: 0, recoil: 0, arm: 0, whip: 0, quill: 0, roll: 0, bite: 0 };
+  /** Snout tipped up at the end of a pounce, so the open jaws face the lens. */
+  private biteK = 0;
   private prevPos = new THREE.Vector3();
   private speedNow = 0;
   private stepPhase = 0;
@@ -478,13 +482,18 @@ export class SpecimenX extends Boss {
 
   /**
    * Hits (weak = 2) that break a wind-up, sized for a ~3 taps/s pistol player
-   * who starts shooting ~0.3 s into the ring:
-   *   pounce  1.5/1.35/1.25 s wind + 0.5 s leap → 3 / 4 / 4 hits
-   *   tail    1.4/1.3/1.2 s, ring on the glowing tail base → 2 / 3 / 3 hits
+   * who starts shooting ~0.35 s into the ring (≈ 4–5 taps per pounce, ~3 per whip):
+   *   pounce  1.5/1.35/1.3 s wind + 0.5 s leap → 3 / 4 / 4  (2 weak hits)
+   *   tail    1.4/1.3/1.2 s, ring on the glowing tail base → 3 / 3 / 3  (2 weak hits)
+   * Enraged, the POUNCE presses a player who is still healthy (4+ hearts): one
+   * more hit (5 over its 1.8 s ≈ 4–5 taps: two stripe shots + one). The whip
+   * never gets the extra hit — its 1.2 s wind-up leaves only ~3 taps after
+   * reacting. Someone hanging on gets the base numbers.
    */
   private interruptThreshold() {
-    if (this.state === 'tailWind') return [2, 3, 3][this.phase] ?? 3;
-    return [3, 4, 4][this.phase] ?? 4;
+    if (this.state === 'tailWind') return [3, 3, 3][this.phase] ?? 3;
+    const pressed = this.phase >= 2 && this.world.player.hp >= 4 ? 1 : 0;
+    return ([3, 4, 4][this.phase] ?? 4) + pressed;
   }
 
   /** Last-heart grace: a little more wind-up time when the player is on 1 heart. */
@@ -647,6 +656,19 @@ export class SpecimenX extends Boss {
     return n;
   }
 
+  /**
+   * While the beast attacks (wind-up, leap, a volley in the air) at most one
+   * minion may be lunging too: the others hold off instead of starting a
+   * wind-up on top. Uses the world's fair attacker cap, which World recounts
+   * after every update (so the cap only lasts while this is called).
+   */
+  private capMinionAttacks() {
+    const w = this.world;
+    let held = 0;
+    for (const e of w.enemies()) if (e !== this && e.holdsSlot && !e.removed && e.state !== 'dying') held++;
+    w.attackSlots = Math.max(0, Math.min(w.attackSlots, 1 - held));
+  }
+
   /** Pounce if the chest is framed; otherwise slip back into the middle of the view first. */
   private tryPounce() {
     if (this.framed(this.r.chest)) {
@@ -762,6 +784,7 @@ export class SpecimenX extends Boss {
     T.whip = 0;
     T.quill = 0;
     T.roll = 0;
+    T.bite = 0;
     this.wiggle = 0;
     this.playerPos(_p);
     const toPlayer = this.yawToPlayer();
@@ -770,6 +793,11 @@ export class SpecimenX extends Boss {
       const rf = this.reinforcements[i];
       rf.t -= dt;
       if (rf.t <= 0) {
+        // Not into a pile of live warnings: the next wave waits a moment.
+        if (this.otherThreats() >= 2) {
+          rf.t = 0.5;
+          continue;
+        }
         this.reinforcements.splice(i, 1);
         this.summon(rf.type, rf.n, rf.variant);
       }
@@ -782,6 +810,8 @@ export class SpecimenX extends Boss {
         if (this.raptorCount() < 2 && this.minionsCalled < 10) this.summon('raptor', 1, 'tan');
       }
     }
+
+    if (st === 'pounceWind' || st === 'pounce' || st === 'tailWind' || st === 'quillWind' || st === 'quillFire') this.capMinionAttacks();
 
     switch (st) {
       case 'intro': {
@@ -902,7 +932,7 @@ export class SpecimenX extends Boss {
       }
       case 'pounceWind': {
         if (first) {
-          const base = this.shortFuse ? [1.3, 1.2, 1.1] : [1.5, 1.35, 1.25];
+          const base = this.shortFuse ? [1.3, 1.2, 1.15] : [1.5, 1.35, 1.3];
           this.windTime = (base[this.phase] ?? 1.1) + this.grace();
           this.shortFuse = false;
           w.audio.play('raptor_screech', { volume: 0.8, pitch: 0.75 });
@@ -942,13 +972,25 @@ export class SpecimenX extends Boss {
         const k = clamp(t / this.leapTime, 0, 1);
         p.x = lerp(this.pFrom.x, this.pTo.x, k);
         p.z = lerp(this.pFrom.z, this.pTo.z, k);
-        this.lift = Math.sin(Math.PI * k) * 1.1 + k * 0.3;
+        this.lift = Math.sin(Math.PI * k) * 0.8 + k * 0.1;
         this.faceYaw(toPlayer, dt, 12);
         T.air = 1;
         T.jaw = 1;
         T.arm = 1;
-        // Head up at eye level (not diving under the bottom HUD): jaws at the lens.
-        T.rear = 0.45;
+        // Rears at take-off, then pitches the head down onto the lens for the bite:
+        // jaws in the middle of the view (not above the boss bar, not under the HUD).
+        const late = clamp((k - 0.3) / 0.55, 0, 1);
+        const e = late * late * (3 - 2 * late);
+        T.rear = lerp(0.35, 0, e);
+        T.dip = lerp(0, 0.85, e);
+        T.crouch = 0.6 * e;
+        T.bite = e;
+        if (late > 0) {
+          const f = 1 - Math.exp(-14 * dt);
+          this.rear += (T.rear - this.rear) * f;
+          this.dip += (T.dip - this.dip) * f;
+          this.crouch += (T.crouch - this.crouch) * f;
+        }
         const total = this.windTime + this.leapTime;
         if (this.telegraph) this.telegraph.progress = clamp((this.windTime + t) / total, 0, 1);
         if (k >= 1) {
@@ -1074,7 +1116,11 @@ export class SpecimenX extends Boss {
         T.quill = 1;
         T.rear = 0.15;
         this.volleyT -= dt;
-        if (this.volley > 0 && this.volleyT <= 0) {
+        // Fair play: the next dart waits while two other warnings are live (its
+        // own earlier darts included); after ~1.2 s of waiting the rest is dropped.
+        if (this.volley > 0 && this.volleyT <= 0 && this.otherThreats() >= 2) {
+          if (this.volleyT < -1.2) this.volley = 0;
+        } else if (this.volley > 0 && this.volleyT <= 0) {
           this.volley--;
           this.volleyT = 0.4;
           // Flicked off the crest past the head, alternating sides: the dart starts
@@ -1324,6 +1370,7 @@ export class SpecimenX extends Boss {
     this.tailWhipAmt = damp(this.tailWhipAmt, T.whip, T.whip > this.tailWhipAmt ? 22 : 6, dt);
     this.quillRaise = damp(this.quillRaise, T.quill, 8, dt);
     this.roll = damp(this.roll, T.roll, 6, dt);
+    this.biteK = damp(this.biteK, T.bite, 12, dt);
     this.flinch = Math.max(0, this.flinch - dt * 3);
     if (this.state !== 'pounce' && this.state !== 'retreat' && this.state !== 'stun' && this.state !== 'intro') this.lift = damp(this.lift, 0, 8, dt);
 
@@ -1370,10 +1417,10 @@ export class SpecimenX extends Boss {
         bob2 * 0.05 * run;
       r.neck[i].rotation.y = this.lookYaw * 0.3;
     }
-    r.head.rotation.x = s.headRest - this.lookPitch * 0.45 - this.dip * 0.15 + this.rear * 0.35 - this.air * 0.15 - fl * 0.35 - this.recoil * 0.25;
+    r.head.rotation.x = s.headRest - this.lookPitch * 0.45 - this.dip * 0.15 + this.rear * 0.35 - this.air * 0.15 - fl * 0.35 - this.recoil * 0.25 - this.biteK * 0.6;
     r.head.rotation.y = this.lookYaw * 0.35;
     r.head.rotation.z = this.recoil * 0.2 * this.flinchSide + (this.state === 'roar' ? Math.sin(this.age * 22) * 0.06 : 0);
-    if (r.jaw) r.jaw.rotation.x = this.jawOpen * 0.85;
+    if (r.jaw) r.jaw.rotation.x = this.jawOpen * 0.85 + this.biteK * 0.2;
 
     // Tail: lashing while hunting, whips on attack.
     const tl = r.tail;

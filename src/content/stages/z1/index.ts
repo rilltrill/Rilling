@@ -35,7 +35,17 @@ const beats: Beat[] = [
     look: { at: [0, 1.4, 14] },
   },
   // ── 1. First contact: one at a time, out of the fog ──────────────────────
-  { kind: 'move', label: 'through the barricade', to: 20, speed: 2.6 },
+  // (Pacing: every walk between fights has something to shoot — a straggler
+  // shambling out of a doorway or the fog — so no stretch of the street is dead
+  // air; they're lone walkers, so the opening stage stays gentle.)
+  {
+    kind: 'move',
+    label: 'through the barricade',
+    to: 20,
+    speed: 3,
+    // The first shape out of the fog, while we're still walking in.
+    waves: [{ start: { atD: 6 }, spawns: [{ type: 'walker', pos: [-0.8, 0, 25], frame: 'world', opts: { variant: 'cop' } }] }],
+  },
   {
     kind: 'hold',
     label: 'first contact',
@@ -43,18 +53,26 @@ const beats: Beat[] = [
     // Floats over the dark, foggy road (not the lit cinema lobby) so its halo pops.
     pickups: [{ kind: 'shotgun', pos: [-1.0, 1.6, 7], t: 0.3 }],
     waves: [
-      { spawns: [{ type: 'walker', pos: [0.6, 0, 21], t: 0.8, opts: { variant: 'cop' } }] },
+      // (Waits for the straggler from the walk: still one at a time.)
+      { start: { remaining: 0 }, spawns: [{ type: 'walker', pos: [0.6, 0, 21], t: 0.6, opts: { variant: 'office' } }] },
       { spawns: [{ type: 'walker', pos: [-4.4, 0, 15], opts: { variant: 'civilian' } }] },
       {
         spawns: [
-          { type: 'walker', pos: [3.4, 0, 17], opts: { variant: 'office' } },
+          { type: 'walker', pos: [3.4, 0, 17], opts: { variant: 'worker' } },
           { type: 'walker', pos: [-1.8, 0, 22], t: 1.4, opts: { variant: 'worker' } },
         ],
       },
     ],
   },
   // ── 2. The diner: shapes behind the glass, then through it ───────────────
-  { kind: 'move', label: 'to the diner', to: 46, speed: 3.4 },
+  {
+    kind: 'move',
+    label: 'to the diner',
+    to: 46,
+    speed: 3.6,
+    // A cook stumbles out ahead-left, on the diner's side of the street.
+    waves: [{ start: { atD: 27 }, spawns: [{ type: 'walker', pos: [-2.6, 0, 16], frame: 'world', opts: { variant: 'worker' } }] }],
+  },
   {
     kind: 'hold',
     label: 'diner',
@@ -188,7 +206,7 @@ const beats: Beat[] = [
     to: 228,
     speed: 3.8,
     // A straggler on the left sidewalk (the side the rescue's zombies come from).
-    waves: [{ start: { atD: 212 }, spawns: [{ type: 'walker', pos: [-62, 0, -186], world: true, frame: 'world', opts: { variant: 'office' } }] }],
+    waves: [{ start: { atD: 205 }, spawns: [{ type: 'walker', pos: [-62, 0, -186], world: true, frame: 'world', opts: { variant: 'office' } }] }],
   },
   {
     kind: 'hold',
@@ -219,7 +237,14 @@ const beats: Beat[] = [
     ],
   },
   // ── 7. Gas station: shoot the barrels ────────────────────────────────────
-  { kind: 'move', label: 'to the gas station', to: 250, speed: 3.3 },
+  {
+    kind: 'move',
+    label: 'to the gas station',
+    to: 250,
+    speed: 3.4,
+    // One wanders over from the forecourt on the left.
+    waves: [{ start: { atD: 231 }, spawns: [{ type: 'walker', pos: [-3.2, 0, 15], frame: 'world', opts: { variant: 'civilian' } }] }],
+  },
   {
     kind: 'hold',
     label: 'gas station',
@@ -262,7 +287,17 @@ const beats: Beat[] = [
   },
   { kind: 'wait', label: 'inferno', duration: 2.4, look: { at: [-12, 2.5, 10], blend: 1.5 } },
   // ── 8. The bus: something is banging inside… ─────────────────────────────
-  { kind: 'move', label: 'to the bus', to: 282, speed: 3.6 },
+  {
+    kind: 'move',
+    label: 'to the bus',
+    to: 282,
+    speed: 3.8,
+    // Stragglers drawn by the blast, one at a time.
+    waves: [
+      { start: { atD: 256 }, spawns: [{ type: 'walker', pos: [-2.2, 0, 15], frame: 'world', opts: { variant: 'worker' } }] },
+      { start: { atD: 268 }, spawns: [{ type: 'walker', pos: [1.6, 0, 16], frame: 'world', opts: { variant: 'office' } }] },
+    ],
+  },
   {
     kind: 'action',
     label: 'bus rocks',
@@ -304,7 +339,16 @@ const beats: Beat[] = [
     ],
   },
   // ── 9. Town square: brute + rooftop spitters ─────────────────────────────
-  { kind: 'move', label: 'into the square', to: 319, speed: 3.5 },
+  {
+    kind: 'move',
+    label: 'into the square',
+    to: 319,
+    speed: 3.7,
+    waves: [
+      { start: { atD: 287 }, spawns: [{ type: 'walker', pos: [-2.4, 0, 15], frame: 'world', opts: { variant: 'nurse' } }] },
+      { start: { atD: 300 }, spawns: [{ type: 'walker', pos: [2.8, 0, 16], frame: 'world', opts: { variant: 'civilian' } }] },
+    ],
+  },
   {
     kind: 'hold',
     label: 'town square',
@@ -342,7 +386,7 @@ const beats: Beat[] = [
     ],
   },
   // ── Boss: THE BUTCHER ────────────────────────────────────────────────────
-  { kind: 'move', label: 'approach PRIME MEATS', to: 334.5, speed: 2.4, look: { at: [0, 2.4, 20], blend: 1.4 } },
+  { kind: 'move', label: 'approach PRIME MEATS', to: 334.5, speed: 2.9, look: { at: [0, 2.4, 20], blend: 1.4 } },
   {
     kind: 'action',
     label: 'something big',
@@ -367,7 +411,7 @@ const beats: Beat[] = [
       });
     },
   },
-  { kind: 'wait', label: 'the doors bulge', duration: 2.1 },
+  { kind: 'wait', label: 'the doors bulge', duration: 1.8 },
   {
     kind: 'boss',
     label: 'THE BUTCHER',

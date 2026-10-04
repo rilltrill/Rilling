@@ -16,7 +16,13 @@ import { TEX_NAMES, Textures } from '../../kit/Textures';
  * texture's mean-brightness gain — so baked and live (Kit.mat) surfaces match.
  *
  * Modes:
- *  - 'bake'    per-vertex texture (`aTex` = layer, repeats/m, strength, gain)
+ *  - 'bake'    per-vertex texture (`aTex` = layer, repeats/m, strength, gain as
+ *              floats; sculpted creature meshes with smooth normals)
+ *  - 'packed'  the baked-scenery layout, 20 bytes per vertex (see `PACKED`):
+ *              position + `aCol` (sRGB colour bytes + sway weight) + `aTex`
+ *              bytes; no normal attribute — the projection axis comes from
+ *              screen derivatives of the object-space position (the facet
+ *              normal; the Lambert lighting is flat-shaded from derivatives too)
  *  - 'uniform' one texture for the whole material (optionally also modulating
  *              the emissive term: wet puddles that glow with the sky)
  *  - 'terrain' three fixed layers picked per texel by per-vertex coverage
@@ -108,13 +114,75 @@ export function packTex(s: TexSpec, out: number[] | Float32Array = [0, 0, 0, 0],
   return out;
 }
 
+/**
+ * The packed baked-scenery vertex layout (`mode: 'packed'`), 20 B per vertex
+ * instead of 56 (position, normal, colour, aTex and aSway as floats):
+ *   position  3 × float32
+ *   aCol      4 × uint8 normalised: sRGB-encoded colour (8-bit precision where
+ *             the eye needs it — dark night colours keep their hue) + sway
+ *             weight / SWAY_MAX in the alpha byte
+ *   aTex      4 × uint8: [layer, repeats per metre (log: exp2(b / 32 − 4),
+ *             0.0625…16 in 2.2 % steps), strength × 255, gain × 100]
+ */
+export const PACKED = {
+  /** Sway weight (metres of bend at the top) that the alpha byte 255 stands for. */
+  SWAY_MAX: 1.5,
+};
+
+const byte = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+
+/** Packed per-vertex texture bytes for a spec (see PACKED). */
+export function packTexBytes(s: TexSpec, out: Uint8Array | number[] = [0, 0, 0, 0], o = 0): Uint8Array | number[] {
+  const rt = Textures.get(s.name);
+  out[o] = TEX_NAMES.indexOf(s.name);
+  out[o + 1] = byte((Math.log2(Math.max(1e-3, rt.density * s.scale)) + 4) * 32);
+  out[o + 2] = byte(s.strength * 255);
+  out[o + 3] = byte(rt.gain * 100);
+  return out;
+}
+
+const _srgb = new THREE.Color();
+
+/** sRGB colour bytes (+ an alpha byte) of a linear working-space colour. */
+export function packColor(c: THREE.Color, alpha: number, out: Uint8Array | number[] = [0, 0, 0, 0], o = 0): Uint8Array | number[] {
+  _srgb.copy(c).convertLinearToSRGB();
+  out[o] = byte(_srgb.r * 255);
+  out[o + 1] = byte(_srgb.g * 255);
+  out[o + 2] = byte(_srgb.b * 255);
+  out[o + 3] = byte(alpha * 255);
+  return out;
+}
+
+const TEX_FN = /* glsl */ `
+  vec3 d3RetroTex(vec2 ruv, vec4 p) {
+    return texture(uD3Arr, vec3(ruv * p.y, floor(p.x + 0.5))).rgb * p.w;
+  }
+`;
+
+/** Projection on the dominant axis of the interpolated normal attribute. */
 const PROJ = /* glsl */ `
   vec2 d3RetroUV() {
     vec3 an = abs(vD3Nrm);
     return (an.x > an.y && an.x > an.z) ? vD3Pos.zy : ((an.y > an.z) ? vD3Pos.xz : vD3Pos.xy);
   }
-  vec3 d3RetroTex(vec2 ruv, vec4 p) {
-    return texture(uD3Arr, vec3(ruv * p.y, floor(p.x + 0.5))).rgb * p.w;
+${TEX_FN}`;
+
+/**
+ * Projection on the dominant axis of the FACET normal (screen derivatives of the
+ * object-space position): one clean projection per low-poly face, no normal
+ * attribute needed. Evaluated outside any branch (derivatives need uniform flow).
+ */
+const PROJ_D = /* glsl */ `
+  vec2 d3RetroUVd() {
+    vec3 an = abs(cross(dFdx(vD3Pos), dFdy(vD3Pos)));
+    return (an.x > an.y && an.x > an.z) ? vD3Pos.zy : ((an.y > an.z) ? vD3Pos.xz : vD3Pos.xy);
+  }
+${TEX_FN}`;
+
+/** GLSL: sRGB transfer → linear (exactly three's sRGBTransferEOTF), for packed colour bytes. */
+const SRGB_EOTF = /* glsl */ `
+  vec3 d3Lin(vec3 c) {
+    return mix(c * 0.0773993808, pow(c * 0.9478672986 + vec3(0.0521327014), vec3(2.4)), step(vec3(0.04045), c));
   }
 `;
 
@@ -127,7 +195,7 @@ const BAYER = /* glsl */ `
 `;
 
 export interface RetroHookOptions {
-  mode: 'bake' | 'uniform' | 'terrain';
+  mode: 'bake' | 'packed' | 'uniform' | 'terrain';
   /** Uniform mode: the texture. */
   spec?: TexSpec;
   /** Also multiply the emissive term by the texture (uniform mode). */
@@ -161,12 +229,20 @@ export function retroHook<T extends THREE.MeshLambertMaterial>(m: T, o: RetroHoo
   const prevKey = m.customProgramCacheKey?.();
   const terrain = o.mode === 'terrain';
   const uni = o.mode === 'uniform';
+  const packed = o.mode === 'packed';
   m.onBeforeCompile = (shader, renderer) => {
     prev?.call(m, shader, renderer);
     Object.assign(shader.uniforms, uniforms);
-    const attr = terrain ? 'attribute vec2 aTexW;\nvarying vec2 vD3W;' : uni ? '' : 'attribute vec4 aTex;\nvarying vec4 vD3Tex;';
+    const attr = terrain
+      ? 'attribute vec2 aTexW;\nvarying vec2 vD3W;'
+      : uni
+        ? ''
+        : packed
+          ? `attribute vec4 aCol;\nattribute vec4 aTex;\nvarying vec4 vD3Tex;\n${SRGB_EOTF}`
+          : 'attribute vec4 aTex;\nvarying vec4 vD3Tex;';
+    const vary = packed ? 'varying vec3 vD3Pos;' : 'varying vec3 vD3Pos;\nvarying vec3 vD3Nrm;';
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `#include <common>\nvarying vec3 vD3Pos;\nvarying vec3 vD3Nrm;\n${attr}`)
+      .replace('#include <common>', `#include <common>\n${vary}\n${attr}`)
       .replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
@@ -175,9 +251,11 @@ export function retroHook<T extends THREE.MeshLambertMaterial>(m: T, o: RetroHoo
             ? 'vD3Pos = position;'
             : 'vD3Pos = position * vec3(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz), length(modelMatrix[2].xyz));'
         }
-        vD3Nrm = normal;
-        ${terrain ? 'vD3W = aTexW;' : uni ? '' : 'vD3Tex = aTex;'}`,
+        ${packed ? '' : 'vD3Nrm = normal;'}
+        ${terrain ? 'vD3W = aTexW;' : uni ? '' : packed ? 'vD3Tex = vec4(aTex.x, exp2(aTex.y * 0.03125 - 4.0), aTex.z * 0.00392157, aTex.w * 0.01);' : 'vD3Tex = aTex;'}`,
       );
+    // Packed colour: sRGB bytes → linear working space (no `color` attribute).
+    if (packed) shader.vertexShader = shader.vertexShader.replace('#include <color_vertex>', 'vColor = vec4(d3Lin(aCol.rgb), 1.0);');
     const fragDecl = terrain
       ? `uniform vec4 uD3L0;\nuniform vec4 uD3L1;\nuniform vec4 uD3L2;\nuniform float uD3Cells;\nvarying vec2 vD3W;\n${BAYER}`
       : uni
@@ -200,13 +278,16 @@ export function retroHook<T extends THREE.MeshLambertMaterial>(m: T, o: RetroHoo
       : uni
         ? `vec3 d3T = mix(vec3(1.0), d3RetroTex(d3RetroUV(), uD3Spec), uD3Spec.z);
           diffuseColor.rgb *= d3T;`
-        : `vec3 d3T = vec3(1.0);
+        : packed
+          ? `vec3 d3T = mix(vec3(1.0), d3RetroTex(d3RetroUVd(), vD3Tex), vD3Tex.z);
+          diffuseColor.rgb *= d3T;`
+          : `vec3 d3T = vec3(1.0);
           if (vD3Tex.z > 0.001) d3T = mix(vec3(1.0), d3RetroTex(d3RetroUV(), vD3Tex), vD3Tex.z);
           diffuseColor.rgb *= d3T;`;
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        `#include <common>\nuniform highp sampler2DArray uD3Arr;\nvarying vec3 vD3Pos;\nvarying vec3 vD3Nrm;\n${fragDecl}\n${PROJ}`,
+        `#include <common>\nuniform highp sampler2DArray uD3Arr;\n${vary}\n${fragDecl}\n${packed ? PROJ_D : PROJ}`,
       )
       .replace('#include <color_fragment>', `#include <color_fragment>\n${fragBody}`);
     if (o.emissive) {
@@ -223,13 +304,17 @@ export function retroHook<T extends THREE.MeshLambertMaterial>(m: T, o: RetroHoo
   return m;
 }
 
-/** Fresh tracked vertex-coloured flat Lambert using the per-vertex texture array. */
-export function bakedLambert(o: { side?: THREE.Side; emissive?: number; unscaled?: boolean } = {}): THREE.MeshLambertMaterial {
+/**
+ * Fresh tracked vertex-coloured flat Lambert using the per-vertex texture array.
+ * `packed`: for the baker's packed 20-byte scenery layout (see PACKED) instead
+ * of float colour/aTex/normal attributes (sculpted creatures).
+ */
+export function bakedLambert(o: { side?: THREE.Side; emissive?: number; unscaled?: boolean; packed?: boolean } = {}): THREE.MeshLambertMaterial {
   const m = Kit.track(
     new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: o.side ?? THREE.FrontSide }),
   );
   if (o.emissive !== undefined) m.emissive.setHex(o.emissive);
-  return retroHook(m, { mode: 'bake', unscaled: o.unscaled });
+  return retroHook(m, { mode: o.packed ? 'packed' : 'bake', unscaled: o.unscaled });
 }
 
 /** Fill a geometry's `aTex` attribute with one spec for every vertex. */

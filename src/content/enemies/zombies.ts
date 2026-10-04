@@ -160,6 +160,11 @@ export abstract class Zombie extends Enemy {
   protected inVehicle = false;
   private pool: THREE.Mesh | null = null;
   protected flyers: Flyer[] = [];
+  /** Safety nets (see `update`): seconds sunk under / hanging over the floor, fall speed, seconds unframed. */
+  private sunkT = 0;
+  private hangT = 0;
+  private hangVy = 0;
+  private unframedT = 0;
 
   /** After configure()/build(), before the entry starts: adapt to the player being on foot or in a vehicle. */
   private adaptToRig() {
@@ -958,13 +963,83 @@ export abstract class Zombie extends Enemy {
     return false;
   }
 
-  /** Anchor visible in the camera (with a looser vertical margin for low enemies). */
-  protected inView(obj: THREE.Object3D, mx = 0.9, my = 0.92): boolean {
-    obj.getWorldPosition(_w);
-    _w.project(this.world.camera);
-    return _w.z < 1 && Math.abs(_w.x) < mx && Math.abs(_w.y) < my;
+  // ─── Safety nets ────────────────────────────────────────────────────────
+
+  override update(dt: number): void {
+    const y0 = this.root.position.y;
+    super.update(dt);
+    if (this.removed || this.isBoss || this.state === 'dying' || this.state === 'entry') {
+      this.sunkT = this.hangT = this.hangVy = 0;
+      return;
+    }
+    this.groundNet(dt, y0);
+    this.ageNet(dt);
+  }
+
+  /**
+   * A zombie standing in a ground state must stand ON the floor. The base class
+   * only steps up small rises and only drops walkers that stepped off a ledge;
+   * a custom move (lunge, pounce, knock-back) that ended under a slope or over a
+   * drop would otherwise leave it sunk in the floor — unseen, unshootable, and
+   * holding its beat forever — or hovering in mid-air.
+   */
+  private groundNet(dt: number, y0: number) {
+    if (!this.grounded || !NET_GROUND_STATES.has(this.state)) {
+      this.sunkT = this.hangT = this.hangVy = 0;
+      return;
+    }
+    const p = this.root.position;
+    const g = this.groundY(p.x, p.z);
+    if (g - p.y > SUNK_MAX) {
+      // Sunk: clamber back up onto the floor.
+      this.sunkT += dt;
+      if (this.sunkT > SUNK_GRACE) {
+        p.y = g;
+        this.sunkT = 0;
+        this.world.fx.dust(this.worldPos(_w), 0.5);
+      }
+    } else this.sunkT = 0;
+    // Hanging over the floor while nothing (the base class's ledge fall) brings it down: fall.
+    if (p.y - g > HANG_MAX && p.y >= y0 - 1e-4) {
+      this.hangT += dt;
+      if (this.hangT > HANG_GRACE) {
+        this.hangVy -= 22 * dt;
+        p.y = Math.max(g, p.y + this.hangVy * dt);
+      }
+    } else {
+      this.hangT = 0;
+      this.hangVy = 0;
+    }
+  }
+
+  /**
+   * Old-age net. The base class retires a zombie older than 45 s only once its
+   * chest is well off screen (|NDC| > 1.2); one whose chest and head both sit
+   * just outside the frame (under the bottom edge, behind a HUD panel) and that
+   * can never attack could hold a beat open forever. Give those UNFRAMED_MAX s
+   * to get back in view.
+   */
+  private ageNet(dt: number) {
+    if (this.age < 45 || this.telegraph) {
+      this.unframedT = 0;
+      return;
+    }
+    const seen = this.inPlayArea(this.anchor, 1) || (this.headAnchor !== null && this.inPlayArea(this.headAnchor, 1));
+    this.unframedT = seen ? 0 : this.unframedT + dt;
+    if (this.unframedT > UNFRAMED_MAX) this.despawn();
   }
 }
+
+/** The base class's ground states (stand on the floor). */
+const NET_GROUND_STATES = new Set<string>(['advance', 'windup', 'recover', 'stagger']);
+/** Deeper under the floor than the base class's step-up, for longer than the grace: climb out. */
+const SUNK_MAX = 0.6;
+const SUNK_GRACE = 0.25;
+/** Higher over the floor than the base class's snap-down, unsupported for longer than the grace: fall. */
+const HANG_MAX = 0.5;
+const HANG_GRACE = 0.1;
+/** Seconds an old (> 45 s) zombie may keep its chest and head out of the play area before it quietly leaves. */
+const UNFRAMED_MAX = 8;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Walker
@@ -1090,6 +1165,9 @@ export class Walker extends Zombie {
 // Runner
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** A runner never lunges onto a floor more than this far above or below its own (a flight of stairs). */
+const LUNGE_MAX_DROP = 1.5;
+
 /** Fresh infected: sprints in hunched, lunges, low hp. */
 export class Runner extends Zombie {
   private lunged = false;
@@ -1152,19 +1230,18 @@ export class Runner extends Zombie {
     if (this.inFront(_v)) return;
     const side = _v.x >= 0 ? 1 : -1;
     this.flankSide = side;
-    const y = this.entryTo.y;
     this.toView(this.entryTo, _w);
     _w.x = side * Math.max(this.flankClear + 0.2, Math.abs(_w.x), Math.abs(_v.x));
     this.fromView(_w);
-    this.entryTo.set(_w.x, y, _w.z);
+    // (Land on the floor at the moved landing spot, not at the old spot's height.)
+    this.entryTo.set(_w.x, this.groundY(_w.x, _w.z), _w.z);
   }
 
   protected override advanceUpdate(dt: number) {
     if (this.flank(dt)) return;
     const d = this.distToPlayer;
     // (The lunge only closes distance — but a leap the player can't see is a cheap scare, so it must be framed too.)
-    if (!this.lunged && d > this.attackRange + 1.6 && d < this.attackRange + 5.5 && this.world.rng.chance(dt * 2.2) && this.inPlayArea(this.anchor, 0.9)) {
-      this.startLunge();
+    if (!this.lunged && d > this.attackRange + 1.6 && d < this.attackRange + 5.5 && this.world.rng.chance(dt * 2.2) && this.inPlayArea(this.anchor, 0.9) && this.startLunge()) {
       return;
     }
     // Close in on the point of the attack circle nearest to it, but within
@@ -1216,28 +1293,42 @@ export class Runner extends Zombie {
     return true;
   }
 
-  private startLunge() {
-    this.lunged = true;
-    this.lungeFrom.copy(this.root.position);
+  /**
+   * Leap in at the player, landing ON the floor at the end (stairs, ramps,
+   * raised decks). No lunge up or down a whole storey: returns false (and keeps
+   * running) when the landing spot is more than LUNGE_MAX_DROP above or below.
+   */
+  private startLunge(): boolean {
+    const pos = this.root.position;
     this.playerPos(_p);
-    _v.subVectors(_p, this.root.position).setY(0);
+    _v.subVectors(_p, pos).setY(0);
     const d = _v.length();
     const travel = clamp(d - this.attackRange - 0.3, 0, 4.2);
-    this.lungeTo.copy(this.root.position).addScaledVector(_v.normalize(), travel);
+    _w.copy(pos).addScaledVector(_v.normalize(), travel);
+    _w.y = this.groundY(_w.x, _w.z);
+    if (Math.abs(_w.y - pos.y) > LUNGE_MAX_DROP) return false;
+    this.lunged = true;
+    this.lungeFrom.copy(pos);
+    this.lungeTo.copy(_w);
     this.setState('lunge');
     this.play('runner_shriek', 0.8);
+    return true;
   }
 
   protected override customUpdate(dt: number) {
     if (this.state !== 'lunge') return;
     const dur = 0.55;
     const k = clamp(this.stateTime / dur, 0, 1);
-    this.root.position.lerpVectors(this.lungeFrom, this.lungeTo, k);
+    const pos = this.root.position;
+    pos.lerpVectors(this.lungeFrom, this.lungeTo, k);
+    // (The straight line can cut under a bend in the floor — stairs onto a landing: ride over it.)
+    pos.y = Math.max(pos.y, this.groundY(pos.x, pos.z));
     this.model.position.y = Math.sin(k * Math.PI) * 0.75;
     this.moveSpeed = this.lungeFrom.distanceTo(this.lungeTo) / dur;
     this.playerPos(_p);
     this.faceToward(_p, dt, 10);
     if (k >= 1) {
+      pos.y = this.groundY(pos.x, pos.z);
       this.model.position.y = 0;
       this.world.fx.dust(this.worldPos(_w), 0.6);
       this.setState('advance');
@@ -1370,6 +1461,9 @@ const CRAWL_PLANT = 0.55;
 const CRAWL_SPLAY = 0.3;
 const _hl = new THREE.Vector3();
 const _hr = new THREE.Vector3();
+/** Head world position (left by `headNdc`) and camera position scratch. */
+const _hw = new THREE.Vector3();
+const _cw = new THREE.Vector3();
 
 /*
  * Fair pounces. The ring is drawn on the crawler's HEAD, which sits low in the
@@ -1378,8 +1472,11 @@ const _hr = new THREE.Vector3();
  *  - at least `attackRange − POUNCE_SLACK` out (closer, the head is under the
  *    bottom edge), roughly facing the player (turning during the coil swings
  *    the head ~0.5 m toward the camera),
- *  - head inside the play area with POUNCE_FRAME headroom (clear of the HUD
- *    corner panels; from a vehicle also above the hood).
+ *  - head inside the play area with POUNCE_FRAME headroom (from a vehicle also
+ *    above the hood), and far enough from the bottom HUD corner panels
+ *    (lives/bomb, weapon/reload — where the thumbs rest) that even the ring's
+ *    OPENING size (the overlay starts it at RING_OPEN × and shrinks it) stays
+ *    clear of them.
  * Otherwise it crawls to such a spot first: in front but too close it scrabbles
  * BACKWARDS still facing you; passed or alongside it crawls round to the front.
  * A coil whose ring stays outside the play area for COIL_LOST s (the rig walked
@@ -1388,7 +1485,28 @@ const _hr = new THREE.Vector3();
 const POUNCE_FRAME = 0.86;
 const POUNCE_SLACK = 0.4;
 const POUNCE_FACING = 0.45;
+/** The bottom HUD corner panels in NDC, as `ndcInPlayArea` has them: lives/bomb x < −0.55, weapon/reload x > 0.45, both y < −0.55. */
+const HUD_LOW_Y = -0.55;
+const HUD_LEFT_X = -0.55;
+const HUD_RIGHT_X = 0.45;
+/** The overlay opens a telegraph ring at this × its final radius, which it clamps to 18..140 px (Overlay2D). */
+const RING_OPEN = 2.4;
+const RING_MIN_PX = 18;
+const RING_MAX_PX = 140;
+/**
+ * Bearing (NDC x of the stand-off spot) the crawler settles at, either side of
+ * the view centre: the weapon panel reaches further in than the lives panel.
+ */
+const SPOT_LEFT = 0.32;
+const SPOT_RIGHT = 0.26;
 const COIL_LOST = 0.2;
+/**
+ * A bite knocks the crawler back to its stand-off plus this (then it shakes
+ * itself off for `recoverTime`). Not further: the weak human bot took MORE
+ * bites from crawlers thrown further out — the next pounce comes from where
+ * the head is a smaller target.
+ */
+const KNOCK_BACK = -0.1;
 /** Re-pounce lockout after a called-off coil (no ring flicker). */
 const COIL_RETRY = 0.45;
 /** Hood clearance from a vehicle: the head must project above this (and below its mirror). */
@@ -1463,6 +1581,8 @@ export class Crawler extends Zombie {
   private pounceCd = 0;
   /** Extra stand-off earned while the camera's pitch kept the head under the frame at `attackRange`. */
   private standoff = 0;
+  /** Shrinks the pouncing spot's bearing toward the view centre while the head sits beside a HUD panel there. */
+  private spread = 1;
 
   protected override configure() {
     this.name = 'crawler';
@@ -1470,7 +1590,8 @@ export class Crawler extends Zombie {
     this.speed = 1.2;
     this.attackRange = 3.3;
     this.windup = Crawler.COIL + Crawler.FLY;
-    this.recoverTime = 0.7;
+    // (Only a landed bite leads to 'recover': a breather — and a head shake — before the next pounce.)
+    this.recoverTime = 1.1;
     this.points = 150;
     this.telegraphRadius = 0.35;
     this.sfxIdle = 'crawler_hiss';
@@ -1552,6 +1673,7 @@ export class Crawler extends Zombie {
       this.launched = false;
       this.lostT = 0;
       this.backing = false;
+      this.spread = 1;
       this.fly = clamp(Crawler.FLY + (this.distToPlayer - 3.3) * 0.06, Crawler.FLY, 0.5);
       this.windup = Crawler.COIL + this.fly;
       this.telegraph = { progress: 0, anchor: this.r.head, radius: this.telegraphRadius };
@@ -1559,22 +1681,45 @@ export class Crawler extends Zombie {
     }
   }
 
-  /** Projects the head (the ring anchor) into `_w` (NDC). */
+  /** Projects the head (the ring anchor) into `_w` (NDC); its world position stays in `_hw`. */
   private headNdc(): THREE.Vector3 {
-    this.r.head.getWorldPosition(_w);
-    return _w.project(this.world.camera);
+    this.r.head.getWorldPosition(_hw);
+    return _w.copy(_hw).project(this.world.camera);
   }
 
-  /** Head inside the play area with `margin`; from a vehicle also clear of the hood. Leaves the NDC in `_w`. */
+  /**
+   * Would the pounce ring around the head (NDC `n`, world `_hw` — see headNdc)
+   * reach a bottom HUD panel at its OPENING size? Same sizing as the overlay:
+   * final radius = telegraphRadius / distance × focal (clamped in px), opening
+   * at RING_OPEN × that; tested as an ellipse in NDC against the panel corners.
+   */
+  private ringNearPanel(n: THREE.Vector3): boolean {
+    const cam = this.world.camera;
+    const dist = Math.max(0.5, _hw.distanceTo(_cw.setFromMatrixPosition(cam.matrixWorld)));
+    let ry = this.telegraphRadius / dist / Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5);
+    const h = this.world.viewport.height;
+    if (h > 50) ry = clamp(ry, (2 * RING_MIN_PX) / h, (2 * RING_MAX_PX) / h);
+    ry *= RING_OPEN;
+    const rx = ry / Math.max(0.1, cam.aspect);
+    const dy = Math.max(0, n.y - HUD_LOW_Y) / ry;
+    if (dy >= 1) return false;
+    const dx = Math.min(Math.max(0, HUD_RIGHT_X - n.x), Math.max(0, n.x - HUD_LEFT_X)) / rx;
+    return dx * dx + dy * dy < 1;
+  }
+
+  /** Head inside the play area with `margin`, its ring clear of the HUD; from a vehicle also clear of the hood. Leaves the NDC in `_w`. */
   private headFramed(margin: number): boolean {
     const n = this.headNdc();
     if (!ndcInPlayArea(n.x, n.y, n.z, margin)) return false;
+    if (this.ringNearPanel(n)) return false;
     return !this.inVehicle || Math.abs(n.y) < VEHICLE_HEAD_Y;
   }
 
   /** May a pounce start right now? (See POUNCE_* above.) */
   private pounceReady(): boolean {
     if (this.state === 'dying' || this.distToPlayer < this.attackRange - POUNCE_SLACK) return false;
+    // Not while the player is still reeling from a lost heart (i-frames): no chain of bites from a pack of crawlers.
+    if (this.world.player.invuln > 0) return false;
     this.playerPos(_p);
     const yaw = Math.atan2(_p.x - this.root.position.x, _p.z - this.root.position.z);
     if (Math.abs(angleDelta(this.root.rotation.y, yaw)) > POUNCE_FACING) return false;
@@ -1598,18 +1743,19 @@ export class Crawler extends Zombie {
     const local = this.toView(this.root.position, _v);
     const R = this.attackRange + this.standoff;
     if (-local.z < 0.8) {
-      // Alongside or behind: out to the flank, then forward up it until it is in front.
+      // Alongside or behind: out to the flank (clear of the vehicle when driving), then forward up it until it is in front.
       const sgn = local.x >= 0 ? 1 : -1;
       const ax = Math.abs(local.x);
-      _w.set(sgn * Math.max(ax, 1.2), 0, ax < 1.1 ? Math.min(local.z, 0) : -1.6);
+      const clear = this.inVehicle ? 2.5 : 1.2;
+      _w.set(sgn * Math.max(ax, clear), 0, ax < clear - 0.1 ? Math.min(local.z, 0) : -1.6);
       this.fromView(_w);
       this.moveToward(_w, this.speed * surge, dt);
       this.separate(dt);
       return;
     }
     const cam = this.world.camera;
-    const maxAng = Math.atan(0.38 * Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5) * cam.aspect);
-    const ang = clamp(Math.atan2(local.x, -local.z), -maxAng, maxAng);
+    const half = this.spread * Math.tan(THREE.MathUtils.degToRad(cam.fov) * 0.5) * cam.aspect;
+    const ang = clamp(Math.atan2(local.x, -local.z), -Math.atan(SPOT_LEFT * half), Math.atan(SPOT_RIGHT * half));
     _w.set(Math.sin(ang) * R, 0, -Math.cos(ang) * R);
     this.fromView(_w);
     let remaining: number;
@@ -1626,6 +1772,8 @@ export class Crawler extends Zombie {
     const n = this.headNdc();
     if (n.z < 1 && n.y < (this.inVehicle ? -VEHICLE_HEAD_Y : -POUNCE_FRAME)) this.standoff = Math.min(3, this.standoff + dt * 1.5);
     else if (this.standoff > 0 && n.y > -0.45) this.standoff = Math.max(0, this.standoff - dt * 0.5);
+    // Its ring would open over a bottom HUD panel (camera pitched/yawed off the rail): swing the spot in toward the middle.
+    if (n.z < 1 && this.ringNearPanel(n)) this.spread = Math.max(0.1, this.spread - dt * 0.8);
     if (this.pounceCd > 0) return;
     if (this.pounceReady() && this.grabSlot()) this.setState('pounce');
   }
@@ -1644,6 +1792,11 @@ export class Crawler extends Zombie {
     this.playerPos(_p);
     if (this.telegraph) this.telegraph.progress = clamp(t / (C + F), 0, 1);
     if (t < C) {
+      // A moving rig carried the player out of reach (world frame): no cross-street leap at the camera.
+      if (this.frame === 'world' && this.distToPlayer > this.attackRange * 1.6 + 1) {
+        this.cancelPounce();
+        return;
+      }
       this.faceToward(_p, dt, 8);
       // The ring rides on the head: if it stays out of the play area, the coil is called off.
       const n = this.headNdc();
@@ -1651,17 +1804,21 @@ export class Crawler extends Zombie {
       if (this.lostT > COIL_LOST) this.cancelPounce();
       return;
     }
+    const pos = this.root.position;
     if (!this.launched) {
       this.launched = true;
-      this.pounceFrom.copy(this.root.position);
-      _v.subVectors(_p, this.root.position).setY(0);
+      this.pounceFrom.copy(pos);
+      _v.subVectors(_p, pos).setY(0);
       const d = _v.length();
-      this.pounceTo.copy(this.root.position).addScaledVector(_v.normalize(), Math.max(0, d - 0.8));
+      this.pounceTo.copy(pos).addScaledVector(_v.normalize(), Math.max(0, d - 0.8));
+      // Springs onto the player's floor (up or down a slope), not at its own height.
+      this.pounceTo.y = this.groundY(this.pounceTo.x, this.pounceTo.z);
       this.world.audio.play('whoosh', { volume: 0.6, vary: 0.1 });
     }
     if (t < C + F) {
       const k = (t - C) / F;
-      this.root.position.lerpVectors(this.pounceFrom, this.pounceTo, k);
+      pos.lerpVectors(this.pounceFrom, this.pounceTo, k);
+      pos.y = Math.max(pos.y, this.groundY(pos.x, pos.z));
       this.lift = (this.world.rig.eyeHeight - 0.55) * (1 - (1 - k) * (1 - k)) + Math.sin(k * Math.PI) * 0.25;
       this.liftV = 0;
       this.moveSpeed = this.pounceFrom.distanceTo(this.pounceTo) / F;
@@ -1672,14 +1829,35 @@ export class Crawler extends Zombie {
       this.telegraph = null;
       this.world.hurtPlayer(this.damage, this.name, this);
       this.play('bite', 1);
-      this.pounceFrom.copy(this.root.position);
-      _v.subVectors(this.root.position, _p).setY(0).normalize();
-      this.pounceTo.copy(_p).addScaledVector(_v, this.attackRange - 0.1);
+      this.pounceFrom.copy(pos);
+      _v.subVectors(pos, _p).setY(0).normalize();
+      this.knockSpot(_p, _v, this.pounceTo);
     }
-    // Knocked back down to the ground.
+    // Knocked back down to the ground, out to its stand-off.
     const k = clamp((t - C - F) / Crawler.BACK, 0, 1);
-    this.root.position.lerpVectors(this.pounceFrom, this.pounceTo, 1 - (1 - k) * (1 - k));
+    pos.lerpVectors(this.pounceFrom, this.pounceTo, 1 - (1 - k) * (1 - k));
+    const g = this.groundY(pos.x, pos.z);
+    if (pos.y < g || k >= 1) pos.y = g;
     if (k >= 1) this.setState('recover');
+  }
+
+  /**
+   * Where a bite knocks it back to: its stand-off (+ KNOCK_BACK) from the
+   * player along `dir`, on the floor there — unless that floor falls away or
+   * rises faster than a flight of stairs (a ledge, the bridge's edge), then
+   * shorter.
+   */
+  private knockSpot(p: THREE.Vector3, dir: THREE.Vector3, out: THREE.Vector3) {
+    const pos = this.root.position;
+    const g0 = this.groundY(pos.x, pos.z);
+    let back = this.attackRange + KNOCK_BACK;
+    for (let i = 0; i < 3; i++) {
+      out.copy(p).addScaledVector(dir, back);
+      out.y = this.groundY(out.x, out.z);
+      if (Math.abs(out.y - g0) <= 0.3 + 0.6 * back) return out;
+      back *= 0.55;
+    }
+    return out.set(pos.x, g0, pos.z);
   }
 
   protected override animate(dt: number) {
@@ -1850,6 +2028,11 @@ export class Crawler extends Zombie {
       const k = Math.sin(clamp(t / this.staggerTime, 0, 1) * Math.PI);
       r.neck.rotation.x -= 0.4 * k;
       r.hips.rotation.x -= 0.25 * k;
+    } else if (st === 'recover') {
+      // Thrown off you: shakes its head clear, then glares back up.
+      const k = 1 - smoothstep(0.2, 1, t / this.recoverTime);
+      r.head.rotation.z += Math.sin(t * 17) * 0.32 * k;
+      r.neck.rotation.x += 0.3 * k;
     }
   }
 
@@ -2344,7 +2527,7 @@ export class Bloater extends Zombie {
   /** Reached the player: burst all over the lens. No points. */
   protected override strike() {
     this.belly.getWorldPosition(_w);
-    this.world.hurtPlayer(this.damage, this.name);
+    this.world.hurtPlayer(this.damage, this.name, this);
     this.world.fx.screenSplat(GOO);
     this.gooBurst(_w);
     this.world.rig.shake(0.5);

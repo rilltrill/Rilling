@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Kit } from '../../kit/ModelKit';
-import { bakedLambert, packTex, retroHook, texOf } from './retro';
+import { PACKED, bakedLambert, packColor, packTexBytes, retroHook, texOf } from './retro';
 
 /**
  * Static-scenery baking for TYRANT CHASE.
@@ -12,6 +12,15 @@ import { bakedLambert, packTex, retroHook, texOf } from './retro';
  * texStrength travel per vertex (`aTex`, see retro.ts), so dozens of textured
  * Kit materials collapse into a single draw call. Glow (unlit) materials are
  * baked into one unlit mesh.
+ *
+ * Memory: lit buckets use the packed 20-byte vertex layout (retro.ts `PACKED`:
+ * float position + sRGB colour/sway bytes + texture-parameter bytes, no
+ * normals — flat shading and the texture projection both come from screen
+ * derivatives). d3 bakes ≈ 1 M vertices (mostly foliage), so this keeps the
+ * stage at ≈ 20 MB of vertex data instead of ≈ 55 MB with float attributes.
+ * Glow buckets (small; colours may exceed 1) keep float position + colour.
+ * The CPU copies stay alive on purpose: three.js re-uploads them after a
+ * WebGL context restore.
  *
  * Swaying foliage: put `userData.sway = { amp, h }` on a plant's root group
  * (amp = metres of sway at the top, h = plant height). Its meshes are baked
@@ -41,13 +50,17 @@ interface Bucket extends BucketMeta {
   geos: THREE.BufferGeometry[];
 }
 
-/** A baked plant/prop variant: raw per-bucket vertex data in its own local space. */
+/**
+ * A baked plant/prop variant: raw per-bucket vertex data in its own local space.
+ * Lit buckets: `col` = packed aCol bytes (4/vertex) and `tex` = aTex bytes;
+ * glow buckets: `col` = float RGB (3/vertex), `tex` = null.
+ */
 export interface Prefab {
-  buckets: { meta: BucketMeta; pos: Float32Array; nrm: Float32Array; col: Float32Array; tex: Float32Array | null; w: Float32Array | null }[];
+  buckets: { meta: BucketMeta; pos: Float32Array; col: Uint8Array | Float32Array; tex: Uint8Array | null }[];
 }
 
-const _nm = new THREE.Matrix3();
-const _pv = new THREE.Vector3();
+const _tb = new Uint8Array(4);
+const _cb = new Uint8Array(4);
 
 export class Baker {
   /** Shared wind uniforms: uTime (s), uWind.xz = direction, uWind.y = gust offset. */
@@ -81,12 +94,14 @@ export class Baker {
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uTime = uniforms.uTime;
       shader.uniforms.uWind = uniforms.uWind;
+      // The sway weight rides in the packed colour's alpha byte (aCol is declared by the retro hook).
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float aSway;\nuniform float uTime;\nuniform vec3 uWind;')
+        .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform vec3 uWind;')
         .replace(
           '#include <begin_vertex>',
           `#include <begin_vertex>
           {
+            float aSway = aCol.a * ${PACKED.SWAY_MAX.toFixed(3)};
             float ph = position.x * 0.17 + position.z * 0.13;
             float s = sin(uTime * 1.7 + ph) * 0.55 + sin(uTime * 4.1 + ph * 1.9) * 0.22 + uWind.y;
             transformed.x += uWind.x * aSway * s;
@@ -95,8 +110,8 @@ export class Baker {
           }`,
         );
     };
-    mat.customProgramCacheKey = () => 'd3sway';
-    m = retroHook(mat, { mode: 'bake' });
+    mat.customProgramCacheKey = () => 'd3sway2';
+    m = retroHook(mat, { mode: 'packed' });
     this.mats.set(key, m);
     return m;
   }
@@ -106,7 +121,7 @@ export class Baker {
     const key = `lit|${side}`;
     let m = this.mats.get(key);
     if (!m) {
-      m = bakedLambert({ side });
+      m = bakedLambert({ side, packed: true });
       this.mats.set(key, m);
     }
     return m;
@@ -136,35 +151,42 @@ export class Baker {
         const basic = (mat as THREE.MeshBasicMaterial).isMeshBasicMaterial;
         if ((lambert || basic) && !mat.transparent && mat.color && !(mat as THREE.MeshLambertMaterial).vertexColors) {
           const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
-          for (const name of Object.keys(geo.attributes)) if (name !== 'position' && name !== 'normal') geo.deleteAttribute(name);
+          for (const name of Object.keys(geo.attributes)) if (name !== 'position') geo.deleteAttribute(name);
           _m.multiplyMatrices(_inv, mesh.matrixWorld);
           geo.applyMatrix4(_m);
           const n = geo.attributes.position.count;
-          const cols = new Float32Array(n * 3);
           _col.copy(mat.color);
           if (lambert && mat.emissive) _col.add(_em.copy(mat.emissive).multiplyScalar((mat.emissiveIntensity ?? 1) * 0.8));
-          for (let i = 0; i < n; i++) {
-            cols[i * 3] = _col.r;
-            cols[i * 3 + 1] = _col.g;
-            cols[i * 3 + 2] = _col.b;
-          }
-          geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
-          if (lambert) {
-            const p = packTex(texOf(mat));
-            const ta = new Float32Array(n * 4);
-            for (let i = 0; i < n; i++) ta.set(p, i * 4);
-            geo.setAttribute('aTex', new THREE.BufferAttribute(ta, 4));
-          }
           const swaying = lambert && !!sw;
-          if (swaying) {
-            const pos = geo.attributes.position as THREE.BufferAttribute;
-            const w = new Float32Array(n);
-            const { spec, baseY } = sw!;
+          if (basic) {
+            // Glow: float colour (unlit, may exceed 1).
+            const cols = new Float32Array(n * 3);
             for (let i = 0; i < n; i++) {
-              const k = THREE.MathUtils.clamp((pos.getY(i) - baseY) / spec.h, 0, 1.3);
-              w[i] = spec.amp * k * k;
+              cols[i * 3] = _col.r;
+              cols[i * 3 + 1] = _col.g;
+              cols[i * 3 + 2] = _col.b;
             }
-            geo.setAttribute('aSway', new THREE.BufferAttribute(w, 1));
+            geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+          } else {
+            // Packed: sRGB colour bytes + sway weight byte, texture-parameter bytes.
+            const cb = new Uint8Array(n * 4);
+            const tb = new Uint8Array(n * 4);
+            packColor(_col, 0, _cb);
+            packTexBytes(texOf(mat), _tb);
+            for (let i = 0; i < n; i++) {
+              cb.set(_cb, i * 4);
+              tb.set(_tb, i * 4);
+            }
+            if (swaying) {
+              const pos = geo.attributes.position as THREE.BufferAttribute;
+              const { spec, baseY } = sw!;
+              for (let i = 0; i < n; i++) {
+                const k = THREE.MathUtils.clamp((pos.getY(i) - baseY) / spec.h, 0, 1.3);
+                cb[i * 4 + 3] = Math.min(255, Math.round(((spec.amp * k * k) / PACKED.SWAY_MAX) * 255));
+              }
+            }
+            geo.setAttribute('aCol', new THREE.BufferAttribute(cb, 4, true));
+            geo.setAttribute('aTex', new THREE.BufferAttribute(tb, 4, false));
           }
           const side = mat.side;
           const key = `${basic ? 'glow' : 'lit'}|${side}|${swaying ? 1 : 0}`;
@@ -217,15 +239,13 @@ export class Baker {
     const buckets: Prefab['buckets'] = [];
     for (const m of meshes) {
       const g = m.geometry;
-      const sw = g.getAttribute('aSway') as THREE.BufferAttribute | undefined;
+      const meta = m.userData.bucket as BucketMeta;
       const tx = g.getAttribute('aTex') as THREE.BufferAttribute | undefined;
       buckets.push({
-        meta: m.userData.bucket as BucketMeta,
+        meta,
         pos: (g.getAttribute('position') as THREE.BufferAttribute).array as Float32Array,
-        nrm: (g.getAttribute('normal') as THREE.BufferAttribute).array as Float32Array,
-        col: (g.getAttribute('color') as THREE.BufferAttribute).array as Float32Array,
-        tex: tx ? (tx.array as Float32Array) : null,
-        w: sw ? (sw.array as Float32Array) : null,
+        col: (g.getAttribute(meta.glow ? 'color' : 'aCol') as THREE.BufferAttribute).array as Uint8Array | Float32Array,
+        tex: tx ? (tx.array as Uint8Array) : null,
       });
     }
     return { buckets };
@@ -262,16 +282,14 @@ export class Sink {
     }
     const out: THREE.Mesh[] = [];
     for (const g of groups.values()) {
+      const glow = g.meta.glow;
       const pos = new Float32Array(g.n * 3);
-      const nrm = new Float32Array(g.n * 3);
-      const col = new Float32Array(g.n * 3);
-      const tex = g.meta.glow ? null : new Float32Array(g.n * 4);
-      const w = g.meta.sway ? new Float32Array(g.n) : null;
+      const col = glow ? new Float32Array(g.n * 3) : new Uint8Array(g.n * 4);
+      const tex = glow ? null : new Uint8Array(g.n * 4);
+      const cw = glow ? 3 : 4;
       let o = 0;
       for (const { b, m } of g.parts) {
         const e = m.elements;
-        _nm.getNormalMatrix(m);
-        const ne = _nm.elements;
         const cnt = b.pos.length / 3;
         for (let i = 0; i < cnt; i++) {
           const x = b.pos[i * 3];
@@ -281,27 +299,18 @@ export class Sink {
           pos[j] = e[0] * x + e[4] * y + e[8] * z + e[12];
           pos[j + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
           pos[j + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
-          const nx = b.nrm[i * 3];
-          const ny = b.nrm[i * 3 + 1];
-          const nz = b.nrm[i * 3 + 2];
-          _pv.set(ne[0] * nx + ne[3] * ny + ne[6] * nz, ne[1] * nx + ne[4] * ny + ne[7] * nz, ne[2] * nx + ne[5] * ny + ne[8] * nz).normalize();
-          nrm[j] = _pv.x;
-          nrm[j + 1] = _pv.y;
-          nrm[j + 2] = _pv.z;
-          col[j] = b.col[i * 3];
-          col[j + 1] = b.col[i * 3 + 1];
-          col[j + 2] = b.col[i * 3 + 2];
-          if (w) w[o + i] = b.w ? b.w[i] : 0;
         }
+        col.set(b.col, o * cw);
         if (tex && b.tex) tex.set(b.tex, o * 4);
         o += cnt;
       }
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      geo.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
-      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      if (tex) geo.setAttribute('aTex', new THREE.BufferAttribute(tex, 4));
-      if (w) geo.setAttribute('aSway', new THREE.BufferAttribute(w, 1));
+      if (glow) geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      else {
+        geo.setAttribute('aCol', new THREE.BufferAttribute(col, 4, true));
+        geo.setAttribute('aTex', new THREE.BufferAttribute(tex!, 4, false));
+      }
       geo.computeBoundingSphere();
       const mesh = new THREE.Mesh(Kit.track(geo), baker.materialFor(g.meta));
       mesh.matrixAutoUpdate = false;

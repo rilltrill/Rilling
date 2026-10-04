@@ -68,9 +68,14 @@ const _processed = new WeakSet<object>();
  * brightness more than ~3 times a second. Panel meshes switch at most every
  * PANEL_HOLD seconds, lights at most every LIGHT_HOLD seconds (and ramp
  * rather than snap), and power surges are a smooth brown-out.
+ * With Settings.reduceFlashes everything is calmer still: no lightning flash
+ * (thunder only), panels/lights switch at most about once a second, alarm and
+ * police lights pulse slowly and shallowly, and surges don't wobble.
  */
 const PANEL_HOLD = 0.2;
 const LIGHT_HOLD = 0.45;
+const CALM_PANEL_HOLD = 1.0;
+const CALM_LIGHT_HOLD = 1.2;
 
 /** Slow envelope of a bad tube (`blink`): the tube is mostly working while this is > -0.9. */
 function blinkEnv(t: number, seed: number): number {
@@ -260,6 +265,10 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   const update = (dt: number, w: World) => {
     sc.t += dt;
     const t = sc.t;
+    // Photosensitivity setting (live: the settings screen can change it mid-stage).
+    const calm = w.settings.reduceFlashes;
+    const panelHold = calm ? CALM_PANEL_HOLD : PANEL_HOLD;
+    const lightHold = calm ? CALM_LIGHT_HOLD : LIGHT_HOLD;
     const d = w.rig.d;
     const cam = w.camera;
     cam.getWorldPosition(_cam);
@@ -294,7 +303,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     // never a strobe) while the ceiling panels cut out together.
     sc.surge = Math.max(0, sc.surge - dt * 0.6);
     const surgeS = Math.min(1, sc.surge);
-    const surgeK = 1 - 0.4 * surgeS * (0.75 + 0.25 * Math.sin(t * 9));
+    const surgeK = 1 - 0.4 * surgeS * (calm ? 0.75 : 0.75 + 0.25 * Math.sin(t * 9));
     const blackout = sc.surge > 0.25;
     // Lightning (bay only).
     if (d < D.erDoor + 2) {
@@ -309,7 +318,8 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     let bolt = 0;
     if (flashT > 0) {
       flashT = Math.max(0, flashT - dt);
-      bolt = flashT > 0.36 ? 1.8 : 1.8 * Math.pow(flashT / 0.36, 1.6);
+      // (Reduced flashes: thunder only, the scene doesn't light up.)
+      if (!calm) bolt = flashT > 0.36 ? 1.8 : 1.8 * Math.pow(flashT / 0.36, 1.6);
     }
     hemi.intensity = hemiK * surgeK + bolt;
     sun.intensity = 0.9 * surgeK + bolt * 0.6;
@@ -333,7 +343,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       if (dd > 42 * 42) continue;
       f.held += dt;
       const lit = !blackout && (f.mode === 'buzz' ? buzz(t, f.seed) : f.mode === 'blink' ? blink(t, f.seed) : dying(t, f.seed));
-      if (lit !== f.lit && (f.held >= PANEL_HOLD || blackout)) {
+      if (lit !== f.lit && (f.held >= panelHold || blackout)) {
         f.lit = lit;
         f.held = 0;
         f.mesh.material = lit ? f.on : f.off;
@@ -363,11 +373,11 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       const f = sc.flickers[best];
       const want = !blackout && (f.mode === 'buzz' || (f.mode === 'blink' && blinkEnv(t, f.seed) > -0.9));
       flickHeld += dt;
-      if (want !== flickOn && flickHeld >= LIGHT_HOLD) {
+      if (want !== flickOn && flickHeld >= lightHold) {
         flickOn = want;
         flickHeld = 0;
       }
-      flickTarget = flickOn ? 5 : 2;
+      flickTarget = calm ? (flickOn ? 4.2 : 3) : flickOn ? 5 : 2;
     }
     flickLevel += (flickTarget - flickLevel) * (1 - Math.exp(-dt * 10));
     flick.intensity = flickLevel;
@@ -392,20 +402,21 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       switch (a.mode) {
         case 'police': {
           // Red/blue alternation at 1.5 Hz with a gentle pulse (no strobe).
-          const ph = Math.floor(t * 3) % 2;
+          const ph = Math.floor(t * (calm ? 1 : 3)) % 2;
           accent.color.setHex(ph ? 0xff2020 : 0x3050ff);
-          kk = 0.8 + 0.2 * Math.abs(Math.sin(t * 3 * Math.PI));
+          kk = calm ? 0.6 : 0.8 + 0.2 * Math.abs(Math.sin(t * 3 * Math.PI));
           break;
         }
         case 'strobe':
-          kk = 0.25 + 0.75 * Math.pow(Math.max(0, Math.sin(t * 3.4)), 3);
+          // Rotating alarm beacon; calm: a slow, shallow swell.
+          kk = calm ? 0.7 + 0.3 * (0.5 + 0.5 * Math.sin(t * 1.6)) : 0.25 + 0.75 * Math.pow(Math.max(0, Math.sin(t * 3.4)), 3);
           break;
         case 'buzz':
         case 'surgical': {
           // Failing lamp: drop-outs are rate-limited and ramped.
           const raw = a.mode === 'buzz' ? buzz(t * 0.8, 4.2) : buzz(t * 0.5, 9.1);
           accHeld += dt;
-          if (raw !== accOn && accHeld >= LIGHT_HOLD) {
+          if (raw !== accOn && accHeld >= lightHold) {
             accOn = raw;
             accHeld = 0;
           }
@@ -438,7 +449,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       s.obj.rotation.x = Math.sin(t * s.rate * 0.7 + s.phase * 1.3) * s.amp * 0.6 + (s.obj.userData.baseX ?? 0);
     }
     for (const s of sc.spinners) s.obj.rotation.y += s.rate * dt;
-    const ph = Math.floor(t * 3) % 2 === 0;
+    const ph = Math.floor(t * (calm ? 1 : 3)) % 2 === 0;
     for (const lb of sc.lightbars) {
       for (const m of lb.red) m.visible = ph;
       for (const m of lb.blue) m.visible = !ph;

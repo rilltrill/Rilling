@@ -120,7 +120,8 @@ class Throwable extends Projectile {
 
 export class Behemoth extends Boss {
   override title = 'THE BEHEMOTH';
-  override deathDuration = 7.0;
+  /** Stagger → topple over the railing → splash (~4.7 s); the truck floors it as the spray climbs. */
+  override deathDuration = 5.6;
 
   // Rig.
   private hips!: THREE.Group;
@@ -201,7 +202,7 @@ export class Behemoth extends Boss {
 
   protected override configure(): void {
     this.name = 'behemoth';
-    this.maxHp = 330;
+    this.maxHp = 390;
     this.speed = 0;
     this.points = 30000;
     this.phases = [0.66, 0.33];
@@ -532,7 +533,7 @@ export class Behemoth extends Boss {
   }
 
   private interruptNeed() {
-    return [8, 9, 10][this.phase] ?? 10;
+    return [13, 14, 15][this.phase] ?? 15;
   }
 
   protected override onPhase(phase: number): void {
@@ -1386,6 +1387,10 @@ export class Behemoth extends Boss {
         this.splashT = 0;
         w.scene.add(this.splash);
         w.fx.dust(_v.setY(BRIDGE.WATER + 2), 4, 0xd8e4f0);
+        // Floor it: the truck pulls away while the camera holds on the spray (the
+        // 'escape' beat turns it back to the open road a moment later).
+        w.rig.moveTo(Math.min(w.rig.length, w.rig.d + 120), 14);
+        w.audio.play('engine_rev', { volume: 0.9 });
       }
     }
     // Splash column climbing past the deck.

@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { Boss } from '../../../gameplay/Boss';
+import { ndcInPlayArea } from '../../../gameplay/Enemy';
 import { Projectile } from '../../../gameplay/Projectile';
 import type { ShotHit } from '../../../gameplay/Entity';
 import type { EntryKind } from '../../../core/types';
+import type { World } from '../../../gameplay/World';
 import { registerEnemy, createEnemy } from '../../registry';
 import { Kit } from '../../kit/ModelKit';
 import { angleDelta, clamp, damp, lerp, smoothstep } from '../../../core/math';
@@ -24,18 +26,24 @@ import { park } from './env';
  *                 the head is posed so the open maw faces the camera)
  *   body        : 'torso' ×0.3, legs/tail even less; brow ridges + back scutes
  *                 are armour (spark)
- *   interrupts  : weak hits during a windup count in full, body hits at half
- *                 the raw shot damage (bite 6, charge 6.5, lunge 7)
+ *   interrupts  : weak hits during a windup count in full, body hits at 0.3×
+ *                 the raw shot damage (see TYRANT_TUNE: about 0.8–1 s of steady
+ *                 mounted-gun fire on the eyes / throat stops an attack — a
+ *                 spray at the body won't)
  *   PHASE 1 (behind)  : bursts out of the trees behind the jeep and chases it
  *                       — lunging BITE (ring, interruptible), TAIL SMASH (flings
  *                       palm trunks / rocks: shootable projectiles)
  *   PHASE 2 (ahead)   : roars, veers into the jungle, cuts ahead and ambushes
  *                       the jeep from the front — CHARGE (ring, interruptible),
- *                       bite, HEADBUTT DEBRIS; calls raptors + pteranodons
+ *                       bite, HEADBUTT DEBRIS; calls raptors + a compy pack
  *   PHASE 3 (helipad) : knocked down (a first-aid kit drops), the jeep races
  *                       past to the helipad; it chases onto the pad, squares up
- *                       beside the fuel tank and makes FINAL LUNGES — shoot the
- *                       tank while it's close for a giant blast.
+ *                       beside the fuel tank and makes FINAL LUNGES (often two
+ *                       back to back) — shoot the tank while it's close for a
+ *                       giant blast.
+ *   fairness    : an attack only starts with the head inside the playable view
+ *                 (Enemy.inPlayArea: clear of the HUD corners and the boss bar),
+ *                 so its ring is readable and shootable from the first frame.
  *   death       : stumbles, crashes onto its side and slides along the road.
  */
 
@@ -69,6 +77,36 @@ const _u = new THREE.Vector3();
 
 /** Phase-3 standoff distance behind the parked jeep (rig z). */
 const P3_Z = 15.5;
+
+/**
+ * Fight tuning (the finale: the hardest boss of the campaign, but every hit is
+ * telegraphed and stoppable). Windups in seconds, interrupt thresholds in
+ * "interrupt damage": a mounted-gun weak-point hit adds 1.6, a body hit 0.24
+ * (0.3 × the raw 0.8), so 16 ≈ 10 eye / throat hits ≈ 0.8–1 s of steady fire —
+ * ~14 rounds, which never overheats a gun the ring's vent left at 35 %.
+ * Measured with the human-like bot (σ 0.03, ~0.3 s reactions): about one hit
+ * per phase gets through for an average player (≈ 3 per fight, 70 s).
+ */
+export const TYRANT_TUNE = {
+  /** Phase 1 bites are slower but need more fire (the head is right behind the jeep). */
+  biteWind: [1.5, 1.45, 1.45],
+  chargeWind: 1.9,
+  lungeWind: 1.8,
+  /** Phase 3: a stopped lunge is answered by another straight away (shorter run-up). */
+  lungeChainWind: 1.65,
+  lungeChainChance: 0.55,
+  biteInterrupt: [21, 19, 17],
+  chargeInterrupt: 20,
+  lungeInterrupt: 18,
+  /** Body (non-weak) hits add this × the raw shot damage to the interrupt meter. */
+  bodyInterrupt: 0.3,
+  /** Seconds between attacks, per phase. */
+  cooldown: [2.2, 1.9, 1.5],
+  /** Interrupt-threshold factor for the attack after a landed one (and again at ≤ 2 hearts). */
+  mercy: 0.8,
+  /** Extra breather after an attack that connected. */
+  mercyRest: 0.6,
+};
 
 // Warm earthy browns (lifted for the night + CRT pass so the king stays a warm
 // silhouette against the blue storm instead of graying out).
@@ -220,6 +258,14 @@ export class Tyrant extends Boss {
   private sfxT = 3;
   private debrisT = 0;
   private veerTarget: number = D.HELI_APPROACH;
+  /** The current lunge is the quick follow-up of a chain (phase 3). */
+  private chained = false;
+  /** Seconds an attack has been held back because the head was out of the play area. */
+  private heldT = 0;
+  /** The last attack connected (→ a longer breather and an easier next attack). */
+  private justLanded = false;
+  /** The current attack follows a landed one: its interrupt threshold is lowered. */
+  private mercyNext = false;
   /** Seconds the phase-1 chase has been parked at the end of its road. */
   private parkedT = 0;
   private healthDropped = false;
@@ -531,18 +577,30 @@ export class Tyrant extends Boss {
     this.flinch = Math.min(1.2, this.flinch + (weak ? 0.22 : 0.06) + amount * 0.05);
     if (weak) this.world.fx.sparks(hit.point, hit.normal, 3);
     if (this.winding) {
-      // Weak-point hits count in full; body hits still add pressure at half the
-      // raw shot damage, so hosing the head while it lunges is never wasted.
-      this.interruptDmg += weak ? amount : hit.damage * 0.5;
+      // Weak-point hits count in full; body hits still add a little pressure
+      // (TYRANT_TUNE.bodyInterrupt × the raw shot damage) — aim for the glow.
+      this.interruptDmg += weak ? amount : hit.damage * TYRANT_TUNE.bodyInterrupt;
       if (this.interruptDmg >= this.interruptThreshold()) this.interrupt();
     }
   }
 
   private interruptThreshold(): number {
     const st = this.state as TState;
-    if (st === 'lungeWind') return 7;
-    if (st === 'chargeWind') return 6.5;
-    return 6;
+    const base =
+      st === 'lungeWind' ? TYRANT_TUNE.lungeInterrupt : st === 'chargeWind' ? TYRANT_TUNE.chargeInterrupt : (TYRANT_TUNE.biteInterrupt[this.phase] ?? 15);
+    // Arcade mercy: right after it has landed a hit, and while the player is on
+    // their last hearts, the next attack is easier to stop — runs of bad luck
+    // don't snowball into a death.
+    let k = 1;
+    if (this.mercyNext) k *= TYRANT_TUNE.mercy;
+    if (this.world.player.hp <= 2) k *= TYRANT_TUNE.mercy;
+    return base * k;
+  }
+
+  /** A Tyrant attack connects. */
+  private landed(w: World) {
+    w.hurtPlayer(1, this.title, this);
+    this.justLanded = true;
   }
 
   private interrupt() {
@@ -600,6 +658,8 @@ export class Tyrant extends Boss {
     this.telegraph = null;
     this.winding = false;
     this.interruptDmg = 0;
+    // A chain (phase-3 double lunge) lasts until it's back in its neutral state.
+    if (s === 'retreat' || s === 'stalk' || s === 'chase') this.chained = false;
     this.entering = true;
     this.setState(s);
   }
@@ -710,7 +770,8 @@ export class Tyrant extends Boss {
     const kind = this.phase === 0 ? (i % 2 === 0 ? 0 : 1) : this.phase === 1 ? (i === 0 ? 2 : 1) : i % 3;
     this.throwProjectile(from.clone(), {
       flightTime: this.phase === 2 ? 1.45 : 1.65,
-      arc: 2.4,
+      // A flat throw: a high lob spent its flight under the boss bar at the top of the screen.
+      arc: 1.1,
       hp: 2,
       size: 0.55,
       damage: 1,
@@ -742,8 +803,28 @@ export class Tyrant extends Boss {
   }
 
   private afterAttack() {
-    this.cooldown = [2.4, 2.0, 2.2][this.phase] ?? 2.2;
+    this.cooldown = (TYRANT_TUNE.cooldown[this.phase] ?? 2) + (this.justLanded ? TYRANT_TUNE.mercyRest : 0);
     this.go(this.idleState());
+  }
+
+  /**
+   * Start the next attack once the cooldown is up — but only with the head (the
+   * telegraph anchor and the weak points) inside the playable view, so the ring
+   * never starts under a HUD panel, the boss bar or off screen.
+   */
+  private tryAttack(dt: number) {
+    this.cooldown -= dt;
+    if (this.cooldown > 0) return;
+    if (!this.inPlayArea(this.head, 0.85)) {
+      this.heldT += dt;
+      return;
+    }
+    this.heldT = 0;
+    const next = this.chooseAttack();
+    this.go(next);
+    // The mercy (lower interrupt threshold) carries into this one attack only.
+    this.mercyNext = this.justLanded;
+    this.justLanded = false;
   }
 
   private stompFx(volume: number, shake: number) {
@@ -873,13 +954,12 @@ export class Tyrant extends Boss {
           w.fx.dust(this.worldPos(_v), 1.3, 0x4a4436);
         }
         if (t >= dur) {
-          if (this.roarFor === 2 && this.once('p2')) {
-            this.spawnMinion('ptero', -7, 10, 14, 'fly');
-            this.spawnMinion('ptero', 7, 11, 18, 'fly');
-          }
+          // (No pteranodons in the final stand: circling over the boss they dove out
+          // from behind its body, where their rings couldn't be shot.)
           if (this.afterRoar === 'stalk' && this.once('p1')) {
-            this.spawnMinion('raptor', -9, 0, -10, 'leap', { variant: 'red' });
-            this.spawnMinion('raptor', 9, 0, -12, 'leap', { variant: 'tan' });
+            // From the jungle either side of it, landing ~11 m ahead near the middle of the view.
+            this.spawnMinion('raptor', -5, 0, -18, 'leap', { variant: 'red' });
+            this.spawnMinion('raptor', 5.5, 0, -19.5, 'leap', { variant: 'tan' });
           }
           // First attack after the entrance roar comes later (the gun is usually hot by now).
           this.cooldown = this.afterRoar === 'chase' && this.lastAttack === '' ? 2.6 : 1.4;
@@ -903,16 +983,17 @@ export class Tyrant extends Boss {
           this.pendingPhase = Math.max(this.pendingPhase, 1);
           break;
         }
-        this.cooldown -= dt;
-        if (this.cooldown <= 0) this.go(this.chooseAttack());
+        this.tryAttack(dt);
         if (this.hp < this.maxHp * 0.86 && this.once('p0')) {
-          this.spawnMinion('raptor', -7.5, 0, 8, 'leap', { variant: 'green' });
-          this.spawnMinion('raptor', 8, 0, 11, 'leap', { variant: 'tan' });
+          // Out of the trees either side of it, landing ~8–9 m back, mid-frame
+          // (never right under the jeep's tailgate / the HUD corners).
+          this.spawnMinion('raptor', -4.2, 0, 15.5, 'leap', { variant: 'green' });
+          this.spawnMinion('raptor', 4.6, 0, 17, 'leap', { variant: 'tan' });
         }
         break;
       }
       case 'biteWind': {
-        const dur = this.phase === 0 ? 1.75 : 1.6;
+        const dur = TYRANT_TUNE.biteWind[this.phase] ?? 1.5;
         this.winding = true;
         if (this.phase === 0) this.steer(0.5, 7.2, 7, dt);
         else {
@@ -933,7 +1014,7 @@ export class Tyrant extends Boss {
         const done = this.telegraphAttack(
           dur,
           () => {
-            w.hurtPlayer(1, this.title, this);
+            this.landed(w);
             w.audio.play('bite', { volume: 1, pitch: 0.6 });
             w.audio.play('crash', { volume: 0.6 });
             w.rig.shake(0.85);
@@ -994,10 +1075,24 @@ export class Tyrant extends Boss {
               w.audio.play(this.phase === 1 ? 'crash' : 'wood_break', { volume: 0.9 });
               w.rig.shake(0.25);
             }
-            this.head.getWorldPosition(_v);
-            _v.y += 0.4;
-            _v.x += w.rng.spread(1);
-            this.fling(_v, i);
+            // Launch from the head — or lower toward the chest if the head sits
+            // under the boss bar / a HUD corner, so the debris (and its ring) is
+            // in clear view from the moment it flies.
+            // (Released ~1.2 m in front of the jaws, never inside the head's hit volume.)
+            const spread = w.rng.spread(1);
+            let ok = false;
+            for (let j = 0; j < 4 && !ok; j++) {
+              this.head.getWorldPosition(_v);
+              this.chest.getWorldPosition(_u);
+              _v.lerp(_u, j / 3);
+              _u.subVectors(w.camera.position, _v).normalize();
+              _v.addScaledVector(_u, 1.2);
+              _v.x += spread;
+              _v.y += 0.2;
+              _w.copy(_v).project(w.camera);
+              ok = ndcInPlayArea(_w.x, _w.y, _w.z, 0.85);
+            }
+            if (ok) this.fling(_v, i);
           }
         }
         if (t > smashAt + throws * 0.32 + 0.6) this.afterAttack();
@@ -1068,17 +1163,19 @@ export class Tyrant extends Boss {
         this.faceYaw(this.yawToJeep(), dt, 4);
         this.neckT = -0.05 + Math.sin(this.age * 1.1) * 0.06;
         this.headYawT = Math.sin(this.age * 0.7) * 0.2;
-        this.cooldown -= dt;
-        if (this.cooldown <= 0) this.go(this.chooseAttack());
+        this.tryAttack(dt);
         if (this.hp < this.maxHp * 0.5 && this.once('p1b')) {
-          this.spawnMinion('ptero', -6, 10, -20, 'fly');
-          this.spawnMinion('ptero', 6, 11, -24, 'fly');
+          // A compy pack skitters out of the jungle ahead (on the ground, in plain
+          // view — fliers circling over the boss dove out from behind its body).
+          this.spawnMinion('compy', -3.5, 0, -16, 'leap');
+          this.spawnMinion('compy', 3, 0, -17, 'leap');
+          this.spawnMinion('compy', 0.5, 0, -18.5, 'leap');
         }
         break;
       }
       case 'chargeWind': {
         // Paws the road, lowers its head… then charges.
-        const dur = 2.05;
+        const dur = TYRANT_TUNE.chargeWind;
         const chargeAt = dur - 0.8;
         this.winding = true;
         this.anchored = true;
@@ -1111,7 +1208,7 @@ export class Tyrant extends Boss {
         const done = this.telegraphAttack(
           dur,
           () => {
-            w.hurtPlayer(1, this.title, this);
+            this.landed(w);
             w.audio.play('crash', { volume: 1 });
             w.audio.play('bite', { volume: 0.7, pitch: 0.5 });
             w.rig.shake(1);
@@ -1143,6 +1240,17 @@ export class Tyrant extends Boss {
         this.shakeHead = 1;
         this.faceYaw(this.yawToJeep() + Math.sin(t * 4) * 0.3, dt, 4);
         if (first) w.fx.dust(this.worldPos(_v), 1.4, 0x4a4436);
+        // Phase 3: a stopped lunge is often answered by another straight away
+        // (shorter run-up from where it reeled) — the final stand never lets up.
+        if (this.phase === 2 && !this.chained && t > 1.1 && t - dt <= 1.1) {
+          if (w.rng.chance(TYRANT_TUNE.lungeChainChance) && this.inPlayArea(this.head, 0.85)) {
+            this.go('lungeWind');
+            this.chained = true;
+            this.mercyNext = false;
+            w.audio.play('dino_roar', { volume: 0.85, pitch: 0.95 });
+            break;
+          }
+        }
         if (t > 1.6) {
           this.cooldown = [1.6, 1.4, 1.1][this.phase] ?? 1.2;
           this.go(this.idleState());
@@ -1217,12 +1325,14 @@ export class Tyrant extends Boss {
       }
       case 'lungeWind': {
         // Final lunge: it thunders down the road past the fuel tank, jaws wide.
-        const dur = 2.5;
+        // A chained follow-up (after a stopped lunge) has a shorter run-up from
+        // wherever it reeled back to.
+        const dur = this.chained ? TYRANT_TUNE.lungeChainWind : TYRANT_TUNE.lungeWind;
         this.winding = true;
         this.anchored = true;
         if (first) {
           this.from.copy(p);
-          this.to.set(0.4, 0, 6.6);
+          this.to.set(this.chained ? -0.5 : 0.4, 0, 6.6);
           w.audio.play('rex_roar', { volume: 0.9, pitch: 1.15 });
           if (!this.finalePrompted && park()?.tank && !park()!.tank!.removed) {
             this.finalePrompted = true;
@@ -1243,7 +1353,7 @@ export class Tyrant extends Boss {
         const done = this.telegraphAttack(
           dur,
           () => {
-            w.hurtPlayer(1, this.title, this);
+            this.landed(w);
             w.audio.play('bite', { volume: 1, pitch: 0.55 });
             w.audio.play('crash', { volume: 0.8 });
             w.rig.shake(1);
@@ -1270,11 +1380,10 @@ export class Tyrant extends Boss {
         this.steer(-2.4 + Math.sin(this.age * 0.6) * 1.2, P3_Z, 4.5, dt);
         this.faceYaw(this.yawToJeep(), dt, 4);
         this.neckT = -0.1 + Math.sin(this.age * 1.3) * 0.06;
-        this.cooldown -= dt;
-        if (this.cooldown <= 0 && p.z > P3_Z - 2) this.go(this.chooseAttack());
+        if (p.z > P3_Z - 2) this.tryAttack(dt);
         if (this.hp < this.maxHp * 0.18 && this.once('p2b')) {
-          this.spawnMinion('raptor', -9, 0, 13, 'leap', { variant: 'blue' });
-          this.spawnMinion('raptor', 9, 0, 15, 'leap', { variant: 'red' });
+          this.spawnMinion('raptor', -4.5, 0, 18, 'leap', { variant: 'blue' });
+          this.spawnMinion('raptor', 5, 0, 19, 'leap', { variant: 'red' });
         }
         break;
       }

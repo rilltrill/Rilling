@@ -7,6 +7,7 @@ import type { Enemy } from '../../../gameplay/Enemy';
 import { clamp, damp, smoothstep } from '../../../core/math';
 import { Kit } from '../../kit/ModelKit';
 import { createEnemy, registerEnemy } from '../../registry';
+import { Projectile, type ProjectileOptions } from '../../../gameplay/Projectile';
 import { M, T, TX } from './mats';
 import { bakeInto } from './bake';
 import { z2Scene } from './scene';
@@ -70,12 +71,38 @@ const CRAWL_PTS: [number, number][] = [
 const CRAWL_RANGE = 4.8;
 /** At most this many pool crawlers alive at once. */
 const CRAWL_MAX = 3;
+/** Seconds without a new attack after the player loses a heart. */
+const BREATHER = 1.6;
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const _t = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
+
+// ─── Bile glob ──────────────────────────────────────────────────────────────
+
+/**
+ * A bile glob that fans out sideways from the volley line (rig-frame metres at
+ * the camera end), so the globs of one volley never line up behind each other
+ * on screen — every one shows its own ring and can be tapped on its own.
+ */
+class BileGlob extends Projectile {
+  constructor(
+    world: World,
+    opts: Partial<ProjectileOptions> & { from: THREE.Vector3 },
+    private lateral: number,
+  ) {
+    super(world, opts);
+  }
+
+  override onAdded(): void {
+    super.onAdded();
+    this.from.x += this.lateral * 0.35;
+    this.to.x += this.lateral;
+    this.root.position.copy(this.from);
+  }
+}
 
 // ─── Dynamic tentacle tube ──────────────────────────────────────────────────
 
@@ -295,6 +322,9 @@ export class PatientZero extends Boss {
   private spawnSel: number[] = [];
   /** Seconds the next attack has been held back for a minion's telegraph. */
   private heldFor = 0;
+  /** Player hearts last frame (to notice a hit) and the breather it earns. */
+  private lastPlayerHp = -1;
+  private breather = 0;
 
   constructor(world: World, spawn: EnemySpawn) {
     super(world, spawn);
@@ -303,7 +333,7 @@ export class PatientZero extends Boss {
   protected override configure() {
     this.name = 'patient_zero';
     this.title = 'PATIENT ZERO';
-    this.maxHp = 185;
+    this.maxHp = 176;
     this.speed = 0;
     this.attackRange = 99;
     this.points = 30000;
@@ -695,6 +725,11 @@ export class PatientZero extends Boss {
 
   protected override customUpdate(dt: number) {
     this.playerLocal(this.player);
+    // Mercy: every heart the player loses (to anything) buys a short breather before the next attack.
+    const php = this.world.player.hp;
+    if (this.lastPlayerHp >= 0 && php < this.lastPlayerHp) this.breather = BREATHER;
+    this.lastPlayerHp = php;
+    if (this.breather > 0) this.breather -= dt;
     switch (this.state) {
       case ST.idle:
         this.updateIdle(dt);
@@ -739,7 +774,7 @@ export class PatientZero extends Boss {
       this.growlT = this.world.rng.range(3, 6);
       this.world.audio.play('zombie_groan', { volume: 0.8, pitch: 0.45, vary: 0.1 });
     }
-    if (this.nextAttack > 0) return;
+    if (this.nextAttack > 0 || this.breather > 0) return;
     // Don't open a ring on the same beat as a minion's: let its pounce/swipe get a head start.
     if (this.heldFor < 0.6 && this.minionThreat()) {
       this.heldFor += dt;
@@ -748,12 +783,14 @@ export class PatientZero extends Boss {
     this.heldFor = 0;
     const rng = this.world.rng;
     this.minions = this.minions.filter((m) => !m.removed && m.state !== 'dying');
-    const canSpawn = this.phase >= 1 && this.minions.length < CRAWL_MAX - 1 && this.lastAttack !== ST.spawn;
+    // The pool is topped up while crawlers are still out — unless the player is down to their last hearts.
+    const cap = this.lowHp() ? CRAWL_MAX - 1 : CRAWL_MAX;
+    const canSpawn = this.phase >= 1 && this.minions.length < cap && this.lastAttack !== ST.spawn;
     const r = rng.next();
     let pick: string;
     if (this.phase === 0) pick = r < 0.58 ? ST.slam : ST.spit;
-    else if (this.phase === 1) pick = canSpawn && r < 0.3 ? ST.spawn : r < 0.68 ? ST.slam : ST.spit;
-    else pick = canSpawn && r < 0.2 ? ST.spawn : r < 0.62 ? ST.slam : ST.spit;
+    else if (this.phase === 1) pick = canSpawn && r < 0.4 ? ST.spawn : r < 0.7 ? ST.slam : ST.spit;
+    else pick = canSpawn && r < 0.3 ? ST.spawn : r < 0.65 ? ST.slam : ST.spit;
     if (pick === this.lastAttack) {
       this.repeat++;
       if (this.repeat >= 2) {
@@ -778,7 +815,7 @@ export class PatientZero extends Boss {
       this.world.audio.play('bloater_gurgle', { volume: 1, pitch: 0.55 });
     } else {
       // Pick distinct emergence points now, so the pool boils where they'll climb out.
-      const n = Math.min(this.phase >= 2 ? 3 : 2, CRAWL_MAX - this.minions.length);
+      const n = Math.min(this.phase >= 2 ? 3 : 2, cap - this.minions.length);
       this.spawnSel.length = 0;
       for (let guard = 0; this.spawnSel.length < n && guard < 40; guard++) {
         const i = rng.int(0, this.spawnPts.length - 1);
@@ -790,7 +827,7 @@ export class PatientZero extends Boss {
   }
 
   private windupFor(kind: 'slam' | 'spit'): number {
-    if (kind === 'slam') return [1.75, 1.5, 1.25][this.phase] ?? 1.25;
+    if (kind === 'slam') return [1.7, 1.45, 1.2][this.phase] ?? 1.2;
     return [1.35, 1.2, 1.05][this.phase] ?? 1.05;
   }
 
@@ -847,6 +884,11 @@ export class PatientZero extends Boss {
     }
     const W = this.windupFor('slam');
     const st = this.stateTime;
+    // A continue rewinds boss attacks (stateTime = 0); one that already struck just ends.
+    if (this.fired && st < W) {
+      this.endAttack();
+      return;
+    }
     if (st < W) {
       if (!this.telegraph) this.telegraph = { progress: 0, anchor: t.tip, radius: 0.6 };
       this.telegraph.progress = clamp(st / W, 0, 1);
@@ -887,7 +929,7 @@ export class PatientZero extends Boss {
       t.rate = 3;
     }
     if (since > 1.2) {
-      if (this.comboLeft > 0) {
+      if (this.comboLeft > 0 && !this.lowHp() && this.slamCandidate()) {
         this.comboLeft--;
         this.beginSlam();
         // Second slam of a combo winds up a little faster (still > 1 s to react).
@@ -899,6 +941,14 @@ export class PatientZero extends Boss {
         this.nextAttack = this.idleGap();
       }
     }
+  }
+
+  /** Back to idle after an attack (no combo follow-up). */
+  private endAttack() {
+    this.comboLeft = 0;
+    this.setState(ST.idle);
+    this.slamTent = null;
+    this.nextAttack = this.idleGap();
   }
 
   private interrupt() {
@@ -919,14 +969,25 @@ export class PatientZero extends Boss {
 
   private idleGap(): number {
     const rng = this.world.rng;
-    if (this.phase === 0) return rng.range(1.9, 2.5);
-    if (this.phase === 1) return rng.range(1.5, 2.0);
-    return rng.range(1.0, 1.5);
+    // (A little slower while the player is on their last hearts.)
+    const mercy = this.lowHp() ? 0.5 : 0;
+    if (this.phase === 0) return rng.range(1.7, 2.2) + mercy;
+    if (this.phase === 1) return rng.range(1.35, 1.8) + mercy;
+    return rng.range(1.0, 1.4) + mercy;
+  }
+
+  /** Player on their last two hearts. */
+  private lowHp(): boolean {
+    return this.world.player.hp <= 2;
   }
 
   private updateSpit(_dt: number) {
     const W = this.windupFor('spit');
     const st = this.stateTime;
+    if (this.fired && st < W) {
+      this.endAttack();
+      return;
+    }
     if (st < W) {
       if (!this.telegraph) this.telegraph = { progress: 0, anchor: this.mouth, radius: 0.55 };
       this.telegraph.progress = clamp(st / W, 0, 1);
@@ -955,10 +1016,17 @@ export class PatientZero extends Boss {
     mesh.add(core);
     const skinM = new THREE.Mesh(Kit.ico(0.36, 0), Kit.mat(0x4a6a10, { transparent: true, opacity: 0.55 }));
     mesh.add(skinM);
-    this.throwProjectile(from, {
+    // Fan the volley out left / centre / right (alternating start side).
+    const n = this.volley;
+    const slot = n <= 1 ? 0 : (this.spat / (n - 1)) * 2 - 1;
+    const lateral = slot * (n >= 3 ? 0.65 : 0.5) * this.lastSlamSide;
+    const glob = new BileGlob(this.world, {
+      from,
       mesh,
       flightTime: ft,
-      arc: 1.6,
+      // (A low lob: the mouth is high in the frame, so a big arc would carry the
+      // glob — and its ring — up under the boss health bar.)
+      arc: 0.3 + Math.abs(slot) * 0.15,
       damage: 1,
       hp: 1,
       points: 150,
@@ -968,7 +1036,8 @@ export class PatientZero extends Boss {
       source: this.title,
       sfxDestroy: 'hit_projectile',
       burst: 'goo',
-    });
+    }, lateral);
+    this.world.add(glob);
     this.world.audio.play('spit', { volume: 1, pitch: 0.6 });
     this.world.fx.blood(from, null, { color: BILE, amount: 0.8 });
     this.flinchK = Math.max(this.flinchK, 0.4);

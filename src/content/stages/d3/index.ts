@@ -6,6 +6,7 @@ import { D, RAIL, rel, worldAt } from './layout';
 import { buildPark, park } from './env';
 import { JeepViewModel, buildJeepBody } from './jeep';
 import { perch, type PerchedCivilian } from './civilian';
+import { lightningTree } from './hazards';
 import './boss';
 
 /**
@@ -29,13 +30,14 @@ const HELI_LOOK = v3(worldAt(D.HELI, 0, 2.6));
 const PAD_LOOK = v3(worldAt(D.PAD - 9, -1, 0));
 const DOOR = rel(D.HOLD_VISITOR, D.VISITOR, D.VISITOR_SIDE + 2.5);
 
-// Civilians stand OUT of the attack lanes: at the edge of the frame (|NDC x| ≈ 0.75,
-// beyond where dinos may line up an attack), farther away than the dinos'
-// striking ring, or perched above them — and every leap / approach in their
-// hold comes from the other side, so shots at an attacker never pass through
-// them. Attackers enter through the middle of the view, clear of the HUD corners.
-const SCIENTIST = rel(D.HOLD_VISITOR, 180, 0);
-const RANGER = rel(D.HOLD_ROADBLOCK, 246.5, 7.3);
+// Civilians stand OUT of the attack lanes: out at the side of the frame (≈ 37°
+// off the view axis — still inside the 39° the engine guarantees on portrait /
+// 4:3 screens), farther away than the dinos' striking ring, or perched above
+// them — and every leap / approach in their hold comes from the other side, so
+// shots at an attacker never pass through them. Attackers enter through the
+// middle of the view, clear of the HUD corners.
+const SCIENTIST = rel(D.HOLD_VISITOR, 180, -1.2);
+const RANGER = rel(D.HOLD_ROADBLOCK, 246.5, 6.5);
 
 /** The mud hold's worker, perched on his truck (spawned by hand: the runner grounds its civilians). */
 let worker: PerchedCivilian | null = null;
@@ -300,6 +302,8 @@ const beats: Beat[] = [
       if (!park()?.roadblockBlasted) park()?.blastRoadblock(w);
       w.audio.play('engine_rev', { volume: 0.8 });
       w.later(3.5, () => w.audio.play('roar_distant', { volume: 1, pitch: 0.9 }));
+      // Lightning splits a palm ahead on the right as the first raptors close in.
+      w.later(2.4, () => lightningTree(w, [5.5, 4.5, 24], 2, () => w.rig.d < D.HOLD_MUD - 8));
     },
     pickups: [{ kind: 'points', pos: [3, 2.3, 40] }],
     waves: [
@@ -331,7 +335,8 @@ const beats: Beat[] = [
   {
     kind: 'hold',
     label: 'stuck in the mud',
-    look: { at: [0, 1.6, 13], blend: 0.8 },
+    // (Turned a touch left so the worker on his truck stays in frame on narrow screens.)
+    look: { at: [-0.9, 1.6, 13], blend: 0.8 },
     minTime: 13,
     onStart: (w) => {
       const env = park();
@@ -342,6 +347,8 @@ const beats: Beat[] = [
       }
       w.audio.play('engine_rev', { volume: 1, pitch: 0.8 });
       w.hud.prompt("WE'RE STUCK! HOLD THEM OFF!");
+      // The storm joins in: a palm on the left of the road is struck and showers the jeep.
+      w.later(5, () => lightningTree(w, [-5.5, 4.5, 17], 3, () => !!park()?.mud));
     },
     onEnd: (w) => {
       const env = park();
@@ -356,7 +363,7 @@ const beats: Beat[] = [
       {
         spawns: [
           { type: 'raptor', pos: [-3, 0, 19], entry: 'leap', hp: 1.3, opts: { variant: 'tan' } },
-          { type: 'raptor', pos: [9, 0, 13], entry: 'leap', t: 0.4, hp: 1.3, opts: { variant: 'tan' } },
+          { type: 'raptor', pos: [8, 0, 14], entry: 'leap', t: 0.4, hp: 1.3, opts: { variant: 'tan' } },
           { type: 'compy', pos: [0, 0, 17], t: 1.2, count: 3, every: 0.3, offset: [1, 0, 0] },
         ],
       },
@@ -372,7 +379,7 @@ const beats: Beat[] = [
         // The pack's final rush once the road is clear (keeps the draw-call peak in budget).
         start: { remaining: 0 },
         spawns: [
-          { type: 'raptor', pos: [9, 0, 10], entry: 'leap', t: 0.5, hp: 1.3, opts: { variant: 'blue' } },
+          { type: 'raptor', pos: [8, 0, 12], entry: 'leap', t: 0.5, hp: 1.3, opts: { variant: 'blue' } },
           { type: 'raptor', pos: [-2, 0, 20], entry: 'leap', t: 0.8, hp: 1.3, opts: { variant: 'red' } },
           { type: 'raptor', pos: [4, 0, 19], entry: 'leap', t: 1.1, hp: 1.3, opts: { variant: 'green' } },
           { type: 'ptero', pos: [-3, 10, 24], entry: 'fly', t: 1.6 },
@@ -444,8 +451,8 @@ const beats: Beat[] = [
       w.hud.prompt('GET TO THE CHOPPER!');
     },
   },
-  { kind: 'wait', label: 'rotors', duration: 1.8, look: { at: HELI_LOOK, world: true, blend: 0.6 } },
-  { kind: 'move', label: 'board', to: D.BOARD, speed: 6, look: { at: HELI_LOOK, world: true, blend: 1 } },
+  { kind: 'wait', label: 'rotors', duration: 1.2, look: { at: HELI_LOOK, world: true, blend: 0.6 } },
+  { kind: 'move', label: 'board', to: D.BOARD, speed: 7, look: { at: HELI_LOOK, world: true, blend: 1 } },
   {
     kind: 'action',
     label: 'lift-off',
@@ -455,14 +462,14 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'escape',
     to: D.END,
-    speed: 7,
+    speed: 9,
     look: { at: PAD_LOOK, world: true, blend: 1.2 },
     onStart: (w) => {
       w.audio.play('helicopter', { volume: 1 });
-      w.later(1.2, () => w.hud.banner('ESCAPED!', 'PRIMAL ISLAND CLEARED', 3.6));
+      w.later(1, () => w.hud.banner('ESCAPED!', 'PRIMAL ISLAND CLEARED', 3.6));
     },
   },
-  { kind: 'wait', label: 'fly away', duration: 1.8 },
+  { kind: 'wait', label: 'fly away', duration: 1.4 },
 ];
 
 /** Board the helicopter: swap the jeep view for the cabin, park the jeep on the pad, jump the rig to the chopper. */
