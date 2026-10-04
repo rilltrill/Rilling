@@ -233,6 +233,9 @@ export class ParkEnv {
     }
 
     scene.add(this.root);
+    // Per-occluder bullet-impact surfaces.
+    for (const m of this.visitor.shell.children) m.userData.surface = 'concrete';
+    this.car.traverse((o) => (o.userData.surface = 'metal'));
 
     this.environment = {
       root: this.root,

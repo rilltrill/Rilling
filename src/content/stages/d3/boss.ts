@@ -842,7 +842,7 @@ export class Tyrant extends Boss {
         const done = this.telegraphAttack(
           dur,
           () => {
-            w.hurtPlayer(1, this.title);
+            w.hurtPlayer(1, this.title, this);
             w.audio.play('bite', { volume: 1, pitch: 0.6 });
             w.audio.play('crash', { volume: 0.6 });
             w.rig.shake(0.85);
@@ -1021,7 +1021,7 @@ export class Tyrant extends Boss {
         const done = this.telegraphAttack(
           dur,
           () => {
-            w.hurtPlayer(1, this.title);
+            w.hurtPlayer(1, this.title, this);
             w.audio.play('crash', { volume: 1 });
             w.audio.play('bite', { volume: 0.7, pitch: 0.5 });
             w.rig.shake(1);
@@ -1145,7 +1145,7 @@ export class Tyrant extends Boss {
         const done = this.telegraphAttack(
           dur,
           () => {
-            w.hurtPlayer(1, this.title);
+            w.hurtPlayer(1, this.title, this);
             w.audio.play('bite', { volume: 1, pitch: 0.55 });
             w.audio.play('crash', { volume: 0.8 });
             w.rig.shake(1);
