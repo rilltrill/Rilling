@@ -58,6 +58,8 @@ export interface SpriteLook {
   levels: number;
   /** Outline darkness (0 = black, 1 = neighbour colour). */
   outline: number;
+  /** 1 = the outline is the silhouette's own edge texels (no bloat), 0 = drawn around it, 2 = auto by size. */
+  outlineIn: number;
   /** Inner contour lines where a part stands in front of another (0 = off, 1 = as dark as the outline). */
   inner: number;
   /** Silhouette rim: top edges brighten, bottom edges darken (0 = off). */
@@ -67,9 +69,11 @@ export interface SpriteLook {
   pxPerTexel: number;
   /** Supersampling (1 or 2): bake at 2× and filter down, like pre-rendered sprites. */
   ss: number;
+  /** Blob shadow strength under sprites (0 = off). */
+  shadows: number;
 }
 
-export const DEFAULT_LOOK: SpriteLook = { bands: 2, dither: 0, levels: 0, outline: 0.16, inner: 0.6, rim: 0.25, saturation: 1.1, pxPerTexel: PX_PER_TEXEL, ss: 2 };
+export const DEFAULT_LOOK: SpriteLook = { bands: 2, dither: 0, levels: 0, outline: 0.16, outlineIn: 2, inner: 0.6, rim: 0.25, saturation: 1.1, pxPerTexel: PX_PER_TEXEL, ss: 2, shadows: 1 };
 
 /** Parse `bands:8,dither:0.3,k:1` (debug URL `&spriteLook=`) over a look. */
 export function parseLook(spec: string | null | undefined, base: SpriteLook = DEFAULT_LOOK): SpriteLook {
@@ -102,6 +106,7 @@ const BAKE_FRAG = /* glsl */ `
   uniform float uDither;
   uniform float uLevels;
   uniform float uOutline;
+  uniform float uOutlineIn;  // 1 = outline drawn on the silhouette's own edge texels (no bloat)
   uniform float uInner;
   uniform float uRim;
   uniform float uSat;
@@ -154,7 +159,7 @@ const BAKE_FRAG = /* glsl */ `
     if (c.a < 0.5) {
       // 1-px outline around the silhouette, in a dark shade of what it borders.
       float n = float(sR) + float(sL) + float(sU) + float(sD);
-      if (n < 0.5) {
+      if (n < 0.5 || uOutlineIn > 0.5) {
         gl_FragColor = vec4(0.0);
         return;
       }
@@ -167,6 +172,14 @@ const BAKE_FRAG = /* glsl */ `
     }
     vec3 rgb = c.rgb;
     float shade = 1.0;
+    bool rim = !(sR && sL && sU && sD);
+    if (uOutlineIn > 0.5 && rim) {
+      // Inner outline: the silhouette's own edge texels, darkened (keeps gaps between limbs open).
+      float l0 = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+      rgb = mix(vec3(l0), rgb, 0.6) * uOutline;
+      gl_FragColor = vec4(encode(rgb), packDepth(dC));
+      return;
+    }
     if (uInner > 0.0) {
       // Inner contours: a nearer part's edge against something well behind it.
       float gap = 0.12 + dC * 0.02;
@@ -237,6 +250,38 @@ const SHOW_FRAG = /* glsl */ `
   }
 `;
 
+/** Blob shadows under sprites (one instanced draw): a two-tone pixel ellipse that fades with height and distance. */
+const SHADOW_VERT = /* glsl */ `
+  varying vec2 vUv;
+  varying float vAlpha;
+  void main() {
+    vUv = uv;
+    vAlpha = instanceColor.r;
+    vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+    vAlpha *= 1.0 - smoothstep(22.0, 40.0, -mv.z);
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+const SHADOW_FRAG = /* glsl */ `
+  precision highp float;
+  varying vec2 vUv;
+  varying float vAlpha;
+  void main() {
+    // Chunky: snap to a 12x12 grid like a sprite of its own.
+    vec2 q = (floor(vUv * 12.0) + 0.5) / 12.0 * 2.0 - 1.0;
+    float r = length(q);
+    float a = r < 0.62 ? 0.5 : r < 1.0 ? 0.28 : 0.0;
+    a *= vAlpha;
+    if (a < 0.01) discard;
+    gl_FragColor = vec4(0.0, 0.0, 0.0, a);
+  }
+`;
+const MAX_SHADOWS = 48;
+const _m4 = new THREE.Matrix4();
+const _sq = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
+const _ss = new THREE.Vector3();
+const _sc = new THREE.Color();
+
 interface Sprite {
   e: Entity;
   mesh: THREE.Mesh;
@@ -253,6 +298,8 @@ interface Sprite {
   hidden: boolean;
   /** Last frame the entity was seen in the world (GC). */
   seen: number;
+  /** Ground shadow radius (m, smoothed) and floor height override. */
+  shadowR: number;
 }
 
 export interface SpriteStats {
@@ -264,6 +311,8 @@ export interface SpriteStats {
   cpuMs: number;
   /** Peak CPU ms of a frame in the last second. */
   cpuPeakMs: number;
+  /** CPU ms of the last beginFrame. */
+  lastMs: number;
   /** Render-target memory (bytes): sprite images + scratch. */
   rtBytes: number;
   bakesPerSec: number;
@@ -286,8 +335,9 @@ export function isCharacter(e: Entity): boolean {
  */
 export class SpriteArt {
   readonly group = new THREE.Group();
+  private shadows: THREE.InstancedMesh;
   look: SpriteLook = { ...DEFAULT_LOOK };
-  readonly stats: SpriteStats = { sprites: 0, drawn: 0, bakes: 0, cpuMs: 0, cpuPeakMs: 0, rtBytes: 0, bakesPerSec: 0 };
+  readonly stats: SpriteStats = { sprites: 0, drawn: 0, bakes: 0, cpuMs: 0, cpuPeakMs: 0, lastMs: 0, rtBytes: 0, bakesPerSec: 0 };
 
   private sprites = new Map<Entity, Sprite>();
   private free = new Map<string, THREE.WebGLRenderTarget[]>();
@@ -342,6 +392,7 @@ export class SpriteArt {
         uDither: { value: 0 },
         uLevels: { value: 0 },
         uOutline: { value: 0 },
+        uOutlineIn: { value: 0 },
         uInner: { value: 0 },
         uRim: { value: 0 },
         uSat: { value: 1 },
@@ -377,6 +428,23 @@ export class SpriteArt {
     const tpl = new THREE.Mesh(this.quad, this.showMat);
     tpl.visible = false;
     this.group.add(tpl);
+    const shMat = new THREE.ShaderMaterial({
+      vertexShader: SHADOW_VERT,
+      fragmentShader: SHADOW_FRAG,
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+      fog: false,
+    });
+    this.shadows = new THREE.InstancedMesh(this.quad, shMat, MAX_SHADOWS);
+    this.shadows.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAX_SHADOWS * 3), 3);
+    this.shadows.frustumCulled = false;
+    this.shadows.count = 0;
+    this.shadows.renderOrder = -1;
+    this.shadows.name = 'sprite-shadows';
+    this.group.add(this.shadows);
     world.scene.add(this.group);
   }
 
@@ -450,6 +518,7 @@ export class SpriteArt {
 
     // Place billboards and hide the real models from the main camera.
     let drawn = 0;
+    let shadows = 0;
     for (const s of this.sprites.values()) {
       const root = s.e.root;
       s.hidden = false;
@@ -475,6 +544,12 @@ export class SpriteArt {
         u.set(c.r, c.g, c.b, 1);
       } else u.w = 0;
       drawn++;
+      if (shadows < MAX_SHADOWS && this.look.shadows > 0 && s.shadowR > 0) this.placeShadow(s, shadows++);
+    }
+    this.shadows.count = shadows;
+    if (shadows) {
+      this.shadows.instanceMatrix.needsUpdate = true;
+      this.shadows.instanceColor!.needsUpdate = true;
     }
 
     const ms = performance.now() - t0;
@@ -483,6 +558,7 @@ export class SpriteArt {
     st.drawn = drawn;
     st.bakes = bakes;
     st.cpuMs = st.cpuMs * 0.9 + ms * 0.1;
+    st.lastMs = ms;
     this.secPeak = Math.max(this.secPeak, ms);
     this.secBakes += bakes;
     this.secT += 1;
@@ -536,7 +612,7 @@ export class SpriteArt {
         mesh.visible = false;
         mesh.name = 'sprite';
         this.group.add(mesh);
-        s = { e, mesh, mat, rt: null, rtKey: '', next: 0, ready: false, offset: new THREE.Vector3(), hidden: false, seen: f };
+        s = { e, mesh, mat, rt: null, rtKey: '', next: 0, ready: false, offset: new THREE.Vector3(), hidden: false, seen: f, shadowR: 0 };
         this.sprites.set(e, s);
       }
       s.seen = f;
@@ -745,6 +821,9 @@ export class SpriteArt {
     pu.uDither.value = L.dither;
     pu.uLevels.value = L.levels;
     pu.uOutline.value = L.outline;
+    // Auto (2): big sprites draw the outline on their own edge (limbs keep their gaps),
+    // small ones around it (readability at a distance beats a texel of bloat).
+    pu.uOutlineIn.value = L.outlineIn >= 2 ? (Math.max(W, H) >= 44 ? 1 : 0) : L.outlineIn;
     pu.uInner.value = L.inner;
     pu.uRim.value = L.rim;
     pu.uSat.value = L.saturation;
@@ -759,6 +838,10 @@ export class SpriteArt {
     m.position.set(qx, qy, -D).applyMatrix4(cam.matrixWorld);
     m.quaternion.copy(cam.getWorldQuaternion(_q));
     m.scale.set((2 * hx * D) / P[0], (2 * hy * D) / P[5], 1);
+    // Ground shadow size from the footprint (smoothed: animation makes the bounds breathe).
+    const foot = Math.max(_box.max.x - _box.min.x, _box.max.z - _box.min.z);
+    const want = THREE.MathUtils.clamp(foot * 0.42, 0.22, 7);
+    s.shadowR = s.shadowR > 0 ? s.shadowR + (want - s.shadowR) * 0.35 : want;
     _c.setFromMatrixPosition(e.root.matrixWorld);
     s.offset.subVectors(m.position, _c);
     const u = s.mat.uniforms;
@@ -767,6 +850,27 @@ export class SpriteArt {
     (u.uRt.value as THREE.Vector2).set(cw, ch);
     (u.uDepth.value as THREE.Vector3).set(d0, d1, D);
     s.ready = true;
+  }
+
+  /** Blob shadow under a sprite: on the floor it stands on, fading as it leaves the ground. */
+  private placeShadow(s: Sprite, i: number) {
+    const e = s.e;
+    _c.setFromMatrixPosition(e.root.matrixWorld);
+    let floor = this.world.groundAt(_c.x, _c.z);
+    if (e instanceof Enemy) {
+      const f = e.spawn.opts.floor;
+      if (typeof f === 'number' && e.frame === 'world') floor = f;
+      // Standing on something raised (a car roof, a deck): that is its floor.
+      else if (e.grounded && e.state !== 'entry' && _c.y > floor && _c.y - floor < 2.5 && e.state !== 'dying') floor = _c.y;
+    }
+    const h = Math.max(0, _c.y - floor);
+    const fade = THREE.MathUtils.clamp(1 - h / 8, 0.25, 1) * this.look.shadows;
+    const r = s.shadowR * THREE.MathUtils.clamp(1 - h / 16, 0.5, 1);
+    _v.set(_c.x, floor + 0.03, _c.z);
+    _ss.set(r * 2, r * 2, 1);
+    _m4.compose(_v, _sq, _ss);
+    this.shadows.setMatrixAt(i, _m4);
+    this.shadows.setColorAt(i, _sc.setRGB(fade, 0, 0));
   }
 
   /** Mirror the stage's lights into the bake scene (same light set → same shader programs). */
@@ -833,6 +937,8 @@ export class SpriteArt {
     this.scratch.depthTexture?.dispose();
     this.scratch.dispose();
     this.postMat.dispose();
+    (this.shadows.material as THREE.Material).dispose();
+    this.shadows.dispose();
     this.showMat.dispose();
     this.quad.dispose();
     this.group.parent?.remove(this.group);

@@ -4,7 +4,8 @@
  * the game and screenshots the SAME instant in ART: 3D and ART: SPRITES.
  *
  *   node scripts/snap-art.mjs --base "http://localhost:5501" --out /tmp/shots \
- *        --shots "z1:4,z1:21,z1:25" [--min 3] [--wait 16000] [--retro crt] [--rate 2.5]
+ *        --shots "z1:4,z1:21,z1:25" [--min 3] [--wait 16000] [--after 0] [--retro crt] [--rate 2.5]
+ *        [--modes "3d,sprites,sprites@k=2;bands=0"] [--noauto] [--flash] [--extra "&zoo=walker"]
  *
  * Writes <out>/<stage>-b<beat>-3d.png and -sprites.png and prints per-shot
  * stats (draw calls / triangles in both modes, sprite stats).
@@ -39,6 +40,7 @@ for (const [stage, beat] of shots) {
   const errors = [];
   page.on('console', (m) => m.type() === 'error' && !/403/.test(m.text()) && errors.push(m.text()));
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  if (args.flash) await page.addInitScript(() => (window.__snapFlash = true));
   await page.addInitScript(() => {
     setInterval(() => {
       const g = window.__game;
@@ -66,11 +68,20 @@ for (const [stage, beat] of shots) {
     );
     if (busy >= minOn) break;
   }
+  if (args.after) await page.waitForTimeout(Number(args.after));
   const freeze = await page.evaluate(() => {
     const g = window.__game;
     if (!g?.world) return null;
+    // Hard freeze: no entity update at all (some animations ease per frame, not per dt).
     g.world.timeScale = 0;
+    g.world.update = () => 0;
+    g.runner.update = () => {};
     g.autoplay = null;
+    // --flash: the boss (or the nearest enemy) is mid hit-flash in the capture.
+    if (window.__snapFlash) {
+      const e = g.world.boss ?? g.world.enemies().find((x) => x.state !== 'dying');
+      e?.flash(true);
+    }
     return { beat: g.runner?.label, entities: g.world.entities.length };
   });
   const row = { stage, beat, busy, freeze, modes: {} };
