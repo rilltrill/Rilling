@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-single/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+# Capacitor native build outputs
+android/app/build/
+android/.gradle/
+android/build/
+ios/App/Pods/
+ios/App/build/
+ios/DerivedData/

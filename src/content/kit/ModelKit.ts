@@ -1,0 +1,216 @@
+import * as THREE from 'three';
+
+/**
+ * Procedural low-poly model toolkit.
+ *
+ * RULES for content code:
+ *  - Geometries and materials from Kit are CACHED and SHARED. Never mutate them
+ *    (no geo.translate(), no mat.color.set()). Position/rotate/scale the Mesh instead.
+ *  - Anything you create yourself (custom BufferGeometry, cloned materials) must be
+ *    passed through `Kit.track()` so it is disposed when the stage ends.
+ *  - Everything is flat-shaded Lambert by default — cheap on mobile and gives
+ *    the chunky arcade look.
+ */
+const geoCache = new Map<string, THREE.BufferGeometry>();
+const matCache = new Map<string, THREE.Material>();
+const tracked = new Set<{ dispose(): void }>();
+
+const k = (n: number) => Math.round(n * 1000) / 1000;
+
+function cachedGeo<T extends THREE.BufferGeometry>(key: string, make: () => T): T {
+  let g = geoCache.get(key);
+  if (!g) {
+    g = make();
+    g.userData.shared = true;
+    geoCache.set(key, g);
+  }
+  return g as T;
+}
+
+function cachedMat<T extends THREE.Material>(key: string, make: () => T): T {
+  let m = matCache.get(key);
+  if (!m) {
+    m = make();
+    m.userData.shared = true;
+    matCache.set(key, m);
+  }
+  return m as T;
+}
+
+export interface MatOptions {
+  emissive?: number;
+  emissiveIntensity?: number;
+  /** Smooth shading instead of flat. */
+  smooth?: boolean;
+  side?: THREE.Side;
+  transparent?: boolean;
+  opacity?: number;
+  /** Skip fog (for skyboxes / far glows). */
+  fog?: boolean;
+  vertexColors?: boolean;
+}
+
+export const Kit = {
+  /** Flat-shaded Lambert material (cached by colour + options). */
+  mat(color: number, o: MatOptions = {}): THREE.MeshLambertMaterial {
+    const key = `l|${color}|${o.emissive ?? ''}|${o.emissiveIntensity ?? ''}|${o.smooth ? 1 : 0}|${o.side ?? ''}|${o.transparent ? o.opacity : ''}|${o.fog ?? ''}|${o.vertexColors ? 1 : 0}`;
+    return cachedMat(key, () => {
+      const m = new THREE.MeshLambertMaterial({
+        color,
+        flatShading: !o.smooth,
+        side: o.side ?? THREE.FrontSide,
+        transparent: !!o.transparent,
+        opacity: o.opacity ?? 1,
+        fog: o.fog ?? true,
+        vertexColors: !!o.vertexColors,
+      });
+      if (o.emissive !== undefined) {
+        m.emissive.setHex(o.emissive);
+        m.emissiveIntensity = o.emissiveIntensity ?? 1;
+      }
+      return m;
+    });
+  },
+
+  /** Physically-based material for shiny/metal things (more expensive — use sparingly). */
+  std(color: number, roughness = 0.6, metalness = 0.2, emissive?: number): THREE.MeshStandardMaterial {
+    return cachedMat(`s|${color}|${roughness}|${metalness}|${emissive ?? ''}`, () => {
+      const m = new THREE.MeshStandardMaterial({ color, roughness, metalness, flatShading: true });
+      if (emissive !== undefined) m.emissive.setHex(emissive);
+      return m;
+    });
+  },
+
+  /** Unlit, full-bright material for glowing eyes, weak points, lamps, muzzle flashes. */
+  glow(color: number, intensity = 1, transparent = false, opacity = 1): THREE.MeshBasicMaterial {
+    return cachedMat(`g|${color}|${intensity}|${transparent ? opacity : ''}`, () => {
+      const c = new THREE.Color(color).multiplyScalar(intensity);
+      return new THREE.MeshBasicMaterial({
+        color: c,
+        toneMapped: false,
+        transparent,
+        opacity,
+        depthWrite: !transparent,
+        fog: false,
+      });
+    });
+  },
+
+  box(w: number, h: number, d: number): THREE.BoxGeometry {
+    return cachedGeo(`box|${k(w)}|${k(h)}|${k(d)}`, () => new THREE.BoxGeometry(w, h, d));
+  },
+
+  sphere(r: number, ws = 8, hs = 6): THREE.SphereGeometry {
+    return cachedGeo(`sph|${k(r)}|${ws}|${hs}`, () => new THREE.SphereGeometry(r, ws, hs));
+  },
+
+  /** Cylinder along Y, centred. */
+  cyl(rt: number, rb: number, h: number, seg = 8): THREE.CylinderGeometry {
+    return cachedGeo(`cyl|${k(rt)}|${k(rb)}|${k(h)}|${seg}`, () => new THREE.CylinderGeometry(rt, rb, h, seg));
+  },
+
+  /** Cone along +Y, centred. */
+  cone(r: number, h: number, seg = 8): THREE.ConeGeometry {
+    return cachedGeo(`cone|${k(r)}|${k(h)}|${seg}`, () => new THREE.ConeGeometry(r, h, seg));
+  },
+
+  /** Capsule along Y, centred; total height = len + 2r. */
+  capsule(r: number, len: number, capSeg = 2, radSeg = 8): THREE.CapsuleGeometry {
+    return cachedGeo(`cap|${k(r)}|${k(len)}|${capSeg}|${radSeg}`, () => new THREE.CapsuleGeometry(r, len, capSeg, radSeg));
+  },
+
+  plane(w: number, h: number, ws = 1, hs = 1): THREE.PlaneGeometry {
+    return cachedGeo(`pl|${k(w)}|${k(h)}|${ws}|${hs}`, () => new THREE.PlaneGeometry(w, h, ws, hs));
+  },
+
+  /** Low-poly blob — an icosahedron, optionally squashed via mesh.scale. */
+  ico(r: number, detail = 0): THREE.IcosahedronGeometry {
+    return cachedGeo(`ico|${k(r)}|${detail}`, () => new THREE.IcosahedronGeometry(r, detail));
+  },
+
+  /**
+   * Organic randomised version of a geometry (rocks, bushes, gore). Not cached —
+   * automatically tracked for disposal.
+   */
+  jitter(geo: THREE.BufferGeometry, amount: number, seed = 1): THREE.BufferGeometry {
+    const g = geo.clone();
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    let s = seed * 9301 + 49297;
+    const rnd = () => {
+      s = (s * 9301 + 49297) % 233280;
+      return s / 233280 - 0.5;
+    };
+    // Same displacement for coincident vertices so faces stay closed.
+    const seen = new Map<string, [number, number, number]>();
+    for (let i = 0; i < pos.count; i++) {
+      const key = `${pos.getX(i).toFixed(3)},${pos.getY(i).toFixed(3)},${pos.getZ(i).toFixed(3)}`;
+      let d = seen.get(key);
+      if (!d) {
+        d = [rnd() * amount, rnd() * amount, rnd() * amount];
+        seen.set(key, d);
+      }
+      pos.setXYZ(i, pos.getX(i) + d[0], pos.getY(i) + d[1], pos.getZ(i) + d[2]);
+    }
+    g.computeVertexNormals();
+    return Kit.track(g);
+  },
+
+  mesh(geo: THREE.BufferGeometry, mat: THREE.Material | THREE.Material[]): THREE.Mesh {
+    return new THREE.Mesh(geo, mat);
+  },
+
+  /**
+   * Create a mesh, add it to `parent` at (x, y, z) with optional rotation (radians)
+   * and scale. Returns the mesh.
+   */
+  add(
+    parent: THREE.Object3D,
+    geo: THREE.BufferGeometry,
+    mat: THREE.Material,
+    x = 0,
+    y = 0,
+    z = 0,
+    rx = 0,
+    ry = 0,
+    rz = 0,
+    sx = 1,
+    sy = sx,
+    sz = sx,
+  ): THREE.Mesh {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z);
+    m.rotation.set(rx, ry, rz);
+    m.scale.set(sx, sy, sz);
+    parent.add(m);
+    return m;
+  },
+
+  /** An empty pivot (joint) group added to parent at (x, y, z). */
+  pivot(parent: THREE.Object3D, x = 0, y = 0, z = 0, name = ''): THREE.Group {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    g.name = name;
+    parent.add(g);
+    return g;
+  },
+
+  /** Register a non-cached geometry/material/texture for disposal at stage end. */
+  track<T extends { dispose(): void }>(x: T): T {
+    tracked.add(x);
+    return x;
+  },
+
+  /** Dispose every cached and tracked GPU resource. Called between stages. */
+  disposeAll() {
+    for (const g of geoCache.values()) g.dispose();
+    for (const m of matCache.values()) m.dispose();
+    for (const t of tracked) t.dispose();
+    geoCache.clear();
+    matCache.clear();
+    tracked.clear();
+  },
+
+  stats() {
+    return { geometries: geoCache.size, materials: matCache.size, tracked: tracked.size };
+  },
+};
