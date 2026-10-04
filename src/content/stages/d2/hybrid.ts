@@ -24,10 +24,11 @@ export const HYBRID_TUNE = {
   /** A single hit this big (magnum) knocks it back at any time. */
   heavy: 3,
   /**
-   * Arcade mercy: with the player on this many hearts or fewer, any hit breaks
-   * its pounce again (a bad patch never snowballs into a death).
+   * Arcade mercy: with the player on this many hearts or fewer, it's a stock
+   * raptor again — any hit breaks its pounce or knocks it back while it closes
+   * in — so a bad patch never snowballs into a death.
    */
-  mercyHp: 1,
+  mercyHp: 2,
 };
 
 /**
@@ -144,7 +145,7 @@ export class HybridRaptor extends Raptor {
       if (this.attacking()) {
         // Enough on target breaks the attack; until then the ring keeps closing.
         if (!heavy && !this.mercy() && this.meter < HYBRID_TUNE.guard) return;
-      } else if (!heavy && !head) {
+      } else if (!heavy && !head && !this.mercy()) {
         // Closing in / recovering: body hits only make it flinch.
         return;
       }

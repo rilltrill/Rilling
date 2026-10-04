@@ -3,6 +3,7 @@ import { D, RAIL } from './layout';
 import { buildJungle, jungle } from './env';
 import { JeepViewModel } from './jeep';
 import './boss';
+import './pack';
 
 /**
  * PRIMAL ISLAND · STAGE 1 — JUNGLE RUN
@@ -40,17 +41,28 @@ const beats: Beat[] = [
     speed: 11,
     // A bonus gem hanging past the gate: a harmless first target while the park rolls by.
     pickups: [{ kind: 'points', pos: [2.2, 2.5, 42], t: 0.4 }],
+    onStart: (w) => {
+      // First compys hop out past the gate: the gun prompt goes up with them.
+      w.later(2.4, () => w.hud.prompt('HOLD TO FIRE!'));
+      // 'WATCH THE HEAT!' pops up the first time the barrel actually gets hot.
+      jungle()?.armHeatTip(true);
+    },
+    waves: [
+      {
+        // Scouts out of the ferns just past the gate (the stage's first targets, ~5 s in).
+        start: { atD: D.GATE + 2 },
+        spawns: [
+          { type: 'compy', pos: [-4.5, 0, 17], entry: 'leap', frame: 'world' },
+          { type: 'compy', pos: [5, 0, 20], entry: 'leap', t: 0.5, frame: 'world' },
+        ],
+      },
+    ],
   },
   // ── 1. Compy ambush: a sparse first wave to learn the mounted gun. ──
   {
     kind: 'hold',
     label: 'compy ambush',
     look: { at: [0, 1.2, 11], blend: 0.8 },
-    onStart: (w) => {
-      w.hud.prompt('HOLD TO FIRE!');
-      // 'WATCH THE HEAT!' pops up the first time the barrel actually gets hot.
-      jungle()?.armHeatTip(true);
-    },
     pickups: [{ kind: 'points', pos: [4.4, 2.3, 13], t: 1 }],
     waves: [
       {
@@ -86,10 +98,12 @@ const beats: Beat[] = [
     onStart: (w) => w.audio.play('engine_rev', { volume: 0.7 }),
     waves: [
       {
+        // A pair bursts out of the ferns on the right and springs at the jeep as it lands:
+        // two rings at once (an ambush pounce takes a short burst to break).
         start: { atD: 76 },
         spawns: [
-          { type: 'raptor', pos: [6.5, 0, 8], entry: 'leap', opts: { variant: 'tan' } },
-          { type: 'raptor', pos: [7.5, 0, 13], entry: 'leap', t: 0.9, opts: { variant: 'tan' } },
+          { type: 'jungle_raptor', pos: [6.5, 0, 8], entry: 'leap', opts: { variant: 'tan', ambush: true } },
+          { type: 'jungle_raptor', pos: [7.5, 0, 13], entry: 'leap', t: 0.5, opts: { variant: 'tan', ambush: true } },
         ],
       },
       {
@@ -97,10 +111,13 @@ const beats: Beat[] = [
         spawns: [{ type: 'compy', pos: [-1.5, 0, 18], count: 3, every: 0.3, offset: [1.4, 0, 0.8] }],
       },
       {
-        start: { atD: 116 },
+        // The pack proper: three out of the left treeline at once, the leader from the right.
+        start: { atD: 114 },
         spawns: [
-          { type: 'raptor', pos: [-6.5, 0, 9], entry: 'leap', opts: { variant: 'blue' } },
-          { type: 'raptor', pos: [-7, 0, 14], entry: 'leap', t: 0.7, opts: { variant: 'tan' } },
+          { type: 'jungle_raptor', pos: [-6.5, 0, 9], entry: 'leap', opts: { variant: 'blue', ambush: true } },
+          { type: 'jungle_raptor', pos: [-7, 0, 14], entry: 'leap', t: 0.25, opts: { variant: 'tan', ambush: true } },
+          { type: 'jungle_raptor', pos: [-8, 0, 11.5], entry: 'leap', t: 0.5, opts: { variant: 'tan', ambush: true } },
+          { type: 'jungle_raptor', pos: [7.5, 0, 12], entry: 'leap', t: 0.8, opts: { variant: 'red', ambush: true } },
         ],
       },
     ],
@@ -116,9 +133,10 @@ const beats: Beat[] = [
       {
         start: { atD: D.FENCE_BREAK - 12 },
         spawns: [
-          { type: 'raptor', pos: [-8.5, 0, 12], entry: 'leap', t: 0.25, opts: { variant: 'red' } },
-          { type: 'raptor', pos: [-9.5, 0, 15], entry: 'leap', t: 0.65, opts: { variant: 'tan' } },
-          { type: 'raptor', pos: [-8, 0, 9.5], entry: 'leap', t: 1.1, opts: { variant: 'tan' } },
+          { type: 'jungle_raptor', pos: [-8.5, 0, 12], entry: 'leap', t: 0.25, opts: { variant: 'red', ambush: true } },
+          { type: 'jungle_raptor', pos: [-9.5, 0, 15], entry: 'leap', t: 0.5, opts: { variant: 'tan', ambush: true } },
+          { type: 'jungle_raptor', pos: [-8, 0, 9.5], entry: 'leap', t: 0.75, opts: { variant: 'tan', ambush: true } },
+          { type: 'jungle_raptor', pos: [-10, 0, 17.5], entry: 'leap', t: 1.1, opts: { variant: 'blue' } },
         ],
       },
       {
@@ -224,7 +242,9 @@ const beats: Beat[] = [
     pickups: [{ kind: 'bomb', pos: [-3.5, 2.2, 12], t: 2 }],
     waves: [
       {
-        spawns: [{ type: 'trike', pos: [D.CAR_SIDE - 0.5, 0, D.CAR - D.TRIKE_HOLD], entry: 'burst', t: 0.35 }],
+        // A bull trike: its charge only stops when it drops (the frill and horns are armour —
+        // aim for the face), so it takes a couple of seconds of fire on the head.
+        spawns: [{ type: 'trike', pos: [D.CAR_SIDE - 0.5, 0, D.CAR - D.TRIKE_HOLD], entry: 'burst', t: 0.35, hp: 2.5 }],
       },
       {
         start: { after: 4, remaining: 0 },
@@ -296,8 +316,9 @@ const beats: Beat[] = [
       },
       {
         spawns: [
-          { type: 'raptor', pos: [-10, 0, 12], entry: 'leap', opts: { variant: 'blue' } },
-          { type: 'raptor', pos: [12, 0, 9], entry: 'leap', t: 0.6, opts: { variant: 'red' } },
+          { type: 'jungle_raptor', pos: [-10, 0, 12], entry: 'leap', opts: { variant: 'blue', ambush: true } },
+          { type: 'jungle_raptor', pos: [12, 0, 9], entry: 'leap', t: 0.3, opts: { variant: 'red', ambush: true } },
+          { type: 'jungle_raptor', pos: [-9, 0, 17], entry: 'leap', t: 0.6, opts: { variant: 'tan', ambush: true } },
           { type: 'compy', pos: [-1.5, 0, 18], count: 3, every: 0.3, offset: [1.5, 0, 0], t: 1.0 },
         ],
       },

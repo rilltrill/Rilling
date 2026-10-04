@@ -23,7 +23,10 @@ import './hybrid';
  *   gift shop   compys pour out of the ceiling vents, a raptor bursts from the
  *               stock room; a scientist hides behind the till
  *   atrium      dilos spit from the planting beds, a raptor pack flanks
- *   hatchery    raptors blow the lab doors off; hatchlings; a second scientist
+ *   hatchery    raptors blow the lab doors off; hatchlings; a second scientist;
+ *               the first of Specimen X's brood (hybrid.ts: shrugs off body
+ *               hits — aim for the head). More hybrids in the kitchen, server
+ *               room, pump room and containment wing.
  *   kitchen     raptors stalking between the counters, the freezer door flies
  *   servers     blinking racks, compys in the cable trays
  *   tunnels     steam, red strobes, an alcove ambush; pump-room pack + gas tanks
@@ -288,15 +291,15 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           at('raptor', labRSpawn[0], 0, labRSpawn[1], { entry: 'burst', opts: { variant: 'tan' } }),
-          // Off the far-left incubator (lands clear of the scientist's line of fire).
-          at('raptor', -3.6, 0.95, -147.2, { entry: 'leap', t: 1.1, opts: { variant: 'green' } }),
+          // Off the far-left incubator (lands clear of the scientist's line of fire):
+          // one of Specimen X's brood — it shrugs off body hits, aim for the head.
+          at('raptor_hybrid', -3.6, 0.95, -147.2, { entry: 'leap', t: 1.1 }),
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
-          // One of Specimen X's brood: shrugs off body hits — aim for the head.
-          at('raptor_hybrid', 0, 0, -165),
+          at('raptor', 0, 0, -165, { opts: { variant: 'red' } }),
           at('raptor', -2, 0, -160, { t: 0.8, opts: { variant: 'tan' } }),
         ],
       },

@@ -10,6 +10,7 @@ import { Projectile } from '../../../gameplay/Projectile';
 import { ndcInPlayArea } from '../../../gameplay/Enemy';
 import type { HitPart } from '../../../core/types';
 import { D, RIVER_WIDTH, riverLatAt } from './layout';
+import { JungleRaptor } from './pack';
 
 /**
  * HORNED DEVIL — a Carnotaurus-like ambush predator (~8 m) that bursts out of
@@ -61,6 +62,48 @@ const ROCK_MAX_NDC_Y = 0.5;
 const ROCK_LAUNCH_NDC_Y = 0.42;
 /** Turret heat a boss windup starts from at most (the gun can then fire through any single windup). */
 const VENT_HEAT = 0.3;
+
+/**
+ * Horned Devil fight tuning. The stagger meter counts raw gun damage (mounted
+ * gun 0.8/round) weighted by where it lands (see `interruptWeight`): an eye /
+ * throat hit fills 1.6, the rest of the head barely anything.
+ */
+export const DEVIL_TUNE = {
+  /**
+   * Seconds at the start of a windup in which hits don't fill the stagger meter:
+   * fire already resting on the eyes can't cancel the ring the instant it shows —
+   * the player has to keep it there. (The ring is up from its first frame and the
+   * grace overlaps a 0.25–0.4 s reaction, so it costs a reacting player nothing.)
+   */
+  grace: 0.4,
+  /**
+   * Meter that breaks a ram / bite, by phase: 5 eye or throat hits after the grace
+   * (≈ 0.35 s of mounted-gun fire on the eyes) — a ram (1.9 s) or a bite (1.45 s,
+   * 1.23 s in a frenzy) breaks at ≈ 0.8 s with steady fire on the weak point;
+   * hosing the skull or the body doesn't stop it.
+   */
+  guard: [6.6, 7, 7.4],
+  /** Meter that breaks a tail sweep (ring on the tail; tail and eye hits count in full): ≈ 5–6 tail hits. */
+  tailGuard: [4.6, 4.6, 5.2],
+  /** Stumble (jaws hanging open) after a broken attack. */
+  stumble: 1.1,
+  /** Chase time before the next attack after a stumble / after an attack, by phase. */
+  stumbleGap: [1.1, 1.0, 0.6],
+  gap: [1.9, 1.5, 1.1],
+  /** Rocks per scoop, by phase (phase 2+ only scoops). */
+  rocks: [1, 2, 3],
+  /** Chance of a chained follow-up attack straight after one that landed or was dodged, by phase. */
+  chain: [0, 0.3, 0.5],
+  /** Raptors on screen called into a pounce alongside each ram / bite / sweep, by phase. */
+  rally: [0, 1, 2],
+  /**
+   * Arcade mercy: on the last heart a ring breaks sooner (shorter grace, lighter
+   * meter), so one bad patch near the end doesn't snowball into a continue.
+   */
+  mercyHp: 1,
+  mercyGrace: 0.15,
+  mercyGuard: 0.6,
+};
 
 /**
  * A boulder lobbed at the jeep. The lob is flattened at launch (sampled against
@@ -485,17 +528,17 @@ export class Carnotaur extends Boss {
     if (obj.isMesh) this.flashMesh(obj, hit.part === 'weak' ? 0.07 : 0.035);
     this.flinchVel = Math.min(4, this.flinchVel + clamp(amount * (hit.part === 'weak' ? 0.9 : 0.35), 0, 1.6));
     if (hit.part === 'weak') this.world.fx.sparks(hit.point, hit.normal, 3);
-    if (this.winding) {
+    if (this.winding && this.stateTime >= (this.mercy() ? DEVIL_TUNE.mercyGrace : DEVIL_TUNE.grace)) {
       this.interruptDmg += hit.damage * this.interruptWeight(hit.part);
       if (this.interruptDmg >= this.interruptThreshold()) this.interrupt();
     }
   }
 
   /**
-   * Stagger meter per hit, in raw gun damage (turret 0.8/shot): shooting the
-   * glowing eyes/throat stops an attack fastest, the head (skull, jaw, neck) in
-   * full, the bulk of the body barely. During the tail sweep the ring sits on
-   * the tail, so tail/body hits count in full there.
+   * Stagger meter per hit, in raw gun damage (turret 0.8/shot): a ram or bite is
+   * stopped by fire on the glowing eyes / open throat (the weak point the ring
+   * sits on); the rest of the head, the body and legs barely count. During the
+   * tail sweep the ring sits on the tail, so tail/body hits count in full there.
    */
   private interruptWeight(part: HitPart): number {
     const tail = this.state === 'tailWind';
@@ -503,22 +546,28 @@ export class Carnotaur extends Boss {
       case 'weak':
         return 2;
       case 'torso':
-        return 1;
+        return tail ? 1 : 0.15;
       case 'tail':
-        return tail ? 1.1 : 0.3;
+        return tail ? 1.1 : 0.05;
       case 'body':
-        return tail ? 1 : 0.3;
+        return tail ? 1 : 0.05;
       case 'limb':
-        return tail ? 0.8 : 0.3;
+        return tail ? 0.8 : 0.05;
       default:
         return 0;
     }
   }
 
-  /** Turret: ram/bite ≈ 2–3 eye hits + a head hit (or 5–6 head hits); tail sweep ≈ 3–4 tail hits. */
+  /** Turret: ram/bite ≈ 5 eye/throat hits after the grace; tail sweep ≈ 5–6 tail hits (see DEVIL_TUNE). */
   private interruptThreshold() {
-    if (this.state === 'tailWind') return this.frenzy ? 3.0 : 2.6;
-    return [3.6, 4, 4.4][this.phase] ?? 4.4;
+    const ph = Math.min(this.phase, 2);
+    const k = this.mercy() ? DEVIL_TUNE.mercyGuard : 1;
+    if (this.state === 'tailWind') return DEVIL_TUNE.tailGuard[ph] * k;
+    return DEVIL_TUNE.guard[ph] * k;
+  }
+
+  private mercy(): boolean {
+    return this.world.player.hp <= DEVIL_TUNE.mercyHp;
   }
 
   /**
@@ -632,7 +681,7 @@ export class Carnotaur extends Boss {
       const left = i % 2 === 0;
       // Beside/behind the boss in the rear view: they leap past its flanks and land mid-frame ~6 m out.
       const pos = new THREE.Vector3(left ? -5 - i : 5 + i, 0, 12 + i * 2);
-      const e = createEnemy('raptor', w, {
+      const e = createEnemy('jungle_raptor', w, {
         pos,
         frame: 'rig',
         entry: 'leap',
@@ -645,6 +694,15 @@ export class Carnotaur extends Boss {
       this.raptorsCalled++;
     }
     w.audio.play('raptor_screech', { volume: 0.9 });
+  }
+
+  /** Phase 2+: raptors that could strike right now pounce alongside the windup (two rings, two targets). */
+  private rallyPack() {
+    let n = DEVIL_TUNE.rally[Math.min(this.phase, 2)];
+    for (const e of this.world.enemies()) {
+      if (n <= 0) break;
+      if (e instanceof JungleRaptor && e.rally()) n--;
+    }
   }
 
   private raptorCount() {
@@ -860,7 +918,10 @@ export class Carnotaur extends Boss {
         const dur = this.windupTime(1.9);
         const chargeAt = dur - 0.45;
         this.winding = true;
-        if (first) this.ventGun(true);
+        if (first) {
+          this.ventGun(true);
+          this.rallyPack();
+        }
         this.faceYaw(this.yawToJeep(), dt, 6);
         if (t < chargeAt) {
           this.steer(0, 12.5, 4, dt);
@@ -899,7 +960,10 @@ export class Carnotaur extends Boss {
       case 'biteWind': {
         const dur = this.windupTime(1.45);
         this.winding = true;
-        if (first) this.ventGun(true);
+        if (first) {
+          this.ventGun(true);
+          this.rallyPack();
+        }
         this.steer(0.8, 7.3, 9, dt);
         this.faceYaw(this.yawToJeep(), dt, 6);
         const k = clamp(t / dur, 0, 1);
@@ -944,7 +1008,10 @@ export class Carnotaur extends Boss {
         // Coil the tail away from the jeep, then whip it across.
         const dur = this.windupTime(1.6);
         this.winding = true;
-        if (first) this.ventGun(true);
+        if (first) {
+          this.ventGun(true);
+          this.rallyPack();
+        }
         this.steer(-7.4, 1.2, 5, dt);
         const whipAt = dur - 0.3;
         if (t < whipAt) {
@@ -984,11 +1051,12 @@ export class Carnotaur extends Boss {
         // Head down into the dirt, flick a boulder at the jeep (shootable).
         this.steer(0.5, 10.5, 5, dt);
         this.faceYaw(this.yawToJeep(), dt, 5);
-        const throws = this.frenzy ? 2 : 1;
+        // A volley in phase 2+: one rock at a time to shoot down, each with its own ring.
+        const throws = DEVIL_TUNE.rocks[Math.min(this.phase, 2)];
         this.neckTarget = t < 0.7 ? 0.6 : -0.4;
         this.jawTarget = t < 0.7 ? 0.3 : 0.5;
         for (let i = 0; i < throws; i++) {
-          const at = 0.75 + i * (this.frenzy ? 0.65 : 0.75);
+          const at = 0.75 + i * (this.frenzy ? 0.6 : 0.7);
           if (t >= at && t - dt < at) this.flingRock();
         }
         if (t > 0.9 + throws * 0.7) this.afterAttack();
@@ -1001,8 +1069,8 @@ export class Carnotaur extends Boss {
         this.neckTarget = -0.35 + Math.sin(t * 10) * 0.08;
         this.crouchTarget = 0.25;
         this.headYaw = Math.sin(t * 7) * 0.25;
-        if (t > 1.5) {
-          this.cooldown = this.frenzy ? 0.7 : 1.4;
+        if (t > DEVIL_TUNE.stumble) {
+          this.cooldown = DEVIL_TUNE.stumbleGap[Math.min(this.phase, 2)];
           this.go('chase');
         }
         break;
@@ -1068,7 +1136,8 @@ export class Carnotaur extends Boss {
   }
 
   private afterAttack() {
-    if (this.frenzy && this.chain < 1 && this.world.rng.chance(0.45)) {
+    const chain = DEVIL_TUNE.chain[Math.min(this.phase, 2)];
+    if (this.chain < 1 && chain > 0 && this.world.rng.chance(chain)) {
       // Chained follow-up: straight back in, but through the same framing gate as any attack.
       this.chain++;
       this.nextAttack = this.chooseAttack();
@@ -1078,7 +1147,7 @@ export class Carnotaur extends Boss {
       return;
     }
     this.chain = 0;
-    this.cooldown = [2.4, 1.8, 1.2][this.phase] ?? 1.2;
+    this.cooldown = DEVIL_TUNE.gap[Math.min(this.phase, 2)];
     this.go('chase');
   }
 

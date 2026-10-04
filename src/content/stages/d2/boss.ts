@@ -27,9 +27,10 @@ import { labs } from './env';
  *                 FADE         (phase 2+) cloaks, slips behind a pillar, ambushes with a
  *                              short-fuse pounce from close range         (ring on the chest)
  *   Enough HITS during a wind-up (or mid-leap) knock it down: free hits
- *   (3–4 stop a pounce, 3 a tail whip — a pounce takes one more against a
- *   healthy player, both one less on the last heart; glowing weak points
- *   count double).
+ *   (3–4 stop a pounce, 3 a tail whip — a pounce takes one or two more
+ *   against a healthy player, both one less on the last heart; glowing weak
+ *   points count double). For the first instant of a wind-up it's braced (hits
+ *   don't count yet), so the ring has to be answered, not pre-empted.
  *   Fairness: attacks only start framed in the play area, never on top of two
  *   other live warnings; while it attacks at most one raptor may lunge and
  *   darts wait their turn; the pack arrives in waves; last-heart grace.
@@ -110,6 +111,8 @@ const EYE_RAGE = new THREE.Color(0xff4060);
 const PILLAR_CLEAR = 3.5;
 /** Where a pounce lands, in front of the camera (keeps head + ring in the middle of the view). */
 const POUNCE_STOP = 4.4;
+/** Seconds at the start of a wind-up in which hits don't build the stagger meter (see braced()). */
+const BRACE = { pounce: 0.25, tail: 0.2 };
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -468,7 +471,7 @@ export class SpecimenX extends Boss {
     // can always break an attack by shooting the ring; the glowing weak points
     // count double. (Every pellet / SMG round is a hit, so pickups stagger fast.)
     const weight = hit.part === 'weak' ? 2 : 1;
-    if (this.winding) {
+    if (this.winding && !this.braced()) {
       this.interruptDmg += weight;
       if (this.interruptDmg >= this.interruptThreshold()) this.interrupt();
       else if (this.interruptDmg >= this.interruptThreshold() * 0.5) this.flinch = Math.min(1.4, this.flinch + 0.3);
@@ -485,11 +488,12 @@ export class SpecimenX extends Boss {
 
   /**
    * Hits (weak = 2) that break a wind-up, sized for a ~3 taps/s pistol player
-   * who starts shooting ~0.35 s into the ring (≈ 4–5 taps per pounce, ~3 per whip):
+   * who starts shooting 0.25–0.4 s into the ring (≈ 4–5 taps per pounce, ~3 per whip):
    *   pounce  1.5/1.35/1.3 s wind + 0.5 s leap → 3 / 4 / 4  (2 weak hits)
    *   tail    1.4/1.3/1.2 s, ring on the glowing tail base → 3 / 3 / 3  (2 weak hits)
-   * The POUNCE presses a player who is still healthy (4+ hearts): one more hit
-   * (4 / 5 / 5 — at most two stripe shots + one over its ≥ 1.8 s ≈ 4–5 taps).
+   * The POUNCE presses a player who is still healthy: one more hit on 3–4 hearts,
+   * two more on 5 (5 / 6 / 6 — three stripe/eye shots out of the 5 taps a 0.4 s
+   * reaction leaves in its ≥ 1.8 s ring; 4 taps for the 1.65–1.7 s ambush pounce).
    * The whip never gets the extra hit — its 1.2–1.4 s wind-up leaves only ~3
    * taps after reacting. On the last heart both take one hit less.
    */
@@ -497,8 +501,23 @@ export class SpecimenX extends Boss {
     const hp = this.world.player.hp;
     const mercy = hp <= 1 ? 1 : 0;
     if (this.state === 'tailWind') return ([3, 3, 3][this.phase] ?? 3) - mercy;
-    const pressed = hp >= 4 ? 1 : 0;
+    const pressed = hp >= 5 ? 2 : hp >= 3 ? 1 : 0;
     return ([3, 4, 4][this.phase] ?? 4) + pressed - mercy;
+  }
+
+  /**
+   * Brace: for the first moments of a wind-up the beast is set in its crouch —
+   * hits still hurt and flinch it, they just don't build the stagger meter yet —
+   * so fire already on a weak point when the ring appears doesn't cancel it on
+   * the spot: the player has to answer the ring. It ends before a quick human
+   * (0.25 s) has even reacted, and only applies while the player has 3+ hearts.
+   */
+  private braced() {
+    if (this.world.player.hp <= 2) return false;
+    const t = this.stateTime;
+    if (this.state === 'pounceWind') return t < BRACE.pounce;
+    if (this.state === 'tailWind') return t < BRACE.tail;
+    return false;
   }
 
   /** Last-heart grace: a little more wind-up time when the player is on 1 heart (and one hit less to stop it). */
@@ -518,7 +537,7 @@ export class SpecimenX extends Boss {
     const hp = this.world.player.hp;
     const relief = this.relief;
     this.relief = 0;
-    return (hp >= 4 ? b * 0.7 : hp <= 2 ? b * 1.5 + 0.5 : b) + relief;
+    return (hp >= 4 ? b * 0.6 : hp <= 2 ? b * 1.5 + 0.5 : b) + relief;
   }
 
   /** After landing a hit: a hurt player (≤ 3 hearts left) gets an extra second before the next attack. */
@@ -1016,8 +1035,9 @@ export class SpecimenX extends Boss {
           w.audio.play('bite', { volume: 1, pitch: 0.7 });
           w.rig.shake(0.8);
           w.hitStop(0.06);
-          // Enraged double pounce — only onto a player who is still healthy.
-          if (this.phase >= 2 && this.chain === 0 && w.player.hp >= 4 && w.rng.chance(0.5)) {
+          // Double pounce (once the pack is out; more often enraged) — only onto a
+          // player who is still healthy.
+          if (this.phase >= 1 && this.chain === 0 && w.player.hp >= 4 && w.rng.chance(this.phase >= 2 ? 0.5 : 0.3)) {
             this.chain = 1;
           } else this.chain = 0;
           this.pFrom.copy(p);
