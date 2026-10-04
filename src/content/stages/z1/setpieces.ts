@@ -86,6 +86,12 @@ export class GasStation {
   priceGlow: THREE.Object3D[] = [];
   spawnPoints: { pumps: THREE.Vector3[]; barrels: THREE.Vector3[]; propane: THREE.Vector3 } | null = null;
   underGlow: THREE.Object3D[] = [];
+  /**
+   * Canopy pillars (animated, not merged) with a marker in canopy space just
+   * under the roof above each one: when the canopy buckles the pillars crumple
+   * so they never poke through it.
+   */
+  readonly pillars: { mesh: THREE.Object3D; marker: THREE.Object3D; height: number; tilt: number }[] = [];
 
   constructor(
     /** Canopy centre (world), size and the corner it pivots around when collapsing. */
@@ -167,6 +173,11 @@ export class GasStation {
       world.audio.play('explosion', { volume: 0.6, pitch: 0.7 });
       world.rig.shake(0.5);
       world.fx.dust(_w.copy(this.center).setY(0.2), 2.2, 0x55504a);
+      // The pillars give way: dust and sparks at their feet and tops.
+      for (const p of this.pillars) {
+        world.fx.dust(_w.copy(p.mesh.position).setY(0.2), 0.9, 0x55504a);
+        world.fx.sparks(_w.setY(p.height * 0.75), null, 6);
+      }
       world.later(0.5, () => {
         for (const o of this.underGlow) o.visible = false;
       });
@@ -189,8 +200,8 @@ export class GasStation {
     return this.items.some((d) => !d.removed);
   }
 
+  /** (Fires are animated by the environment, which also distance-culls them.) */
   update(dt: number) {
-    for (const f of this.fires) f.update(dt);
     if (this.collapse >= 0 && this.collapse < 1) {
       this.collapse = Math.min(1, this.collapse + dt / 0.9);
       const k = this.collapse;
@@ -198,6 +209,15 @@ export class GasStation {
       const e = k < 0.7 ? (k / 0.7) ** 2 : 1 - Math.sin(((k - 0.7) / 0.3) * Math.PI) * 0.12;
       this.canopy.rotation.z = -0.32 * e;
       this.canopy.rotation.x = 0.06 * e;
+      this.canopy.updateMatrixWorld(true);
+      // Crumple each pillar down to the underside of the sagging roof above it.
+      for (const p of this.pillars) {
+        p.marker.getWorldPosition(_v);
+        const h = Math.max(0.4, Math.min(p.height, _v.y));
+        p.mesh.scale.y = h / p.height;
+        p.mesh.position.y = h / 2;
+        p.mesh.rotation.z = p.tilt * e;
+      }
     }
   }
 }
@@ -245,8 +265,8 @@ export class BusWreck {
     world.fx.debris(this.doorFrom, 0xd29a16);
   }
 
+  /** (The engine fire is animated by the environment with the other fires.) */
   update(dt: number, world: World) {
-    this.fire.update(dt);
     if (this.shakeT > 0) {
       this.shakeT -= dt;
       const k = Math.max(0, this.shakeT) / 0.35;

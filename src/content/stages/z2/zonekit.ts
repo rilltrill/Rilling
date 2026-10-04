@@ -92,7 +92,7 @@ export function flickerPanel(ctx: ZoneCtx, g: THREE.Object3D, x: number, y: numb
   m.position.set(x, y - 0.05, z);
   m.rotation.y = ry;
   ctx.dyn.add(m);
-  ctx.sc.flickers.push({ mesh: m, on, off, seed: ctx.rng.range(0, 50), mode, pos: new THREE.Vector3(x, y - 0.3, z), lit: true });
+  ctx.sc.flickers.push({ mesh: m, on, off, seed: ctx.rng.range(0, 50), mode, pos: new THREE.Vector3(x, y - 0.3, z), lit: true, held: 0 });
 }
 
 /** A ceiling panel hanging by one corner from its wires, swinging and sparking. */
@@ -118,7 +118,7 @@ export function danglingPanel(ctx: ZoneCtx, g: THREE.Object3D, x: number, y: num
   diff.position.set(0, -0.05, 0.63);
   hang.add(diff);
   ctx.sc.swingers.push({ obj: hang, amp: 0.12, rate: 1.3 + ctx.rng.next() * 0.5, phase: ctx.rng.next() * 6 });
-  ctx.sc.flickers.push({ mesh: diff, on, off, seed: ctx.rng.range(0, 50), mode: 'blink', pos: new THREE.Vector3(x, y - 0.8, z), lit: true });
+  ctx.sc.flickers.push({ mesh: diff, on, off, seed: ctx.rng.range(0, 50), mode: 'blink', pos: new THREE.Vector3(x, y - 0.8, z), lit: true, held: 0 });
 }
 
 /** Ceiling vent: static dark hole + dynamic grate (falls out when a crawler drops through). */

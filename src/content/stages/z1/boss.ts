@@ -45,6 +45,9 @@ const SKIN_DARK = 0x6e5048;
 const PANTS = 0x2e2a28;
 const BLOOD = 0x4a0808;
 
+/** Charge wind-up (s): not shortened by later phases. */
+const CHARGE_WIND = 0.85;
+
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const _p = new THREE.Vector3();
@@ -83,6 +86,10 @@ export class Butcher extends Boss {
   private lookPivot = new THREE.Object3D();
   private hookGeo!: THREE.BufferGeometry;
   private hookGeoBig!: THREE.BufferGeometry;
+  /** Thrown-object prototypes, built once and cloned per throw (shared geometry + materials). */
+  private thrownHook!: THREE.Mesh;
+  private thrownBarrel!: THREE.Mesh;
+  private thrownDoor!: THREE.Mesh;
 
   // AI.
   private nextAttack = 2.0;
@@ -104,6 +111,8 @@ export class Butcher extends Boss {
   private pendingPhase = 0;
   private deathBurst = false;
   private bloodT = 0;
+  /** Heart swelling while he charges (bigger, brighter target: "shoot it to stop him"). */
+  private heartSwell = 1;
   private roarSfx = false;
   /** One-shot flag for the current state (reset by go()). */
   private fired = false;
@@ -115,7 +124,7 @@ export class Butcher extends Boss {
   protected override configure() {
     this.name = 'butcher';
     this.title = 'THE BUTCHER';
-    this.maxHp = 210;
+    this.maxHp = 175;
     this.speed = 1.4;
     this.attackRange = 3.4;
     this.points = 25000;
@@ -137,7 +146,9 @@ export class Butcher extends Boss {
     const boots = Kit.mat(0x1a1614);
     const blood = Kit.mat(BLOOD);
     const vein = Kit.mat(0x5a2a3a);
-    const steel = Kit.std(0xc0c8d0, 0.35, 0.45);
+    // Self-lit steel: the moon is behind him, so a lit material would read as a
+    // dark sliver against the night sky exactly when the raised cleaver matters.
+    const steel = Kit.glow(0x8a95a3, 1.0);
     const iron = Kit.mat(0x5a5e65);
     const bone = Kit.mat(0xd8cdb0);
     const mail = Kit.mat(0x9aa2aa);
@@ -283,9 +294,11 @@ export class Butcher extends Boss {
     });
     // Cleaver blade grafted to the wrist, edge forward.
     bake(this.elR, 'armor', (g) => {
-      Kit.add(g, Kit.box(0.07, 1.3, 0.68), steel, 0, -1.72, 0.2);
+      Kit.add(g, Kit.box(0.1, 1.3, 0.68), steel, 0, -1.72, 0.2);
       Kit.add(g, Kit.box(0.09, 1.3, 0.1), iron, 0, -1.72, -0.12);
-      Kit.add(g, Kit.box(0.08, 0.9, 0.06), Kit.mat(0x6a0a0a), 0, -1.6, 0.52);
+      // Honed cutting edge catches the light: the raised cleaver reads against the night sky.
+      Kit.add(g, Kit.box(0.11, 1.34, 0.06), Kit.glow(0xeef4ff, 1.4), 0, -1.72, 0.56);
+      Kit.add(g, Kit.box(0.08, 0.9, 0.06), Kit.mat(0x6a0a0a), 0, -1.6, 0.4);
       Kit.add(g, Kit.cyl(0.07, 0.07, 0.09, 8), Kit.mat(0x111111), 0, -2.2, 0.05, 0, 0, Math.PI / 2);
     });
 
@@ -310,6 +323,9 @@ export class Butcher extends Boss {
     this.propBarrel.visible = false;
     this.propDoor.visible = false;
     this.handL.add(this.propBarrel, this.propDoor);
+    this.thrownHook = this.bakeProto((b) => this.hookParts(b, false));
+    this.thrownBarrel = this.bakeProto((b) => this.barrelParts(b));
+    this.thrownDoor = this.bakeProto((b) => this.doorParts(b));
 
     this.anchor = this.chest;
     this.lookPivot.position.set(0, 1.85, 0);
@@ -318,45 +334,79 @@ export class Butcher extends Boss {
     this.spine.rotation.x = 0.28;
   }
 
+  /**
+   * Bake a prop into ONE root mesh (the opaque body) with the rest as children.
+   * Projectiles aim/hit-test their root mesh, so it must be the solid part.
+   */
+  private bakeProto(fn: (g: THREE.Group) => void): THREE.Mesh {
+    const holder = new THREE.Group();
+    const meshes = bakeInto(holder, fn);
+    const main = meshes[0];
+    for (let i = 1; i < meshes.length; i++) main.add(meshes[i]);
+    holder.remove(main);
+    return main;
+  }
+
   private makeHook(withChain: boolean): THREE.Group {
     const g = new THREE.Group();
-    // Held hooks are small; thrown ones are chunky so they read (and can be hit) mid-air.
-    const k = withChain ? 1 : 1.6;
-    bakeInto(g, (b) => {
-      const iron = Kit.mat(0xa4a8ae);
-      if (withChain) for (let i = 0; i < 3; i++) Kit.add(b, Kit.box(0.06, 0.12, 0.03), iron, 0, -i * 0.12, 0, 0, i % 2 ? Math.PI / 2 : 0, 0);
-      const hk = new THREE.Mesh(withChain ? this.hookGeo : this.hookGeoBig, iron);
-      hk.position.set(0.02, withChain ? -0.55 : 0, 0);
-      hk.rotation.set(0, 0, Math.PI * 0.85);
-      b.add(hk);
-      Kit.add(b, Kit.cone(0.05 * k, 0.14 * k, 5), iron, 0.2 * k, withChain ? -0.48 : 0.07 * k, 0, 0, 0, 0.4);
-      // Shank + rusty blood.
-      Kit.add(b, Kit.box(0.07 * k, 0.32 * k, 0.07 * k), iron, -0.17 * k, withChain ? -0.4 : 0.15 * k, 0, 0, 0, 0.2);
-      Kit.add(b, Kit.box(0.1 * k, 0.06 * k, 0.08 * k), Kit.mat(0x7a0a0a), 0.18 * k, withChain ? -0.62 : -0.06 * k, 0);
-    });
+    bakeInto(g, (b) => this.hookParts(b, withChain));
     return g;
+  }
+
+  private hookParts(b: THREE.Group, withChain: boolean) {
+    // Held hooks are small; thrown ones are chunky (with a hunk of meat) so they read and can be hit mid-air.
+    const k = withChain ? 1 : 1.6;
+    const iron = Kit.mat(0xa4a8ae);
+    if (withChain) for (let i = 0; i < 3; i++) Kit.add(b, Kit.box(0.06, 0.12, 0.03), iron, 0, -i * 0.12, 0, 0, i % 2 ? Math.PI / 2 : 0, 0);
+    if (!withChain) {
+      // Meat chunk first: it is the solid body the projectile is aimed at.
+      Kit.add(b, Kit.sphere(0.2, 7, 5), Kit.mat(0xb04848), 0.02, -0.12, 0, 0.3, 0, 0.4, 1.15, 0.9, 0.8);
+      Kit.add(b, Kit.box(0.3, 0.06, 0.24), Kit.mat(0xe8d8c0), 0.02, -0.1, 0.02, 0, 0, 0.4);
+    }
+    const hk = new THREE.Mesh(withChain ? this.hookGeo : this.hookGeoBig, iron);
+    hk.position.set(0.02, withChain ? -0.55 : 0, 0);
+    hk.rotation.set(0, 0, Math.PI * 0.85);
+    b.add(hk);
+    Kit.add(b, Kit.cone(0.05 * k, 0.14 * k, 5), iron, 0.2 * k, withChain ? -0.48 : 0.07 * k, 0, 0, 0, 0.4);
+    // Shank + rusty blood.
+    Kit.add(b, Kit.box(0.07 * k, 0.32 * k, 0.07 * k), iron, -0.17 * k, withChain ? -0.4 : 0.15 * k, 0, 0, 0, 0.2);
+    Kit.add(b, Kit.box(0.1 * k, 0.06 * k, 0.08 * k), Kit.mat(0x7a0a0a), 0.18 * k, withChain ? -0.62 : -0.06 * k, 0);
   }
 
   private makeBarrel(): THREE.Group {
     const g = new THREE.Group();
-    bakeInto(g, (b) => {
-      Kit.add(b, Kit.cyl(0.34, 0.34, 0.95, 10), Kit.mat(0xb3261e), 0, 0, 0);
-      Kit.add(b, Kit.cyl(0.35, 0.35, 0.06, 10), Kit.mat(0x5a120e), 0, 0.25, 0);
-      Kit.add(b, Kit.cyl(0.35, 0.35, 0.06, 10), Kit.mat(0x5a120e), 0, -0.25, 0);
-      Kit.add(b, Kit.box(0.3, 0.22, 0.03), Kit.glow(0xffd23a, 1.1), 0, 0.03, 0.34);
-    });
+    bakeInto(g, (b) => this.barrelParts(b));
     return g;
+  }
+
+  private barrelParts(b: THREE.Group) {
+    Kit.add(b, Kit.cyl(0.34, 0.34, 0.95, 10), Kit.mat(0xc22a20), 0, 0, 0);
+    Kit.add(b, Kit.cyl(0.35, 0.35, 0.06, 10), Kit.mat(0x5a120e), 0, 0.25, 0);
+    Kit.add(b, Kit.cyl(0.35, 0.35, 0.06, 10), Kit.mat(0x5a120e), 0, -0.25, 0);
+    // Glowing hazard band all the way round + label: reads on a dark sky from any spin angle.
+    Kit.add(b, Kit.cyl(0.352, 0.352, 0.08, 10), Kit.glow(0xffb020, 1.25), 0, 0.05, 0);
+    Kit.add(b, Kit.box(0.3, 0.22, 0.03), Kit.glow(0xffd23a, 1.1), 0, -0.1, 0.34);
   }
 
   private makeDoor(): THREE.Group {
     const g = new THREE.Group();
-    bakeInto(g, (b) => {
-      Kit.add(b, Kit.box(1.15, 0.65, 0.08), Kit.mat(0x1d2c4a), 0, -0.2, 0);
-      Kit.add(b, Kit.box(1.0, 0.42, 0.06), Kit.mat(0x18202e), 0.05, 0.33, 0);
-      Kit.add(b, Kit.box(0.08, 0.5, 0.08), Kit.mat(0x1d2c4a), 0.55, 0.3, 0);
-      Kit.add(b, Kit.box(0.22, 0.05, 0.1), Kit.mat(0x8c9198), -0.2, -0.05, 0.05);
-    });
+    bakeInto(g, (b) => this.doorParts(b));
     return g;
+  }
+
+  /** A police-cruiser door torn off at the hinges: white with a red/blue stripe. */
+  private doorParts(b: THREE.Group) {
+    const white = Kit.mat(0xe8e8e0);
+    Kit.add(b, Kit.box(1.15, 0.65, 0.08), white, 0, -0.2, 0);
+    Kit.add(b, Kit.box(1.0, 0.42, 0.06), Kit.mat(0x18202e), 0.05, 0.33, 0);
+    Kit.add(b, Kit.box(1.0, 0.06, 0.08), white, 0.05, 0.55, 0);
+    Kit.add(b, Kit.box(0.08, 0.5, 0.08), white, 0.55, 0.3, 0);
+    Kit.add(b, Kit.box(0.08, 0.5, 0.08), white, -0.47, 0.3, 0);
+    Kit.add(b, Kit.box(0.22, 0.05, 0.1), Kit.mat(0x8c9198), -0.2, -0.05, 0.05);
+    for (const sz of [1, -1]) {
+      Kit.add(b, Kit.box(1.16, 0.08, 0.02), Kit.glow(0x3a6aff, 1.3), 0, -0.3, sz * 0.045);
+      Kit.add(b, Kit.box(1.16, 0.04, 0.02), Kit.glow(0xff2a2a, 1.3), 0, -0.4, sz * 0.045);
+    }
   }
 
   override onAdded(): void {
@@ -371,7 +421,8 @@ export class Butcher extends Boss {
     const vulnerable = this.state === 'stumble' || this.state === 'flinch' || this.state === 'slamStuck';
     if (hit.part === 'weak') return vulnerable ? 1.5 : 1;
     if (hit.part === 'head') return this.mouthOpen() ? 1.2 : 0.4;
-    return 0.15;
+    // Body shots chip a little (a missed heart shot still counts for something).
+    return 0.25;
   }
 
   private mouthOpen(): boolean {
@@ -441,7 +492,23 @@ export class Butcher extends Boss {
     this.dmgInState = 0;
     this.roarSfx = false;
     this.fired = false;
+    // Only the pick-up → throw sequence may carry a prop; anything else (phase
+    // change, end of a hook volley…) leaves him with just the hook in hand.
+    if (s !== 'heavyPick' && s !== 'heavyThrow') this.resetHands();
     this.setState(s);
+  }
+
+  /** Drop any held barrel / door (with a clatter if one was up) and restore the hook. */
+  private resetHands() {
+    const held = this.propBarrel.visible ? this.propBarrel : this.propDoor.visible ? this.propDoor : null;
+    if (held) {
+      held.getWorldPosition(_v);
+      this.world.fx.debris(_v, held === this.propBarrel ? 0xc22a20 : 0xe8e8e0);
+      this.world.audio.play('hit_world', { volume: 0.6, pitch: 0.7 });
+    }
+    this.propBarrel.visible = false;
+    this.propDoor.visible = false;
+    this.hookInHand.visible = true;
   }
 
   /** Rig-relative [right, forward] → world point on the ground. */
@@ -471,9 +538,17 @@ export class Butcher extends Boss {
     return this.phase === 0 ? 1 : this.phase === 1 ? 0.9 : 0.8;
   }
 
-  /** Weak-point damage needed to interrupt a slam / charge: always two pistol hits on a weak spot. */
+  /**
+   * Weak-point damage needed to interrupt a slam / charge: two pistol hits on a
+   * weak spot (weak ×2 → 2 per hit) in every phase.
+   */
   private get interruptNeed() {
     return this.phase === 0 ? 3 : 4;
+  }
+
+  /** Charges are stopped by one heart hit in phase 1 (it teaches the move), two later. */
+  private get chargeNeed() {
+    return this.phase === 0 ? 2 : this.interruptNeed;
   }
 
   private standDist() {
@@ -486,7 +561,7 @@ export class Butcher extends Boss {
     const opts: [string, number][] = [];
     opts.push(['slam', 3.5]);
     opts.push(['hook', 3]);
-    if (dist > 6.5) opts.push(['charge', this.phase === 0 ? 2 : 2.6]);
+    if (dist > 6.5) opts.push(['charge', this.phase === 0 ? 1.6 : 2.2]);
     if (this.phase >= 1) opts.push(['heavy', 2.8]);
     // Avoid repeating the same thing three times running.
     const filtered = opts.map(([k, w]) => [k, k === this.lastAttack ? w * 0.4 : w] as [string, number]);
@@ -681,8 +756,10 @@ export class Butcher extends Boss {
       }
       case 'heavyPick': {
         this.faceToward(_p, dt, 6);
-        if (t > 0.45 && !this.propBarrel.visible && !this.propDoor.visible) {
-          (this.heavyKind === 'barrel' ? this.propBarrel : this.propDoor).visible = true;
+        if (t > 0.45 && !this.fired) {
+          this.fired = true;
+          this.propBarrel.visible = this.heavyKind === 'barrel';
+          this.propDoor.visible = this.heavyKind === 'door';
           this.hookInHand.visible = false;
           this.world.audio.play('hit_world', { volume: 0.7, pitch: 0.6 });
         }
@@ -692,9 +769,12 @@ export class Butcher extends Boss {
       case 'heavyThrow': {
         this.faceToward(_p, dt, 6);
         const wind = 0.75 * this.windMul;
-        if (t >= wind && (this.propBarrel.visible || this.propDoor.visible)) this.throwHeavy();
+        // Released as the arm swings through shoulder height (one projectile per throw).
+        if (t >= wind + 0.1 && !this.fired) {
+          this.fired = true;
+          this.throwHeavy();
+        }
         if (t > wind + 0.6) {
-          this.hookInHand.visible = true;
           this.nextAttack = this.cooldown();
           this.go('stalk');
         }
@@ -705,24 +785,31 @@ export class Butcher extends Boss {
         if (!this.roarSfx) {
           this.roarSfx = true;
           this.roarFx(0.8);
+          // Fair in every phase: a fixed 0.85 s wind-up and a run of at least
+          // 0.7 s, so there is always ≥ 1.5 s to land the weak-point hits that
+          // trip him (one in phase 1, two later; the heart swells as a target).
           const dist = Math.max(0, this.relOf(this.root.position).fwd - 2.7);
-          const runSpeed = 6.5 * this.speedMul;
-          this.chargeDur = 0.8 * this.windMul + dist / runSpeed;
+          const runSpeed = Math.min(6.5 * this.speedMul, dist / 0.7);
+          this.chargeDur = CHARGE_WIND + (runSpeed > 0 ? dist / runSpeed : 0.7);
           this.chargeT = 0;
         }
         this.chargeT += dt;
         this.updateChargeTelegraph();
-        if (this.dmgInState >= this.interruptNeed + 1) {
+        if (this.dmgInState >= this.chargeNeed) {
           this.stumbled();
           break;
         }
-        if (t > 0.8 * this.windMul) this.go('charge');
+        if (t > CHARGE_WIND) {
+          const carried = this.dmgInState;
+          this.go('charge');
+          this.dmgInState = carried;
+        }
         break;
       }
       case 'charge': {
         this.chargeT += dt;
         this.updateChargeTelegraph();
-        if (this.dmgInState >= this.interruptNeed + 1) {
+        if (this.dmgInState >= this.chargeNeed) {
           this.stumbled();
           break;
         }
@@ -833,14 +920,34 @@ export class Butcher extends Boss {
     w.fx.sparks(_w.setY(0.1), null, 16);
   }
 
+  /**
+   * Launch point for a throw: the hand, but never above `maxAbove` over his
+   * chest and a step toward the player. With the distance-scaled arc below the
+   * whole flight stays on screen and under the boss health bar.
+   */
+  private launchFrom(hand: THREE.Object3D, maxAbove: number): THREE.Vector3 {
+    hand.getWorldPosition(_v);
+    this.chest.getWorldPosition(_w);
+    _v.y = Math.min(_v.y, _w.y + maxAbove);
+    this.playerPos(_p);
+    _f.subVectors(_p, this.root.position).setY(0).normalize();
+    return _v.addScaledVector(_f, 0.5).clone();
+  }
+
+  /** Arc height for a throw from `from`: flatter up close (a high lob would leave the screen). */
+  private arcFor(from: THREE.Vector3, max: number): number {
+    this.playerPos(_p);
+    return clamp((Math.hypot(from.x - _p.x, from.z - _p.z) - 1) * 0.09, 0.2, max);
+  }
+
   private throwHook() {
     this.hookInHand.visible = false;
-    this.hookInHand.getWorldPosition(_v);
+    const from = this.launchFrom(this.hookInHand, 0.45);
     const ft = (this.phase === 0 ? 1.65 : this.phase === 1 ? 1.45 : 1.25) + (this.volley > 1 ? 0.1 * this.volley : 0);
-    this.throwProjectile(_v.clone(), {
-      mesh: this.makeHook(false),
+    this.throwProjectile(from, {
+      mesh: this.thrownHook.clone(),
       flightTime: ft,
-      arc: 0.9,
+      arc: this.arcFor(from, 0.6),
       hp: 1,
       points: 150,
       size: 0.5,
@@ -854,21 +961,23 @@ export class Butcher extends Boss {
   }
 
   private throwHeavy() {
-    const barrel = this.heavyKind === 'barrel';
+    // Throw whatever is actually in his hand (heavyKind may have been re-rolled).
+    const barrel = this.propBarrel.visible || (!this.propDoor.visible && this.heavyKind === 'barrel');
     const prop = barrel ? this.propBarrel : this.propDoor;
-    prop.visible = false;
-    prop.getWorldPosition(_v);
-    this.throwProjectile(_v.clone(), {
-      mesh: barrel ? this.makeBarrel() : this.makeDoor(),
+    const from = this.launchFrom(prop, 0.3);
+    this.propBarrel.visible = false;
+    this.propDoor.visible = false;
+    this.throwProjectile(from, {
+      mesh: (barrel ? this.thrownBarrel : this.thrownDoor).clone(),
       flightTime: barrel ? 2.0 : 2.1,
-      arc: barrel ? 2.2 : 1.5,
+      arc: this.arcFor(from, barrel ? 0.6 : 0.5),
       hp: barrel ? 2 : 3,
       points: barrel ? 300 : 250,
       size: barrel ? 0.5 : 0.6,
       spin: barrel ? 5 : 6,
       source: this.title,
       burst: barrel ? 'explode' : 'debris',
-      color: barrel ? 0xb3261e : 0x1d2c4a,
+      color: barrel ? 0xc22a20 : 0xe8e8e0,
       sfxDestroy: barrel ? 'explosion' : 'crash',
     });
     this.world.audio.play('stomp', { volume: 0.5, pitch: 1.1 });
@@ -919,7 +1028,9 @@ export class Butcher extends Boss {
     // Heart beat + pustule throb.
     const bpm = this.phase === 0 ? 1.2 : this.phase === 1 ? 1.6 : 2.2;
     const beat = Math.pow(Math.max(0, Math.sin(a * Math.PI * 2 * bpm)), 6);
-    this.heart.scale.set(1 + beat * 0.25, 1.15 + beat * 0.3, 0.9 + beat * 0.2);
+    this.heartSwell = damp(this.heartSwell, s === 'chargeWind' || s === 'charge' ? 1.5 : 1, 8, dt);
+    const hs = this.heartSwell;
+    this.heart.scale.set((1 + beat * 0.25) * hs, (1.15 + beat * 0.3) * hs, (0.9 + beat * 0.2) * hs);
     for (let i = 0; i < this.allPustules.length; i++) {
       const p = this.allPustules[i];
       if (p.popped) continue;
@@ -953,6 +1064,8 @@ export class Butcher extends Boss {
     let shRx = -0.15 - sw * 0.5;
     let shRz = -0.2;
     let elRx = -0.35;
+    /** Forearm twist: turns the cleaver's broad face toward the player while it is raised. */
+    let elRy = 0;
     // Left arm swings the hook.
     let shLx = -0.25 + sw * 0.5 + Math.sin(a * 2.2) * 0.08;
     let shLz = 0.25;
@@ -989,6 +1102,7 @@ export class Butcher extends Boss {
         shRx = -0.15 - 2.85 * up + 0.9 * down;
         shRz = -0.2 + 0.15 * up;
         elRx = -0.35 - 0.6 * up + 0.3 * down;
+        elRy = -1.45 * up;
         spineX = 0.28 - 0.35 * up + 0.55 * down;
         headX = -0.15 - 0.25 * up;
         jaw = 0.1 + 0.35 * up;
@@ -1124,6 +1238,7 @@ export class Butcher extends Boss {
     this.shR.rotation.x += (shRx - this.shR.rotation.x) * ra;
     this.shR.rotation.z += (shRz - this.shR.rotation.z) * ra;
     this.elR.rotation.x += (elRx - this.elR.rotation.x) * ra;
+    this.elR.rotation.y += (elRy - this.elR.rotation.y) * ra;
     this.shL.rotation.x += (shLx - this.shL.rotation.x) * r;
     this.shL.rotation.z += (shLz - this.shL.rotation.z) * r;
     this.elL.rotation.x += (elLx - this.elL.rotation.x) * r;
@@ -1134,8 +1249,7 @@ export class Butcher extends Boss {
 
   protected override onDeath(_hit: ShotHit | null): void {
     this.telegraph = null;
-    this.propBarrel.visible = false;
-    this.propDoor.visible = false;
+    this.resetHands();
     this.roarFx(1);
     this.world.hud.banner('THE BUTCHER', 'IS DEAD', 2.2);
     const sc = z1Scene(this.world);
@@ -1156,6 +1270,7 @@ export class Butcher extends Boss {
     this.shR.rotation.x = 0.4 * e;
     this.shR.rotation.z = -0.15;
     this.elR.rotation.x = -0.1;
+    this.elR.rotation.y *= 0.9;
     this.shL.rotation.x = 0.2 * e;
     if (!this.deathBurst) {
       // 1.2–2.4 s: kneeling, howling at the sky, swelling.

@@ -257,7 +257,9 @@ export function signPanel(lines: string[], width: number, height: number, color:
   Kit.add(g, Kit.box(width, height, 0.12), M.lam(color), 0, 0, 0);
   Kit.add(g, Kit.box(width - 0.2, height - 0.2, 0.02), M.lam(PAL.signText), 0, 0, 0.065);
   Kit.add(g, Kit.box(width - 0.34, height - 0.34, 0.02), M.lam(color), 0, 0, 0.075);
-  const px = Math.min(0.13, (height - 0.5) / (lines.length * 9));
+  // Text size: fit the line count to the height AND the longest line to the width.
+  const longest = lines.reduce((n, t) => Math.max(n, t.length), 1);
+  const px = Math.min(0.13, (height - 0.5) / (lines.length * 9), (width - 0.6) / Math.max(1, longest * 6 - 1));
   const lh = px * 9.5;
   lines.forEach((t, i) => {
     addText(g, t, M.lam(PAL.signText), 0, ((lines.length - 1) / 2 - i) * lh, 0.1, px, 0.03);

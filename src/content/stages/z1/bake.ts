@@ -24,9 +24,12 @@ function sharedMat(key: string, make: () => THREE.Material): THREE.Material {
   return m;
 }
 
-/** Vertex-coloured flat Lambert (fogged). */
+/**
+ * Vertex-coloured flat Lambert (fogged). Built through Kit.mat so it picks up
+ * the global retro grain exactly like every other untextured Kit.mat.
+ */
 export function bakedLambert(): THREE.Material {
-  return sharedMat('lambert', () => new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+  return Kit.mat(0xffffff, { vertexColors: true });
 }
 
 /** Vertex-coloured unlit glow (no fog, no tone mapping — matches Kit.glow). */
@@ -41,6 +44,11 @@ function bucketOf(m: THREE.Material): Bucket {
   if ((m as THREE.MeshLambertMaterial).isMeshLambertMaterial) {
     const l = m as THREE.MeshLambertMaterial;
     if (l.vertexColors || l.map || !l.fog || l.emissive.getHex() !== 0) return null;
+    // Kit retro textures are injected via onBeforeCompile (no `map`): only the
+    // global grain matches the baked material; any other texture keeps its own
+    // material (merged per material below) instead of being flattened.
+    const tex = l.userData.retroTex as string | undefined;
+    if (tex && (tex !== 'grain' || !Kit.retro.grain)) return null;
     return 'lambert';
   }
   if ((m as THREE.MeshBasicMaterial).isMeshBasicMaterial) {

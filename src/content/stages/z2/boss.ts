@@ -54,6 +54,7 @@ class Tube {
   readonly P = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
   readonly tipDir = new THREE.Vector3(0, 1, 0);
   private pos: Float32Array;
+  private nrm: Float32Array;
   private geo: THREE.BufferGeometry;
   private n = new THREE.Vector3(1, 0, 0);
 
@@ -66,6 +67,7 @@ class Tube {
   ) {
     const count = rings * sides;
     this.pos = new Float32Array(count * 3);
+    this.nrm = new Float32Array(count * 3);
     const idx: number[] = [];
     for (let i = 0; i < rings - 1; i++) {
       for (let j = 0; j < sides; j++) {
@@ -78,7 +80,7 @@ class Tube {
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage));
-    g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(count * 3).fill(0.577), 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(this.nrm, 3).setUsage(THREE.DynamicDrawUsage));
     g.setIndex(idx);
     this.geo = Kit.track(g);
     this.mesh = new THREE.Mesh(this.geo, mat);
@@ -115,7 +117,7 @@ class Tube {
 
   /** Rebuild the vertices. `wave` adds a travelling peristaltic bulge. */
   update(time: number, wave: number, thick = 1) {
-    const { rings, sides, pos } = this;
+    const { rings, sides, pos, nrm } = this;
     this.tangent(0, _t);
     this.n.copy(Math.abs(_t.y) > 0.9 ? _b.set(1, 0, 0) : UP);
     this.n.addScaledVector(_t, -this.n.dot(_t)).normalize();
@@ -131,16 +133,24 @@ class Tube {
       const r = (this.r0 + (this.r1 - this.r0) * Math.pow(s, 0.85)) * thick * (1 + wave * 0.16 * Math.sin(s * 10 - time * 4));
       for (let j = 0; j < sides; j++) {
         const a = (j / sides) * Math.PI * 2;
-        const ca = Math.cos(a) * r;
-        const sa = Math.sin(a) * r;
+        const ca = Math.cos(a);
+        const sa = Math.sin(a);
+        // Outward ring direction = the vertex normal (unit: n ⊥ b).
+        const nx = this.n.x * ca + _b.x * sa;
+        const ny = this.n.y * ca + _b.y * sa;
+        const nz = this.n.z * ca + _b.z * sa;
         const o = (i * sides + j) * 3;
-        pos[o] = _w.x + this.n.x * ca + _b.x * sa;
-        pos[o + 1] = _w.y + this.n.y * ca + _b.y * sa;
-        pos[o + 2] = _w.z + this.n.z * ca + _b.z * sa;
+        pos[o] = _w.x + nx * r;
+        pos[o + 1] = _w.y + ny * r;
+        pos[o + 2] = _w.z + nz * r;
+        nrm[o] = nx;
+        nrm[o + 1] = ny;
+        nrm[o + 2] = nz;
       }
     }
     this.tangent(1, this.tipDir);
     (this.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
+    (this.geo.attributes.normal as THREE.BufferAttribute).needsUpdate = true;
     this.geo.computeBoundingSphere();
   }
 }
@@ -219,6 +229,8 @@ export class PatientZero extends Boss {
   private fired = false;
   private slamTent: Tentacle | null = null;
   private comboLeft = 0;
+  /** The current slam is the quick follow-up of a phase-3 double slam. */
+  private followUp = false;
   private volley = 0;
   private flinchK = 0;
   private ribOpen = 0;
@@ -232,6 +244,8 @@ export class PatientZero extends Boss {
   private flashObj: THREE.Mesh | null = null;
   private flashMat: THREE.Material | null = null;
   private flashT = 0;
+  /** Age of the last hit flash (flashes are rate-limited: no strobing under autofire). */
+  private lastFlash = -9;
   private deathBursts = 0;
   private heartPopped = false;
   private lastSlamSide: 1 | -1 = 1;
@@ -623,6 +637,7 @@ export class PatientZero extends Boss {
     super.setState(s);
     this.dmgInState = 0;
     this.fired = false;
+    this.followUp = false;
   }
 
   protected override customUpdate(dt: number) {
@@ -699,6 +714,8 @@ export class PatientZero extends Boss {
   }
 
   private interruptAt(): number {
+    // The quick follow-up slam goes down to a single tip hit (counts double) or two eye hits.
+    if (this.followUp && this.state === ST.slam) return 3;
     return [4, 5, 6][this.phase] ?? 6;
   }
 
@@ -777,8 +794,9 @@ export class PatientZero extends Boss {
       if (this.comboLeft > 0) {
         this.comboLeft--;
         this.beginSlam();
-        // Second slam of a combo winds up faster.
-        this.stateTime = W * 0.35;
+        // Second slam of a combo winds up a little faster (still > 1 s to react).
+        this.followUp = true;
+        this.stateTime = W * 0.15;
       } else {
         this.slamTent = null;
         this.setState(ST.idle);
@@ -994,6 +1012,9 @@ export class PatientZero extends Boss {
   // ─── Flash only the part that was hit (a full-body strobe is too much) ───
 
   override flash(critical = false) {
+    // At most ~3 flashes a second, however fast the SMG hits.
+    if (this.age - this.lastFlash < 0.34) return;
+    this.lastFlash = this.age;
     const obj = this.lastHit?.object as THREE.Mesh | undefined;
     const target = obj && obj.isMesh && obj.userData.noFlash !== true ? obj : this.headMesh;
     if (this.flashObj && this.flashMat) this.flashObj.material = this.flashMat;

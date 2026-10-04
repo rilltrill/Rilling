@@ -115,6 +115,16 @@ export const TUNNEL_SPOTS = {
 /** Pump room side-tunnel openings (z). */
 export const PUMP_SIDE_Z = -287;
 
+/** Ceiling height over world (x, z) — used to keep vent drops under the ceiling. */
+export function ceilingAt(x: number, z: number): number {
+  if (z <= TUNNEL.z0 && z >= TUNNEL.z1) return TUNNEL.h;
+  for (const k in ROOMS) {
+    const r = ROOMS[k as keyof typeof ROOMS];
+    if (x >= r.x0 && x <= r.x1 && z <= r.z0 && z >= r.z1) return r.h;
+  }
+  return 99;
+}
+
 /** Rail distances of every hold / landmark. */
 export const D = {
   LOBBY_IN: dAtZ(-6),
@@ -129,7 +139,8 @@ export const D = {
   SERVER_HOLD: dAtZ(-198),
   TUNNEL_IN: dAtZ(-221),
   TUNNEL_MID: dAtZ(-246),
-  PUMP_HOLD: dAtZ(-277.6),
+  /** Held back in the tunnel mouth so the side openings sit ~30° off-axis, not at the screen edge. */
+  PUMP_HOLD: dAtZ(-274.5),
   WING_HOLD: dAtZ(-299),
   WING_EXIT: dAtZ(-322),
   END: Math.floor(RAIL_LEN * 100) / 100,

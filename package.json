@@ -26,6 +26,7 @@
     "@capacitor/ios": "^8.5.2",
     "@capacitor/status-bar": "^8.0.4",
     "@fontsource/black-ops-one": "^5.3.0",
+    "@fontsource/press-start-2p": "^5.3.0",
     "@fontsource/rajdhani": "^5.3.0",
     "three": "^0.186.1"
   },

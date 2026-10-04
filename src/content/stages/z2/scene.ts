@@ -12,6 +12,8 @@ export interface Flicker {
   mode: 'buzz' | 'blink' | 'dying';
   pos: THREE.Vector3;
   lit: boolean;
+  /** Seconds since the panel last switched (rate limit: no strobing). */
+  held: number;
 }
 
 /** Bed curtain that whips open when something comes through it. */

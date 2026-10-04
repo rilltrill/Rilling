@@ -271,9 +271,11 @@ export function buildPump(ctx: Ctx): RoomOut {
   slab(stat, rust, R.x0 + 0.6, R.x1 - 0.6, R.h - 0.8, R.h - 0.5, -279.4, -279.7);
   slab(stat, rust, R.x0 + 0.6, R.x1 - 0.6, R.h - 0.8, R.h - 0.5, -290.9, -291.2);
   // Control console with blinking buttons.
-  box(stat, steel, cx + 3.2, 0.55, R.z0 - 1.2, 1.6, 1.1, 0.6);
-  for (let i = 0; i < 8; i++) box(stat, am.leds[i % 3], cx + 2.6 + (i % 4) * 0.4, 1.12, R.z0 - 1.0 - Math.floor(i / 4) * 0.2, 0.08, 0.04, 0.08);
-  box(stat, am.screen, cx + 3.2, 1.45, R.z0 - 1.48, 0.9, 0.5, 0.02);
+  // (Tucked beside the entrance, out of the view from the tunnel-mouth hold.)
+  const conX = cx + 5.6;
+  box(stat, steel, conX, 0.55, R.z0 - 1.2, 1.6, 1.1, 0.6);
+  for (let i = 0; i < 8; i++) box(stat, am.leds[i % 3], conX - 0.6 + (i % 4) * 0.4, 1.12, R.z0 - 1.0 - Math.floor(i / 4) * 0.2, 0.08, 0.04, 0.08);
+  box(stat, am.screen, conX, 1.45, R.z0 - 1.48, 0.9, 0.5, 0.02);
   // Exit: blast-door frame into the containment wing.
   frameZ(stat, mat(0x3a3e44, 'metal', 1.5), R.z1 + 0.1, exitX, 4.4, 3.8, 0.9);
   hazardBand(stat, exitX - 2.2, exitX + 2.2, R.z1 + 0.7, 0.6);

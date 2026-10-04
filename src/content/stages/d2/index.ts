@@ -3,7 +3,7 @@ import type { V3 } from '../../../core/types';
 import type { Beat, SpawnDef, StageDef } from '../../../gameplay/StageTypes';
 import type { World } from '../../../gameplay/World';
 import { EnvKit } from '../../kit/EnvKit';
-import { CURVE, D, PUMP_SIDE_Z, RAIL, TUNNEL, TUNNEL_SPOTS } from './layout';
+import { CURVE, D, PUMP_SIDE_Z, RAIL, TUNNEL, TUNNEL_SPOTS, dAtZ } from './layout';
 import { buildLabs, labs } from './env';
 import { propaneTank } from './setpieces';
 
@@ -17,7 +17,8 @@ import './boss';
  * green lab glow.
  *
  *   lobby       raptors drop off the mezzanine, burst through a staff door…
- *               then the giant skeleton display comes crashing down
+ *               then the giant skeleton display comes crashing down — its
+ *               skull lands on the alpha leaping over the plinth
  *   gift shop   compys pour out of the ceiling vents, a raptor bursts from the
  *               stock room; a scientist hides behind the till
  *   atrium      dilos spit from the planting beds, a raptor pack flanks
@@ -25,8 +26,8 @@ import './boss';
  *   kitchen     raptors stalking between the counters, the freezer door flies
  *   servers     blinking racks, compys in the cable trays
  *   tunnels     steam, red strobes, an alcove ambush; pump-room pack + gas tanks
- *   containment a triceratops smashes out of its glass enclosure
- *   BOSS        SPECIMEN X in the holding hall
+ *   containment the cell glass blows out and a triceratops charges through
+ *   BOSS        SPECIMEN X in the holding hall; its pack breaks out of the tank
  */
 
 /** World-space spawn helper. */
@@ -71,7 +72,7 @@ const freezerSpawn = behindDoor([9, -183.5], PLAYER.kitchen, 1.7);
 const vent1 = onRail(TUNNEL_SPOTS.vents[0], 0.4, 3.2);
 const vent2 = onRail(TUNNEL_SPOTS.vents[1], -0.4, 3.2);
 const alcove = onRail(TUNNEL_SPOTS.alcove, -(TUNNEL.half + 1.2));
-const tunnelEnd = onRail(D.PUMP_HOLD - 9, 0);
+const tunnelEnd = onRail(dAtZ(-268.6), 0);
 
 const beats: Beat[] = [
   {
@@ -100,60 +101,48 @@ const beats: Beat[] = [
       {
         spawns: [
           at('raptor', -11.2, 5.2, -29, { entry: 'leap', t: 0.8, opts: { variant: 'tan' } }),
-          at('raptor', -7.0, 0, -36.5, { t: 2.6, opts: { variant: 'green' } }),
+          // From the back of the hall, right of the display plinth (never through it).
+          at('raptor', 3.5, 0, -41, { t: 2.6, opts: { variant: 'green' } }),
         ],
       },
       {
         start: { remaining: 0, after: 12 },
         spawns: [
           at('raptor', staffSpawn[0], 0, staffSpawn[1], { entry: 'burst', opts: { variant: 'blue' } }),
-          at('raptor', -11.2, 5.2, -37, { entry: 'leap', t: 1.4, opts: { variant: 'tan' } }),
-        ],
-      },
-      {
-        start: { remaining: 1 },
-        spawns: [
-          at('compy', -4.0, 0, -33.8, { count: 4, every: 0.3, offset: [1.1, 0, 0.4] }),
-          at('raptor', 11.2, 5.2, -44, { entry: 'leap', t: 1.6, opts: { variant: 'green' } }),
+          at('raptor', 11.2, 5.2, -37, { entry: 'leap', t: 1.4, opts: { variant: 'tan' } }),
         ],
       },
     ],
   },
-  // ── Set piece: the skeleton display comes down ───────────────────────────
-  {
-    kind: 'action',
-    label: 'skeleton collapses',
-    look: { at: W(-2.2, 4.2, -29), world: true, blend: 0.9 },
-    run: (w) => {
-      const lab = labs(w);
-      w.audio.play('raptor_screech', { volume: 0.6, pitch: 0.8 });
-      w.later(0.5, () => lab?.skeleton.collapse(w));
-      w.later(0.5, () => popup(w, 'LOOK OUT!', 0.45, 0.28));
-    },
-  },
-  { kind: 'wait', label: 'bones rain down', duration: 2.6, look: { at: W(-2.0, 1.2, -25.5), world: true, blend: 1.4 } },
+  // ── Set piece: the skeleton display comes down — on top of a raptor ──────
   {
     kind: 'hold',
-    label: 'bone yard',
-    look: { at: W(-0.5, 1.6, -31), world: true, blend: 1.2 },
-    pickups: [{ kind: 'points', pos: W(-2.4, 1.6, -24.4), world: true }],
+    label: 'skeleton collapse',
+    look: { at: W(-1.8, 2.6, -28), world: true, blend: 0.8 },
+    pickups: [{ kind: 'points', pos: W(-2.4, 1.6, -24.4), world: true, t: 3.2 }],
+    onStart: (w) => {
+      const lab = labs(w);
+      w.audio.play('raptor_screech', { volume: 0.6, pitch: 0.8 });
+      // The alpha bursts from behind the plinth just as the armature snaps:
+      // the falling skull lands on it (crush() kills whatever is underneath).
+      w.later(0.1, () => lab?.skeleton.collapse(w));
+      w.later(0.5, () => popup(w, 'LOOK OUT!', 0.45, 0.28));
+      w.later(2.3, () => w.fx.dust(new THREE.Vector3(1.6, 0.2, -33.8), 1.6, 0xb8ab90));
+    },
     waves: [
+      { spawns: [at('raptor', -4.4, 0, -33.4, { entry: 'leap', t: 0.5, hp: 3, opts: { variant: 'red' } })] },
       {
-        spawns: [
-          at('raptor', -5.0, 1.8, -30.0, { entry: 'leap', t: 0.2, opts: { variant: 'red' } }),
-          at('compy', -7, 0, -33, { t: 0.9, count: 3, every: 0.3, offset: [1.2, 0, 0.3] }),
-        ],
+        // Compys scatter out of the debris (round the open end of the plinth).
+        start: { after: 2.4 },
+        spawns: [at('compy', 1.0, 0, -34, { count: 3, every: 0.3, offset: [0.9, 0, 0.5] })],
       },
       {
-        start: { remaining: 1 },
-        spawns: [
-          at('raptor', -2, 0, -50, { opts: { variant: 'tan' } }),
-          at('raptor', 4.5, 0, -48, { t: 0.8, opts: { variant: 'blue' } }),
-        ],
+        start: { remaining: 0, after: 9 },
+        spawns: [at('raptor', 4.5, 0, -49, { opts: { variant: 'blue' } })],
       },
     ],
   },
-  { kind: 'move', label: 'to the gift shop', to: D.SHOP_HOLD, speed: 3.5, look: { at: W(0, 1.8, -70), world: true, blend: 1.6 } },
+  { kind: 'move', label: 'to the gift shop', to: D.SHOP_HOLD, speed: 3.9, look: { at: W(0, 1.8, -70), world: true, blend: 1.6 } },
   // ── 2. Gift shop: compys from the vents, the stock-room door ─────────────
   {
     kind: 'hold',
@@ -188,7 +177,7 @@ const beats: Beat[] = [
       },
     ],
   },
-  { kind: 'move', label: 'into the atrium', to: D.GREEN_HOLD, speed: 3.4, look: { at: W(-2, 2.4, -104), world: true, blend: 1.6 } },
+  { kind: 'move', label: 'into the atrium', to: D.GREEN_HOLD, speed: 3.7, look: { at: W(-2, 2.4, -104), world: true, blend: 1.6 } },
   // ── 3. Botanical atrium: dilos in the beds, a raptor pack flanks ─────────
   {
     kind: 'hold',
@@ -205,8 +194,10 @@ const beats: Beat[] = [
       {
         start: { remaining: 1, after: 9 },
         spawns: [
-          at('raptor', -12, 0, -96, { entry: 'leap', opts: { variant: 'green' } }),
-          at('raptor', 11, 0, -100, { entry: 'leap', t: 0.7, opts: { variant: 'green' } }),
+          // Flankers break cover from the beds either side of the path — close
+          // enough to the look target that they land inside the frame.
+          at('raptor', -7, 0, -101, { entry: 'leap', opts: { variant: 'tan' } }),
+          at('raptor', 5, 0, -98.5, { entry: 'leap', t: 0.7, opts: { variant: 'red' } }),
           at('compy', -3, 0, -118, { t: 1.4, count: 3, every: 0.3, offset: [1.4, 0, 0] }),
         ],
       },
@@ -219,7 +210,7 @@ const beats: Beat[] = [
       },
     ],
   },
-  { kind: 'move', label: 'to the hatchery', to: D.HATCH_HOLD, speed: 3.5, look: { at: W(0, 1.8, -145), world: true, blend: 1.6 } },
+  { kind: 'move', label: 'to the hatchery', to: D.HATCH_HOLD, speed: 3.9, look: { at: W(0, 1.8, -145), world: true, blend: 1.6 } },
   // ── 4. Hatchery: lab doors blown open, hatchlings ────────────────────────
   {
     kind: 'hold',
@@ -238,19 +229,20 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           at('raptor', labRSpawn[0], 0, labRSpawn[1], { entry: 'burst', opts: { variant: 'tan' } }),
-          at('raptor', 4.65, 0.95, -146.7, { entry: 'leap', t: 1.1, opts: { variant: 'green' } }),
+          // Off the far-left incubator (lands clear of the scientist's line of fire).
+          at('raptor', -3.6, 0.95, -147.2, { entry: 'leap', t: 1.1, opts: { variant: 'green' } }),
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
           at('raptor', 0, 0, -165, { opts: { variant: 'red' } }),
-          at('raptor', -5, 0, -158, { t: 0.8, opts: { variant: 'tan' } }),
+          at('raptor', -2, 0, -160, { t: 0.8, opts: { variant: 'tan' } }),
         ],
       },
     ],
   },
-  { kind: 'move', label: 'to the kitchen', to: D.KITCHEN_HOLD, speed: 3.4, look: { at: W(0, 1.6, -180), world: true, blend: 1.6 } },
+  { kind: 'move', label: 'to the kitchen', to: D.KITCHEN_HOLD, speed: 3.7, look: { at: W(0, 1.6, -180), world: true, blend: 1.6 } },
   // ── 5. Kitchen: raptors between the counters, the freezer door ───────────
   {
     kind: 'hold',
@@ -264,7 +256,9 @@ const beats: Beat[] = [
     waves: [
       {
         spawns: [
-          at('raptor', -6.6, 0, -186, { t: 0.4, opts: { variant: 'tan' } }),
+          // Stalks up the central aisle between the islands…
+          at('raptor', -1.6, 0, -191, { t: 0.4, opts: { variant: 'tan' } }),
+          // …while another vaults off the far counter.
           at('raptor', 4.6, 0.95, -183, { entry: 'leap', t: 1.8, opts: { variant: 'green' } }),
         ],
       },
@@ -279,13 +273,13 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           at('raptor', 0, 0, -196, { opts: { variant: 'tan' } }),
-          at('raptor', -3, 0, -194, { t: 0.7, opts: { variant: 'green' } }),
-          at('compy', 3, 0, -193, { t: 1.2, count: 3, every: 0.3, offset: [-1, 0, 0] }),
+          at('raptor', -1.2, 0, -193.2, { t: 0.7, opts: { variant: 'green' } }),
+          at('compy', 3, 0, -193, { t: 1.2, count: 2, every: 0.3, offset: [-1, 0, 0] }),
         ],
       },
     ],
   },
-  { kind: 'move', label: 'to the servers', to: D.SERVER_HOLD, speed: 3.4, look: { at: W(0, 1.6, -210), world: true, blend: 1.6 } },
+  { kind: 'move', label: 'to the servers', to: D.SERVER_HOLD, speed: 3.7, look: { at: W(0, 1.6, -210), world: true, blend: 1.6 } },
   // ── 6. Server room ───────────────────────────────────────────────────────
   {
     kind: 'hold',
@@ -302,18 +296,16 @@ const beats: Beat[] = [
         ],
       },
       {
+        // A pair charges up the cold aisle between the racks (never through them).
         start: { remaining: 1 },
         spawns: [
-          at('raptor', -5, 0, -211, { opts: { variant: 'green' } }),
-          at('raptor', 5, 0, -206, { t: 0.9, opts: { variant: 'tan' } }),
+          at('raptor', -0.9, 0, -217, { entry: 'burst', opts: { variant: 'tan' } }),
+          at('raptor', 0.9, 0, -216.6, { entry: 'burst', t: 0.9, opts: { variant: 'green' } }),
         ],
       },
       {
         start: { remaining: 1 },
-        spawns: [
-          at('raptor', 0, 0, -216.5, { entry: 'leap', opts: { variant: 'red' } }),
-          at('compy', -4, 0, -216, { t: 0.6, count: 3, every: 0.3, offset: [0.8, 0, 0] }),
-        ],
+        spawns: [at('raptor', 0, 0, -216.5, { entry: 'leap', opts: { variant: 'red' } })],
       },
     ],
   },
@@ -322,7 +314,7 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'maintenance tunnels',
     to: TUNNEL_SPOTS.ambush,
-    speed: 3.6,
+    speed: 3.9,
     waves: [
       {
         start: { atD: D.TUNNEL_IN - 1 },
@@ -347,36 +339,39 @@ const beats: Beat[] = [
       },
       {
         start: { remaining: 0 },
-        spawns: [at('compy', tunnelEnd[0], 0, tunnelEnd[2], { count: 4, every: 0.35 })],
+        spawns: [at('compy', tunnelEnd[0], 0, tunnelEnd[2], { count: 3, every: 0.35 })],
       },
     ],
   },
-  { kind: 'move', label: 'to the pump room', to: D.PUMP_HOLD, speed: 3.6 },
+  { kind: 'move', label: 'to the pump room', to: D.PUMP_HOLD, speed: 3.9 },
   // ── 8. Pump room: pack from both side tunnels, gas tanks ─────────────────
+  // The player stops in the tunnel mouth, so the side openings sit ~30° off
+  // the view axis; raptors vault out of the openings, compys pour in through
+  // the containment-wing door straight ahead.
   {
     kind: 'hold',
     label: 'pump room',
     look: { at: W(11, 1.5, -288), world: true, blend: 1.2 },
-    pickups: [{ kind: 'health', pos: W(13.2, 1.35, -283.5), world: true, t: 1 }],
+    pickups: [{ kind: 'health', pos: W(13.2, 1.35, -281.5), world: true, t: 1 }],
     onStart: (w) => w.later(3, () => popup(w, 'GAS TANKS!', 0.5, 0.3)),
     waves: [
       {
         spawns: [
-          at('raptor', -0.5, 0, PUMP_SIDE_Z, { t: 0.5, opts: { variant: 'tan' } }),
-          at('compy', 22.5, 0, PUMP_SIDE_Z, { t: 1.4, count: 3, every: 0.3 }),
+          at('raptor', 2.4, 0, PUMP_SIDE_Z - 0.8, { entry: 'leap', t: 0.5, opts: { variant: 'tan' } }),
+          at('compy', 10.2, 0, -296, { t: 1.4, count: 3, every: 0.35, offset: [0.8, 0, 0] }),
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
-          at('raptor', -0.5, 0, PUMP_SIDE_Z - 0.5, { opts: { variant: 'blue' } }),
-          at('raptor', 22.5, 0, PUMP_SIDE_Z + 0.5, { t: 0.3, opts: { variant: 'blue' } }),
+          at('raptor', 2.4, 0, PUMP_SIDE_Z - 0.4, { entry: 'leap', opts: { variant: 'blue' } }),
+          at('raptor', 19.6, 0, PUMP_SIDE_Z - 0.4, { entry: 'leap', t: 0.4, opts: { variant: 'blue' } }),
           at('raptor', 11, 0, -297, { t: 1.6, opts: { variant: 'red' } }),
         ],
       },
     ],
   },
-  { kind: 'move', label: 'containment wing', to: D.WING_HOLD, speed: 3.2, look: { at: W(14, 2.2, -310), world: true, blend: 1.6 } },
+  { kind: 'move', label: 'containment wing', to: D.WING_HOLD, speed: 3.5, look: { at: W(14, 2.2, -310), world: true, blend: 1.6 } },
   // ── Set piece: something big behind the glass ────────────────────────────
   {
     kind: 'action',
@@ -401,26 +396,34 @@ const beats: Beat[] = [
       { kind: 'bomb', pos: W(8.4, 1.35, -304), world: true, t: 0.5 },
       { kind: 'health', pos: W(13.6, 1.35, -305), world: true, t: 9 },
     ],
+    // Scripted, not left to proximity: the glass blows out and the trike
+    // comes through the shards (it charges from range, so it would otherwise
+    // stand behind the pane).
+    onStart: (w) => {
+      const cell = labs(w)?.cells[4];
+      if (cell) cell.shatter(w, new THREE.Vector3(16.6, 0, -310.5));
+      w.audio.play('trike_bellow', { volume: 1, pitch: 0.85 });
+    },
     waves: [
-      { spawns: [at('trike', 20.4, 0, -310.5, { entry: 'burst', t: 0.15 })] },
+      { spawns: [at('trike', 16.2, 0, -310.5, { entry: 'burst', t: 0.05 })] },
       {
+        // Out of the broken far cells, through the glass line (clear of the dividers).
         start: { after: 5, remaining: 0 },
         spawns: [
-          at('raptor', 2.5, 0, -321, { entry: 'leap', opts: { variant: 'tan' } }),
+          at('raptor', 3.4, 0, -324.5, { entry: 'leap', opts: { variant: 'tan' } }),
           at('raptor', 11, 0, -331, { t: 0.9, opts: { variant: 'green' } }),
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
-          at('raptor', 2.0, 0, -319.5, { entry: 'leap', opts: { variant: 'blue' } }),
-          at('raptor', 1.5, 0, -324, { entry: 'leap', t: 0.5, opts: { variant: 'blue' } }),
-          at('raptor', 11, 0, -332, { t: 1.4, opts: { variant: 'red' } }),
+          at('raptor', 18.6, 0, -324.5, { entry: 'leap', opts: { variant: 'blue' } }),
+          at('raptor', 11, 0, -332, { t: 1.2, opts: { variant: 'red' } }),
         ],
       },
     ],
   },
-  { kind: 'move', label: 'into the holding hall', to: D.END, speed: 3.0, look: { at: W(11, 2.6, -356), world: true, blend: 1.6 } },
+  { kind: 'move', label: 'into the holding hall', to: D.END, speed: 3.4, look: { at: W(11, 2.6, -356), world: true, blend: 1.6 } },
   {
     kind: 'action',
     label: 'lights out',

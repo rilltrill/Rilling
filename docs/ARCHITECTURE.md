@@ -189,7 +189,23 @@ to pick impact effects per object.
 
 `?stage=z1` jump into a stage · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
-overlay · `&seed=42` · `&mute=1`. `window.__game` exposes the game for tests.
+overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor
+mode (`?stage`/`?autoplay` deep links render with retro OFF unless `retro` is
+given, so tooling gets clean captures) · `?stage=zoo&zoo=walker,raptor` dev arena.
+`window.__game` exposes the game for tests; `Menus.current` names the top screen.
+
+## Arcade front-end
+
+- Boot POST screen once per session → title (`PRESS START`, `FREE PLAY`, 1P/HI row).
+- Attract cycle: title idle 15 s → HI-SCORES 6 s → `Game` state `'demo'` for 25 s
+  (AutoPlayer + god, a stage fast-forwarded to the next fight; never records
+  scores/unlocks, no tutorial/intro). Any tap → main menu.
+- Hi-scores: per-campaign top-10 tables in `Save` (`hiScores`, `hiScoreRank`,
+  `qualifies`, `addHiScore`, `topHiScore`, `lastInitials`). An ARCADE run that
+  ends (campaign clear, game over, quit) with a qualifying total goes to 3-letter
+  NAME ENTRY. RETRY/RESTART replace that stage's score; continues are recorded.
+- The 2D overlay follows `engine.retro.targetSize` (`Overlay2D.setPixelGrid`) so
+  rings/crosshairs are drawn on the same chunky pixel grid as the 3D.
 
 ## Verifying changes
 

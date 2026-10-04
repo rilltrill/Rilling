@@ -9,6 +9,7 @@ import { Kit } from '../kit/ModelKit';
 import type { HumanoidRig, Limb } from '../kit/humanoid';
 import {
   ZBody,
+  footWorld,
   ZOMBIE_VARIANTS,
   SKIN_TONES,
   BLOOD,
@@ -60,18 +61,44 @@ const SEG_LEG_R = 7;
 
 type DeathStyle = 'back' | 'forward' | 'spin' | 'drop' | 'blast';
 
+/** A severed limb tumbling (then lying) in the world. */
 interface Flyer {
   obj: THREE.Object3D;
   vel: THREE.Vector3;
   spin: THREE.Vector3;
   t: number;
-  rest: boolean;
+  /** −1 while airborne, then seconds since it started settling. */
+  restT: number;
+  /** World length of the limb along its local −Y, and its half-thickness when lying flat. */
+  len: number;
+  half: number;
+  /** Settling: orientation/height it eases from → lying flat on the ground. */
+  fromQ: THREE.Quaternion;
+  toQ: THREE.Quaternion;
+  fromY: number;
+  restY: number;
 }
 
 const STOMP_OPTS = { volume: 0.4, vary: 0.12, pitch: 1.25 };
 
-/** Last zombie-caused explosion, so blast deaths can fall away from its centre. */
-const lastBlast = { pos: new THREE.Vector3(), time: -1, world: null as unknown };
+/**
+ * Stand-off distance when the player rides a vehicle (eye 2.05 m, cab/hood in
+ * the bottom of the frame): attackers stop clear of the hood so their chest and
+ * the warning ring stay above it.
+ */
+const VEHICLE_RANGE = 3.4;
+const VEHICLE_POUNCE_RANGE = 5.4;
+
+/**
+ * Last bloater blast per World (weakly held, so a disposed stage's World is
+ * never kept alive), so blast deaths fall away from its centre.
+ */
+const blasts = new WeakMap<object, { pos: THREE.Vector3; time: number }>();
+const _box = new THREE.Box3();
+const _m4 = new THREE.Matrix4();
+const _e = new THREE.Euler(0, 0, 0, 'YXZ');
+const _vf = new THREE.Vector3();
+const _vp = new THREE.Vector3();
 const GROWL_OPTS = { volume: 0.5, vary: 0.15, pitch: 0.6 };
 
 function variantOpt(opts: Record<string, unknown>, rng: { pick<T>(a: readonly T[]): T }, fallback: string): string {
@@ -127,8 +154,65 @@ export abstract class Zombie extends Enemy {
   protected mAir = 0;
   protected mAirV = 0;
   protected sink = 0;
+  /** True when spawned while the player rides a vehicle (bigger stand-off, carried legs keep running). */
+  protected inVehicle = false;
   private pool: THREE.Mesh | null = null;
-  private flyers: Flyer[] = [];
+  protected flyers: Flyer[] = [];
+
+  /** After configure()/build(), before the entry starts: adapt to the player being on foot or in a vehicle. */
+  private adaptToRig() {
+    this.inVehicle = this.world.rig.mode === 'drive';
+    const ar = this.spawn.opts.attackRange;
+    if (typeof ar === 'number' && ar > 0) this.attackRange = ar;
+    else if (this.inVehicle) this.attackRange = Math.max(this.attackRange, this.vehicleRange());
+  }
+
+  /** Attack stand-off used when the player is in a vehicle. */
+  protected vehicleRange(): number {
+    return VEHICLE_RANGE;
+  }
+
+  /** Carried along by a moving rig (legs must keep running even while attacking). */
+  protected get carried(): boolean {
+    return this.frame === 'rig' && this.world.rig.speed > 0.8;
+  }
+
+  /** Horizontal camera forward (unit) in this zombie's frame. */
+  private viewFwd(out: THREE.Vector3): THREE.Vector3 {
+    this.world.camera.getWorldDirection(out);
+    out.y = 0;
+    if (out.lengthSq() < 1e-6) out.set(0, 0, -1);
+    out.normalize();
+    if (this.frame === 'rig') {
+      const h = this.world.rig.space.rotation.y;
+      const c = Math.cos(h);
+      const sn = Math.sin(h);
+      out.set(out.x * c - out.z * sn, 0, out.x * sn + out.z * c);
+    }
+    return out;
+  }
+
+  /**
+   * A point of this zombie's frame in VIEW space: origin at the player, +x to
+   * the right of where the camera looks, −z straight ahead (so `-z` = how far
+   * in front of the player it is).
+   */
+  protected toView(p: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
+    const f = this.viewFwd(_vf);
+    this.playerPos(_vp);
+    const dx = p.x - _vp.x;
+    const dz = p.z - _vp.z;
+    return out.set(-dx * f.z + dz * f.x, 0, -(dx * f.x + dz * f.z));
+  }
+
+  /** Inverse of `toView` (in place); y is set to this zombie's height. */
+  protected fromView(v: THREE.Vector3): THREE.Vector3 {
+    const f = this.viewFwd(_vf);
+    this.playerPos(_vp);
+    const side = v.x;
+    const ahead = -v.z;
+    return v.set(_vp.x - f.z * side + f.x * ahead, this.root.position.y, _vp.z + f.x * side + f.z * ahead);
+  }
 
   // ─── Building ───────────────────────────────────────────────────────────
 
@@ -171,6 +255,16 @@ export abstract class Zombie extends Enemy {
     this.b.box(parent, 0.1, 0.05, 0.11, GORE, pivot.position.x, pivot.position.y + (whole ? 0 : 0.02), pivot.position.z);
     this.b.box(parent, 0.04, 0.035, 0.04, BONE, pivot.position.x, pivot.position.y - 0.02, pivot.position.z);
     this.severed[side > 0 ? 0 : 1] = whole ? 2 : 1;
+    this.unrig(arm, whole);
+  }
+
+  /**
+   * Point the rig at inert stand-in joints once a limb is gone, so the pose
+   * code stops driving the detached pivot (which now tumbles on its own).
+   */
+  protected unrig(arm: Limb, whole: boolean) {
+    if (whole) arm.shoulder = new THREE.Group();
+    arm.elbow = new THREE.Group();
   }
 
   /** Bake the body, add it to the model and register hit zones. */
@@ -256,6 +350,8 @@ export abstract class Zombie extends Enemy {
   }
 
   protected override beginEntry(kind: EntryKind) {
+    // (Called once, from onAdded, right after configure() and build().)
+    this.adaptToRig();
     this.landT = -1;
     if (kind === 'rise') {
       // (Skips the base class's big dust puff — we throw dirt as the hands break through.)
@@ -529,6 +625,7 @@ export abstract class Zombie extends Enemy {
     Kit.add(parent, Kit.box(0.11, 0.05, 0.12), Kit.mat(GORE), pivot.position.x, pivot.position.y + (whole ? 0 : 0.01), pivot.position.z);
     this.severed[idx] = whole ? 2 : 1;
     this.launchLimb(pivot, hit.dir, side);
+    this.unrig(arm, whole);
     const fx = this.world.fx;
     fx.gibs(hit.point, this.skinColor, 2, 0.11);
     fx.gibs(hit.point, BLOOD, 4, 0.07);
@@ -541,47 +638,103 @@ export abstract class Zombie extends Enemy {
   /** Detach a limb into the world and let it tumble to the ground. */
   protected launchLimb(obj: THREE.Object3D, dir: THREE.Vector3, side: number) {
     const rng = this.world.rng;
+    // A whole arm goes limp: relax its elbow into a slight sideways bend (it lies
+    // in the ground plane once the limb settles on its front face).
+    const bend = rng.chance(0.5) ? 0.35 : -0.35;
+    for (const c of obj.children) if (!(c as THREE.Mesh).isMesh) c.rotation.set(0, 0, bend);
+    // Measure the limb in its own space: length along −Y, thickness along Z
+    // (local Z points down once it lies flat).
+    let len = 0.3;
+    let half = 0.05;
+    let first = true;
+    obj.updateMatrix();
+    obj.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !m.geometry.boundingBox) return;
+      _m4.identity();
+      for (let n: THREE.Object3D | null = m; n && n !== obj; n = n.parent) {
+        n.updateMatrix();
+        _m4.premultiply(n.matrix);
+      }
+      _box.copy(m.geometry.boundingBox).applyMatrix4(_m4);
+      if (first) {
+        len = -_box.min.y;
+        half = _box.max.z;
+        first = false;
+      } else {
+        len = Math.max(len, -_box.min.y);
+        half = Math.max(half, _box.max.z);
+      }
+    });
     this.world.scene.attach(obj);
+    const sc = obj.getWorldScale(_p).x;
     // Out to the arm's side (model +X is the zombie's left) and up, a little along the shot.
     this.root.getWorldQuaternion(_q);
     _v.set(side, 0, 0).applyQuaternion(_q);
     const out = rng.range(2, 3.2);
     const vel = new THREE.Vector3(_v.x * out + dir.x * 1.2 + rng.spread(0.6), rng.range(3, 4.5), _v.z * out + dir.z * 1.2 + rng.spread(0.6));
     const spin = new THREE.Vector3(rng.spread(12), rng.spread(12), rng.spread(12));
-    this.flyers.push({ obj, vel, spin, t: 0, rest: false });
+    this.flyers.push({
+      obj,
+      vel,
+      spin,
+      t: 0,
+      restT: -1,
+      len: Math.max(0.1, len) * sc,
+      half: Math.max(0.02, half) * sc,
+      fromQ: new THREE.Quaternion(),
+      toQ: new THREE.Quaternion(),
+      fromY: 0,
+      restY: 0,
+    });
   }
 
-  private tickFlyers(dt: number) {
+  /** Severed limbs: ballistic tumble, bounce, settle flat on the ground, then sink away. */
+  protected tickFlyers(dt: number) {
     const fl = this.flyers;
     for (let i = fl.length - 1; i >= 0; i--) {
       const f = fl[i];
       f.t += dt;
       const o = f.obj;
-      if (!f.rest) {
+      if (f.restT < 0) {
         f.vel.y -= 14 * dt;
         o.position.addScaledVector(f.vel, dt);
         o.rotation.x += f.spin.x * dt;
         o.rotation.y += f.spin.y * dt;
         o.rotation.z += f.spin.z * dt;
-        const g = this.world.groundAt(o.position.x, o.position.z) + 0.07;
-        if (o.position.y <= g) {
-          o.position.y = g;
+        // Lowest point: the joint end or the far end of the limb.
+        _v.set(0, -f.len, 0).applyQuaternion(o.quaternion);
+        const low = Math.min(0, _v.y) - f.half * 0.6;
+        const g = this.world.groundAt(o.position.x, o.position.z);
+        if (o.position.y + low <= g) {
+          o.position.y = g - low;
           if (f.vel.y < -2.5) {
+            // Bounce, trading spin for a splat.
             f.vel.y *= -0.3;
             f.vel.x *= 0.5;
             f.vel.z *= 0.5;
             f.spin.multiplyScalar(0.4);
             this.world.fx.blood(o.position, null, { color: this.bloodColor, amount: 0.3 });
           } else {
-            f.rest = true;
-            // Lie flat-ish.
-            o.rotation.x = Math.PI / 2;
+            // Settle: ease to lying flat along its current heading, resting on its side.
+            f.restT = 0;
+            f.fromQ.copy(o.quaternion);
+            f.fromY = o.position.y;
+            f.restY = g + f.half;
+            const yaw = Math.atan2(-_v.x, -_v.z) + (Math.abs(_v.x) + Math.abs(_v.z) < 1e-4 ? this.world.rng.next() * 6 : 0);
+            _e.set(Math.PI / 2, yaw, 0, 'YXZ');
+            f.toQ.setFromEuler(_e);
           }
         }
-      } else if (f.t > 4) {
-        o.position.y -= dt * 0.4;
+      } else {
+        f.restT += dt;
+        const k = Math.min(1, f.restT / 0.16);
+        const e = k * (2 - k);
+        o.quaternion.slerpQuaternions(f.fromQ, f.toQ, e);
+        o.position.y = lerp(f.fromY, f.restY, e);
+        if (f.restT > 2.4) o.position.y -= (f.restT - 2.4) * 0.3;
       }
-      if (f.t > 5.5) {
+      if (f.restT > 3.4 || f.t > 7) {
         o.parent?.remove(o);
         fl.splice(i, 1);
       }
@@ -592,6 +745,8 @@ export abstract class Zombie extends Enemy {
     super.dispose();
     for (const f of this.flyers) f.obj.parent?.remove(f.obj);
     this.flyers.length = 0;
+    // Baked geometry is per zombie (random palettes) — free it with the zombie.
+    this.b?.dispose();
   }
 
   // ─── Death ──────────────────────────────────────────────────────────────
@@ -615,9 +770,9 @@ export abstract class Zombie extends Enemy {
       along = (hit.dir.x * fx + hit.dir.z * fz) / len;
       lateral = (hit.dir.x * fz - hit.dir.z * fx) / len;
       this.deathDir.set(hit.dir.x / len, 0, hit.dir.z / len);
-    } else if (lastBlast.world === this.world && this.world.time - lastBlast.time < 0.1) {
+    } else if (this.recentBlast()) {
       // Thrown away from the blast centre.
-      this.deathDir.subVectors(this.root.position, lastBlast.pos).setY(0);
+      this.deathDir.subVectors(this.root.position, blasts.get(this.world)!.pos).setY(0);
       const len = this.deathDir.length();
       if (len > 0.01) this.deathDir.divideScalar(len);
       else this.deathDir.set(-fx, 0, -fz);
@@ -673,7 +828,19 @@ export abstract class Zombie extends Enemy {
       const a = this.model.rotation.y;
       this.pool.position.set(_v.x * Math.cos(a) + _v.z * Math.sin(a), 0.012, -_v.x * Math.sin(a) + _v.z * Math.cos(a));
     }
-    return t > this.corpseTime;
+    return this.corpseGone(t);
+  }
+
+  /** The corpse has sunk away; linger (hidden) until any severed limbs have sunk too. */
+  protected corpseGone(t: number): boolean {
+    if (t <= this.corpseTime) return false;
+    this.model.visible = false;
+    return this.flyers.length === 0;
+  }
+
+  private recentBlast(): boolean {
+    const b = blasts.get(this.world);
+    return !!b && this.world.time - b.time < 0.1;
   }
 
   /** Where the torso ends up lying, relative to the feet (model space, before any death spin). */
@@ -870,7 +1037,7 @@ export class Walker extends Zombie {
       r.spine.rotation.x = this.lean - 0.42 * e;
       r.head.rotation.x = -0.5 * e;
       r.neck.rotation.x -= 0.2 * e;
-      poseCrouch(r, 0.18 * e, this.hipsY);
+      if (!this.carried) poseCrouch(r, 0.18 * e, this.hipsY);
     } else if (this.state === 'recover' && t < 0.45) {
       const f = 1 - t / 0.45;
       const e = f * f;
@@ -927,6 +1094,9 @@ export class Runner extends Zombie {
   private lungeTo = new THREE.Vector3();
   private twitchT = 0;
   private twitch = 0;
+  /** Flanking round the player/vehicle: which side (±1, 0 = undecided) and whether it's under way. */
+  private flankSide = 0;
+  private flanking = false;
 
   protected override configure() {
     const rng = this.world.rng;
@@ -961,13 +1131,84 @@ export class Runner extends Zombie {
     this.finishBody();
   }
 
+  /** Lateral clearance to keep from the player (the vehicle's width when driving). */
+  private get flankClear() {
+    return this.inVehicle ? 2.5 : 1.3;
+  }
+
+  /** In front of the player — in view space — by enough to approach head-on? */
+  private inFront(local: THREE.Vector3) {
+    return -local.z >= this.attackRange * 0.6;
+  }
+
+  protected override beginEntry(kind: EntryKind) {
+    super.beginEntry(kind);
+    if (kind !== 'leap') return;
+    // Leaping in from behind/alongside: land out on the flank, never on (or in) the player/vehicle.
+    this.toView(this.root.position, _v);
+    if (this.inFront(_v)) return;
+    const side = _v.x >= 0 ? 1 : -1;
+    this.flankSide = side;
+    const y = this.entryTo.y;
+    this.toView(this.entryTo, _w);
+    _w.x = side * Math.max(this.flankClear + 0.2, Math.abs(_w.x), Math.abs(_v.x));
+    this.fromView(_w);
+    this.entryTo.set(_w.x, y, _w.z);
+  }
+
   protected override advanceUpdate(dt: number) {
+    if (this.flank(dt)) return;
     const d = this.distToPlayer;
     if (!this.lunged && d > this.attackRange + 1.6 && d < this.attackRange + 5.5 && this.world.rng.chance(dt * 2.2) && this.onScreen()) {
       this.startLunge();
       return;
     }
-    super.advanceUpdate(dt);
+    // Close in on the point of the attack circle nearest to it, but within
+    // ±24° of where the camera looks, so the attack is framed in the middle of
+    // the screen (not at the edge under the HUD, after overtaking wide).
+    const local = this.toView(this.root.position, _v);
+    const ang = clamp(Math.atan2(local.x, -local.z), -0.42, 0.42);
+    _w.set(Math.sin(ang) * this.attackRange, 0, -Math.cos(ang) * this.attackRange);
+    this.fromView(_w);
+    const remaining = this.moveToward(_w, this.speed, dt);
+    this.separate(dt);
+    if (remaining <= 0.1) {
+      this.playerPos(_p);
+      this.faceToward(_p, dt);
+      if (this.grabSlot()) this.setState('windup');
+    }
+  }
+
+  /**
+   * Behind or alongside the player: sprint round the outside (sideways first,
+   * then forward along the flank) instead of straight through the player — or
+   * through the truck's cab when chasing a vehicle — until it has overtaken
+   * well past its attack range. Returns true while flanking.
+   */
+  private flank(dt: number): boolean {
+    const local = this.toView(this.root.position, _v);
+    if (!this.flanking) {
+      if (this.inFront(local)) {
+        this.flankSide = 0;
+        return false;
+      }
+      this.flanking = true;
+    } else if (-local.z >= this.attackRange + 0.9) {
+      this.flanking = false;
+      this.flankSide = 0;
+      return false;
+    }
+    const clear = this.flankClear;
+    if (!this.flankSide) this.flankSide = local.x > 0.05 ? 1 : local.x < -0.05 ? -1 : this.world.rng.chance(0.5) ? 1 : -1;
+    const ax = Math.abs(local.x);
+    const x = this.flankSide * Math.max(clear, ax);
+    // Too close sideways: step out first (keeping its place along the rail), then run up the flank.
+    const z = ax < clear - 0.15 ? Math.min(local.z, 1.2) : -(this.attackRange + 1.5);
+    _w.set(x, 0, z);
+    this.fromView(_w);
+    this.moveToward(_w, this.speed, dt);
+    this.separate(dt);
+    return true;
   }
 
   private startLunge() {
@@ -999,8 +1240,25 @@ export class Runner extends Zombie {
   }
 
   override stagger() {
-    if (this.state === 'lunge') this.model.position.y = 0;
+    // Shot out of the air mid-lunge: fall from where it was instead of snapping down.
+    if (this.state === 'lunge') {
+      this.mAir = Math.max(0, this.model.position.y);
+      this.mAirV = 0;
+    }
     super.stagger();
+  }
+
+  protected override animate(dt: number) {
+    if (this.state !== 'lunge' && this.state !== 'dying' && this.mAir > 0) {
+      this.mAirV -= 22 * dt;
+      this.mAir = Math.max(0, this.mAir + this.mAirV * dt);
+      this.model.position.y = this.mAir;
+      if (this.mAir === 0) {
+        this.mAirV = 0;
+        this.world.fx.dust(this.worldPos(_w), 0.5);
+      }
+    }
+    super.animate(dt);
   }
 
   protected override pose(dt: number) {
@@ -1060,7 +1318,8 @@ export class Runner extends Zombie {
       const k = clamp(t / this.windup, 0, 1);
       const e = k * k * (3 - 2 * k);
       const spring = smoothstep(0.78, 1, k);
-      poseCrouch(r, 0.5 * e * (1 - spring), this.hipsY);
+      // Carried by a moving vehicle the legs keep sprinting (no ice-skating crouch).
+      if (!this.carried) poseCrouch(r, 0.5 * e * (1 - spring), this.hipsY);
       r.spine.rotation.x = 0.55 + 0.25 * e - 0.4 * spring;
       r.neck.rotation.x = -0.6 * e;
       r.head.rotation.z = Math.sin(t * 30) * 0.12 * e;
@@ -1094,9 +1353,69 @@ export class Runner extends Zombie {
 // Crawler
 // ═══════════════════════════════════════════════════════════════════════════
 
+const TAU = Math.PI * 2;
+/** Prone torso pitch, shoulder distance from the hips joint, crawl stroke reach (model z) and hand height. */
+const CRAWL_PITCH = 1.42;
+const CRAWL_HEAVE = 0.35;
+const CRAWL_SHOULDER = 0.46;
+const CRAWL_FAR = 1.0;
+const CRAWL_NEAR = 0.76;
+const CRAWL_HAND_Y = 0.07;
+const CRAWL_PLANT = 0.55;
+const CRAWL_SPLAY = 0.3;
+const _hl = new THREE.Vector3();
+const _hr = new THREE.Vector3();
+
+/** Phase → cycle position 0..1. */
+function cycle(ph: number) {
+  const u = ph / TAU;
+  return u - Math.floor(u);
+}
+
+/** 0..1 while the hand is planted (peaks mid-pull). */
+function plantOf(u: number) {
+  return u < CRAWL_PLANT ? Math.sin((Math.PI * u) / CRAWL_PLANT) : 0;
+}
+
+/** Hand target (y, z in the model's side plane) at cycle position `u`: planted and sliding back, then lifted and swung forward. */
+function handTarget(u: number, out: THREE.Vector3) {
+  if (u < CRAWL_PLANT) return out.set(0, CRAWL_HAND_Y, lerp(CRAWL_FAR, CRAWL_NEAR, smoothstep(0, 1, u / CRAWL_PLANT)));
+  const e = (u - CRAWL_PLANT) / (1 - CRAWL_PLANT);
+  return out.set(0, CRAWL_HAND_Y + Math.sin(e * Math.PI) * 0.17, lerp(CRAWL_NEAR, CRAWL_FAR, smoothstep(0, 1, e)));
+}
+
+/**
+ * Chest heave 0..1 needed for a hand at reach `z`: the further the hand is
+ * pulled back under the body, the higher the chest must ride for the bent
+ * elbow to clear the ground.
+ */
+function heaveOf(z: number) {
+  return Math.sqrt(clamp((CRAWL_FAR - z) / (CRAWL_FAR - CRAWL_NEAR), 0, 1));
+}
+
+const _ik = { phi1: 0, el: 0 };
+
+/**
+ * Planar two-bone IK in the model's side plane. Angles use the rig convention
+ * (direction (z, y) = (−sin φ, −cos φ); 0 = straight down, −π/2 = forward).
+ * Elbow-down solution, i.e. natural flexion (el ≤ 0). Writes `_ik`.
+ */
+function solveArm(sy: number, sz: number, hy: number, hz: number, l1: number, l2: number) {
+  const vz = hz - sz;
+  const vy = hy - sy;
+  const d = clamp(Math.hypot(vz, vy), Math.abs(l1 - l2) + 1e-3, (l1 + l2) * 0.999);
+  const phiV = Math.atan2(-vz, -vy);
+  const alpha = Math.acos(clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+  const beta = Math.acos(clamp((l1 * l1 + l2 * l2 - d * d) / (2 * l1 * l2), -1, 1));
+  _ik.phi1 = phiV + alpha;
+  _ik.el = -(Math.PI - beta);
+}
+
 /** Legless torso dragging itself on its arms. Pounces at your face from ~3 m. */
 export class Crawler extends Zombie {
   private legless = true;
+  /** Pivot for everything below the waist (counter-rotated to drag flat). */
+  private drag!: THREE.Group;
   private lift = 0;
   private liftV = 0;
   private pull = 0;
@@ -1106,6 +1425,8 @@ export class Crawler extends Zombie {
   private static readonly COIL = 0.8;
   private static readonly FLY = 0.36;
   private static readonly BACK = 0.45;
+  /** Flight time of the current pounce (longer from the vehicle stand-off). */
+  private fly = Crawler.FLY;
 
   protected override configure() {
     this.name = 'crawler';
@@ -1121,7 +1442,7 @@ export class Crawler extends Zombie {
     this.sfxDie = 'zombie_die';
     this.bloodColor = 0x8a0d0d;
     this.knockback = 0.2;
-    this.hipsY = 0.13;
+    this.hipsY = 0.15;
     this.riseTime = 1.1;
   }
 
@@ -1143,22 +1464,34 @@ export class Crawler extends Zombie {
       r.hips.remove(r.legL.hip);
       r.hips.remove(r.legR.hip);
       r.hips.remove(b.pelvis);
-      // Torn waist: guts and spine trailing behind (−Y in hips space = behind once prone).
-      const sp = r.spine;
-      b.box(sp, 0.3, 0.05, 0.18, GORE, 0, -0.03, 0, 0, 0, 0, 0, 'torso');
-      b.part(sp, Kit.cyl(0.03, 0.025, 0.22, 5), BONE, 0, -0.12, -0.04, 0.2, 0, 0, 1, 1, 1, 0, 'torso');
-      b.part(sp, Kit.capsule(0.045, 0.2, 2, 5), GUTS, 0.06, -0.15, 0.03, 0.4, 0, 0.3, 1, 1, 1, 0, 'torso');
-      b.part(sp, Kit.capsule(0.04, 0.26, 2, 5), BLOOD, -0.06, -0.2, 0.0, -0.3, 0, -0.25, 1, 1, 1, 0, 'torso');
-      b.part(sp, Kit.capsule(0.035, 0.18, 2, 5), GUTS, 0.0, -0.3, 0.05, 0.5, 0, 0.6, 1, 1, 1, 0, 'torso');
     } else {
       // Broken legs dragging limp behind.
       b.box(r.legL.knee, 0.08, 0.06, 0.14, BLOOD_DARK, 0, 0, 0);
+    }
+    // Everything below the waist (legs, belts, gown/coat tails) hangs off a
+    // "drag" pivot that stays flat along the ground (−Y in hips space = behind
+    // once prone) while the chest heaves up with each pull.
+    const drag = (this.drag = new THREE.Group());
+    for (const c of [...r.hips.children]) if (c !== r.spine) drag.add(c);
+    r.hips.add(drag);
+    if (this.legless) {
+      // Torn waist: guts and spine trailing behind.
+      b.box(r.spine, 0.3, 0.05, 0.18, GORE, 0, -0.03, 0, 0, 0, 0, 0, 'torso');
+      b.part(drag, Kit.cyl(0.03, 0.025, 0.22, 5), BONE, 0, -0.06, -0.04, 0.2, 0, 0, 1, 1, 1, 0, 'torso');
+      b.part(drag, Kit.capsule(0.045, 0.2, 2, 5), GUTS, 0.06, -0.09, 0.03, 0.4, 0, 0.3, 1, 1, 1, 0, 'torso');
+      b.part(drag, Kit.capsule(0.04, 0.26, 2, 5), BLOOD, -0.06, -0.14, 0.0, -0.3, 0, -0.25, 1, 1, 1, 0, 'torso');
+      b.part(drag, Kit.capsule(0.035, 0.18, 2, 5), GUTS, 0.0, -0.24, 0.05, 0.5, 0, 0.6, 1, 1, 1, 0, 'torso');
     }
     this.finishBody();
   }
 
   protected override riseDepth() {
     return 0.75;
+  }
+
+  /** From a vehicle it must start further out, or the cab/hood hides it. */
+  protected override vehicleRange() {
+    return VEHICLE_POUNCE_RANGE;
   }
 
   protected override onDamaged(hit: ShotHit, amount: number) {
@@ -1178,6 +1511,8 @@ export class Crawler extends Zombie {
       // Base setState releases slots for custom states — keep ours.
       if (had) this.grabSlot();
       this.launched = false;
+      this.fly = clamp(Crawler.FLY + (this.distToPlayer - 3.3) * 0.06, Crawler.FLY, 0.5);
+      this.windup = Crawler.COIL + this.fly;
       this.telegraph = { progress: 0, anchor: this.r.head, radius: this.telegraphRadius };
       this.play('crawler_hiss', 0.9);
     }
@@ -1191,7 +1526,8 @@ export class Crawler extends Zombie {
     this.separate(dt);
     if (remaining <= 0.05) {
       this.faceToward(_p, dt);
-      if (!this.inView(this.r.head, 0.85, 1.15)) {
+      // On foot its low head may sit at the screen's bottom edge; from a vehicle it must clear the hood.
+      if (!this.inView(this.r.head, 0.85, this.inVehicle ? 0.6 : 1.15)) {
         this.world.camera.getWorldDirection(_v).setY(0).normalize();
         _v.multiplyScalar(this.attackRange).add(this.world.rig.space.position);
         if (this.frame === 'rig') this.world.rig.space.worldToLocal(_v);
@@ -1206,7 +1542,7 @@ export class Crawler extends Zombie {
     if (this.state !== 'pounce') return;
     const t = this.stateTime;
     const C = Crawler.COIL;
-    const F = Crawler.FLY;
+    const F = this.fly;
     this.playerPos(_p);
     if (this.telegraph) this.telegraph.progress = clamp(t / (C + F), 0, 1);
     if (t < C) {
@@ -1246,7 +1582,7 @@ export class Crawler extends Zombie {
 
   protected override animate(dt: number) {
     // Gravity on the pounce lift whenever we're not mid-pounce.
-    if (this.state !== 'pounce' || this.stateTime > Crawler.COIL + Crawler.FLY) {
+    if (this.state !== 'pounce' || this.stateTime > Crawler.COIL + this.fly) {
       if (this.lift > 0) {
         this.liftV -= 18 * dt;
         this.lift = Math.max(0, this.lift + this.liftV * dt);
@@ -1255,6 +1591,9 @@ export class Crawler extends Zombie {
     }
     super.animate(dt);
     this.r.root.position.y += this.lift;
+    // Legs/guts drag flat behind the waist; dangle once it leaves the ground.
+    const airborne = (this.state === 'pounce' && this.stateTime > Crawler.COIL) || (this.state === 'entry' && this.spawn.entry === 'drop' && this.landT < 0);
+    this.drag.rotation.x = airborne ? 0.25 : clamp(CRAWL_PITCH - this.r.hips.rotation.x, -0.3, 1.2);
   }
 
   protected override poseEntry(dt: number): boolean {
@@ -1293,57 +1632,93 @@ export class Crawler extends Zombie {
     this.world.fx.blood(this.worldPos(_w).setY(_w.y + 0.2), null, { color: this.bloodColor, amount: 0.6 });
   }
 
-  /** Arm-over-arm drag. `rate` adds to the stroke speed. */
+  /**
+   * Dragging stroke: both arms (the right a beat behind) reach out, slam down
+   * and haul the torso forward, the chest heaving up off the ground as the
+   * hands are pulled back under it; then they lift and swing forward again.
+   * Hands are placed with 2-bone IK so they stay planted on the ground (the
+   * heave is what keeps the elbows clear of it). `rate` adds to the stroke speed.
+   */
   private crawlPose(dt: number, rate: number, moving: boolean) {
     const r = this.r;
     restPose(r, this.hipsY);
-    r.hips.rotation.x = 1.42;
-    const gs = moving ? Math.max(this.groundSpeed, 0.6) : this.groundSpeed;
+    // Cadence from the nominal crawl speed (plus any rig speed) — not the
+    // surging per-frame speed, which would feed back into the stroke.
+    const gs = moving ? Math.max(this.speed + this.groundSpeed - this.moveSpeed, 0.6) : this.groundSpeed;
     this.phase += dt * (1.6 + rate * 2 + Math.min(gs, 6) * 3.2);
     const ph = this.phase;
-    // Neck/head up to look at the player.
-    r.neck.rotation.x = -0.95;
-    r.head.rotation.x = -0.45 + Math.sin(ph * 2) * 0.06;
+    const uL = cycle(ph);
+    const uR = cycle(ph - 0.7);
+    handTarget(uL, _hl);
+    handTarget(uR, _hr);
+    const hL = heaveOf(_hl.z);
+    const hR = heaveOf(_hr.z);
+    const heave = Math.max(hL, hR);
+    const pitch = CRAWL_PITCH - CRAWL_HEAVE * heave;
+    r.hips.rotation.x = pitch;
+    r.hips.position.y = this.hipsY;
+    // A little roll toward whichever arm is hauling.
+    r.hips.rotation.z = (hR - hL) * 0.06;
+    // Neck/head up to look at the player (level, whatever the chest is doing).
+    r.neck.rotation.x = -0.95 + 0.6 * CRAWL_HEAVE * heave;
+    r.head.rotation.x = -0.45 + Math.sin(ph * 2) * 0.05;
     r.head.rotation.z = Math.sin(this.age * 1.1 + this.seed) * 0.15;
-    this.crawlArm(r.armL, 1, ph);
-    this.crawlArm(r.armR, -1, ph + Math.PI);
-    // Body rolls and surges with each pull.
-    const s = Math.sin(ph);
-    r.spine.rotation.y = s * 0.16;
-    r.hips.rotation.z = -s * 0.08;
-    r.hips.position.y = this.hipsY + Math.abs(Math.cos(ph)) * 0.025;
-    this.pull = Math.abs(s);
+    this.crawlArm(r.armL, 1, _hl, pitch);
+    this.crawlArm(r.armR, -1, _hr, pitch);
+    // Surge while the hands are planted (feeds the advance speed; averages ≈ 1).
+    this.pull = 0.9 * (plantOf(uL) + plantOf(uR));
     if (!this.legless) {
-      r.legL.hip.rotation.x = 0.1 + Math.sin(ph * 0.5) * 0.06;
-      r.legR.hip.rotation.x = 0.05 - Math.sin(ph * 0.5) * 0.06;
+      // Broken legs trail along the ground behind (the drag pivot keeps them level).
+      r.legL.hip.rotation.x = 0.2 + Math.sin(ph * 0.5) * 0.05;
+      r.legR.hip.rotation.x = 0.16 - Math.sin(ph * 0.5) * 0.05;
       r.legL.hip.rotation.y = 0.3;
       r.legR.hip.rotation.y = -0.15;
-      r.legL.knee.rotation.x = -0.05;
+      r.legL.knee.rotation.x = 0;
       r.legR.knee.rotation.x = 0.35;
     }
   }
 
-  /**
-   * One arm's crawl stroke. In the prone body frame shoulder.x ≈ −3 reaches
-   * ahead along the ground, ≈ −1.7 is pulled back under the chest.
-   */
-  private crawlArm(a: Limb, side: number, ph: number) {
-    const u = ((ph % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / (Math.PI * 2);
-    let x: number;
-    let el: number;
-    if (u < 0.55) {
-      // Planted, hauling the body forward.
-      const e = u / 0.55;
-      x = lerp(-2.95, -1.85, e);
-      el = -0.15 - Math.sin(e * Math.PI) * 0.9;
-    } else {
-      // Lift and swing forward.
-      const e = (u - 0.55) / 0.45;
-      x = lerp(-1.85, -2.95, e) - Math.sin(e * Math.PI) * 0.35;
-      el = -0.15 - Math.sin(e * Math.PI) * 0.6;
+  /** Rear up on planted arms (k 0..1 blends from the crawl pose already set). */
+  private coilPose(k: number, shake: number) {
+    const r = this.r;
+    const pitch = lerp(r.hips.rotation.x, CRAWL_PITCH - 0.55, k);
+    r.hips.rotation.x = pitch;
+    r.hips.position.y = this.hipsY + 0.05 * k;
+    _hl.set(0, lerp(_hl.y, CRAWL_HAND_Y + 0.03, k), lerp(_hl.z, 0.74, k));
+    _hr.set(0, lerp(_hr.y, CRAWL_HAND_Y + 0.03, k), lerp(_hr.z, 0.72, k));
+    this.crawlArm(r.armL, 1, _hl, pitch);
+    this.crawlArm(r.armR, -1, _hr, pitch);
+    r.armL.shoulder.rotation.x += shake;
+    r.armR.shoulder.rotation.x -= shake;
+    r.neck.rotation.x = lerp(r.neck.rotation.x, -0.5, k);
+    r.head.rotation.x = lerp(r.head.rotation.x, -0.25, k) + shake;
+  }
+
+  /** Airborne pounce pose, blended over the current pose by `f`. */
+  private airPose(f: number) {
+    const r = this.r;
+    r.hips.rotation.x = lerp(r.hips.rotation.x, CRAWL_PITCH - 1.0, f);
+    r.neck.rotation.x = lerp(r.neck.rotation.x, -0.25, f);
+    r.head.rotation.x = lerp(r.head.rotation.x, -0.2, f);
+    for (let i = 0; i < 2; i++) {
+      const a = i === 0 ? r.armL : r.armR;
+      const side = i === 0 ? 1 : -1;
+      a.shoulder.rotation.x = lerp(a.shoulder.rotation.x, -1.7, f);
+      a.shoulder.rotation.z = lerp(a.shoulder.rotation.z, side * 1.2, f);
+      a.elbow.rotation.x = lerp(a.elbow.rotation.x, -0.5, f);
     }
-    a.shoulder.rotation.set(x, 0, side * 0.32);
-    a.elbow.rotation.x = el;
+  }
+
+  /** Solve one arm so its hand reaches `h` (model y/z, unscaled rig units). */
+  private crawlArm(a: Limb, side: number, h: THREE.Vector3, pitch: number) {
+    // Shoulder in the model's side plane (y up, z forward).
+    const sy = this.r.hips.position.y + CRAWL_SHOULDER * Math.cos(pitch);
+    const sz = CRAWL_SHOULDER * Math.sin(pitch);
+    const k = Math.cos(CRAWL_SPLAY);
+    const al = this.b.al;
+    solveArm(sy, sz, h.y, h.z, 0.3 * al * k, 0.31 * al * k);
+    a.shoulder.rotation.set(_ik.phi1 - pitch, 0, side * CRAWL_SPLAY);
+    a.elbow.rotation.x = _ik.el;
   }
 
   protected override pose(dt: number) {
@@ -1353,30 +1728,18 @@ export class Crawler extends Zombie {
     this.crawlPose(dt, st === 'advance' ? 0.6 : 0, st === 'advance');
     if (st === 'pounce') {
       const C = Crawler.COIL;
-      const F = Crawler.FLY;
+      const F = this.fly;
       if (t < C) {
-        // Coil: rears up on its arms like a cat about to spring, shaking.
+        // Coil: rears up on planted, straightening arms like a cat about to spring, shaking.
         const k = smoothstep(0, 0.6, t / C);
-        const sh = Math.sin(t * 38) * 0.05 * k;
-        r.hips.rotation.x = 1.42 - 0.55 * k;
-        r.hips.position.y = this.hipsY + 0.05 * k;
-        r.armL.shoulder.rotation.set(-2.2 + 0.6 * k + sh, 0, 0.45);
-        r.armR.shoulder.rotation.set(-2.2 + 0.6 * k - sh, 0, -0.45);
-        r.armL.elbow.rotation.x = -0.4 * k;
-        r.armR.elbow.rotation.x = -0.4 * k;
-        r.neck.rotation.x = -0.95 + 0.45 * k;
-        r.head.rotation.x = -0.25 * k + sh;
+        this.coilPose(k, Math.sin(t * 38) * 0.05 * k);
+      } else if (t < C + F) {
+        // Launch: from the coil into the airborne pose, claws spread at the camera.
+        this.coilPose(1, 0);
+        this.airPose(smoothstep(0, 0.5, (t - C) / F));
       } else {
-        // Airborne at the camera, claws spread.
-        const k = clamp((t - C) / F, 0, 1);
-        const up = t < C + F ? k : 1 - clamp((t - C - F) / Crawler.BACK, 0, 1);
-        r.hips.rotation.x = 1.42 - 1.0 * up;
-        r.neck.rotation.x = -0.95 + 0.7 * up;
-        r.head.rotation.x = -0.2;
-        r.armL.shoulder.rotation.set(-2.3 + 0.6 * up, 0, 0.5 + 0.7 * up);
-        r.armR.shoulder.rotation.set(-2.3 + 0.6 * up, 0, -0.5 - 0.7 * up);
-        r.armL.elbow.rotation.x = -0.5;
-        r.armR.elbow.rotation.x = -0.5;
+        // Knocked back down: from the airborne pose back into the crawl.
+        this.airPose(1 - smoothstep(0, 1, (t - C - F) / Crawler.BACK));
       }
     } else if (st === 'stagger') {
       const k = Math.sin(clamp(t / this.staggerTime, 0, 1) * Math.PI);
@@ -1393,10 +1756,17 @@ export class Crawler extends Zombie {
     r.hips.position.y = this.hipsY - 0.03 * c;
     r.neck.rotation.x = -0.95 + 1.0 * c;
     r.head.rotation.z = this.deathSide * 0.6 * c;
-    r.spine.rotation.y = this.deathSide * 0.3 * c;
+    // (Only a slight roll — more would drive the splayed arm on that side into the ground.)
+    r.spine.rotation.y = this.deathSide * 0.1 * c;
     const twitch = t < 1.2 ? Math.sin(t * 25) * 0.08 * (1 - t / 1.2) : 0;
-    r.armL.shoulder.rotation.set(-2.6 + twitch, 0, 0.6 + 0.5 * c);
-    r.armR.shoulder.rotation.set(-2.4 - twitch, 0, -0.6 - 0.5 * c);
+    // Arms flop forward flat along the ground, splayed.
+    const flat = -1.52 - r.hips.rotation.x;
+    r.armL.shoulder.rotation.set(flat + twitch, 0, 0.55 + 0.35 * c);
+    r.armR.shoulder.rotation.set(flat + 0.06 - twitch, 0, -0.55 - 0.35 * c);
+    if (!this.legless) {
+      r.legL.hip.rotation.set(0.24, 0.3, 0);
+      r.legR.hip.rotation.set(0.2, -0.15, 0);
+    }
     if (c >= 1 && this.deathLandAt < 0) {
       this.deathLandAt = t;
       this.onBodyLand();
@@ -1431,7 +1801,8 @@ export class Brute extends Zombie {
     this.name = 'brute';
     this.maxHp = 14;
     this.speed = 0.9;
-    this.attackRange = 2.4;
+    // Far enough back that the raised fists stay in frame through the 2 s windup.
+    this.attackRange = 2.85;
     this.windup = 2.0;
     this.recoverTime = 1.5;
     this.points = 500;
@@ -1541,8 +1912,12 @@ export class Brute extends Zombie {
     super.strike();
     this.world.rig.shake(0.7);
     this.world.audio.play('stomp', { volume: 1, vary: 0.1, pitch: 0.8 });
-    this.r.armL.end.getWorldPosition(_w);
-    _w.y = this.root.position.y;
+    // Impact dust where the fists come down: in front of the chest, on the ground
+    // (works whether or not an arm has been blown off).
+    this.root.updateWorldMatrix(true, false);
+    this.root.localToWorld(_w.set(0, 0, 0.95 * this.r.scale));
+    this.root.getWorldPosition(_p);
+    _w.y = _p.y;
     this.world.fx.dust(_w, 1.3, 0x6a6058);
   }
 
@@ -1566,18 +1941,19 @@ export class Brute extends Zombie {
     r.armR.shoulder.rotation.set(s * 0.35 * amt - 0.1, 0, -0.32);
     r.armL.elbow.rotation.x = -0.4;
     r.armR.elbow.rotation.x = -0.4;
-    // Footfalls shake the camera when close.
+    // Footfalls shake the camera when close — only for its own heavy steps, not
+    // the fast cadence it needs just to keep pace when carried by a moving rig.
     const step = Math.floor(this.phase / Math.PI);
     if (step !== this.stepIdx) {
       this.stepIdx = step;
-      if (amt > 0.6 && this.state === 'advance') {
+      if (amt > 0.6 && this.state === 'advance' && !this.carried) {
         const near = clamp(1 - this.distToPlayer / 16, 0, 1);
         if (near > 0) {
           this.world.rig.shake(0.12 * near);
           STOMP_OPTS.volume = 0.25 + 0.45 * near;
           this.world.audio.play('stomp', STOMP_OPTS);
         }
-        (s > 0 ? r.legR.foot : r.legL.foot).getWorldPosition(_w);
+        footWorld(s > 0 ? r.legR : r.legL, _w);
         this.world.fx.dust(_w, 0.35, 0x6a6058);
       }
     }
@@ -1595,21 +1971,22 @@ export class Brute extends Zombie {
       const roar = 1 - smoothstep(0.12, 0.3, k);
       const raise = smoothstep(0.2, 0.75, k);
       const trem = k > 0.75 ? Math.sin(t * 46) * 0.06 : 0;
-      poseCrouch(r, 0.22 * raise, this.hipsY);
+      if (!this.carried) poseCrouch(r, 0.22 * raise, this.hipsY);
       r.spine.rotation.x = lerp(0.42, -0.2, Math.max(roar * smoothstep(0, 0.12, k), raise));
       r.head.rotation.x = -0.55 * roar * smoothstep(0, 0.1, k) - 0.25 * raise;
-      r.armL.shoulder.rotation.set(lerp(-0.4, -2.95, raise) + trem, 0, lerp(1.1 * smoothstep(0, 0.12, k), 0.28, raise));
-      r.armR.shoulder.rotation.set(lerp(-0.4, -2.95, raise) - trem, 0, -lerp(1.1 * smoothstep(0, 0.12, k), 0.28, raise));
-      r.armL.elbow.rotation.x = -0.5 * raise;
-      r.armR.elbow.rotation.x = -0.5 * raise;
+      // Fists overhead (not straight up, so they stay in frame) and slightly bent.
+      r.armL.shoulder.rotation.set(lerp(-0.4, -2.7, raise) + trem, 0, lerp(1.1 * smoothstep(0, 0.12, k), 0.28, raise));
+      r.armR.shoulder.rotation.set(lerp(-0.4, -2.7, raise) - trem, 0, -lerp(1.1 * smoothstep(0, 0.12, k), 0.28, raise));
+      r.armL.elbow.rotation.x = -0.55 * raise;
+      r.armR.elbow.rotation.x = -0.55 * raise;
     } else if (st === 'recover' && t < 0.7) {
       // The smash: arms crash down, body follows through.
       const down = smoothstep(0, 0.12, t);
       const out = 1 - smoothstep(0.35, 0.7, t);
       r.spine.rotation.x = lerp(-0.2, 0.8, down) * out + 0.42 * (1 - out);
-      poseCrouch(r, 0.4 * out, this.hipsY);
-      r.armL.shoulder.rotation.set(lerp(-2.95, -0.7, down) * out - 0.1 * (1 - out), 0, 0.25);
-      r.armR.shoulder.rotation.set(lerp(-2.95, -0.7, down) * out - 0.1 * (1 - out), 0, -0.25);
+      if (!this.carried) poseCrouch(r, 0.4 * out, this.hipsY);
+      r.armL.shoulder.rotation.set(lerp(-2.7, -0.7, down) * out - 0.1 * (1 - out), 0, 0.25);
+      r.armR.shoulder.rotation.set(lerp(-2.7, -0.7, down) * out - 0.1 * (1 - out), 0, -0.25);
       r.head.rotation.x = 0.2 * out;
     } else if (st === 'stagger') {
       const k = Math.sin(clamp(t / this.staggerTime, 0, 1) * Math.PI);
@@ -1882,15 +2259,17 @@ export class Bloater extends Zombie {
     this.model.visible = false;
     // Short fuse makes chain reactions ripple instead of popping all at once.
     this.world.later(0.06, () => {
-      lastBlast.pos.copy(p);
-      lastBlast.time = this.world.time;
-      lastBlast.world = this.world;
+      let b = blasts.get(this.world);
+      if (!b) blasts.set(this.world, (b = { pos: new THREE.Vector3(), time: -1 }));
+      b.pos.copy(p);
+      b.time = this.world.time;
       this.world.explode(p, 4.5, 6);
     });
   }
 
-  protected override updateDeath(_dt: number): boolean {
-    return this.stateTime > 0.2;
+  protected override updateDeath(dt: number): boolean {
+    this.tickFlyers(dt);
+    return this.stateTime > 0.2 && this.flyers.length === 0;
   }
 
   protected override pose(dt: number) {

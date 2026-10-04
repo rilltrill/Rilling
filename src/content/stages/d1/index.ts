@@ -43,17 +43,19 @@ const beats: Beat[] = [
   {
     kind: 'hold',
     label: 'compy ambush',
-    look: { at: [0, 1.6, 13], blend: 0.8 },
+    look: { at: [0, 1.2, 11], blend: 0.8 },
     onStart: (w) => {
       w.hud.prompt('HOLD TO FIRE!');
-      w.later(1.8, () => w.hud.prompt('WATCH THE HEAT!'));
+      // 'WATCH THE HEAT!' pops up the first time the barrel actually gets hot.
+      jungle()?.armHeatTip(true);
     },
     pickups: [{ kind: 'points', pos: [4.4, 2.3, 13], t: 1 }],
     waves: [
       {
+        // Two lone compys close enough to read clearly: learn to aim before the swarm.
         spawns: [
-          { type: 'compy', pos: [-2.2, 0, 12], t: 0.4 },
-          { type: 'compy', pos: [2.4, 0, 14], t: 1.4 },
+          { type: 'compy', pos: [-2.5, 0, 10], t: 0.4 },
+          { type: 'compy', pos: [2.5, 0, 10.5], t: 1.6 },
         ],
       },
       {
@@ -129,6 +131,7 @@ const beats: Beat[] = [
     label: 'fallen tree',
     look: { at: [-0.8, 1.7, 13], blend: 0.9 },
     onStart: (w) => {
+      jungle()?.armHeatTip(false);
       jungle()?.spawnDrums(w);
       w.later(5, () => w.hud.prompt('SHOOT THE FUEL DRUMS!'));
     },
@@ -137,8 +140,9 @@ const beats: Beat[] = [
     waves: [
       {
         spawns: [
-          { type: 'dilo', pos: [-7.8, 0, 13.5], t: 0.3 },
-          { type: 'dilo', pos: [8.2, 0, 14], t: 1.2 },
+          // Step out beside the bushes (bearing ≈ 24–29°, well clear of the ranger at ≈ 40° left).
+          { type: 'dilo', pos: [-5.8, 0, 13], t: 0.3 },
+          { type: 'dilo', pos: [7.0, 0, 12.8], t: 1.2 },
         ],
       },
       {
@@ -154,7 +158,7 @@ const beats: Beat[] = [
         spawns: [
           { type: 'raptor', pos: [0.5, 0, 19], entry: 'leap', opts: { variant: 'red' } },
           { type: 'compy', pos: [-1, 0, 16], count: 3, every: 0.4, offset: [2.5, 0, 0], t: 0.6 },
-          { type: 'dilo', pos: [6.8, 0, 15], t: 1.6 },
+          { type: 'dilo', pos: [5.6, 0, 13.4], t: 1.6 },
         ],
       },
     ],
@@ -203,7 +207,8 @@ const beats: Beat[] = [
       },
       {
         spawns: [
-          { type: 'raptor', pos: [-11, 0, 15], entry: 'leap', opts: { variant: 'blue' } },
+          // Left raptor comes in at ≈ 18° — never on the bearing of the civilian (≈ 37° left).
+          { type: 'raptor', pos: [-7, 0, 22], entry: 'leap', opts: { variant: 'blue' } },
           { type: 'raptor', pos: [10, 0, 17], entry: 'leap', t: 0.8, opts: { variant: 'tan' } },
         ],
       },
@@ -243,7 +248,7 @@ const beats: Beat[] = [
   {
     kind: 'hold',
     label: 'river ford',
-    look: { at: [0, 1.6, 13], blend: 0.8 },
+    look: { at: [0, 1.3, 12], blend: 0.8 },
     civilians: [{ pos: [5.4, 0, 7], variant: 'scientist' }],
     pickups: [{ kind: 'health', pos: [-3.5, 2.6, 11], t: 1 }],
     waves: [
@@ -252,14 +257,15 @@ const beats: Beat[] = [
           { type: 'compy', pos: [-5.5, 0, 8.5], entry: 'leap' },
           { type: 'compy', pos: [3.5, 0, 11], entry: 'leap', t: 0.4 },
           { type: 'compy', pos: [-7, 0, 14], entry: 'leap', t: 0.9 },
-          { type: 'compy', pos: [7.5, 0, 15], entry: 'leap', t: 1.3 },
+          { type: 'compy', pos: [6.5, 0, 17], entry: 'leap', t: 1.3 },
           { type: 'compy', pos: [0, 0, 17], entry: 'leap', t: 1.7 },
         ],
       },
       {
         start: { remaining: 2 },
         spawns: [
-          { type: 'dilo', pos: [7.8, 0, 15.5], t: 0.2 },
+          // Far bank, ≈ 20° right: clear of the scientist (≈ 38° right).
+          { type: 'dilo', pos: [6.2, 0, 17], t: 0.2 },
           { type: 'compy', pos: [-4.5, 0, 15], count: 4, every: 0.35, offset: [2.2, 0, 0.5], entry: 'leap', t: 0.6 },
         ],
       },
@@ -277,7 +283,7 @@ const beats: Beat[] = [
     label: 'riverbank',
     to: D.BOSS_START,
     speed: 8,
-    pickups: [{ kind: 'bomb', pos: [2.8, 1.6, 21] }],
+    pickups: [{ kind: 'bomb', pos: [2.6, 1.8, 11] }],
   },
   // ── BOSS: the Horned Devil ambushes from the treeline and gives chase. ──
   {

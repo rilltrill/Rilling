@@ -243,6 +243,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     bus.update(dt, w);
     doors.update(dt, w);
     rain.update(dt, _cam);
+    if (d > 290) kioskCollide(w);
   };
 
   return {
@@ -258,6 +259,44 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       SCENES.delete(world);
     },
   };
+}
+
+/** Ground zombies keep this far from a newsstand's walls (more than one frame's step). */
+const KIOSK_MARGIN = 0.75;
+
+/**
+ * Newsstand kiosks: their flat roofs are walkable ground (groundAt), which the
+ * rooftop spitters stand on. Runs before the entities each frame:
+ * - zombies on a roof are kept on it (never step off and hover);
+ * - zombies on the street are pushed out around the kiosk walls, so they never
+ *   clip through them nor get snapped up onto the roof by the ground clamp.
+ */
+function kioskCollide(w: World) {
+  for (const e of w.enemies()) {
+    if (e.frame !== 'world' || e.isBoss || e.state === 'dying') continue;
+    const p = e.root.position;
+    for (const pad of ROOF_PADS) {
+      const x0 = pad.x0 - KIOSK_MARGIN;
+      const x1 = pad.x1 + KIOSK_MARGIN;
+      const z0 = pad.z0 - KIOSK_MARGIN;
+      const z1 = pad.z1 + KIOSK_MARGIN;
+      if (p.x < x0 || p.x > x1 || p.z < z0 || p.z > z1) continue;
+      if (p.y > pad.y - 0.8) {
+        p.x = Math.min(pad.x1 - 0.3, Math.max(pad.x0 + 0.3, p.x));
+        p.z = Math.min(pad.z1 - 0.3, Math.max(pad.z0 + 0.3, p.z));
+      } else {
+        const dl = p.x - x0;
+        const dr = x1 - p.x;
+        const dn = p.z - z0;
+        const ds = z1 - p.z;
+        const m = Math.min(dl, dr, dn, ds);
+        if (m === dl) p.x = x0;
+        else if (m === dr) p.x = x1;
+        else if (m === dn) p.z = z0;
+        else p.z = z1;
+      }
+    }
+  }
 }
 
 /** Irregular neon buzz: mostly on (1), with short dropouts (0). Deterministic in t. */

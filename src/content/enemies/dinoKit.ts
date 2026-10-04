@@ -3,7 +3,7 @@ import { Kit } from '../kit/ModelKit';
 import { Enemy, type EnemyState } from '../../gameplay/Enemy';
 import type { ShotHit } from '../../gameplay/Entity';
 import type { SfxName } from '../../audio/names';
-import { angleDelta, clamp, damp, lerp } from '../../core/math';
+import { angleDelta, clamp, damp, lerp, TAU } from '../../core/math';
 
 /**
  * Dinosaur model kit: painted low-poly geometry (vertex-coloured, flat shaded,
@@ -44,6 +44,37 @@ export function dgeo(key: string, make: () => THREE.BufferGeometry): THREE.Buffe
  */
 export const skinMat = (density = 1): THREE.MeshLambertMaterial =>
   Kit.mat(0xffffff, { vertexColors: true, tex: 'scales', texScale: density, texStrength: 0.4 });
+
+const litCache = new Map<string, THREE.MeshLambertMaterial>();
+
+/**
+ * `skinMat` that never goes fully black: it also emits `k` × its own (painted,
+ * textured) albedo. Undersides seen from below against a dark sky — pteros in
+ * the night storm — keep their paint pattern and silhouette instead of taking
+ * the hemisphere light's dark ground colour. Cached per (density, k); tracked
+ * by Kit and evicted on dispose like `dgeo`.
+ */
+export function selfLitSkin(density: number, k: number): THREE.MeshLambertMaterial {
+  const key = `${density}|${k}`;
+  const hit = litCache.get(key);
+  if (hit) return hit;
+  const base = skinMat(density);
+  const m = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, flatShading: true });
+  m.userData.shared = true;
+  const glsl = `#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * ${k.toFixed(3)};`;
+  m.onBeforeCompile = (shader, renderer) => {
+    // Reuse the Kit's retro texture injection, then add the albedo-proportional glow.
+    base.onBeforeCompile(shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', glsl);
+  };
+  const baseKey = base.customProgramCacheKey();
+  m.customProgramCacheKey = () => `${baseKey}|selfLit${k.toFixed(3)}`;
+  m.addEventListener('dispose', () => {
+    if (litCache.get(key) === m) litCache.delete(key);
+  });
+  litCache.set(key, m);
+  return Kit.track(m);
+}
 
 const _e = new THREE.Euler();
 const _q = new THREE.Quaternion();
@@ -712,25 +743,29 @@ export interface PteroRig {
   shoulders: THREE.Group[];
   wrists: THREE.Group[];
   legs: THREE.Group;
+  /** Glowing eyes + crest tip (one mesh). */
+  glow: THREE.Mesh;
   meshes: { head: THREE.Mesh[]; torso: THREE.Mesh[]; limb: THREE.Mesh[] };
 }
 
 export const PTERO_PAL: Palette = {
   key: 'ptero',
-  base: 0x6a5a4a,
-  back: 0x3e342c,
-  belly: 0xcbbca0,
-  stripe: 0x2e2620,
-  accent: 0xc8401e,
+  base: 0x7c6a56,
+  back: 0x463a30,
+  // Players nearly always see a pteranodon from below: a pale belly and wing
+  // linings keep it readable against both a stormy night sky and foliage.
+  belly: 0xe4d6b8,
+  stripe: 0x342a22,
+  accent: 0xd8461e,
   accent2: 0x7a1e10,
   claw: 0x1e1a16,
   teeth: 0xe8dfc8,
   mouth: 0x7a2a26,
-  eye: 0xff9a2a,
+  eye: 0xffa030,
 };
 
 export function buildPtero(model: THREE.Group, p: Palette = PTERO_PAL): PteroRig {
-  const mat = skinMat(2);
+  const mat = selfLitSkin(2, 0.3);
   const K = `ptero|${p.key}`;
   const body = Kit.pivot(model, 0, 0, 0, 'body');
   const meshes: PteroRig['meshes'] = { head: [], torso: [], limb: [] };
@@ -761,7 +796,16 @@ export function buildPtero(model: THREE.Group, p: Palette = PTERO_PAL): PteroRig
     return sc.build();
   });
   meshes.head.push(Kit.add(head, headGeo, mat));
-  Kit.add(head, eyesGeo(0.056, 0.025, 0.03, 0.036), Kit.glow(p.eye, 1.2));
+  // Glowing eyes + crest tip in one mesh: a warm spark that marks the head at range.
+  const glowGeo = dgeo(`${K}|glow`, () => {
+    const sc = new Sculpt(0);
+    const e = 0.05;
+    for (const side of [1, -1]) sc.box(e * 0.7, e, e * 1.5, 0xffffff, M(side * 0.058, 0.026, 0.03, 0, side * 0.35, 0));
+    // Sheath over the last third of the crest blade (same frame as the blade, slightly larger).
+    sc.seg(0.22, [0.025, 0.052], [0.019, 0.036], 0xffffff, M(0, 0.06, 0.05, -2.75, 0, 0).multiply(M(0, 0, 0.41)), { sides: 6 });
+    return sc.build();
+  });
+  const glow = Kit.add(head, glowGeo, Kit.glow(p.eye, 1.15));
   const jaw = Kit.pivot(head, 0, -0.035, 0.1, 'jaw');
   const jawGeo = dgeo(`${K}|jaw`, () =>
     new Sculpt(0.05, 44).seg(0.7, [0.04, 0.025], [0.005, 0.005], (_x, _y, z) => (z > 0.6 ? beakDark : beak), M(0, -0.01, 0), { sides: 5 }).build(),
@@ -769,10 +813,12 @@ export function buildPtero(model: THREE.Group, p: Palette = PTERO_PAL): PteroRig
   meshes.head.push(Kit.add(jaw, jawGeo, mat));
 
   // Wings: leading edge thick (arm bones), trailing edge thin membrane.
-  const wingPaint: PaintFn = (x, _y, z, _nx, ny) => {
+  const wingPaint: PaintFn = (x, _y, z, _nx, ny, nz) => {
     if (ny > 0.3) return frac(Math.abs(x) * 2.6 + z * 0.8) < 0.18 ? p.stripe : p.back;
-    if (ny < -0.3) return frac(Math.abs(x) * 2.6) < 0.12 ? p.base : p.belly;
-    return p.base;
+    // Pale lining with faint finger bands; darker trailing membrane edge.
+    if (ny < -0.3) return z < -0.3 ? p.base : frac(Math.abs(x) * 2.6) < 0.08 ? p.base : p.belly;
+    // Leading edge (arm bones) pale too, so the wing outline reads from any angle.
+    return nz > 0.4 ? p.belly : p.base;
   };
   const inner: [number, number][] = [
     [0, 0.17],
@@ -819,7 +865,7 @@ export function buildPtero(model: THREE.Group, p: Palette = PTERO_PAL): PteroRig
     return sc.build();
   });
   meshes.limb.push(Kit.add(legs, legGeo, mat));
-  return { body, neck, head, jaw, shoulders, wrists, legs, meshes };
+  return { body, neck, head, jaw, shoulders, wrists, legs, glow, meshes };
 }
 
 // ─── Triceratops ───────────────────────────────────────────────────────────
@@ -1054,6 +1100,10 @@ export abstract class Dino extends Enemy {
   protected deathVy = 0;
   protected deathSide = 1;
   protected deathTumble = 0;
+  /** Pitch somersault rate while a corpse falls (fitted to land after whole turns). */
+  protected deathSpin = 0;
+  /** Height of the body's centre above the feet: somersaults pivot around it, not the toes. */
+  protected spinPivot = 0;
   protected deathLanded = false;
   protected deathY = 0;
   /** Seconds after death before toppling starts / how long it takes. */
@@ -1173,6 +1223,13 @@ export abstract class Dino extends Enemy {
 
   protected override animate(dt: number): void {
     if (!(this.state === 'entry' && this.spawn.entry === 'rise')) this.model.position.y = this.lift + this.deathY;
+    if (this.state === 'dying' && this.spinPivot > 0) {
+      // Pitch around the body's centre rather than the feet (the model's origin).
+      const rx = this.model.rotation.x;
+      const h = this.spinPivot * Math.cos(this.model.rotation.z);
+      this.model.position.y += h * (1 - Math.cos(rx));
+      this.model.position.z = -h * Math.sin(rx);
+    }
     this.pose(dt);
   }
 
@@ -1207,9 +1264,46 @@ export abstract class Dino extends Enemy {
     }
     if (this.deathVel.lengthSq() > 256) this.deathVel.setLength(16);
     this.deathVy = this.airborne ? this.airVel.y : clamp(this.liftVel, -8, 8);
+    // Base-class entries ('leap', 'drop', ledge jumps) carry height in root.y rather than
+    // `lift`: hand it over so the corpse falls from where it was instead of popping down.
+    // (die() has already re-parented a rig-frame root into the world, so this is world space.)
+    const pos = this.root.position;
+    const g = this.groundY(pos.x, pos.z);
+    const h = pos.y - g;
+    if (h > 0.05) {
+      this.lift += h;
+      pos.y = g;
+      this.deathVy += clamp(this.vel.y, -14, 10);
+    }
+    if (this.lift > 0.25) {
+      // Shot out of the air: the hit checks most of the lunge (plus a little arcade
+      // knockback), so bodies don't sail into the lens and pile up at the camera.
+      this.playerPos(_p);
+      _v.set(pos.x - _p.x, 0, pos.z - _p.z);
+      if (_v.lengthSq() > 1e-6) {
+        _v.normalize();
+        const toward = -(this.deathVel.x * _v.x + this.deathVel.z * _v.z);
+        if (toward > 0) this.deathVel.addScaledVector(_v, toward * 0.65);
+        this.deathVel.addScaledVector(_v, 1.8);
+      }
+    }
     this.deathTumble = this.lift > 0.25 ? (this.world.rng.chance(0.5) ? 1 : -1) * this.world.rng.range(5, 9) : 0;
+    this.deathSpin = this.fitSpin(this.deathTumble);
     this.airborne = false;
     this.deathLanded = this.lift <= 0.01;
+  }
+
+  /**
+   * Somersault rate close to `rate` that completes whole turns exactly at
+   * touchdown, so the corpse lands feet-down and never swings through the
+   * ground while settling. Short falls get no somersault (0).
+   */
+  protected fitSpin(rate: number): number {
+    if (rate === 0 || this.lift <= 0.01) return 0;
+    const vy = this.deathVy;
+    const tLand = (vy + Math.sqrt(vy * vy + 2 * GRAVITY * this.lift)) / GRAVITY;
+    const n = Math.floor((Math.abs(rate) * tLand) / TAU + 0.35);
+    return n > 0 ? (Math.sign(rate) * TAU * n) / tLand : 0;
   }
 
   /** Called once when the falling corpse hits the ground. */
@@ -1241,11 +1335,13 @@ export abstract class Dino extends Enemy {
     if (!this.deathLanded) {
       this.deathVy -= GRAVITY * dt;
       this.lift += this.deathVy * dt;
-      this.model.rotation.x += this.deathTumble * dt;
+      this.model.rotation.x += this.deathSpin * dt;
       if (this.lift <= 0) {
         this.lift = 0;
         this.deathVy = 0;
         this.deathLanded = true;
+        // Settle the short way round.
+        this.model.rotation.x = angleDelta(0, this.model.rotation.x);
         this.onDeathLand();
       }
     } else {

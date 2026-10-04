@@ -115,8 +115,8 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
   const clear: [number, number][] = [
     [-9.5, -100],
     [7.5, -111],
-    [-12, -96],
-    [11, -100],
+    [-7, -101],
+    [5, -98.5],
     [-8, -112],
     [2, -121],
   ];
@@ -253,6 +253,31 @@ export function buildHatchery(ctx: Ctx): HatchOut {
   for (const zc of [-130.7, -138.7, -146.7]) for (const s of [-1, 1]) tables.push([s * 4.65, zc, s]);
   tables.forEach(([x, z, s], i) => {
     const broken = i === 2;
+    if (i === 3) {
+      // Knocked flat (keeps the floor open between LAB C's door and the aisle):
+      // tray on the floor, buckled legs, smashed dome, spilled eggs.
+      const g = new THREE.Group();
+      g.position.set(x + 0.4, 0, z);
+      g.rotation.y = 0.35;
+      stat.add(g);
+      box(g, steelLight, 0, 0.06, 0, 3.3, 0.08, 3.1, 0, 0, 0.05);
+      box(g, mat(0x3a3e44), 0.1, 0.13, 0.1, 2.5, 0.06, 2.4, 0, 0, 0.05);
+      for (const [lx, lz, a] of [
+        [-1.4, 1.6, 0.4],
+        [1.2, -1.7, -0.7],
+        [1.9, 0.9, 1.2],
+      ]) box(g, steelDark, lx, 0.04, lz, 0.07, 0.07, 0.8, a);
+      for (let k = 0; k < 7; k++) {
+        const ex = rnd() * 3 - 1.5;
+        const ez = rnd() * 3 - 1.5;
+        Kit.add(g, Kit.sphere(0.15, 8, 4), mat(0xe8dcc0), ex, 0.08, ez, rnd(), 0, 1.4, 1, 0.55, 1);
+      }
+      for (let k = 0; k < 3; k++) Kit.add(g, Kit.sphere(0.15, 8, 6), am.egg, -0.6 + k * 0.6, 0.27, 0.3 - k * 0.25, 0.3, 0, 1.4, 1, 1.35, 1);
+      for (let k = 0; k < 12; k++) box(g, glass, rnd() * 4 - 2, 0.02, rnd() * 4 - 2, 0.3 + rnd() * 0.3, 0.02, 0.2 + rnd() * 0.3, rnd() * 3);
+      pipe(g, steelDark, new THREE.Vector3(-1.9, 0.06, -0.4), new THREE.Vector3(0.9, 0.08, -1.3), 0.04, 6);
+      box(stat, mat(0x3a0806), x - 0.5, 0.006, z + 1.4, 1.6, 0.004, 0.7, 0.4);
+      return;
+    }
     slab(stat, steelLight, x - 1.75, x + 1.75, 0.82, 0.9, z - 1.7, z + 1.7);
     for (const lx of [-1.6, 1.6]) for (const lz of [-1.55, 1.55]) box(stat, steelDark, x + lx, 0.41, z + lz, 0.07, 0.82, 0.07);
     slab(stat, steelDark, x - 1.6, x + 1.6, 0.25, 0.3, z - 1.55, z + 1.55);

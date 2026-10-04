@@ -120,7 +120,8 @@ export function wallThuds(world: World, times: number[]) {
         sc.wall.shake = 1;
         world.fx.dust(_v.copy(sc.wall.centre).setZ(sc.wall.centre.z + 0.3), 0.6, 0x8a8478);
       }
-      if (sc) sc.surge = Math.max(sc.surge, 0.4);
+      // Lights cut out on the first thud and stay out until the wall gives.
+      if (sc) sc.surge = Math.max(sc.surge, 0.8);
     });
   }
 }

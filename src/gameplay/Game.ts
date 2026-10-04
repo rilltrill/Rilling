@@ -30,19 +30,71 @@ export interface DebugFlags {
   seed?: number;
   debug?: boolean;
   mute?: boolean;
+  /**
+   * Forced arcade-monitor mode (`&retro=crt|pixel|off`). main.ts sets 'off' for
+   * debug deep links (?stage / ?autoplay) unless `retro` is given explicitly, so
+   * tooling gets clean screenshots. Undefined = the player's DISPLAY setting.
+   */
+  retro?: RetroMode;
 }
+
+/** Attract-mode demo length (wall-clock seconds of live action; cuts don't count). */
+const DEMO_SECONDS = 25;
+/** Sound effects play quieter under the demo (music stays). */
+const DEMO_SFX = 0.45;
+/** The demo cuts away from a lull (nothing hostile on screen) this long, or sooner while just travelling… */
+const DEMO_LULL = 3;
+const DEMO_LULL_TRAVEL = 1.5;
+/** …unless it cut less than this long ago, or has less than this left (seconds). */
+const DEMO_CUT_GAP = 4;
+const DEMO_CUT_TAIL = 5;
+/** A cut stays black at least this long (ms), so it reads as a scene cut rather than a flicker. */
+const DEMO_CUT_MIN_MS = 320;
+/** Fast-forward under a cut: fixed sim step, CPU budget per frame (ms), max skipped game time (s). */
+const DEMO_FF_STEP = 1 / 30;
+const DEMO_FF_BUDGET_MS = 20;
+const DEMO_FF_MAX = 45;
 
 const _hurtV = new THREE.Vector3();
 const _hurtBest = new THREE.Vector3();
 
-type State = 'menu' | 'intro' | 'playing' | 'paused' | 'continue' | 'results' | 'gameover';
+type State = 'menu' | 'intro' | 'playing' | 'paused' | 'continue' | 'results' | 'gameover' | 'demo';
 
 interface Run {
   mode: 'arcade' | 'single';
   campaign: CampaignDef;
   stageIndex: number;
+  /** Arcade: banked score of the stages cleared so far. */
   total: number;
   bombs: number;
+  /** Bombs carried into the current stage (RETRY / RESTART STAGE start it again with these). */
+  stageBombs: number;
+  /** The current stage's result already added to `total` (results screen); 0 while playing. */
+  banked: number;
+  /** Arcade: continues used (incl. RETRY after GAME OVER), shown on the hi-score table. */
+  continues: number;
+  /** Arcade: the credit has been scored (game over / campaign clear): leaving adds nothing. */
+  ended: boolean;
+}
+
+function newRun(mode: Run['mode'], campaign: CampaignDef, stageIndex: number): Run {
+  return { mode, campaign, stageIndex, total: 0, bombs: 1, stageBombs: 1, banked: 0, continues: 0, ended: false };
+}
+
+/** Attract demo progress. */
+interface Demo {
+  /** Live (on-screen) action so far, wall-clock seconds. */
+  t: number;
+  /** performance.now() of the previous demo frame (0 = none yet). */
+  last: number;
+  /** Seconds without anything hostile on screen. */
+  lull: number;
+  /** ≥ 0: cut to black, fast-forwarding (game seconds skipped so far); -1: live. */
+  ff: number;
+  /** performance.now() when the current cut began. */
+  cutAt: number;
+  /** Live seconds since the last cut. */
+  sinceCut: number;
 }
 
 /** Top-level game: menus ↔ stages, input routing, the frame loop. */
@@ -76,6 +128,15 @@ export class Game implements MenuActions {
   private renderedDpr = 0;
   /** Keep redrawing a frozen frame until this time (ms): resizes clear the canvas, some arrive late. */
   private redrawUntil = 0;
+  /** Attract-mode demo in progress (state 'demo'). */
+  private demo: Demo | null = null;
+  /** Rotates through the stages for successive demos. */
+  private demoIndex = Date.now() % 997;
+  /** Overlay pixel grid last pushed to the HUD (re-derived when these change). */
+  private gridW = -1;
+  private gridH = -1;
+  private gridScale = -1;
+  private gridOn = false;
   lastResult: StageResult | null = null;
   /** Exposed for tests / debugging. */
   stats = { frames: 0, stagesCleared: 0, errors: 0 };
@@ -141,13 +202,20 @@ export class Game implements MenuActions {
     if (this.flags.stage) {
       const st = this.findStage(this.flags.stage);
       if (st) {
-        this.run = { mode: 'single', campaign: st.campaign, stageIndex: st.stage.index, total: 0, bombs: 1 };
+        this.run = newRun('single', st.campaign, st.stage.index);
         this.startStage(st.stage, true);
         return;
       }
       console.warn(`Unknown stage "${this.flags.stage}"`);
     }
     this.music('menu');
+    // Power-on self test once per browser session (a reload skips straight to the title).
+    if (!this.flags.autoplay && !sessionFlag('overrun.booted')) this.menus.showBoot(() => this.showTitle());
+    else this.showTitle();
+  }
+
+  /** Title screen → PRESS START → main menu (idle: hi-score table → demo → title…). */
+  private showTitle() {
     this.menus.showTitle(() => this.menus.showMain());
   }
 
@@ -162,7 +230,7 @@ export class Game implements MenuActions {
   private zoo: StageDef | null = null;
 
   private applySettings(s: Settings) {
-    this.audio.setVolumes(s.sfxVolume, s.musicVolume);
+    this.applyVolumes(s);
     this.hud.setLeftHanded(s.leftHanded);
     this.hud.showFps(s.showFps);
     // Only touch the renderer when these actually change: every call resizes the
@@ -172,11 +240,35 @@ export class Game implements MenuActions {
       this.engine.setQuality(s.quality);
       this.redrawUntil = performance.now() + 100;
     }
-    if (RETRO_SETTING_ENABLED && s.retro !== this.appliedRetro) {
-      this.appliedRetro = s.retro;
-      this.engine.setRetro(s.retro);
+    const retro: RetroMode = RETRO_SETTING_ENABLED ? (this.flags.retro ?? s.retro) : 'off';
+    if (retro !== this.appliedRetro) {
+      this.appliedRetro = retro;
+      this.engine.setRetro(retro);
+      this.root.dataset.retro = retro;
       this.redrawUntil = performance.now() + 100;
     }
+    this.gridW = -1; // re-derive the overlay's pixel grid (quality changes its line count)
+  }
+
+  /** SFX / music volumes (SFX ducked under the attract demo, silent while it fast-forwards). */
+  private applyVolumes(s: Settings = this.save.settings) {
+    const duck = this.demo ? (this.demo.ff >= 0 ? 0 : DEMO_SFX) : 1;
+    this.audio.setVolumes(s.sfxVolume * duck, s.musicVolume);
+  }
+
+  /** Keep the 2D overlay on the retro pass's pixel grid (or full-res when it's off). */
+  private syncOverlayGrid() {
+    const r = this.engine.retro;
+    const { width, height } = this.engine.size;
+    if (width === this.gridW && height === this.gridH && r.scale === this.gridScale && r.enabled === this.gridOn) return;
+    this.gridW = width;
+    this.gridH = height;
+    this.gridScale = r.scale;
+    this.gridOn = r.enabled;
+    if (r.enabled) {
+      const t = r.targetSize(width, height);
+      this.hud.overlay.setPixelGrid(t.width, t.height);
+    } else this.hud.overlay.setPixelGrid(0, 0);
   }
 
   private music(id: MusicId | null) {
@@ -187,23 +279,31 @@ export class Game implements MenuActions {
 
   private startStage(stage: StageDef, skipIntro = false) {
     this.teardownWorld();
-    const w = new World(this.engine.camera, this.audio, this.hud, this.save.settings, this.flags.seed ?? (Date.now() & 0xffff));
+    const demo = !!this.demo;
+    // The demo plays itself: no vibration on the player's phone while it idles.
+    const settings = demo ? { ...this.save.settings, haptics: false } : this.save.settings;
+    const w = new World(this.engine.camera, this.audio, this.hud, settings, this.flags.seed ?? (Date.now() & 0xffff));
     w.viewport = { ...this.engine.size };
     w.fx.setViewportHeight(this.engine.size.height, this.engine.pixelRatio);
-    if (this.flags.god) w.player.god = true;
+    if (this.flags.god || demo) w.player.god = true;
     if (this.flags.speed) w.timeScale = this.flags.speed;
-    if (this.run) w.player.bombs = this.run.bombs;
+    if (this.run) {
+      w.player.bombs = this.run.bombs;
+      this.run.stageBombs = this.run.bombs;
+      this.run.banked = 0;
+    }
     this.world = w;
     this.shooter = new Shooter(w);
     this.runner = new StageRunner(w, stage);
-    const showIntro = !(skipIntro || this.flags.autoplay);
+    const showIntro = !(skipIntro || this.flags.autoplay || demo);
     // HUD wiring first: the opening beat (usually a banner, or a boss when
     // debugging with ?beat=) talks to the HUD from inside runner.start().
     this.hud.reset();
     w.events.on('boss-start', ({ boss }) => this.hud.bossIntro(boss.title));
     w.events.on('player-hurt', ({ from }) => this.showHurtDirection(from));
     // The intro card already names the stage: don't repeat it as the opening banner.
-    this.hud.suppressBanner(showIntro ? stage.name : null);
+    // (The demo cuts straight to the action: no title card either.)
+    this.hud.suppressBanner(showIntro || demo ? stage.name : null);
     try {
       this.runner.start(this.flags.beat ?? 0);
     } catch (err) {
@@ -211,7 +311,7 @@ export class Game implements MenuActions {
       this.stats.errors++;
     }
     this.hud.suppressBanner(null);
-    this.autoplay = this.flags.autoplay ? new AutoPlayer(w, this.shooter) : null;
+    this.autoplay = this.flags.autoplay || demo ? new AutoPlayer(w, this.shooter) : null;
     this.clearTimer = -1;
     w.weapons.onChange = () => this.audio.play('ui_click', { volume: 0.4 });
     w.weapons.onReloadDone = () => {
@@ -228,6 +328,16 @@ export class Game implements MenuActions {
     w.events.on('boss-dead', () => this.music(null));
     const campaign = this.run?.campaign ?? this.findStage(stage.id)!.campaign;
     this.music(stage.music ?? (campaign.id === 'zombie' ? 'zombie' : 'dino'));
+    if (demo) {
+      // Starts on a black cut that fast-forwards to the first enemies (see demoTick).
+      this.state = 'demo';
+      this.menus.hide();
+      this.hud.setDemo(true);
+      this.hud.demoCut(true);
+      this.hud.show(true);
+      this.input.enabled = true;
+      return;
+    }
     // Render one frame so the intro card has the scene behind it.
     this.renderWorld(w);
     if (!showIntro) {
@@ -243,7 +353,7 @@ export class Game implements MenuActions {
     this.menus.hide();
     this.hud.show(true);
     this.input.enabled = true;
-    if (!this.save.data.seenTutorial && !this.flags.autoplay && !this.flags.stage) this.openTutorial();
+    if (!this.save.data.seenTutorial && !this.flags.autoplay && !this.flags.stage && !this.demo) this.openTutorial();
   }
 
   /** First stage ever: show the illustrated briefing; the stage waits underneath. */
@@ -307,17 +417,174 @@ export class Game implements MenuActions {
     this.autoplay = null;
     this.tutorialOpen = false;
     this.holdStart.clear();
+    this.hud.setDemo(false);
     Kit.disposeAll();
   }
 
+  // ─── Attract demo ─────────────────────────────────────────────────────────
+
+  /** Attract cycle: a random stage plays itself (god + aimbot) behind DEMO PLAY. */
+  startDemo() {
+    if (this.state !== 'menu' || this.world || this.flags.stage) return;
+    const stages = this.campaigns.flatMap((c) => c.stages);
+    if (stages.length === 0) return;
+    const stage = stages[this.demoIndex++ % stages.length];
+    this.run = null;
+    this.demo = { t: 0, last: 0, lull: 0, ff: 0, cutAt: performance.now(), sinceCut: 0 };
+    this.applyVolumes();
+    this.startStage(stage, true);
+  }
+
+  /**
+   * Per-frame demo bookkeeping. An attract demo should show off the action, so
+   * the walk-in and the walks between encounters are skipped: the screen cuts
+   * to black (DEMO PLAY stays up) while the stage fast-forwards headlessly to
+   * the next enemy. Returns true when this frame has no live action to show.
+   */
+  private demoTick(demo: Demo, w: World, runner: StageRunner): boolean {
+    const now = performance.now();
+    const real = demo.last ? Math.min(0.25, (now - demo.last) / 1000) : 0;
+    demo.last = now;
+    // Stage over, or the player died (can't happen in god mode): back to the title.
+    if (this.clearTimer > 0 || runner.done || w.player.hp <= 0) {
+      this.endDemo(false);
+      return true;
+    }
+    if (demo.ff >= 0) {
+      do {
+        if (w.hostileCount() > 0) {
+          // Found the next fight. Hold the black a moment if the skip was short.
+          if (now - demo.cutAt < DEMO_CUT_MIN_MS) return true;
+          this.demoCut(false);
+          return false;
+        }
+        if (demo.ff > DEMO_FF_MAX || this.clearTimer > 0 || runner.done) {
+          this.endDemo(false);
+          return true;
+        }
+        try {
+          runner.update(w.update(DEMO_FF_STEP));
+          w.scene.updateMatrixWorld();
+        } catch (err) {
+          this.stats.errors++;
+          console.error('[game] demo fast-forward error', err);
+          this.endDemo(false);
+          return true;
+        }
+        demo.ff += DEMO_FF_STEP;
+      } while (performance.now() - now < DEMO_FF_BUDGET_MS);
+      return true;
+    }
+    demo.t += real;
+    demo.sinceCut += real;
+    demo.lull = w.hostileCount() > 0 ? 0 : demo.lull + real;
+    if (demo.t >= DEMO_SECONDS) {
+      this.endDemo(false);
+      return true;
+    }
+    const b = runner.beat;
+    const travelling = !!b && (b.kind === 'move' ? !b.waves?.length : b.kind !== 'hold' && b.kind !== 'boss');
+    const lull = travelling ? DEMO_LULL_TRAVEL : DEMO_LULL;
+    if (demo.lull >= lull && demo.sinceCut >= DEMO_CUT_GAP && DEMO_SECONDS - demo.t >= DEMO_CUT_TAIL) {
+      this.demoCut(true);
+      return true;
+    }
+    return false;
+  }
+
+  /** Start / end a demo cut (black screen while the stage fast-forwards, SFX silent). */
+  private demoCut(on: boolean) {
+    const demo = this.demo;
+    if (!demo) return;
+    if (on) {
+      demo.ff = 0;
+      demo.lull = 0;
+      demo.cutAt = performance.now();
+    } else {
+      demo.ff = -1;
+      demo.sinceCut = 0;
+      demo.last = performance.now();
+      // Drop whatever the skipped stretch triggered (muted) before turning the sound back up.
+      this.audio.stopSfx();
+    }
+    this.applyVolumes();
+    this.hud.demoCut(on);
+  }
+
+  /** Leave the demo: back to the title (timeout) or straight to the main menu (PRESS START). */
+  private endDemo(toMain: boolean) {
+    if (!this.demo) return;
+    this.demo = null;
+    this.teardownWorld();
+    this.applyVolumes();
+    this.run = null;
+    this.state = 'menu';
+    this.input.reset();
+    this.hud.show(false);
+    this.music('menu');
+    if (toMain) {
+      this.audio.play('ui_start');
+      this.menus.showMain();
+    } else this.showTitle();
+  }
+
+  // ─── Hi-score name entry ──────────────────────────────────────────────────
+
+  /** Score that ends an arcade credit: the 1P counter, plus the initials screen when it makes the table. */
+  private finishCredit(run: Run, score: number, stage: string): (() => void) | undefined {
+    run.ended = true;
+    this.menus.lastScore = score;
+    const rank = this.save.hiScoreRank(run.campaign.id, score);
+    if (rank < 0) return undefined;
+    const { campaign, continues } = run;
+    return () => this.enterInitials(campaign, score, stage, continues);
+  }
+
+  /**
+   * Leaving an arcade run early (pause → QUIT, MENU on a results screen) still
+   * ends the credit: the banked score (+ the stage in progress) goes to the
+   * initials screen when it makes the table.
+   */
+  private abandonCredit(): (() => void) | undefined {
+    const run = this.run;
+    if (!run || run.mode !== 'arcade' || run.ended) return undefined;
+    const live = this.state === 'paused' ? (this.world?.score.score ?? 0) : 0;
+    const score = run.total + live;
+    if (score <= 0) return undefined;
+    return this.finishCredit(run, score, this.runner?.stage.id ?? '');
+  }
+
+  private enterInitials(campaign: CampaignDef, score: number, stage: string, continues: number) {
+    this.teardownWorld();
+    this.run = null;
+    this.state = 'menu';
+    this.input.reset();
+    this.hud.show(false);
+    this.music('results');
+    const rank = this.save.hiScoreRank(campaign.id, score);
+    this.menus.showNameEntry({ campaign, score, rank, initials: this.save.data.lastInitials }, (initials) => {
+      const at = this.save.addHiScore(campaign.id, { initials, score, stage, continues });
+      this.music('menu');
+      this.menus.showHiScores({
+        highlight: at >= 0 ? { campaign: campaign.id, rank: at } : undefined,
+        done: () => this.menus.showMain(),
+      });
+    });
+    // The name entry plays over that campaign's scene (screens reset the lock when they open).
+    this.backdropTheme = campaign.id === 'zombie' ? 'city' : 'jungle';
+  }
+
   private onPlayerDead() {
+    // (Demo: god mode — but if it ever happens the frame loop ends the demo, never mid-update.)
+    if (this.state === 'demo') return;
     if (this.state !== 'playing') return;
     this.state = 'continue';
     this.input.reset();
     this.hud.show(false);
     this.audio.play('game_over');
     this.music('gameover');
-    this.menus.showContinue(10);
+    // Classic 9 → 0 countdown (10 s to decide).
+    this.menus.showContinue(9);
   }
 
   private stageCleared() {
@@ -332,6 +599,7 @@ export class Game implements MenuActions {
     this.stats.stagesCleared++;
     if (this.run) {
       this.run.total += result.total;
+      this.run.banked = result.total;
       this.run.bombs = w.player.bombs;
     }
     this.state = 'results';
@@ -339,6 +607,7 @@ export class Game implements MenuActions {
     this.hud.show(false);
     this.audio.play('stage_clear');
     this.music('results');
+    if (this.run?.mode !== 'arcade') this.menus.lastScore = result.total;
     const label = this.run?.mode === 'arcade' ? (next ? 'NEXT STAGE' : 'FINISH') : 'CONTINUE';
     this.menus.showResults(result, isBest, label);
   }
@@ -347,13 +616,13 @@ export class Game implements MenuActions {
 
   playCampaign(id: CampaignId) {
     const c = this.campaigns.find((x) => x.id === id)!;
-    this.run = { mode: 'arcade', campaign: c, stageIndex: 0, total: 0, bombs: 1 };
+    this.run = newRun('arcade', c, 0);
     this.startStage(c.stages[0]);
   }
 
   playStage(stage: StageDef) {
     const c = this.findStage(stage.id)!.campaign;
-    this.run = { mode: 'single', campaign: c, stageIndex: stage.index, total: 0, bombs: 1 };
+    this.run = newRun('single', c, stage.index);
     this.startStage(stage);
   }
 
@@ -383,23 +652,43 @@ export class Game implements MenuActions {
     this.state = 'playing';
   }
 
-  restart() {
+  restart(): void {
     if (!this.runner) return this.quit();
     const stage = this.runner.stage;
-    if (this.run?.mode === 'arcade') this.run.bombs = 1;
+    const run = this.run;
+    if (run?.mode === 'arcade') {
+      // Replaying a stage replaces its score: take back what its results screen
+      // banked (else clear → RETRY → clear farms the hi-score table), and start
+      // it again with the bombs carried into it.
+      run.total -= run.banked;
+      run.banked = 0;
+      run.bombs = run.stageBombs;
+      // RETRY after GAME OVER keeps the credit going: that's a continue.
+      if (this.state === 'gameover') {
+        run.continues++;
+        run.ended = false;
+      }
+    }
     this.startStage(stage, true);
   }
 
-  quit() {
+  quit(): void {
+    const run = this.run;
+    // MENU on the final stage's results: the campaign is cleared, so take the ending.
+    if (this.state === 'results' && run?.mode === 'arcade' && !run.ended && this.runner) {
+      if (!run.campaign.stages[this.runner.stage.index + 1]) return this.nextStage();
+    }
+    const nameEntry = this.abandonCredit();
     this.teardownWorld();
     this.run = null;
     this.state = 'menu';
     this.hud.show(false);
+    if (nameEntry) return nameEntry();
     this.music('menu');
     this.menus.showMain();
   }
 
-  nextStage() {
+  nextStage(): void {
     const run = this.run;
     const stage = this.runner?.stage;
     if (!run || !stage) return this.quit();
@@ -410,10 +699,11 @@ export class Game implements MenuActions {
         this.startStage(next);
       } else {
         const isBest = this.save.recordCampaign(run.campaign.id, run.total);
+        const nameEntry = this.finishCredit(run, run.total, 'ALL');
         this.teardownWorld();
         this.state = 'menu';
         this.music('results');
-        this.menus.showCampaignClear(run.campaign, run.total, isBest);
+        this.menus.showCampaignClear(run.campaign, run.total, isBest, nameEntry);
         this.backdropTheme = run.campaign.id === 'zombie' ? 'city' : 'jungle';
       }
     } else {
@@ -429,6 +719,7 @@ export class Game implements MenuActions {
     const w = this.world;
     w.player.revive();
     w.score.continues++;
+    if (this.run) this.run.continues++;
     w.score.breakCombo();
     // Clear the immediate threats so the player isn't killed instantly: regular
     // attackers are knocked out of their wind-up, incoming projectiles vanish,
@@ -452,18 +743,27 @@ export class Game implements MenuActions {
     if (this.state !== 'continue') return;
     this.state = 'gameover';
     const score = (this.run?.total ?? 0) + (this.world?.score.score ?? 0);
-    this.menus.showGameOver(score);
+    const run = this.run;
+    const nameEntry =
+      run?.mode === 'arcade' ? this.finishCredit(run, score, this.runner?.stage.id ?? '') : ((this.menus.lastScore = score), undefined);
+    this.menus.showGameOver(score, nameEntry);
   }
 
   // ─── Input ────────────────────────────────────────────────────────────────
 
   private onPress(x: number, y: number, id: number) {
+    if (this.state === 'demo') return this.endDemo(true);
     if (this.state !== 'playing' || !this.shooter) return;
     this.holdStart.set(id, performance.now());
     this.shooter.fire(x, y, false);
   }
 
   private onKey(code: string) {
+    if (this.state === 'demo') {
+      if (code === 'Enter' || code === 'Space') this.endDemo(true);
+      else if (code === 'Escape') this.endDemo(false);
+      return;
+    }
     if (code === 'Escape' || code === 'KeyP') {
       if (this.state === 'playing') this.pause();
       else if (this.state === 'paused') this.resume();
@@ -499,13 +799,16 @@ export class Game implements MenuActions {
       w.viewport.width = this.engine.size.width;
       w.viewport.height = this.engine.size.height;
     }
-    if (this.state === 'playing' && w && this.runner) {
+    this.syncOverlayGrid();
+    if ((this.state === 'playing' || this.state === 'demo') && w && this.runner) {
+      const demo = this.demo;
+      if (demo && this.demoTick(demo, w, this.runner)) return;
       try {
-        this.heldFire();
+        if (!demo) this.heldFire();
         this.autoplay?.update(dt * w.timeScale);
         const sdt = w.update(dt);
         this.runner.update(sdt);
-        if (this.clearTimer > 0) {
+        if (this.clearTimer > 0 && !demo) {
           this.clearTimer -= dt;
           if (this.clearTimer <= 0) this.stageCleared();
         }
@@ -562,5 +865,17 @@ export class Game implements MenuActions {
     // Same arcade-monitor post effect as gameplay when it's switched on.
     if (this.engine.retro.enabled) this.engine.render(bd.scene, bd.camera);
     else bd.render(this.engine.renderer);
+  }
+}
+
+/** True if `key` was already set this browser session (and sets it). Storage may be unavailable. */
+function sessionFlag(key: string): boolean {
+  try {
+    const ss = globalThis.sessionStorage;
+    if (ss.getItem(key)) return true;
+    ss.setItem(key, '1');
+    return false;
+  } catch {
+    return false;
   }
 }

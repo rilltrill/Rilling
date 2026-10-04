@@ -4,8 +4,9 @@ import type { ShotHit } from '../../../gameplay/Entity';
 import { registerEnemy, createEnemy } from '../../registry';
 import { Kit } from '../../kit/ModelKit';
 import { mergedMeshes } from './props';
-import { angleDelta, clamp, damp } from '../../../core/math';
-import { D, RIVER_WIDTH } from './layout';
+import { angleDelta, clamp, damp, easeInOutSine } from '../../../core/math';
+import { Projectile } from '../../../gameplay/Projectile';
+import { D, RIVER_WIDTH, riverLatAt } from './layout';
 
 /**
  * HORNED DEVIL — a Carnotaurus-like ambush predator (~8 m) that bursts out of
@@ -77,7 +78,10 @@ export class Carnotaur extends Boss {
   private halos: THREE.Mesh[] = [];
   private skull: THREE.Mesh[] = [];
   private tail: THREE.Group[] = [];
-  private tailTip!: THREE.Object3D;
+  /** Telegraph anchor for the tail sweep (mid-tail: stays in frame while the tip whips off-screen). */
+  private tailMid!: THREE.Object3D;
+  /** 0..1: how far the camera framing leans toward the tail (tail sweep). */
+  private tailBias = 0;
   private legs: Leg[] = [];
   private arms: THREE.Group[] = [];
   private focus = new THREE.Object3D();
@@ -128,8 +132,9 @@ export class Carnotaur extends Boss {
   /** True on the first update of a custom state (set by go()). */
   private entering = true;
 
-  // Death.
+  // Death (world-space waypoints: where it died → behind the jeep → in the river).
   private deathFrom = new THREE.Vector3();
+  private deathMid = new THREE.Vector3();
   private deathTo = new THREE.Vector3();
   private deathFwd = new THREE.Vector3();
   private deathYaw = 0;
@@ -139,7 +144,8 @@ export class Carnotaur extends Boss {
 
   protected override configure(): void {
     this.name = 'carnotaur';
-    this.maxHp = 400;
+    // Tuned for the heat-limited turret: autoplayer ≈ 60 s, decent human ≈ 60–90 s.
+    this.maxHp = 360;
     this.speed = 7;
     this.points = 6000;
     this.sfxHit = 'hit_flesh';
@@ -312,7 +318,7 @@ export class Carnotaur extends Boss {
       this.tail.push(seg);
       parent = seg;
     }
-    this.tailTip = Kit.pivot(parent, 0, 0, -0.9);
+    this.tailMid = Kit.pivot(this.tail[1], 0, 0.35, -0.6);
 
     // Legs.
     for (const sx of [-1, 1]) {
@@ -490,6 +496,11 @@ export class Carnotaur extends Boss {
     this.head.getWorldPosition(_w);
     this.chest.getWorldPosition(_u);
     out.lerpVectors(_u, _w, 0.55);
+    // Tail sweep: lean the framing toward the tail so the coiling tail and its ring stay on screen.
+    if (this.tailBias > 0.01) {
+      this.tail[2].getWorldPosition(_w);
+      out.lerp(_w, this.tailBias);
+    }
     this.world.rig.space.updateMatrixWorld();
     this.world.rig.space.worldToLocal(out);
     out.y = clamp(out.y * 0.8 + 0.2, 1.8, 3.4);
@@ -500,7 +511,8 @@ export class Carnotaur extends Boss {
     const w = this.world;
     for (let i = 0; i < n; i++) {
       const left = i % 2 === 0;
-      const pos = new THREE.Vector3(left ? -9 - i : 7 + i, 0, 4 + i * 2.5);
+      // Beside/behind the boss in the rear view: they leap past its flanks and land mid-frame ~6 m out.
+      const pos = new THREE.Vector3(left ? -5 - i : 5 + i, 0, 12 + i * 2);
       const e = createEnemy('raptor', w, {
         pos,
         frame: 'rig',
@@ -770,7 +782,7 @@ export class Carnotaur extends Boss {
           w.rig.shake(0.85);
           w.rig.swerve = -0.14;
           w.hitStop(0.05);
-        }, this.tailTip);
+        }, this.tailMid);
         if (done) this.go('tailRecover');
         break;
       }
@@ -833,12 +845,8 @@ export class Carnotaur extends Boss {
       }
     }
 
-    // Rig speed by phase; announce the dead end.
-    const desired = st === 'intro' || st === 'leapIn' ? 5 : ([6.5, 5, 7.5][this.phase] ?? 6);
-    if (desired !== this.rigSpeed) {
-      this.rigSpeed = desired;
-      w.rig.moveTo(D.END, desired);
-    }
+    // Rig pacing; announce the dead end.
+    this.updatePace(st);
     if (!this.deadEndShown && w.rig.d >= D.END - 0.5) {
       this.deadEndShown = true;
       w.hud.prompt('DEAD END!');
@@ -862,8 +870,34 @@ export class Carnotaur extends Boss {
     }
 
     // Camera framing.
+    const wantTail = st === 'flank' || st === 'tailWind' || st === 'tailRecover' ? 0.4 : 0;
+    this.tailBias = damp(this.tailBias, wantTail, 3, dt);
     this.updateFocusTarget(_v);
     this.focus.position.lerp(_v, 1 - Math.exp(-4 * dt));
+  }
+
+  /**
+   * The jeep's progress down the river road tracks the boss's health, so the
+   * road runs out around the kill (DEAD END is a last stand, not half the
+   * fight). The driver floors it while the beast is just chasing and eases off
+   * while it winds up an attack (it catches up, and is steadier to aim at).
+   */
+  private updatePace(st: CState) {
+    const w = this.world;
+    let desired = 5;
+    if (st !== 'intro' && st !== 'leapIn') {
+      const left = Math.max(0, D.END - w.rig.d);
+      // Seconds of fight a decent player still needs at this health.
+      const expectLeft = 14 + 56 * (this.hp / this.maxHp);
+      const need = left / expectLeft;
+      const cruising = st === 'chase' || st === 'flank' || st === 'tailWind' || st === 'stumble';
+      desired = cruising ? clamp(need * 1.35, 3.6, 7.5) : clamp(need * 0.7, 2, 4.5);
+      if (this.frenzy) desired *= 1.1;
+    }
+    if (Math.abs(desired - this.rigSpeed) > 0.3) {
+      this.rigSpeed = desired;
+      w.rig.moveTo(D.END, desired);
+    }
   }
 
   private afterAttack() {
@@ -974,21 +1008,54 @@ export class Carnotaur extends Boss {
     this.mouth.visible = false;
     w.rig.halt();
     w.rig.swerve = 0;
-    // Root is now in world space. Work out where the river is (right of the rail).
-    const heading = w.rig.space.rotation.y;
-    const right = _u.set(Math.cos(heading), 0, -Math.sin(heading));
-    this.deathFwd.set(-Math.sin(heading), 0, -Math.cos(heading));
+    // The pack scatters with its leader: no cheap hits after the killing blow.
+    for (const e of w.enemies()) {
+      if (e === this || e.isBoss || e.state === 'dying') continue;
+      e.die(null);
+    }
+    for (const e of w.entities) {
+      if (e instanceof Projectile && !e.removed) {
+        e.removed = true;
+        e.root.getWorldPosition(_v);
+        w.fx.debris(_v, 0x8a7d6a);
+      }
+    }
+    // Root is now in world space. Plan the fall in the rig frame (+x right,
+    // +z behind) so it never passes through the jeep: stagger back to a spot
+    // behind the jeep first, then roll sideways off the bank into the river.
+    const space = w.rig.space;
+    space.updateMatrixWorld();
+    const local = space.worldToLocal(this.root.getWorldPosition(_v));
+    const midX = clamp(local.x, -3.5, 4);
+    const midZ = Math.max(local.z, 10.5);
+    // Comes to rest just inside the near bank so the splash and the sinking body stay big on screen.
+    const riverX = riverLatAt(w.rig.d - midZ) - RIVER_WIDTH / 2 + 2.6;
     this.deathFrom.copy(this.root.position);
-    this.root.getWorldPosition(_v);
-    w.rig.space.updateMatrixWorld();
-    const local = w.rig.space.worldToLocal(_v.clone());
-    const toRiver = 18 + RIVER_WIDTH * 0.1 - local.x;
-    this.deathTo.copy(this.root.position).addScaledVector(right, toRiver).addScaledVector(this.deathFwd, 3);
+    this.deathMid.set(midX, 0, midZ);
+    space.localToWorld(this.deathMid);
+    this.deathTo.set(riverX, 0, midZ + 2.5);
+    space.localToWorld(this.deathTo);
+    const heading = space.rotation.y;
+    this.deathFwd.set(-Math.sin(heading), 0, -Math.cos(heading));
     this.deathYaw = heading + Math.PI; // face along the road (model +Z = rail forward)
     this.deathRoll = 0;
     this.splashed = false;
-    this.focus.position.copy(local).setY(2.5);
+    this.focus.position.set(midX, 2.5, midZ);
+    this.clampFocus(this.focus.position);
     w.audio.play('rex_roar', { volume: 0.8, pitch: 0.7 });
+  }
+
+  /** Keep the camera's focus point (rig-local) at least 4.5 m from the gunner so it never whips into the jeep. */
+  private clampFocus(p: THREE.Vector3) {
+    const r = Math.hypot(p.x, p.z);
+    if (r < 4.5) {
+      if (r < 1e-3) p.set(0, p.y, 4.5);
+      else {
+        p.x *= 4.5 / r;
+        p.z *= 4.5 / r;
+      }
+    }
+    return p;
   }
 
   protected override updateDeath(dt: number): boolean {
@@ -1000,20 +1067,25 @@ export class Carnotaur extends Boss {
     this.jawTarget = t < 1.8 ? 0.9 : 0.4;
     this.jawOpen = damp(this.jawOpen, this.jawTarget, 8, dt);
     this.jaw.rotation.x = this.jawOpen;
-    if (t < 0.6) {
-      // Legs buckle, slide on momentum.
-      const k = t / 0.6;
-      p.lerpVectors(this.deathFrom, this.deathTo, k * 0.12);
+    if (t < 1.0) {
+      // Mortally hit: staggers back behind the jeep, legs buckling, head thrashing.
+      const k = t / 1.0;
+      p.lerpVectors(this.deathFrom, this.deathMid, easeInOutSine(k));
       this.hips.position.y = 2.35 - k * 0.6;
       this.neck.rotation.x = -0.5 + Math.sin(t * 20) * 0.1;
-      for (const l of this.legs) l.knee.rotation.x = 0.4 + k * 0.8;
-    } else if (t < 2.0) {
+      this.head.rotation.y = Math.sin(t * 9) * 0.3;
+      for (let i = 0; i < this.legs.length; i++) {
+        this.legs[i].hip.rotation.x = Math.sin(t * 11 + i * Math.PI) * 0.5 * (1 - k);
+        this.legs[i].knee.rotation.x = 0.4 + k * 0.8;
+      }
+      if (Math.floor((t - dt) * 5) !== Math.floor(t * 5)) w.audio.play('stomp', { volume: 0.7, vary: 0.3 });
+    } else if (t < 2.4) {
       // Topples onto its side and rolls down the bank.
-      const k = (t - 0.6) / 1.4;
+      const k = (t - 1.0) / 1.4;
       const e = k * k;
-      p.lerpVectors(this.deathFrom, this.deathTo, 0.12 + 0.88 * e);
+      p.lerpVectors(this.deathMid, this.deathTo, e);
       p.y = Math.sin(k * Math.PI) * 0.6;
-      this.deathRoll = -Math.PI * 0.55 - k * Math.PI * 0.9;
+      this.deathRoll = -Math.PI * 0.55 * Math.min(1, k * 3) - k * Math.PI * 0.9;
       this.model.rotation.z = this.deathRoll;
       this.hips.position.y = 1.4;
       for (let i = 0; i < this.tail.length; i++) this.tail[i].rotation.y = Math.sin(t * 12 - i) * 0.35;
@@ -1042,7 +1114,7 @@ export class Carnotaur extends Boss {
         w.rig.shake(0.8);
       }
       // Sinks, legs kicking feebly, bubbles.
-      const k = clamp((t - 2.0) / 2.4, 0, 1);
+      const k = clamp((t - 2.4) / 2.4, 0, 1);
       p.copy(this.deathTo);
       p.y = -k * 3.4;
       this.model.rotation.z = this.deathRoll - k * 0.2;
@@ -1055,12 +1127,13 @@ export class Carnotaur extends Boss {
         w.fx.dust(_v, 0.6, 0xe8f6ff);
       }
     }
-    // Keep the camera on it.
+    // Keep the camera on it (never closer than a few metres to the gunner).
     this.anchor.getWorldPosition(_v);
     w.rig.space.worldToLocal(_v);
     _v.y = clamp(_v.y, 0.8, 3);
+    this.clampFocus(_v);
     this.focus.position.lerp(_v, 1 - Math.exp(-3 * dt));
-    return t > 4.6;
+    return t > 5.0;
   }
 }
 

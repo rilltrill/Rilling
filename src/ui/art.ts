@@ -3,6 +3,7 @@
  * campaign-card scenes, tutorial illustrations and weapon silhouettes.
  */
 import type { WeaponId } from '../core/types';
+import { lockSvg, skullSvg, weaponSprite } from './pixel';
 
 /** Deterministic pseudo-random sequence for layout. */
 function seq(seed: number) {
@@ -165,13 +166,18 @@ export const TUTORIAL_ART = {
     <g fill="#55604a" stroke="#000" stroke-width="1">${zombiePath(56, 88, 1.3, false, 2)}</g>
     <circle cx="60" cy="40" r="30" fill="rgba(255,40,40,0.12)" stroke="#ff3b3b" stroke-width="3.5" class="tut-ring"/>
     <circle cx="60" cy="40" r="14" fill="none" stroke="#ff9a3b" stroke-width="2" stroke-dasharray="5 6" class="tut-spin"/>
-    <text x="100" y="22" font-family="Black Ops One, Impact, sans-serif" font-size="22" fill="#ff3b3b">!</text>
+    <text x="100" y="22" font-family="'Press Start 2P', monospace" font-size="20" fill="#ff2a2a">!</text>
   </svg>`,
   reload: `<svg viewBox="0 0 120 90" aria-hidden="true">
     <circle cx="36" cy="46" r="24" fill="rgba(10,12,18,0.9)" stroke="rgba(255,255,255,0.5)" stroke-width="3"/>
     <circle cx="36" cy="46" r="24" fill="none" stroke="#ffd84a" stroke-width="4" stroke-dasharray="151" class="tut-reload-ring" transform="rotate(-90 36 46)"/>
-    <text x="36" y="50" text-anchor="middle" font-family="Black Ops One, Impact, sans-serif" font-size="9.5" fill="#fff">RELOAD</text>
-    <text x="68" y="50" font-family="Rajdhani, sans-serif" font-weight="700" font-size="10" fill="#aaa">or</text>
+    <g shape-rendering="crispEdges" stroke="none">
+      <path fill="#000" d="M31,30h10v3h3v28h3v5h-22v-5h3v-28h3z"/>
+      <path fill="#e07a30" d="M34,33h4v3h3v6h-10v-6h3z"/>
+      <rect x="31" y="42" width="10" height="16" fill="#ffd84a"/>
+      <rect x="33" y="44" width="3" height="11" fill="#fff6c0"/>
+      <rect x="28" y="58" width="16" height="5" fill="#b8860b"/>
+    </g>
     <path d="M96,14 L96,58" stroke="#5cc8ff" stroke-width="4" stroke-linecap="round" class="tut-swipe"/>
     <path d="M86,52 L96,66 L106,52" stroke="#5cc8ff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round" class="tut-swipe"/>
     ${finger(96, 64)}
@@ -193,22 +199,14 @@ export const TUTORIAL_ART = {
   </svg>`,
 } as const;
 
-// ─── Weapon silhouettes (viewBox 0 0 48 20) ──────────────────────────────────
-
-export const WEAPON_ICONS: Record<WeaponId, string> = {
-  pistol: 'M6,4 H34 V10 H18 L15,18 H8 L11,10 H6 Z',
-  shotgun: 'M1,7 H42 V10 H26 L24,13 H17 L8,17 L3,17 L5,11 L1,10 Z',
-  smg: 'M4,5 H38 V9 H44 V11 H30 L28,18 H23 L24,11 H17 L15,15 H11 L12,11 H4 Z',
-  magnum: 'M4,4 H40 V8 H24 Q22,12 18,12 L15,18 H8 L11,8 H4 Z',
-  turret: 'M2,6 H30 V4 H44 V12 H30 V10 H22 L20,18 H12 L14,10 H2 Z',
-};
+// ─── Weapon silhouettes / glyphs (pixel art, see ./pixel) ────────────────────
 
 export function weaponIcon(id: WeaponId, cls = ''): string {
-  return `<svg class="wicon ${cls}" viewBox="0 0 48 20" aria-hidden="true"><path d="${WEAPON_ICONS[id]}"/></svg>`;
+  return weaponSprite(id, `wicon ${cls}`);
 }
 
 /** Padlock glyph. */
-export const LOCK_ICON = `<svg class="lock-icon" viewBox="0 0 20 24" aria-hidden="true"><path d="M5,10 V7 a5,5 0 0 1 10,0 V10" fill="none" stroke="currentColor" stroke-width="2.6"/><rect x="2" y="10" width="16" height="13" rx="2" fill="currentColor"/></svg>`;
+export const LOCK_ICON = lockSvg().replace('class="px ', 'class="px lock-icon ');
 
 /** Skull glyph (boss markers). */
-export const SKULL_ICON = `<svg class="skull-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10,1 C4.5,1 2,4.6 2,8.6 C2,11.4 3.4,12.9 5,13.6 V17 H8 V15 H9 V17 H11 V15 H12 V17 H15 V13.6 C16.6,12.9 18,11.4 18,8.6 C18,4.6 15.5,1 10,1 Z M6.5,7.5 a2,2 0 1 1 0,4 a2,2 0 1 1 0,-4 Z M13.5,7.5 a2,2 0 1 1 0,4 a2,2 0 1 1 0,-4 Z" fill="currentColor" fill-rule="evenodd"/></svg>`;
+export const SKULL_ICON = skullSvg('skull-icon');

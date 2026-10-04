@@ -63,6 +63,20 @@ const _w = new THREE.Vector3();
 const _c = new THREE.Color();
 const _processed = new WeakSet<object>();
 
+/*
+ * Photosensitivity: nothing that covers a large part of the screen may change
+ * brightness more than ~3 times a second. Panel meshes switch at most every
+ * PANEL_HOLD seconds, lights at most every LIGHT_HOLD seconds (and ramp
+ * rather than snap), and power surges are a smooth brown-out.
+ */
+const PANEL_HOLD = 0.2;
+const LIGHT_HOLD = 0.45;
+
+/** Slow envelope of a bad tube (`blink`): the tube is mostly working while this is > -0.9. */
+function blinkEnv(t: number, seed: number): number {
+  return Math.sin(t * 0.9 + seed) + Math.sin(t * 2.3 + seed * 1.7) * 0.7;
+}
+
 /** Irregular buzz: mostly on, short drop-outs. Deterministic in t. */
 function buzz(t: number, seed: number): boolean {
   const a = Math.sin(t * 1.7 + seed) + Math.sin(t * 2.9 + seed * 2.1) * 0.6;
@@ -71,7 +85,7 @@ function buzz(t: number, seed: number): boolean {
 }
 /** Bad tube: bursts of rapid flicker, often off. */
 function blink(t: number, seed: number): boolean {
-  const slow = Math.sin(t * 0.9 + seed) + Math.sin(t * 2.3 + seed * 1.7) * 0.7;
+  const slow = blinkEnv(t, seed);
   if (slow > 0.6) return true;
   if (slow < -0.9) return false;
   return Math.sin(t * 31 + seed * 3) + Math.sin(t * 47) * 0.5 > -0.2;
@@ -109,7 +123,9 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   flash.name = 'flashlight';
   root.add(flash, flash.target);
   const accent = new THREE.PointLight(0xff2020, 0, 14, 1.4);
+  accent.name = 'z2-accent';
   const flick = new THREE.PointLight(0xe6fff2, 0, 8, 1.5);
+  flick.name = 'z2-flick';
   root.add(accent, flick);
 
   const sc: Z2Scene = {
@@ -183,6 +199,16 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   A(D.atrium - 1, Infinity, 40.6, B + 0.9, -121, 0xff6a3a, 11, 15, 'flesh');
   let accentIdx = -1;
   let accentFade = 0;
+  // Rate-limited on/off for the failing-lamp accent modes ('buzz', 'surgical').
+  let accOn = true;
+  let accHeld = 0;
+  let accK = 1;
+  // Roaming panel light: follows the nearest faulty panel in view, but on a
+  // slow, rate-limited signal (the panel mesh itself does the fast flicker).
+  let flickIdx = -1;
+  let flickOn = true;
+  let flickHeld = 0;
+  let flickLevel = 0;
 
   // ─── Rain (bay only) ──────────────────────────────────────────────────────
   const RAIN = 280;
@@ -261,9 +287,12 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     fog.near = fogNear;
     fog.far = fogFar;
     (scene.background as THREE.Color).copy(fogCol);
-    // Power surges dim the fill.
+    // Power surges: a smooth brown-out of the fill (a slow < 1.5 Hz wobble,
+    // never a strobe) while the ceiling panels cut out together.
     sc.surge = Math.max(0, sc.surge - dt * 0.6);
-    const surgeK = sc.surge > 0 ? (Math.sin(t * 40) > 0 ? 0.55 : 0.9) : 1;
+    const surgeS = Math.min(1, sc.surge);
+    const surgeK = 1 - 0.4 * surgeS * (0.75 + 0.25 * Math.sin(t * 9));
+    const blackout = sc.surge > 0.25;
     // Lightning (bay only).
     if (d < D.erDoor + 2) {
       thunderT -= dt;
@@ -273,10 +302,11 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
         w.later(ambRng.range(0.4, 1.1), () => w.audio.play('thunder', { volume: 0.55, vary: 0.2 }));
       }
     }
+    // One bright flash that fades out (no on/off double strobe).
     let bolt = 0;
     if (flashT > 0) {
-      flashT -= dt;
-      bolt = (flashT > 0.36 || (flashT > 0.12 && flashT < 0.22)) ? 2.2 : 0;
+      flashT = Math.max(0, flashT - dt);
+      bolt = flashT > 0.36 ? 1.8 : 1.8 * Math.pow(flashT / 0.36, 1.6);
     }
     hemi.intensity = hemiK * surgeK + bolt;
     sun.intensity = 0.9 * surgeK + bolt * 0.6;
@@ -291,17 +321,18 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       } else if (r < 0.5) w.audio.play('roar_distant', { volume: 0.2, pan: ambRng.spread(0.8) });
     }
 
-    // ── Flickering panels ──
+    // ── Flickering panels (small emissive meshes; ≤ 3 switches/s each) ──
     let best = -1;
     let bestD = 15 * 15;
     for (let i = 0; i < sc.flickers.length; i++) {
       const f = sc.flickers[i];
       const dd = f.pos.distanceToSquared(_cam);
       if (dd > 42 * 42) continue;
-      let lit = f.mode === 'buzz' ? buzz(t, f.seed) : f.mode === 'blink' ? blink(t, f.seed) : dying(t, f.seed);
-      if (sc.surge > 0.05 && Math.sin(t * 23 + f.seed) > 0) lit = false;
-      if (lit !== f.lit) {
+      f.held += dt;
+      const lit = !blackout && (f.mode === 'buzz' ? buzz(t, f.seed) : f.mode === 'blink' ? blink(t, f.seed) : dying(t, f.seed));
+      if (lit !== f.lit && (f.held >= PANEL_HOLD || blackout)) {
         f.lit = lit;
+        f.held = 0;
         f.mesh.material = lit ? f.on : f.off;
       }
       if (dd < bestD) {
@@ -312,12 +343,31 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
         }
       }
     }
+    // The roaming light: a gentle 5 ↔ 2 swing on the tube's SLOW envelope,
+    // switching at most every LIGHT_HOLD s and ramping instead of snapping.
+    if (best !== flickIdx) {
+      flickIdx = best;
+      if (best >= 0) {
+        const f = sc.flickers[best];
+        f.mesh.getWorldPosition(flick.position);
+        flick.position.y -= 0.35;
+        // Hand over softly from the previous panel.
+        flickLevel *= 0.5;
+      }
+    }
+    let flickTarget = 0;
     if (best >= 0) {
       const f = sc.flickers[best];
-      f.mesh.getWorldPosition(flick.position);
-      flick.position.y -= 0.35;
-      flick.intensity = f.lit ? 7 : 0.2;
-    } else flick.intensity = 0;
+      const want = !blackout && (f.mode === 'buzz' || (f.mode === 'blink' && blinkEnv(t, f.seed) > -0.9));
+      flickHeld += dt;
+      if (want !== flickOn && flickHeld >= LIGHT_HOLD) {
+        flickOn = want;
+        flickHeld = 0;
+      }
+      flickTarget = flickOn ? 5 : 2;
+    }
+    flickLevel += (flickTarget - flickLevel) * (1 - Math.exp(-dt * 10));
+    flick.intensity = flickLevel;
 
     // ── Accent light ──
     let want = accentIdx;
@@ -338,22 +388,30 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       let kk = 1;
       switch (a.mode) {
         case 'police': {
-          const ph = Math.floor(t * 4) % 2;
+          // Red/blue alternation at 1.5 Hz with a gentle pulse (no strobe).
+          const ph = Math.floor(t * 3) % 2;
           accent.color.setHex(ph ? 0xff2020 : 0x3050ff);
-          kk = 0.6 + 0.4 * Math.abs(Math.sin(t * 12.5));
+          kk = 0.8 + 0.2 * Math.abs(Math.sin(t * 3 * Math.PI));
           break;
         }
         case 'strobe':
           kk = 0.25 + 0.75 * Math.pow(Math.max(0, Math.sin(t * 3.4)), 3);
           break;
         case 'buzz':
-          kk = buzz(t * 0.8, 4.2) ? 1 : 0.15;
+        case 'surgical': {
+          // Failing lamp: drop-outs are rate-limited and ramped.
+          const raw = a.mode === 'buzz' ? buzz(t * 0.8, 4.2) : buzz(t * 0.5, 9.1);
+          accHeld += dt;
+          if (raw !== accOn && accHeld >= LIGHT_HOLD) {
+            accOn = raw;
+            accHeld = 0;
+          }
+          accK += ((accOn ? 1 : a.mode === 'buzz' ? 0.35 : 0.5) - accK) * (1 - Math.exp(-dt * 12));
+          kk = accK;
           break;
-        case 'surgical':
-          kk = buzz(t * 0.5, 9.1) ? 1 : 0.3;
-          break;
+        }
         case 'fire':
-          kk = 0.7 + 0.18 * Math.sin(t * 17) + 0.12 * Math.sin(t * 41 + 1.3);
+          kk = 0.82 + 0.1 * Math.sin(t * 5.1) + 0.08 * Math.sin(t * 8.3 + 1.3);
           break;
         case 'flesh':
           kk = (0.75 + 0.25 * Math.pow(Math.max(0, Math.sin(t * 2.6)), 6)) * (0.7 + sc.fleshGlow * 0.8);
@@ -377,7 +435,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       s.obj.rotation.x = Math.sin(t * s.rate * 0.7 + s.phase * 1.3) * s.amp * 0.6 + (s.obj.userData.baseX ?? 0);
     }
     for (const s of sc.spinners) s.obj.rotation.y += s.rate * dt;
-    const ph = Math.floor(t * 4) % 2 === 0;
+    const ph = Math.floor(t * 3) % 2 === 0;
     for (const lb of sc.lightbars) {
       for (const m of lb.red) m.visible = ph;
       for (const m of lb.blue) m.visible = !ph;

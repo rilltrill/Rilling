@@ -538,9 +538,22 @@ export function buildTankerSite(ctx: Ctx) {
   const holder = new THREE.Group();
   holder.add(cab);
   ctx.put(holder, T + 2, 6.4, 0, 0.6);
-  // Fuel spill.
-  const spill = Kit.mesh(Kit.box(14, 0.02, 9), M.lam(0x16141c));
-  ctx.put(spill, T - 4, -2, 0.03, 0.2);
+  // Fuel spill: a glossy, oily sheen with a ragged outline (overlapping thin slabs), not a black hole.
+  {
+    const oil = M.lam(0x2c2734);
+    const sheen = M.lam(0x3a3446);
+    const slabs: [number, number, number, number, number][] = [
+      [0, 0, 6.5, 3.6, 0.2],
+      [-2.2, 1.1, 4.2, 2.6, -0.5],
+      [2.4, -0.8, 3.8, 2.4, 0.7],
+      [0.6, 2.0, 3.0, 1.8, 1.2],
+      [-1.0, -1.7, 3.4, 1.6, -0.2],
+      [3.6, 1.0, 2.0, 1.2, 0.3],
+    ];
+    const g = new THREE.Group();
+    slabs.forEach(([x, z, w, l, r], i) => Kit.add(g, Kit.box(w, 0.02, l), i % 2 ? sheen : oil, x, 0.004 * i, z, 0, r, 0));
+    ctx.put(g, T - 5, -2, 0.03, 0.2);
+  }
   ctx.fires.add(ctx.at(T + 3, 7.5, 0.6), 1.2, 1);
   // Warning triangle + flares.
   for (let i = 0; i < 5; i++) {
@@ -800,7 +813,7 @@ export function buildBay(ctx: Ctx, root: THREE.Group) {
     const steel = M.lam(PAL.metalDark);
     for (const x of [-9, 10]) Kit.add(g, Kit.box(0.6, 8, 0.6), steel, x, 4, 0);
     Kit.add(g, Kit.box(19.6, 0.6, 0.6), steel, 0.5, 7.8, 0);
-    const s = signPanel(['SAFE ZONE', 'MILITARY CHECKPOINT'], 10, 2.8, 0x1a3a1a);
+    const s = signPanel(['SAFE ZONE', 'MILITARY CHECKPOINT'], 15.5, 2.9, 0x1a3a1a);
     s.position.set(0.5, 9.4, 0.4);
     g.add(s);
     for (const x of [-16, 17]) {

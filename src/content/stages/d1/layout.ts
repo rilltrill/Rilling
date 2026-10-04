@@ -23,11 +23,11 @@ export const RAIL: V3[] = [
   [7, 0, -560],
   [3, 0, -600],
   [0, 0, -640],
-  [-2, 0, -680],
+  [-3, 0, -695],
 ];
 
-/** Approximate rail length (the curve measures ≈ 683.6 m). */
-export const RAIL_END = 682;
+/** Approximate rail length (the curve measures ≈ 698.6 m). */
+export const RAIL_END = 697;
 
 export const D = {
   /** Big wooden park gate across the road. */
@@ -61,8 +61,10 @@ export const D = {
   /** River ford (road crosses the river). */
   FORD_HOLD: 497,
   FORD: 501,
-  /** Riverside road: river on the RIGHT, treeline on the left. Boss chase. */
-  BOSS_START: 526,
+  /** Riverside road: river on the RIGHT, treeline on the left. Boss chase (≈185 m of road). */
+  BOSS_START: 512,
+  /** Near vegetation is cleared from here on so the boss can run alongside the jeep. */
+  BOSS_CLEAR: 504,
   END: RAIL_END,
 };
 
@@ -89,3 +91,16 @@ export const RIVER: [number, number][] = [
   [720, 18],
 ];
 export const RIVER_WIDTH = 12;
+
+/** Lateral offset (metres right of the rail) of the river centre at rail distance d. */
+export function riverLatAt(d: number): number {
+  if (d <= RIVER[0][0]) return RIVER[0][1];
+  for (let i = 1; i < RIVER.length; i++) {
+    const [d1, l1] = RIVER[i];
+    if (d <= d1) {
+      const [d0, l0] = RIVER[i - 1];
+      return l0 + ((d - d0) / (d1 - d0)) * (l1 - l0);
+    }
+  }
+  return RIVER[RIVER.length - 1][1];
+}

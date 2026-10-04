@@ -369,6 +369,8 @@ export function buildOR(ctx: ZoneCtx): THREE.Group {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const WALL_BREAK = { x: 60, w: 3.2, h: 2.7 };
+/** Ceiling vent in corridor C (x, z). */
+export const CORR_C_VENT: [number, number] = [63, -120];
 export const GAS_CYL: [number, number][] = [
   [54.6, -119.4],
   [56.4, -122.8],
@@ -434,9 +436,11 @@ export function buildCorrC(ctx: ZoneCtx): THREE.Group {
   pipe(g, 52, r.z0 + 0.4, 71, r.z0 + 0.4, B + 3.05, 0.12, M(0x7a6a4a));
   for (let x = 54; x < 71; x += 3.6) {
     if (x > 60 && x < 62) flickerPanel(ctx, g, x, B + r.h, -121, Math.PI / 2, 'blink');
-    else if (x > 64 && x < 66) danglingPanel(ctx, g, x, B + r.h, -121, 0.3);
+    else if (x > 57 && x < 59) danglingPanel(ctx, g, x, B + r.h, -121, 0.3);
     else panel(g, x, B + r.h, -121, Math.PI / 2, x < 56);
   }
+  // Vent a crawler drops out of on the way to the boiler wall.
+  vent(ctx, g, CORR_C_VENT[0], B + r.h, CORR_C_VENT[1], B);
   emergencyLamp(g, 53, B + 2.7, r.z1 - 0.18, Math.PI);
   emergencyLamp(g, 69.5, B + 2.7, r.z0 + 0.18, 0);
   exitSign(g, 52.4, B + 2.9, -122.6, -Math.PI / 2);
@@ -444,7 +448,8 @@ export function buildCorrC(ctx: ZoneCtx): THREE.Group {
   dragTrail(g, 70, -121.4, 52, -120.2, B, rng);
   for (let i = 0; i < 4; i++) cyl(g, rng.range(0.4, 0.9), rng.range(0.4, 0.9), 0.01, M(0x1a2226), rng.range(53, 70), B + 0.006, -121 + rng.spread(1.4), 10);
   wallSmear(g, 57, B + 1.2, r.z1 - 0.17, Math.PI, rng, true);
-  corpse(g, 63.4, B, -122.2, 0.4, rng, 0x6fb8ac);
+  // (Under the smear, well ahead of the brute-hold camera.)
+  corpse(g, 57.4, B, -119.45, Math.PI / 2 + 0.2, rng, 0x6fb8ac);
   return g;
 }
 
@@ -604,7 +609,9 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
   corpse(g, 41.4, B, -116.8, 2.2, rng, 0xa8c8d0);
   corpse(g, 30.6, B, -130.2, -0.6, rng, 0xe2e2da);
   papers(g, 40, -121, 8, 9, 40, B, rng);
-  sign(g, 'ST MERCY', 22.18, ATRIUM_LEVELS[1] + 2.4, -121, Math.PI / 2, 0.1, 0xbfe8ff, 0x101418, 1.0, [3]);
+  // High on the top level: from the boss camera it sits above the action (behind
+  // the boss bar), so it never competes with the glowing eyes.
+  sign(g, 'ST MERCY', 22.18, ATRIUM_LEVELS[2] + 2.5, -121, Math.PI / 2, 0.1, 0xbfe8ff, 0x101418, 0.75, [3]);
   // Pendant lamps hanging from the skylight beams (dynamic swing).
   for (const [lx, lz, on] of [[30.5, -114, true], [42, -128, false], [29.5, -129, true], [43, -113.5, true]] as [number, number, boolean][]) {
     const p = new THREE.Group();

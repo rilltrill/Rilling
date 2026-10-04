@@ -38,6 +38,17 @@ export function bake(group: THREE.Object3D): THREE.BufferGeometry {
 
 const _col = new THREE.Color();
 const _em = new THREE.Color();
+const _nm = new THREE.Matrix3();
+const _p = new THREE.Vector3();
+const _n = new THREE.Vector3();
+
+interface MergeItem {
+  mesh: THREE.Mesh;
+  r: number;
+  g: number;
+  b: number;
+  count: number;
+}
 
 /**
  * Merge every opaque lit mesh under `g` into ONE vertex-coloured mesh (the
@@ -46,37 +57,31 @@ const _em = new THREE.Color();
  * colours it uses. Unlit glow meshes and transparent meshes are left alone.
  * An optional `userData.tint` on any ancestor multiplies the colour (cheap
  * per-object variation). Returns the group.
+ *
+ * Vertices are transformed straight into preallocated arrays (no per-mesh
+ * geometry clones), which keeps the stage's scenery bake fast on phones.
  */
 export function merged<T extends THREE.Object3D>(g: T): T {
   g.updateMatrixWorld(true);
   _inv.copy(g.matrixWorld).invert();
-  // Geometries grouped by retro texture (Kit.mat `tex`), so textured parts keep their look.
-  const groups = new Map<string, THREE.BufferGeometry[]>();
+  // Meshes grouped by retro texture (Kit.mat `tex`), so textured parts keep their look.
+  const groups = new Map<string, { items: MergeItem[]; verts: number }>();
   const remove: THREE.Mesh[] = [];
   const visit = (o: THREE.Object3D, tint: number) => {
     const t = tint * ((o.userData.tint as number | undefined) ?? 1);
     const m = o as THREE.Mesh;
-    if (m.isMesh && !m.userData.noMerge && !Array.isArray(m.material)) {
+    if (m.isMesh && !m.userData.noMerge && !Array.isArray(m.material) && m.geometry.attributes.normal) {
       const mat = m.material as THREE.MeshLambertMaterial;
       if ((mat.isMeshLambertMaterial || (mat as unknown as THREE.MeshStandardMaterial).isMeshStandardMaterial) && !mat.transparent) {
-        const geo = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
-        for (const name of Object.keys(geo.attributes)) if (name !== 'position' && name !== 'normal') geo.deleteAttribute(name);
-        _m.multiplyMatrices(_inv, m.matrixWorld);
-        geo.applyMatrix4(_m);
-        const n = geo.attributes.position.count;
-        const arr = new Float32Array(n * 3);
+        const geo = m.geometry;
+        const count = geo.index ? geo.index.count : geo.attributes.position.count;
         _col.copy(mat.color).multiplyScalar(t);
         if (mat.emissive) _col.add(_em.copy(mat.emissive).multiplyScalar(mat.emissiveIntensity * 0.8));
-        for (let i = 0; i < n; i++) {
-          arr[i * 3] = _col.r;
-          arr[i * 3 + 1] = _col.g;
-          arr[i * 3 + 2] = _col.b;
-        }
-        geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
         const key = (mat.userData.retroTex as string | undefined) ?? '';
-        const list = groups.get(key) ?? [];
-        list.push(geo);
-        groups.set(key, list);
+        let grp = groups.get(key);
+        if (!grp) groups.set(key, (grp = { items: [], verts: 0 }));
+        grp.items.push({ mesh: m, r: _col.r, g: _col.g, b: _col.b, count });
+        grp.verts += count;
         remove.push(m);
       }
     }
@@ -84,19 +89,39 @@ export function merged<T extends THREE.Object3D>(g: T): T {
   };
   visit(g, 1);
   if (!groups.size) return g;
-  for (const m of remove) m.parent?.remove(m);
-  // Hoist the meshes we couldn't merge (glows, transparent) and drop the empty
-  // pivot groups so they don't cost a matrix update every frame.
-  const keep: THREE.Object3D[] = [];
-  g.traverse((o) => {
-    if (o !== g && (o as THREE.Mesh).isMesh) keep.push(o);
-  });
-  for (const o of keep) g.attach(o);
-  for (const c of [...g.children]) if (!(c as THREE.Mesh).isMesh) g.remove(c);
-  for (const [tex, geos] of groups) {
-    const geo = mergeGeometries(geos, false);
-    geos.forEach((x) => x.dispose());
-    if (!geo) continue;
+  const built: THREE.Mesh[] = [];
+  for (const [tex, grp] of groups) {
+    const pos = new Float32Array(grp.verts * 3);
+    const nor = new Float32Array(grp.verts * 3);
+    const col = new Float32Array(grp.verts * 3);
+    let o = 0;
+    for (const it of grp.items) {
+      const geo = it.mesh.geometry;
+      const pa = geo.attributes.position;
+      const na = geo.attributes.normal;
+      const idx = geo.index;
+      _m.multiplyMatrices(_inv, it.mesh.matrixWorld);
+      _nm.getNormalMatrix(_m);
+      for (let i = 0; i < it.count; i++) {
+        const vi = idx ? idx.getX(i) : i;
+        _p.fromBufferAttribute(pa, vi).applyMatrix4(_m);
+        _n.fromBufferAttribute(na, vi).applyNormalMatrix(_nm);
+        pos[o] = _p.x;
+        pos[o + 1] = _p.y;
+        pos[o + 2] = _p.z;
+        nor[o] = _n.x;
+        nor[o + 1] = _n.y;
+        nor[o + 2] = _n.z;
+        col[o] = it.r;
+        col[o + 1] = it.g;
+        col[o + 2] = it.b;
+        o += 3;
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     geo.computeBoundingSphere();
     const mat =
       tex === '' || tex === 'grain'
@@ -104,8 +129,18 @@ export function merged<T extends THREE.Object3D>(g: T): T {
         : Kit.mat(0xffffff, { vertexColors: true, tex: tex as TexName });
     const mesh = new THREE.Mesh(Kit.track(geo), mat);
     mesh.matrixAutoUpdate = false;
-    g.add(mesh);
+    built.push(mesh);
   }
+  for (const m of remove) m.parent?.remove(m);
+  // Hoist the meshes we couldn't merge (glows, transparent) and drop the empty
+  // pivot groups so they don't cost a matrix update every frame.
+  const keep: THREE.Object3D[] = [];
+  g.traverse((x) => {
+    if (x !== g && (x as THREE.Mesh).isMesh) keep.push(x);
+  });
+  for (const x of keep) g.attach(x);
+  for (const c of [...g.children]) if (!(c as THREE.Mesh).isMesh) g.remove(c);
+  for (const mesh of built) g.add(mesh);
   return g;
 }
 

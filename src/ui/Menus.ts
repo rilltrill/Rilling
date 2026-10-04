@@ -1,11 +1,13 @@
 import type { CampaignDef, StageDef } from '../gameplay/StageTypes';
-import type { Save } from '../core/Save';
+import { INITIAL_CHARS, cleanInitials, type Save } from '../core/Save';
 import type { AudioSystem } from '../audio/Audio';
 import type { SfxName } from '../audio/names';
 import type { CampaignId, Grade, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
 import { haptic } from '../core/Haptics';
 import { el, escapeHtml, onTap } from './dom';
 import { cityCardArt, jungleCardArt, LOCK_ICON, SKULL_ICON, TUTORIAL_ART } from './art';
+import { arrowSvg, bombSvg, installPixelSprites } from './pixel';
+import { pixelateInto } from './pixelate';
 
 export interface MenuActions {
   /** Start a full campaign run (arcade mode). */
@@ -20,6 +22,8 @@ export interface MenuActions {
   nextStage(): void;
   continueYes(): void;
   continueNo(): void;
+  /** Attract mode: start a self-playing demo stage behind a DEMO PLAY banner. */
+  startDemo(): void;
 }
 
 /** Context shown on the pause screen. */
@@ -27,6 +31,27 @@ export interface PauseInfo {
   stage: string;
   campaign?: string;
   score: number;
+}
+
+/** Arcade name entry after a qualifying run. */
+export interface NameEntryInfo {
+  campaign: CampaignDef;
+  score: number;
+  /** Table position the score earns (0 = top). */
+  rank: number;
+  /** Pre-filled initials (last ones used). */
+  initials: string;
+}
+
+export interface HiScoreOptions {
+  /** BACK button target (omit in attract mode). */
+  back?: Back;
+  /** Attract-mode cycle: any tap = PRESS START (this callback); times out into the demo. */
+  attract?: Back;
+  /** Flash this freshly entered row. */
+  highlight?: { campaign: CampaignId; rank: number };
+  /** After a name entry: OK button target. */
+  done?: Back;
 }
 
 type Back = () => void;
@@ -39,32 +64,43 @@ interface TallyStep {
   dur: number;
 }
 
-const fmtInt = (n: number) => Math.round(n).toLocaleString('en-US');
+/** Plain arcade digits (no thousands separators). */
+const num = (n: number) => String(Math.max(0, Math.round(n)));
+/** Zero-padded 7-digit score, like the HUD. */
+const pad7 = (n: number) => String(Math.max(0, Math.floor(n))).padStart(7, '0');
+const ORD = ['1ST', '2ND', '3RD', '4TH', '5TH', '6TH', '7TH', '8TH', '9TH', '10TH'];
 const GRADE_ORDER: Grade[] = ['D', 'C', 'B', 'A', 'S'];
 /** Tap-arming delay for buttons on screens that can appear mid-action. */
 const ARM_MS = 600;
 const CONTINUE_ARM_MS = 700;
+/** Attract cycle (ms): title idle → hi-score table → demo. */
+const ATTRACT_TITLE_MS = 15000;
+const ATTRACT_TABLE_MS = 6000;
+const NAME_ENTRY_SECS = 30;
+const RIGHT = arrowSvg('right', 'btn-cursor');
 
 /**
  * Show the DISPLAY (CRT / PIXEL / OFF) setting and apply Settings.retro to the
- * renderer. Off until the arcade-monitor look (core/RetroPass) ships: turning it
- * on changes every screen's look (and what renderer.info reports), so the lead
- * flips this once the retro pass is signed off. Game.applySettings reads it too.
+ * renderer (Game.applySettings reads it too).
  */
-export const RETRO_SETTING_ENABLED = false;
+export const RETRO_SETTING_ENABLED = true;
 
 /**
- * All full-screen menus (title, campaign/stage select, settings, pause, results,
- * tutorial…). Pure DOM; the animated 3D backdrop (MenuBackdrop) shows through the
- * semi-transparent screens. Buttons act on pointer-down with a click sound and a
- * haptic tick.
+ * All full-screen menus (boot, title, attract hi-scores, campaign/stage select,
+ * settings, pause, results, name entry, tutorial…) in late-90s arcade style.
+ * Pure DOM; the animated 3D backdrop (MenuBackdrop) shows through the
+ * semi-transparent screens. Buttons act on pointer-down with a click sound and
+ * a haptic tick.
  */
 export class Menus {
   readonly root: HTMLDivElement;
   /** Notified whenever a screen opens (Game themes the 3D backdrop with it). */
   onScreen: ((name: string) => void) | null = null;
+  /** Score of the last finished credit (the cabinet's "1P" counter). */
+  lastScore = 0;
   private timers: number[] = [];
   private raf = 0;
+  private keyHandler: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(
     parent: HTMLElement,
@@ -73,12 +109,20 @@ export class Menus {
     private campaigns: CampaignDef[],
     private actions: MenuActions,
   ) {
+    installPixelSprites();
     this.root = el('div', 'menus', parent);
     this.root.id = 'menus';
+    window.addEventListener('keydown', (e) => this.keyHandler?.(e));
   }
 
   get visible() {
     return this.root.querySelector('.screen:not(.leaving)') !== null;
+  }
+
+  /** Name of the screen on top ('' when none). */
+  get current(): string {
+    const s = this.root.querySelector('.screen:not(.leaving)');
+    return s ? s.classList[1] ?? '' : '';
   }
 
   /** Close the current screen (fades out; taps go straight to the game). */
@@ -93,6 +137,7 @@ export class Menus {
     this.timers = [];
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.keyHandler = null;
   }
 
   /** Fade out whatever is on screen, then remove it. */
@@ -117,6 +162,11 @@ export class Menus {
     this.timers.push(window.setTimeout(fn, ms));
   }
 
+  /** Keyboard handler for the current screen (cleared with the screen's timers). */
+  private onKeys(fn: (e: KeyboardEvent) => void) {
+    this.keyHandler = fn;
+  }
+
   /** Click sound + haptic tick. */
   private feedback(sfx: SfxName = 'ui_click', volume = 1) {
     this.audio.unlock();
@@ -134,7 +184,7 @@ export class Menus {
       'button',
       `btn ${cls}${armMs > 0 ? ' disabled arming' : ''}`,
       parent,
-      `<span class="btn-label">${label}</span>${sub ? `<span class="btn-sub">${sub}</span>` : ''}`,
+      `${cls.includes('primary') ? RIGHT : ''}<span class="btn-label">${label}</span>${sub ? `<span class="btn-sub">${sub}</span>` : ''}`,
     );
     if (armMs > 0) this.later(armMs, () => b.classList.remove('disabled', 'arming'));
     onTap(b, () => {
@@ -148,14 +198,15 @@ export class Menus {
     return b;
   }
 
-  private backButton(parent: HTMLElement, back: Back) {
-    return this.button(parent, '◀ BACK', back, 'back');
+  private backButton(parent: HTMLElement, back: Back, label = 'BACK') {
+    const b = this.button(parent, label, back, 'back');
+    b.insertAdjacentHTML('afterbegin', arrowSvg('left', 'back-arrow'));
+    return b;
   }
 
-  private bestCampaignScore(): number {
-    let best = 0;
-    for (const v of Object.values(this.save.data.campaignBest)) best = Math.max(best, v);
-    return best;
+  /** The cabinet's HI: best score in any campaign table. */
+  private hiScore(): number {
+    return this.save.topHiScore(this.campaigns.map((c) => c.id));
   }
 
   private logo(parent: HTMLElement, small = false) {
@@ -163,25 +214,76 @@ export class Menus {
     const main = el('div', 'logo-main', logo);
     main.setAttribute('aria-label', 'OVERRUN');
     'OVERRUN'.split('').forEach((ch, i) => {
+      // The letter itself is the black keyline/shadow layer; ::before paints the fire gradient on top.
       const sp = el('span', 'logo-ch', main, ch);
+      sp.dataset.ch = ch;
       sp.style.setProperty('--i', String(i));
     });
     return logo;
   }
 
-  // ─── Title / main ─────────────────────────────────────────────────────────
+  /** Keep a screen's attract cycle going: when idle long enough, run `fn`. */
+  private attract(ms: number, fn: () => void) {
+    this.later(ms, fn);
+  }
+
+  // ─── Boot / title / attract ───────────────────────────────────────────────
+
+  /** Power-on self test, ≤ 1.5 s, skippable by tap. */
+  showBoot(onDone: () => void) {
+    const s = this.screen('boot');
+    const term = el('div', 'boot-term', s);
+    const lines: [number, string, string][] = [
+      [60, 'OVERRUN ARCADE BOARD', 'REV.B'],
+      [260, 'PROGRAM ROM .......', 'OK'],
+      [420, 'WORK RAM ..........', 'OK'],
+      [580, 'VIDEO RAM .........', 'OK'],
+      [740, 'SOUND .............', 'OK'],
+      [900, 'GUN I/O ...........', 'OK'],
+    ];
+    for (const [t, k, v] of lines) {
+      this.later(t, () => {
+        const row = el('div', 'boot-line', term);
+        el('span', 'boot-k', row, k);
+        el('span', `boot-v ${v === 'OK' ? 'ok' : ''}`, row, v);
+        if (v === 'OK') this.audio.play('ui_click', { volume: 0.25, pitch: 1.6 });
+      });
+    }
+    this.later(1080, () => el('div', 'boot-line boot-free', term, 'FREE PLAY'));
+    el('div', 'boot-cursor', s);
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      onDone();
+    };
+    this.later(1450, finish);
+    s.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      finish();
+    });
+    this.onKeys(() => finish());
+  }
+
+  /** Cabinet top row: 1P score · HI score · 2P. */
+  private cabinetTop(parent: HTMLElement) {
+    const top = el('div', 'cab-top', parent);
+    el('div', 'cab-1p', top, `<i>1P</i><b>${pad7(this.lastScore)}</b>`);
+    el('div', 'title-hi', top, `<i>HI</i><b>${pad7(this.hiScore())}</b>`);
+    el('div', 'cab-2p', top, '<i>2P</i><b>-------</b>');
+    return top;
+  }
 
   showTitle(onStart: () => void) {
     const s = this.screen('title');
     el('div', 'scanlines', s);
-    const hi = this.bestCampaignScore();
-    if (hi > 0) el('div', 'title-hi', s, `HI-SCORE <b>${fmtInt(hi)}</b>`);
+    this.cabinetTop(s);
     const logo = this.logo(s);
     el('div', 'logo-slash', logo);
     el('div', 'logo-sub', logo, 'ARCADE RAIL SHOOTER');
-    el('div', 'tap-start', s, 'TAP TO START');
-    // Two halves so narrow (portrait) screens break it cleanly onto two lines.
-    el('div', 'title-foot', s, '<span>ZOMBIES &bull; DINOSAURS</span><span class="tf-sep"> &bull; </span><span>NO QUARTERS REQUIRED</span>');
+    el('div', 'tap-start', s, 'PRESS START');
+    el('div', 'title-foot', s, '<span>ZOMBIES</span><span class="tf-sep"> VS </span><span>DINOSAURS</span>');
+    el('div', 'free-play', s, 'FREE PLAY');
     let started = false;
     const go = (e: Event) => {
       e.preventDefault();
@@ -192,27 +294,215 @@ export class Menus {
       onStart();
     };
     s.addEventListener('pointerdown', go);
-    const key = (e: KeyboardEvent) => {
-      if (!s.isConnected || s.classList.contains('leaving')) return window.removeEventListener('keydown', key);
+    this.onKeys((e) => {
       if (e.code === 'Enter' || e.code === 'Space') go(e);
-    };
-    window.addEventListener('keydown', key);
+    });
+    this.attract(ATTRACT_TITLE_MS, () => this.showHiScores({ attract: onStart }));
   }
 
   showMain() {
     const s = this.screen('main');
     const left = el('div', 'main-left', s);
     this.logo(left, true);
-    el('div', 'main-tag', left, 'ZOMBIES &bull; DINOSAURS');
-    const hi = this.bestCampaignScore();
-    if (hi > 0) el('div', 'main-hi', left, `HI-SCORE <b>${fmtInt(hi)}</b>`);
+    el('div', 'main-tag', left, 'ZOMBIES VS DINOSAURS');
+    el('div', 'main-hi', left, `HI <b>${pad7(this.hiScore())}</b>`);
     const col = el('div', 'menu-col', s);
     this.button(col, 'ARCADE', () => this.showCampaigns(), 'primary big', 'CAMPAIGN RUN');
     this.button(col, 'STAGE SELECT', () => this.showStageSelect(() => this.showMain()));
+    this.button(col, 'HI-SCORES', () => this.showHiScores({ back: () => this.showMain() }), 'hiscore-btn');
     const row = el('div', 'menu-pair', col);
     this.button(row, 'HOW TO PLAY', () => this.showHowTo(() => this.showMain()), 'small');
     this.button(row, 'SETTINGS', () => this.showSettings(() => this.showMain()), 'small');
   }
+
+  // ─── Hi-scores / name entry ───────────────────────────────────────────────
+
+  private stageTag(c: CampaignDef, stage: string): string {
+    if (stage === 'ALL') return 'ALL';
+    const st = c.stages.find((x) => x.id === stage);
+    return st ? `ST${st.index + 1}` : escapeHtml(stage.slice(0, 3).toUpperCase());
+  }
+
+  private hiTable(parent: HTMLElement, c: CampaignDef, highlight?: number) {
+    const t = el('div', `hs-table camp-${c.id}${highlight !== undefined ? ' has-new' : ''}`, parent);
+    t.style.setProperty('--accent', c.accent);
+    el('div', 'hs-camp', t, escapeHtml(c.name));
+    el('div', 'hs-head', t, '<span>RANK</span><span>NAME</span><span>SCORE</span><span>ST</span><span></span>');
+    this.save.hiScores(c.id).forEach((e, i) => {
+      const row = el('div', `hs-row r${i + 1}${i === highlight ? ' new' : ''}`, t);
+      row.style.setProperty('--i', String(i));
+      el('span', 'hs-rank', row, ORD[i] ?? `${i + 1}TH`);
+      el('span', 'hs-name', row, escapeHtml(e.initials).replace(/ /g, '&nbsp;'));
+      el('span', 'hs-score', row, pad7(e.score));
+      el('span', 'hs-stage', row, this.stageTag(c, e.stage));
+      // Continues used: C1…C9 (a one-credit run shows nothing).
+      const cont = el('span', 'hs-cont', row, e.continues ? `C${Math.min(9, e.continues)}` : '');
+      if (e.continues) cont.title = `${e.continues} continue${e.continues > 1 ? 's' : ''}`;
+    });
+    return t;
+  }
+
+  /** Both campaign tables (main menu, attract cycle, after a name entry). */
+  showHiScores(opts: HiScoreOptions = {}) {
+    const s = this.screen('hiscores');
+    if (opts.attract) s.classList.add('attract');
+    el('h2', 'screen-title', s, opts.highlight ? 'WELL DONE!' : 'HI-SCORES');
+    const wrap = el('div', 'hs-wrap', s);
+    // Campaign order stays fixed; portrait CSS lifts the table with the fresh entry (.has-new) to the top.
+    for (const c of this.campaigns) {
+      const hl = opts.highlight?.campaign === c.id ? opts.highlight.rank : undefined;
+      this.hiTable(wrap, c, hl);
+    }
+    if (opts.attract) {
+      const start = opts.attract;
+      el('div', 'tap-start hs-press', s, 'PRESS START');
+      let started = false;
+      const go = (e: Event) => {
+        e.preventDefault();
+        if (started) return;
+        started = true;
+        this.feedback('ui_start');
+        start();
+      };
+      s.addEventListener('pointerdown', go);
+      this.onKeys((e) => {
+        if (e.code === 'Enter' || e.code === 'Space') go(e);
+      });
+      this.attract(ATTRACT_TABLE_MS, () => this.actions.startDemo());
+      return;
+    }
+    const row = el('div', 'menu-row', s);
+    if (opts.done) this.button(row, 'OK', opts.done, 'primary', undefined, ARM_MS);
+    if (opts.back) this.backButton(row, opts.back);
+  }
+
+  /** Arcade initials entry: ▲/▼ per letter or the A–Z grid, END to confirm, 30 s timer. */
+  showNameEntry(info: NameEntryInfo, onDone: (initials: string) => void) {
+    const s = this.screen('name-entry');
+    s.style.setProperty('--accent', info.campaign.accent);
+    const head = el('div', 'ne-head', s);
+    el('h2', 'screen-title ne-title', head, 'NEW HI-SCORE!');
+    const meta = el('div', 'ne-meta', head);
+    el('span', 'ne-rank', meta, `${ORD[info.rank] ?? ''} PLACE`);
+    el('span', 'ne-score', meta, pad7(info.score));
+    const two = (n: number) => String(Math.max(0, n)).padStart(2, '0');
+    const timer = el('span', 'ne-timer', meta, `TIME <b>${two(NAME_ENTRY_SECS)}</b>`);
+    const timerVal = timer.querySelector('b')!;
+    el('div', 'ne-prompt', s, 'ENTER YOUR INITIALS');
+
+    const body = el('div', 'ne-body', s);
+    const slotsEl = el('div', 'ne-slots', body);
+    const chars = cleanInitials(info.initials || 'AAA').split('');
+    if (chars.join('').trim() === '') chars.splice(0, 3, 'A', 'A', 'A');
+    let cursor = 0;
+    let finished = false;
+    const letters: HTMLElement[] = [];
+    const slots: HTMLElement[] = [];
+    const grid = el('div', 'ne-grid', body);
+    let endKey: HTMLElement;
+
+    const paint = () => {
+      for (let i = 0; i < 3; i++) {
+        letters[i].textContent = chars[i] === ' ' ? '_' : chars[i];
+        letters[i].classList.toggle('blank', chars[i] === ' ');
+        slots[i].classList.toggle('active', cursor === i);
+      }
+      endKey.classList.toggle('active', cursor >= 3);
+    };
+    const confirm = () => {
+      if (finished) return;
+      finished = true;
+      let ini = chars.join('');
+      if (ini.trim() === '') ini = 'AAA';
+      this.feedback('ui_start');
+      s.classList.add('done');
+      for (const l of letters) l.classList.add('locked');
+      this.later(450, () => onDone(ini));
+    };
+    const cycle = (i: number, d: number) => {
+      if (finished) return;
+      const k = INITIAL_CHARS.indexOf(chars[i]);
+      chars[i] = INITIAL_CHARS[(k + d + INITIAL_CHARS.length) % INITIAL_CHARS.length];
+      cursor = i;
+      this.feedback('ui_click', 0.6);
+      paint();
+    };
+    const type = (ch: string) => {
+      if (finished) return;
+      if (cursor >= 3) cursor = 2;
+      chars[cursor] = ch;
+      cursor = Math.min(3, cursor + 1);
+      this.feedback('ui_click', 0.7);
+      paint();
+    };
+    const del = () => {
+      if (finished) return;
+      cursor = Math.max(0, cursor - 1);
+      chars[cursor] = ' ';
+      this.feedback('ui_back', 0.7);
+      paint();
+    };
+
+    for (let i = 0; i < 3; i++) {
+      const slot = el('div', 'ne-slot', slotsEl);
+      const up = el('button', 'ne-arrow ne-up', slot, arrowSvg('up'));
+      up.setAttribute('aria-label', `Letter ${i + 1} up`);
+      const letter = el('div', 'ne-letter', slot);
+      const down = el('button', 'ne-arrow ne-down', slot, arrowSvg('down'));
+      down.setAttribute('aria-label', `Letter ${i + 1} down`);
+      // Cabinet convention: ▲ steps forward through the alphabet (A → B), ▼ back.
+      onTap(up, () => cycle(i, 1));
+      onTap(down, () => cycle(i, -1));
+      onTap(letter, () => {
+        if (finished) return;
+        cursor = i;
+        this.feedback('ui_click', 0.5);
+        paint();
+      });
+      letters.push(letter);
+      slots.push(slot);
+    }
+
+    const key = (label: string, cls: string, fn: () => void) => {
+      const b = el('button', `ne-key ${cls}`, grid, label);
+      onTap(b, fn);
+      return b;
+    };
+    for (const ch of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') key(ch, '', () => type(ch));
+    key('.', 'k-dot', () => type('.'));
+    key('SPC', 'k-sp', () => type(' '));
+    key('DEL', 'k-del', del);
+    endKey = key('END', 'k-end', confirm);
+    paint();
+
+    let left = NAME_ENTRY_SECS;
+    this.timers.push(
+      window.setInterval(() => {
+        if (finished) return;
+        left--;
+        timerVal.textContent = two(left);
+        timer.classList.toggle('urgent', left <= 5);
+        if (left <= 5 && left > 0) this.audio.play('continue_tick', { volume: 0.6 });
+        if (left <= 0) confirm();
+      }, 1000),
+    );
+    this.onKeys((e) => {
+      if (finished) return;
+      const c = e.key.length === 1 ? e.key.toUpperCase() : '';
+      if (c && /[A-Z0-9.]/.test(c)) type(c);
+      else if (e.code === 'Space') type(' ');
+      else if (e.code === 'Backspace') del();
+      else if (e.code === 'Enter') confirm();
+      else if (e.code === 'ArrowUp') cycle(Math.min(2, cursor), 1);
+      else if (e.code === 'ArrowDown') cycle(Math.min(2, cursor), -1);
+      else if (e.code === 'ArrowLeft') (cursor = Math.max(0, cursor - 1)), paint();
+      else if (e.code === 'ArrowRight') (cursor = Math.min(3, cursor + 1)), paint();
+      else return;
+      e.preventDefault();
+    });
+  }
+
+  // ─── Campaign / stage select ──────────────────────────────────────────────
 
   private stagePips(parent: HTMLElement, c: CampaignDef) {
     const pips = el('div', 'camp-pips', parent);
@@ -227,21 +517,24 @@ export class Menus {
 
   showCampaigns() {
     const s = this.screen('campaigns');
-    el('h2', 'screen-title', s, 'CHOOSE YOUR NIGHTMARE');
+    el('h2', 'screen-title', s, 'SELECT CAMPAIGN');
     const row = el('div', 'campaign-row', s);
     for (const c of this.campaigns) {
       const card = el('button', `campaign-card camp-${c.id}`, row);
       card.style.setProperty('--accent', c.accent);
-      el('div', 'camp-art', card, c.id === 'zombie' ? cityCardArt() : jungleCardArt());
+      const svg = c.id === 'zombie' ? cityCardArt() : jungleCardArt();
+      const art = el('div', 'camp-art', card, svg);
+      pixelateInto(art, `card-${c.id}`, svg, 160, 96);
       el('div', 'camp-shade', card);
+      const marquee = el('div', 'camp-marquee', card);
+      el('div', 'camp-name', marquee, escapeHtml(c.name));
       const info = el('div', 'camp-info', card);
-      el('div', 'camp-name', info, escapeHtml(c.name));
       el('div', 'camp-tag', info, escapeHtml(c.tagline));
       const meta = el('div', 'camp-meta', info);
       this.stagePips(meta, c);
-      const best = this.save.data.campaignBest[c.id];
-      el('div', 'camp-best', meta, best ? `BEST <b>${fmtInt(best)}</b>` : `${c.stages.length} STAGES`);
-      el('div', 'camp-play', card, 'PLAY ▶');
+      const top = this.save.hiScores(c.id)[0];
+      el('div', 'camp-best', meta, top ? `HI <b>${pad7(top.score)}</b>` : `${c.stages.length} STAGES`);
+      el('div', 'camp-play', card, `PLAY${arrowSvg('right')}`);
       onTap(card, () => {
         this.feedback('ui_start');
         card.classList.add('chosen');
@@ -271,7 +564,7 @@ export class Menus {
           'span',
           'stage-best',
           txt,
-          best ? `BEST ${fmtInt(best.score)}` : unlocked ? (boss ? `${SKULL_ICON} FINAL STAGE` : 'NOT CLEARED') : `CLEAR STAGE ${i} TO UNLOCK`,
+          best ? `BEST ${pad7(best.score)}` : unlocked ? (boss ? `${SKULL_ICON} FINAL STAGE` : 'NOT CLEARED') : `CLEAR STAGE ${i} FIRST`,
         );
         if (best) el('span', `grade-badge grade-${best.grade}`, b, best.grade);
         else if (!unlocked) el('span', 'stage-lock', b, LOCK_ICON);
@@ -297,14 +590,14 @@ export class Menus {
     el('h2', 'screen-title', s, 'HOW TO PLAY');
     const grid = el('div', 'howto-grid', s);
     const tips: [string, string, string][] = [
-      [TUTORIAL_ART.tap, 'TAP TO SHOOT', 'Tap anywhere to fire. Hold to keep firing.'],
-      [TUTORIAL_ART.ring, 'RED RING = ATTACK', 'A shrinking red ring means that enemy is about to strike. Shoot it first!'],
-      [TUTORIAL_ART.reload, 'RELOAD', 'Tap RELOAD or swipe down. Auto-reload is on by default.'],
-      [TUTORIAL_ART.crate, 'SHOOT CRATES', 'Shoot crates, first-aid kits and grenades to collect them.'],
-      [TUTORIAL_ART.civ, "DON'T SHOOT CIVILIANS", 'Hitting a survivor costs a life. Protect them for a bonus.'],
-      ['<div class="tip-glyph glyph-head">✛</div>', 'HEADSHOTS', 'Aim for the head: double damage and bonus points.'],
-      ['<div class="tip-glyph glyph-bomb"></div>', 'BOMB', 'Panic button — clears the screen. You start with one.'],
-      ['<div class="tip-glyph glyph-combo">x4</div>', 'COMBOS', 'Hit without missing to raise your multiplier up to x4.'],
+      [TUTORIAL_ART.tap, 'TAP TO SHOOT', 'Tap to fire. Hold for auto-fire.'],
+      [TUTORIAL_ART.ring, 'RED RING = ATTACK', 'Shoot it before the ring closes!'],
+      [TUTORIAL_ART.reload, 'RELOAD', 'Tap RELOAD or swipe down.'],
+      [TUTORIAL_ART.crate, 'SHOOT CRATES', 'Guns, bombs and health inside.'],
+      [TUTORIAL_ART.civ, "DON'T SHOOT CIVILIANS", 'Hitting a survivor costs a life.'],
+      ['<div class="tip-glyph glyph-head">+</div>', 'HEADSHOTS', 'Double damage, bonus points.'],
+      [`<div class="tip-glyph glyph-bomb">${bombSvg()}</div>`, 'BOMB', 'Clears the screen. You get one.'],
+      ['<div class="tip-glyph glyph-combo">x4</div>', 'COMBOS', "Don't miss! Up to x4 score."],
     ];
     for (const [art, title, text] of tips) {
       const t = el('div', 'tip', grid);
@@ -421,7 +714,7 @@ export class Menus {
     };
 
     const segRow = <K extends 'quality' | 'retro'>(parent: HTMLElement, label: string, key: K, opts: [Settings[K], string][]) => {
-      const row = el('div', 'set-row', parent);
+      const row = el('div', 'set-row seg-row', parent);
       el('span', 'set-label', row, label);
       const wrap = el('div', 'set-seg', row);
       for (const [value, text] of opts) {
@@ -492,7 +785,7 @@ export class Menus {
     if (info) {
       const meta = el('div', 'pause-meta', s);
       el('span', 'pause-stage', meta, escapeHtml(info.stage));
-      el('span', 'pause-score', meta, `SCORE <b>${fmtInt(info.score)}</b>`);
+      el('span', 'pause-score', meta, `SCORE <b>${pad7(info.score)}</b>`);
     }
     const col = el('div', 'menu-col pause-col', s);
     this.button(col, 'RESUME', () => this.actions.resume(), 'primary big');
@@ -510,10 +803,11 @@ export class Menus {
     el('div', 'letterbox bottom', s);
     const card = el('div', 'intro-card', s);
     el('div', 'intro-camp', card, escapeHtml(campaign.name));
-    el('div', 'intro-stage', card, `STAGE ${stage.index + 1}${stage.index === campaign.stages.length - 1 ? ' · FINAL' : ''}`);
+    const final = stage.index === campaign.stages.length - 1;
+    el('div', 'intro-stage', card, `STAGE ${stage.index + 1}${final ? '<em>FINAL</em>' : ''}`);
     el('div', 'intro-name', card, escapeHtml(stage.name));
     if (stage.tagline) el('div', 'intro-tag', card, escapeHtml(stage.tagline));
-    el('div', 'intro-hint', card, 'GET READY');
+    el('div', 'intro-hint', card, 'GET READY!');
     let done = false;
     const finish = () => {
       if (done) return;
@@ -539,11 +833,11 @@ export class Menus {
     el('h2', 'screen-title', s, 'SURVIVAL BRIEFING');
     const grid = el('div', 'tut-grid', s);
     const cards: [string, string, string][] = [
-      [TUTORIAL_ART.tap, 'TAP TO SHOOT', 'Tap anywhere to fire. Hold to keep firing.'],
-      [TUTORIAL_ART.ring, 'RED RING = ATTACK', 'That enemy is about to hit you — shoot it first!'],
+      [TUTORIAL_ART.tap, 'TAP TO SHOOT', 'Tap to fire. Hold for auto.'],
+      [TUTORIAL_ART.ring, 'RED RING!', 'It is about to hit you. Shoot it first!'],
       [TUTORIAL_ART.reload, 'RELOAD', 'Tap RELOAD or swipe down.'],
-      [TUTORIAL_ART.crate, 'SHOOT CRATES', 'Weapons, bombs and health inside.'],
-      [TUTORIAL_ART.civ, "DON'T SHOOT CIVILIANS", 'Hitting a survivor costs a life.'],
+      [TUTORIAL_ART.crate, 'SHOOT CRATES', 'Guns, bombs and health inside.'],
+      [TUTORIAL_ART.civ, 'SPARE CIVILIANS', 'Hitting one costs a life.'],
     ];
     cards.forEach(([art, title, text], i) => {
       const c = el('div', 'tut-card', grid);
@@ -552,14 +846,14 @@ export class Menus {
       el('div', 'tut-title', c, title);
       el('div', 'tut-text', c, text);
     });
-    this.button(s, "GOT IT — LET'S GO!", () => onDone(), 'primary big tut-go', undefined, 900);
+    this.button(s, "GOT IT! LET'S GO!", () => onDone(), 'primary big tut-go', undefined, 900);
   }
 
   showResults(r: StageResult, isBest: boolean, nextLabel: string) {
     const s = this.screen('results');
     const stage = this.campaigns.flatMap((c) => c.stages).find((x) => x.id === r.stageId);
     const head = el('div', 'results-head', s);
-    el('h2', 'screen-title', head, 'STAGE CLEAR');
+    el('h2', 'screen-title', head, 'STAGE CLEAR!');
     if (stage) el('div', 'results-stage', head, escapeHtml(stage.name));
     const panel = el('div', 'results-panel', s);
     const left = el('div', 'results-list', panel);
@@ -571,26 +865,21 @@ export class Menus {
       const v = el('span', 'res-v', rw, fmt(0));
       steps.push({ row: rw, val: v, to, fmt, dur });
     };
-    row(left, 'SCORE', r.score, fmtInt, '', 0.5);
-    row(left, 'KILLS', r.kills, fmtInt);
+    row(left, 'SCORE', r.score, num, '', 0.5);
+    row(left, 'KILLS', r.kills, num);
     row(left, 'ACCURACY', r.accuracy * 100, (n) => `${Math.round(n)}%`);
-    row(left, 'HEADSHOTS', r.headshots, fmtInt);
-    row(left, 'MAX COMBO', r.maxCombo, fmtInt);
-    row(left, 'RESCUED', r.rescues, fmtInt);
-    el('div', 'bonus-title', right, 'BONUSES');
-    if (r.bonuses.length === 0) el('div', 'res-row in none', right, '<span class="res-k">—</span>');
-    for (const b of r.bonuses) row(right, escapeHtml(b.label), b.points, (n) => `+${fmtInt(n)}`, 'bonus', 0.28);
-    row(right, 'TOTAL', r.total, fmtInt, 'total', 0.9);
+    row(left, 'HEADSHOTS', r.headshots, num);
+    row(left, 'MAX COMBO', r.maxCombo, num);
+    row(left, 'RESCUED', r.rescues, num);
+    el('div', 'bonus-title', right, 'BONUS');
+    if (r.bonuses.length === 0) el('div', 'res-row in none', right, '<span class="res-k">NONE</span>');
+    for (const b of r.bonuses) row(right, escapeHtml(b.label), b.points, (n) => `+${num(n)}`, 'bonus', 0.28);
+    row(right, 'TOTAL', r.total, num, 'total', 0.9);
     const gradeBox = el('div', 'grade-box', panel);
     el('div', 'grade-label', gradeBox, 'RANK');
     const grade = el('div', `grade grade-${r.grade}`, gradeBox, r.grade);
     const prev = this.save.data.best[r.stageId];
-    const bestLine = el(
-      'div',
-      `best-line ${isBest ? 'is-new' : ''}`,
-      gradeBox,
-      isBest ? 'NEW BEST!' : prev ? `BEST ${fmtInt(prev.score)}` : '',
-    );
+    const bestLine = el('div', `best-line ${isBest ? 'is-new' : ''}`, gradeBox, isBest ? 'NEW BEST!' : prev ? `BEST ${num(prev.score)}` : '');
     const actions = el('div', 'menu-row results-actions', s);
     this.button(actions, nextLabel, () => this.actions.nextStage(), 'primary', undefined, ARM_MS);
     this.button(actions, 'RETRY', () => this.actions.restart(), '', undefined, ARM_MS);
@@ -656,13 +945,15 @@ export class Menus {
     return done;
   }
 
-  showContinue(seconds = 10) {
+  /** CONTINUE? with classic huge digits counting down `seconds` … 0. */
+  showContinue(seconds = 9) {
     const s = this.screen('continue');
     el('h2', 'screen-title danger', s, 'CONTINUE?');
     const dial = el('div', 'continue-dial', s);
-    dial.innerHTML = `<svg viewBox="0 0 100 100" aria-hidden="true"><circle class="dial-bg" cx="50" cy="50" r="44"/><circle class="dial-fg" cx="50" cy="50" r="44" transform="rotate(-90 50 50)"/></svg>`;
-    dial.style.setProperty('--secs', `${seconds + 1}s`);
     const count = el('div', 'continue-count', dial, String(seconds));
+    const bar = el('div', 'continue-bar', dial);
+    const blocks: HTMLElement[] = [];
+    for (let i = 0; i <= seconds; i++) blocks.push(el('i', 'on', bar));
     el('div', 'continue-hint', s, 'Continuing resets your combo and lowers your rank.');
     const row = el('div', 'menu-row', s);
     // The screen opens the instant the last heart goes — usually mid-tap.
@@ -678,6 +969,7 @@ export class Menus {
           return;
         }
         count.textContent = String(n);
+        blocks[n + 1]?.classList.remove('on');
         dial.classList.toggle('urgent', n <= 3);
         count.classList.remove('tick');
         void count.offsetWidth;
@@ -688,51 +980,80 @@ export class Menus {
     );
   }
 
-  showGameOver(score: number) {
+  /**
+   * GAME OVER with the final score counting up. With `nameEntry` (an arcade run
+   * that made the hi-score table) it leads into the initials screen instead of
+   * RETRY / MENU.
+   */
+  showGameOver(score: number, nameEntry?: () => void) {
+    this.lastScore = score;
     const s = this.screen('gameover');
     const title = el('h2', 'screen-title danger big gameover-title', s);
     'GAME OVER'.split('').forEach((ch, i) => {
       const sp = el('span', ch === ' ' ? 'go-ch gap' : 'go-ch', title, ch === ' ' ? '&nbsp;' : ch);
       sp.style.setProperty('--i', String(i));
     });
-    const sc = el('div', 'gameover-score', s, 'SCORE ');
-    const v = el('b', '', sc, '0');
+    const sc = el('div', 'gameover-score', s, '<span>SCORE</span> ');
+    // Zero-padded like the HUD: the centred row never changes width while it counts.
+    const v = el('b', '', sc, pad7(0));
     const row = el('div', 'menu-row', s);
+    if (nameEntry) {
+      const nb = el('div', 'new-best', s, 'NEW HI-SCORE!');
+      s.insertBefore(nb, row);
+      let gone = false;
+      const go = () => {
+        if (gone) return;
+        gone = true;
+        nameEntry();
+      };
+      this.button(row, 'ENTER INITIALS', go, 'primary pulse', undefined, ARM_MS);
+      const skip = this.runTally([{ row: sc, val: v, to: score, fmt: pad7, dur: 1.1 }], () => {
+        nb.classList.add('pop');
+        this.later(3200, go);
+      }, 900);
+      s.addEventListener('pointerdown', () => skip());
+      return;
+    }
     this.button(row, 'RETRY', () => this.actions.restart(), 'primary', undefined, ARM_MS);
     this.button(row, 'MENU', () => this.actions.quit(), 'back', undefined, ARM_MS);
-    const skip = this.runTally([{ row: sc, val: v, to: score, fmt: fmtInt, dur: 1.1 }], () => {}, 900);
+    const skip = this.runTally([{ row: sc, val: v, to: score, fmt: pad7, dur: 1.1 }], () => {}, 900);
     s.addEventListener('pointerdown', () => skip());
   }
 
-  showCampaignClear(campaign: CampaignDef, total: number, isBest: boolean) {
+  showCampaignClear(campaign: CampaignDef, total: number, isBest: boolean, nameEntry?: () => void) {
+    this.lastScore = total;
     const s = this.screen('campaign-clear');
     s.style.setProperty('--accent', campaign.accent);
     const burst = el('div', 'confetti', s);
-    const colors = [campaign.accent, '#ffd84a', '#ffffff', '#8cff5a', '#5cc8ff'];
+    const colors = [campaign.accent, '#ffe000', '#ffffff', '#5aff3a', '#2ee6ff'];
     for (let i = 0; i < 46; i++) {
       const p = el('i', '', burst);
       p.style.setProperty('--x', `${(Math.random() * 2 - 1) * 48}vw`);
       p.style.setProperty('--y', `${-20 - Math.random() * 45}vh`);
-      p.style.setProperty('--r', `${Math.random() * 720 - 360}deg`);
+      p.style.setProperty('--r', `${Math.round(Math.random() * 8 - 4) * 90}deg`);
       p.style.setProperty('--d', `${Math.random() * 0.6}s`);
       p.style.background = colors[i % colors.length];
     }
     el('div', 'clear-kicker', s, `${escapeHtml(campaign.name)} COMPLETE`);
-    el('h2', 'screen-title big clear-title', s, 'YOU SURVIVED');
+    el('h2', 'screen-title big clear-title', s, 'YOU SURVIVED!');
     const grades = el('div', 'clear-grades', s);
     campaign.stages.forEach((st, i) => {
       const best = this.save.data.best[st.id];
       const g = el('div', 'clear-stage', grades);
       g.style.setProperty('--i', String(i));
-      el('span', `grade-badge grade-${best?.grade ?? 'D'}`, g, best?.grade ?? '–');
+      el('span', `grade-badge grade-${best?.grade ?? 'D'}`, g, best?.grade ?? '-');
       el('span', 'clear-stage-name', g, escapeHtml(st.name));
     });
-    const sc = el('div', 'gameover-score final', s, 'FINAL SCORE ');
-    const v = el('b', '', sc, '0');
-    const nb = isBest ? el('div', 'new-best', s, 'NEW HIGH SCORE!') : null;
+    const sc = el('div', 'gameover-score final', s, '<span>FINAL SCORE</span> ');
+    const v = el('b', '', sc, pad7(0));
+    const nb = isBest || nameEntry ? el('div', 'new-best', s, nameEntry ? 'NEW HI-SCORE!' : 'NEW PERSONAL BEST!') : null;
     const row = el('div', 'menu-row', s);
-    this.button(row, 'MENU', () => this.actions.quit(), 'primary', undefined, ARM_MS);
-    const skip = this.runTally([{ row: sc, val: v, to: total, fmt: fmtInt, dur: 1.6 }], () => nb?.classList.add('pop'), 1100);
+    if (nameEntry) {
+      this.button(row, 'ENTER INITIALS', nameEntry, 'primary pulse', undefined, ARM_MS);
+      // Like a cabinet: the initials screen comes up on its own if nobody presses anything.
+      this.later(14000, nameEntry);
+    } else this.button(row, 'MENU', () => this.actions.quit(), 'primary', undefined, ARM_MS);
+    const skip = this.runTally([{ row: sc, val: v, to: total, fmt: pad7, dur: 1.6 }], () => nb?.classList.add('pop'), 1100);
     s.addEventListener('pointerdown', () => skip());
   }
 }

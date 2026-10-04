@@ -5,7 +5,7 @@ import { B, POOL, RAIL, RAIL_LENGTH, dAt } from './layout';
 import { D, buildEnv } from './env';
 import { z2Scene } from './scene';
 import { burstWall, crashAmbulance, ensureAmbulanceCrashed, spawnProps, wallThuds } from './setpieces';
-import { drawerFront } from './zonesLower';
+import { CORR_C_VENT, drawerFront } from './zonesLower';
 import './boss';
 
 /**
@@ -90,9 +90,17 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'up the drive',
     to: HOLD.bay,
-    speed: 2.6,
+    speed: 3.3,
     look: L(0, 2.2, -18, 2),
-    waves: [{ spawns: [W(2.6, -15, 'patient', { frame: 'world', t: 2 })] }],
+    waves: [
+      {
+        spawns: [
+          W(2.6, -15, 'patient', { frame: 'world', t: 1.6 }),
+          W(-8.6, 6, 'worker', { frame: 'world', t: 3.4 }),
+          W(8.8, -1, 'civilian', { frame: 'world', t: 5.2 }),
+        ],
+      },
+    ],
   },
   {
     kind: 'action',
@@ -112,14 +120,14 @@ const beats: Beat[] = [
         spawns: [
           S('runner', -2.2, -9.3, { entry: 'burst', t: 0.1 }),
           S('runner', -2.7, -9.0, { entry: 'burst', t: 1.0 }),
-          W(1.4, -22.5, 'patient', { t: 1.6 }),
-          W(-8.4, -15.5, 'nurse', { t: 2.6 }),
+          W(1.2, -15.5, 'patient', { t: 1.6 }),
+          W(-7.8, -14.6, 'nurse', { t: 2.6 }),
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
-          W(4.4, -14.2, 'patient'),
+          W(3.8, -12.6, 'patient'),
           W(-6.6, -5.5, 'doctor', { t: 0.8 }),
           S('crawler', 1.4, -7.2, { entry: 'rise', t: 1.8 }),
         ],
@@ -128,9 +136,9 @@ const beats: Beat[] = [
         start: { remaining: 1 },
         spawns: [
           S('runner', 13, -8, { t: 0.2 }),
-          W(7.2, -13.2, 'worker', { t: 0.8 }),
-          W(-3.4, -16.4, 'soldier', { t: 1.4 }),
-          W(0.6, -18.5, 'patient', { t: 2.2 }),
+          W(6.6, -11.4, 'worker', { t: 0.8 }),
+          W(-3.0, -14.2, 'soldier', { t: 1.4 }),
+          W(0.6, -16, 'patient', { t: 2.2 }),
         ],
       },
     ],
@@ -140,15 +148,21 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'into the ER',
     to: D.erHold,
-    speed: 3.2,
-    waves: [{ start: { atD: dAt(0, -12) }, spawns: [W(-7.6, -21.8, 'nurse', { frame: 'world' })] }],
+    speed: 3.8,
+    waves: [
+      {
+        start: { atD: dAt(0, -12) },
+        // A nurse under the canopy, then a runner bolts out through the broken doors.
+        spawns: [W(-7.6, -21.8, 'nurse', { frame: 'world' }), S('runner', 0.8, -32, { frame: 'world', t: 1.1 })],
+      },
+    ],
   },
   {
     kind: 'hold',
     label: 'ER reception',
     look: L(-1.2, 1.3, -39),
     civilians: [{ pos: [3.4, 0, -39], world: true, variant: 'nurse', t: 0.3 }],
-    pickups: [P('health', -5.6, 1.6, -35.2, 0.5), P('points', 7.4, 2.4, -37.2, 3)],
+    pickups: [P('health', -5.6, 1.6, -35.2, 0.5), P('points', 1.0, 2.4, -42.5, 3)],
     onStart: (w) => w.later(0.9, () => popup(w, "DON'T SHOOT THE NURSE!", 0.6, 0.26)),
     waves: [
       { spawns: [W(-3.2, -45, 'nurse', { t: 0.3 }), W(2.2, -47.2, 'patient', { t: 1.3 })] },
@@ -163,8 +177,8 @@ const beats: Beat[] = [
       {
         start: { remaining: 1 },
         spawns: [
-          W(-12.8, -31.5, 'doctor'),
-          W(13.2, -44, 'patient', { t: 0.9 }),
+          W(-12.4, -44.5, 'doctor'),
+          W(11.8, -45.4, 'patient', { t: 0.9 }),
           S('crawler', -2.2, -45.5, { y: 3.85, entry: 'drop', t: 1.7 }),
           W(-4, -48.6, 'office', { t: 2.4 }),
         ],
@@ -172,14 +186,21 @@ const beats: Beat[] = [
     ],
   },
   // ── 3. Corridor A: doors burst open ─────────────────────────────────────
-  { kind: 'move', label: 'to corridor A', to: HOLD.corrA, speed: 3.3 },
+  {
+    kind: 'move',
+    label: 'to corridor A',
+    to: HOLD.corrA,
+    speed: 4.0,
+    // Something shambles towards you down the corridor as you turn into it.
+    waves: [{ start: { atD: dAt(8, -43.6) }, spawns: [W(31, -43.4, 'patient', { frame: 'world' })] }],
+  },
   {
     kind: 'hold',
     label: 'corridor A',
     look: L(28, 1.3, -44.4),
-    pickups: [P('points', 22.4, 2.0, -45.4, 1.5), P('smg', 31.6, 1.6, -45.5, 2.5)],
+    pickups: [P('points', 26, 1.8, -45.2, 1.5), P('smg', 31.6, 1.6, -45.5, 2.5)],
     waves: [
-      { spawns: [W(38.5, -44.6, 'patient', { t: 0.4 }), W(46, -43.2, 'nurse', { t: 1.6 })] },
+      { spawns: [W(35.5, -44.6, 'patient', { t: 0.4 }), W(41, -43.2, 'nurse', { t: 1.4 })] },
       {
         start: { remaining: 1 },
         spawns: [
@@ -202,7 +223,7 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'down the corridor',
     to: HOLD.corrAEnd,
-    speed: 2.6,
+    speed: 3.0,
     waitClear: true,
     waves: [
       {
@@ -210,10 +231,11 @@ const beats: Beat[] = [
         spawns: [S('walker', ...behindDoor(DOOR.a38, [34, -44], 1.6), { frame: 'world', entry: 'burst', opts: { variant: 'doctor' } })],
       },
       {
-        start: { atD: dAt(39, -44) },
+        // (Early enough that the vent crawler drops in front of you, not behind.)
+        start: { atD: dAt(36, -44) },
         spawns: [
-          S('runner', ...behindDoor(DOOR.a44, [40.5, -44], 1.4), { frame: 'world' }),
-          S('crawler', 41.5, -43.4, { y: 2.85, entry: 'drop', frame: 'world', t: 1.2 }),
+          S('crawler', 41.5, -43.4, { y: 2.85, entry: 'drop', frame: 'world', t: 0.4 }),
+          S('runner', ...behindDoor(DOOR.a44, [40.5, -44], 1.4), { frame: 'world', t: 0.8 }),
         ],
       },
     ],
@@ -224,7 +246,7 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'ward',
     look: L(63, 1.2, -44),
-    pickups: [P('health', 66, 1.4, -41.6, 6), P('bomb', 60.6, 1.5, -46.6, 10)],
+    pickups: [P('health', 66, 1.4, -41.6, 3), P('bomb', 60.6, 1.5, -46.6, 5)],
     waves: [
       { spawns: [W(59.8, -39.6, 'patient', { t: 0.5 }), W(64, -48.4, 'patient', { t: 1.8 })] },
       {
@@ -247,19 +269,26 @@ const beats: Beat[] = [
     ],
   },
   // ── 5. Nurse station: spitters behind the counter ───────────────────────
-  { kind: 'move', label: 'to the nurse station', to: D.hubHold, speed: 3.2 },
+  {
+    kind: 'move',
+    label: 'to the nurse station',
+    to: D.hubHold,
+    speed: 3.8,
+    // A runner crashes in through the hub's north door.
+    waves: [{ start: { atD: dAt(62, -44) }, spawns: [S('runner', 83.5, -37.4, { frame: 'world' })] }],
+  },
   {
     kind: 'hold',
     label: 'nurse station',
-    look: L(83, 1.5, -44),
-    pickups: [P('health', 77, 1.4, -40.4, 4)],
+    look: L(83, 1.5, -45.2),
+    pickups: [P('health', 82.4, 1.5, -40.9, 3)],
     onStart: (w) => w.later(2.2, () => popup(w, 'SHOOT THE BILE!', 0.5, 0.26)),
     waves: [
       {
         spawns: [
           S('spitter', 84.8, -45.6, { t: 0.4, opts: { variant: 'nurse' } }),
           W(83.5, -37.6, 'nurse', { t: 1.4 }),
-          W(79, -52.6, 'patient', { t: 2.4 }),
+          W(79.3, -51.6, 'patient', { t: 2.4 }),
         ],
       },
       {
@@ -267,22 +296,22 @@ const beats: Beat[] = [
         spawns: [
           S('spitter', 84.6, -42.2, { opts: { variant: 'patient' } }),
           S('runner', 83.5, -37.2, { t: 1.0 }),
-          W(79, -52.6, 'doctor', { t: 1.8 }),
+          W(79.3, -51.6, 'doctor', { t: 1.8 }),
         ],
       },
       {
         start: { remaining: 1 },
-        spawns: [W(80.6, -38, 'patient'), W(83.5, -37.4, 'office', { t: 0.8 }), S('runner', 79, -52.8, { t: 1.6 })],
+        spawns: [W(80.6, -38, 'patient'), W(83.5, -37.4, 'office', { t: 0.8 }), S('runner', 79.3, -51.8, { t: 1.6 })],
       },
     ],
   },
   // ── 6. Stairwell: they come up from the basement ────────────────────────
-  { kind: 'move', label: 'to the stairs', to: D.stairTop, speed: 3.0 },
+  { kind: 'move', label: 'to the stairs', to: D.stairTop, speed: 3.6 },
   {
     kind: 'hold',
     label: 'stairwell',
     look: L(79, -2.8, -66.5, 1.1),
-    pickups: [P('health', 77.2, 1.2, -57.6, 0.5)],
+    pickups: [P('health', 78.2, -1.1, -61.5, 0.5)],
     waves: [
       { spawns: [W(78, -70.5, 'patient', { t: 0.3 }), W(80.6, -72.2, 'nurse', { t: 1.5 })] },
       {
@@ -308,17 +337,19 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'down to the morgue',
     to: HOLD.morgue,
-    speed: 2.7,
-    onStart: (w) => w.later(2.5, () => w.audio.play('zombie_groan', { volume: 0.9, pitch: 0.7 })),
+    speed: 3.3,
+    onStart: (w) => w.later(1.5, () => w.audio.play('zombie_groan', { volume: 0.9, pitch: 0.7 })),
+    // One of them is already coming up the stairs.
+    waves: [{ start: { atD: D.stairTop + 0.5 }, spawns: [W(80.2, -73.4, 'patient', { frame: 'world', t: 0.4 })] }],
   },
   {
     kind: 'hold',
     label: 'morgue',
     look: L(79.4, B + 1.2, -87),
-    pickups: [P('magnum', 75, B + 1.6, -80.6, 1), P('health', 83, B + 1.6, -89.4, 12)],
+    pickups: [P('magnum', 76.4, B + 1.5, -83.6, 1), P('health', 83, B + 1.6, -88.4, 6)],
     onStart: (w) => w.later(3.5, () => popup(w, 'SHOOT THE BLOATERS!', 0.5, 0.26)),
     waves: [
-      { spawns: [S('bloater', 79.5, -91.2, { t: 0.4 }), W(77.4, -93.4, 'doctor', { t: 0.9 }), W(81.6, -93.2, 'patient', { t: 1.4 })] },
+      { spawns: [S('bloater', 79.5, -87.4, { t: 0.4 }), W(77.4, -89.4, 'doctor', { t: 0.9 }), W(81.6, -89.2, 'patient', { t: 1.4 })] },
       {
         start: { remaining: 1 },
         spawns: [
@@ -346,7 +377,7 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'service corridor',
     to: D.orHold,
-    speed: 2.7,
+    speed: 3.3,
     waitClear: true,
     waves: [{ start: { atD: dAt(79, -96.5) }, spawns: [S('crawler', 79.6, -100.6, { y: B + 2.85, entry: 'drop', frame: 'world' })] }],
   },
@@ -355,7 +386,7 @@ const beats: Beat[] = [
     label: 'operating theatre',
     look: L(82, B + 1.7, -118.4),
     civilians: [{ pos: [77.4, 0, -119.4], world: true, variant: 'scientist', t: 0.4 }],
-    pickups: [P('health', 80.6, B + 1.6, -115.2, 1), P('shotgun', 73.4, B + 1.4, -111.0, 5)],
+    pickups: [P('health', 80.6, B + 1.6, -115.2, 1), P('shotgun', 80.6, B + 1.4, -117.5, 5)],
     onStart: (w) => {
       w.later(1.0, () => popup(w, "DON'T SHOOT THE DOCTOR!", 0.42, 0.26));
     },
@@ -383,7 +414,20 @@ const beats: Beat[] = [
     ],
   },
   // ── 9. Basement corridor: the brute comes through the wall ──────────────
-  { kind: 'move', label: 'towards the atrium', to: D.corrCHold, speed: 3.2 },
+  {
+    kind: 'move',
+    label: 'towards the atrium',
+    to: D.corrCHold,
+    speed: 3.8,
+    waitClear: true,
+    // A crawler drops out of the corridor vent ahead.
+    waves: [
+      {
+        start: { atD: dAt(76.4, -119) },
+        spawns: [S('crawler', CORR_C_VENT[0], CORR_C_VENT[1], { y: B + 3.05, entry: 'drop', frame: 'world', t: 0.2 })],
+      },
+    ],
+  },
   {
     kind: 'action',
     label: 'pounding',
@@ -400,7 +444,7 @@ const beats: Beat[] = [
     look: L(59, B + 1.5, -122, 1.2),
     // (No-op unless a debug start skipped the pounding.)
     onStart: (w) => burstWall(w),
-    pickups: [P('shotgun', 64.2, B + 1.4, -119.6, 0), P('bomb', 57, B + 1.6, -119.3, 8)],
+    pickups: [P('shotgun', 61, B + 1.4, -120, 0), P('bomb', 55.6, B + 1.6, -121.8, 4)],
     waves: [
       {
         spawns: [
@@ -416,7 +460,7 @@ const beats: Beat[] = [
     ],
   },
   // ── Boss: PATIENT ZERO ──────────────────────────────────────────────────
-  { kind: 'move', label: 'into the atrium', to: RAIL_LENGTH, speed: 2.3, look: L(POOL[0], B + 2.2, POOL[2], 1.6) },
+  { kind: 'move', label: 'into the atrium', to: RAIL_LENGTH, speed: 2.9, look: L(POOL[0], B + 2.2, POOL[2], 1.6) },
   {
     kind: 'action',
     label: 'it wakes',

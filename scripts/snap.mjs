@@ -38,6 +38,8 @@ const browser = await chromium.launch({
 });
 const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: dpr, isMobile: true, hasTouch: true });
 const page = await ctx.newPage();
+// Swallow Vite HMR so concurrent edits by others don't reload the page mid-capture.
+await page.routeWebSocket(/.*/, () => {});
 if (args.save) {
   const seed = JSON.parse(args.save);
   await page.addInitScript((data) => {

@@ -101,6 +101,10 @@ abstract class Theropod extends Dino {
   protected leapPitch = 0;
   /** Body yaw offset from the player while crouching/prowling (radians). */
   protected stalkAngle = 0.55;
+  /** No new attack closer than this fraction of attackRange (backs off first). */
+  protected minStrikeFrac = 0.7;
+  /** |NDC x| beyond which a prowling dino turns back toward the middle of the view. */
+  protected prowlEdge = 0.55;
 
   protected abstract makeSpec(): TheroSpec;
 
@@ -119,6 +123,7 @@ abstract class Theropod extends Dino {
     this.prowlDir = this.world.rng.chance(0.5) ? 1 : -1;
     this.reach = (this.r.headFwd + this.reachPad) * this.modelScale;
     this.lieHeight = this.spec.hips[0] * 0.85 * this.modelScale;
+    this.spinPivot = this.r.hipH * this.modelScale;
     this.baseStagger = this.staggerTime;
   }
 
@@ -153,29 +158,49 @@ abstract class Theropod extends Dino {
       this.moveToward(_v, this.speed * 0.8, dt);
       return;
     }
-    if (this.cooldown <= 0 && this.takeSlot()) {
+    // Too close (e.g. just shot out of a pounce, or a leap entry landed short): back off first.
+    if (this.cooldown <= 0 && dist >= this.attackRange * this.minStrikeFrac && this.takeSlot()) {
       this.setState('windup');
       return;
     }
     this.prowl(dt, dist);
   }
 
-  /** Waiting for an opening: pace sideways around the player at striking range. */
+  /**
+   * Waiting for an opening: pace sideways around the player at striking range,
+   * staying in the middle of the view (clear of the corner HUD and screen edges).
+   * Expects `_p` = player position and `_d` = unit direction player → this.
+   */
   protected prowl(dt: number, dist: number) {
     this.prowlT -= dt;
     if (this.prowlT <= 0) {
       this.prowlT = this.world.rng.range(1.2, 2.6);
       this.prowlDir = this.world.rng.chance(0.65) ? -this.prowlDir : this.prowlDir;
     }
-    if (!this.onScreen(0.7) && this.prowlT < 2.2) {
-      // Drifting off the edge of the screen: turn back toward the middle.
-      this.prowlDir = -this.prowlDir;
-      this.prowlT = 2.6;
+    const bearing = Math.atan2(_d.x, _d.z);
+    this.anchor.getWorldPosition(_w).project(this.world.camera);
+    const sx = _w.x;
+    const sy = _w.z < 1 ? _w.y : 0;
+    if (_w.z > 1 || Math.abs(sx) > this.prowlEdge) {
+      // Drifting toward a screen edge: circle back toward the middle of the view.
+      this.world.camera.getWorldDirection(_w).setY(0).normalize();
+      _w.multiplyScalar(Math.max(2, dist)).add(this.world.rig.space.position);
+      if (this.frame === 'rig') this.world.rig.space.worldToLocal(_w);
+      const want = angleDelta(bearing, Math.atan2(_w.x - _p.x, _w.z - _p.z)) >= 0 ? 1 : -1;
+      if (want !== this.prowlDir) {
+        this.prowlDir = want;
+        this.prowlT = Math.max(this.prowlT, 1.6);
+      }
     }
-    const a = Math.atan2(_d.x, _d.z) + this.prowlDir * 0.6;
-    const rr = lerp(dist, this.attackRange, 0.5);
+    // Inside the minimum strike distance: give ground decisively (mostly backwards, not
+    // sideways) before the next attack.
+    const tooClose = dist < this.attackRange * this.minStrikeFrac + 0.6;
+    const a = bearing + this.prowlDir * (tooClose ? 0.2 : 0.6);
+    let rr = tooClose ? this.attackRange : lerp(dist, this.attackRange, 0.5);
+    // Low on screen (small dinos up close sit over the bottom HUD): give ground.
+    if (sy < -0.5) rr = Math.max(rr, Math.min(dist + 0.8, this.attackRange + 0.2));
     _v.set(_p.x + Math.sin(a) * rr, 0, _p.z + Math.cos(a) * rr);
-    this.moveToward(_v, this.speed * 0.3, dt);
+    this.moveToward(_v, this.speed * (tooClose ? 0.55 : 0.3), dt);
     this.separate(dt);
     // Body angled along the pacing direction, head (via look-at) on the player.
     this.faceTowardOffset(_p, dt, -this.prowlDir * this.stalkAngle, 8);
@@ -268,7 +293,8 @@ abstract class Theropod extends Dino {
   }
 
   override stagger() {
-    const wasAir = this.state === 'pounce' || this.state === 'retreat';
+    const prev = this.state;
+    const wasAir = prev === 'pounce' || prev === 'retreat';
     super.stagger();
     if (this.state !== 'stagger') return;
     this.staggerTime = this.baseStagger;
@@ -282,6 +308,8 @@ abstract class Theropod extends Dino {
       this.launch(_v.x * 3.5, 2.2, _v.z * 3.5);
       this.staggerTime = this.baseStagger * 1.8;
     }
+    // Interrupted attack: a breather after recovering (prowl backs it off to range meanwhile).
+    if (wasAir || prev === 'windup') this.cooldown = Math.max(this.cooldown, this.staggerTime + this.world.rng.range(0.7, 1.3));
   }
 
   // ── Animation ──
@@ -513,7 +541,8 @@ export class Compy extends Theropod {
     this.name = 'compy';
     this.maxHp = 0.6;
     this.speed = rng.range(5, 6);
-    this.attackRange = rng.range(4.2, 5.2);
+    // Far enough out that these tiny bodies sit mid-screen, above the bottom-corner HUD.
+    this.attackRange = rng.range(5.5, 6.5);
     this.windup = 1.4;
     this.damage = 1;
     this.points = 50;
@@ -537,7 +566,7 @@ export class Compy extends Theropod {
     this.windupShare = 0.75;
     this.pounceDur = 0.45;
     this.leapH = 0.45;
-    this.retreatDist = 4;
+    this.retreatDist = 5;
     this.reachPad = 0.35;
     this.lieHeight = 0.04;
     this.deathTime = 2.3;
@@ -718,6 +747,7 @@ export class Raptor extends Theropod {
     this.weaveAmp = rng.range(2, 3.5);
     this.weaveFreq = rng.range(0.9, 1.4);
     this.windupShare = 0.66;
+    this.minStrikeFrac = 0.8;
     this.pounceDur = 0.58;
     this.leapH = 0.85;
     this.retreatDist = 5.6;
@@ -824,6 +854,7 @@ export class Dilo extends Theropod {
     this.tailStiff = 0.8;
     this.weaveAmp = 1.2;
     this.weaveFreq = 0.8;
+    this.minStrikeFrac = 0.45;
     this.lieHeight = 0.17;
     this.landDust = 0.7;
     this.modelScale = 0.9;
@@ -1021,6 +1052,9 @@ export class Dilo extends Theropod {
 
 // ─── Pteranodon ────────────────────────────────────────────────────────────
 
+/** Highest NDC y a circling pteranodon's body may sit at. */
+const SKY_NDC = 0.5;
+
 export class Ptero extends Dino {
   private r!: PteroRig;
   private readonly fwd = new THREE.Vector3(0, 0, -1);
@@ -1049,6 +1083,10 @@ export class Ptero extends Dino {
   private lastFlap = 0;
   private lastCry = -1;
   private seed = 0;
+  /** Death roll (kept separately so the base topple can't overwrite it). */
+  private roll = 0;
+  /** 0..1 blend of the landed-corpse wing pose (wings flat on the ground). */
+  private wingFlat = 0;
 
   protected override configure() {
     const rng = this.world.rng;
@@ -1157,6 +1195,24 @@ export class Ptero extends Dino {
     this.moveSpeed = Math.hypot(this.flyVel.x, this.flyVel.z);
   }
 
+  /**
+   * Cruise altitude, capped so that at the horizontal depth of (x, z) in front of
+   * the camera the body sits no higher than NDC y = SKY_NDC: clear of the progress
+   * bar and pause button, with its dive ring fully on screen. Never below 3.5 m.
+   */
+  private cruiseAlt(x: number, z: number, want: number): number {
+    const cam = this.world.camera;
+    cam.getWorldPosition(_w);
+    if (this.frame === 'rig') this.world.rig.space.worldToLocal(_w);
+    const depth = (x - _w.x) * this.fwd.x + (z - _w.z) * this.fwd.z;
+    if (depth < 3) return want;
+    cam.getWorldDirection(_d);
+    const pitch = Math.asin(clamp(_d.y, -1, 1));
+    const ang = Math.min(1.3, pitch + Math.atan(SKY_NDC * Math.tan((cam.fov * Math.PI) / 360)));
+    const ceil = _w.y - this.root.position.y + depth * Math.tan(ang);
+    return Math.max(3.5, Math.min(want, ceil));
+  }
+
   private circleUpdate(dt: number) {
     this.updateCenter(dt);
     this.circleA += dt * (this.speed / this.circleR) * this.circleDir * 0.75;
@@ -1164,7 +1220,7 @@ export class Ptero extends Dino {
     const c = this.center;
     const tx = c.x + this.right.x * Math.cos(a) * this.circleR + this.fwd.x * Math.sin(a) * this.circleDepth;
     const tz = c.z + this.right.z * Math.cos(a) * this.circleR + this.fwd.z * Math.sin(a) * this.circleDepth;
-    this.steer(tx, this.alt + Math.sin(a * 2) * 0.9, tz, this.speed, dt);
+    this.steer(tx, this.cruiseAlt(tx, tz, this.alt + Math.sin(a * 2) * 0.9), tz, this.speed, dt);
     this.circleTime += dt;
     if (this.circleTime > this.nextDive && this.cooldown <= 0 && this.onScreen(0.8)) {
       _v.set(this.root.position.x, 0, this.root.position.z).sub(this.playerPos(_p));
@@ -1226,8 +1282,8 @@ export class Ptero extends Dino {
   private startClimb() {
     this.setState('climb');
     this.computeBasis();
-    // Peel away from the camera: up, forward and to the side.
-    this.flyVel.set(this.fwd.x * 6 + this.right.x * this.diveSide * 4, 7, this.fwd.z * 6 + this.right.z * this.diveSide * 4);
+    // Peel away from the camera: out, to the side and up (shallow, so it doesn't shoot off the top of the screen).
+    this.flyVel.set(this.fwd.x * 8 + this.right.x * this.diveSide * 4.5, 3.5, this.fwd.z * 8 + this.right.z * this.diveSide * 4.5);
   }
 
   private climbUpdate(dt: number) {
@@ -1235,8 +1291,9 @@ export class Ptero extends Dino {
     const c = this.center;
     const tx = c.x + this.right.x * this.diveSide * this.circleR;
     const tz = c.z + this.right.z * this.diveSide * this.circleR;
-    this.steer(tx, this.alt + 1, tz, 11, dt, 1.8);
-    if (this.lift > this.alt - 1.5 && this.stateTime > 1.0) {
+    const ceil = this.cruiseAlt(this.root.position.x, this.root.position.z, this.alt + 1);
+    this.steer(tx, ceil, tz, 11, dt, 1.8);
+    if (this.lift > ceil - 1.5 && this.stateTime > 1.0) {
       this.circleA = Math.atan2(
         (this.root.position.x - c.x) * this.fwd.x + (this.root.position.z - c.z) * this.fwd.z,
         (this.root.position.x - c.x) * this.right.x + (this.root.position.z - c.z) * this.right.z,
@@ -1284,15 +1341,30 @@ export class Ptero extends Dino {
     super.onDeath(hit);
     this.sfx('raptor_die', 1, 1.5);
     this.deathTumble = (this.world.rng.chance(0.5) ? 1 : -1) * this.world.rng.range(3, 5);
+    this.deathSpin = 0; // spirals down around its roll axis instead (see updateDeath)
     this.toppleDelay = 0;
     this.toppleDur = 0.4;
+    this.roll = this.model.rotation.z;
+  }
+
+  protected override onDeathLand(): void {
+    super.onDeathLand();
+    // The glow goes out.
+    this.r.glow.material = Kit.mat(PTERO_PAL.accent2);
   }
 
   protected override updateDeath(dt: number): boolean {
+    const wasLanded = this.deathLanded;
     const done = super.updateDeath(dt);
-    // Crumple belly-down rather than rolling fully onto a side; spin while falling.
-    if (!this.deathLanded) this.model.rotation.z = this.deathTumble * this.stateTime * 0.6;
-    else this.model.rotation.z = damp(this.model.rotation.z, this.deathSide * 0.35, 6, dt);
+    // Spin while falling, then crumple belly-down (wings spread flat) rather than
+    // rolling onto a side like the walkers — the base topple's roll is overridden.
+    const rest = this.deathSide * 0.12;
+    if (!this.deathLanded) this.roll += this.deathTumble * 0.6 * dt;
+    else {
+      if (!wasLanded) this.roll = rest + angleDelta(rest, this.roll);
+      this.roll = damp(this.roll, rest, 7, dt);
+    }
+    this.model.rotation.z = this.roll;
     return done;
   }
 
@@ -1339,11 +1411,12 @@ export class Ptero extends Dino {
       case 'dying':
         rate = this.deathLanded ? 0 : 6;
         amp = this.deathLanded ? 0 : 0.8;
-        foldT = this.deathLanded ? 0.9 : 0.4;
+        foldT = this.deathLanded ? 1 : 0.4;
         jawT = 0.5;
         break;
     }
     this.flapAmt = damp(this.flapAmt, amp, 6, dt);
+    this.wingFlat = damp(this.wingFlat, st === 'dying' && this.deathLanded ? 1 : 0, 6, dt);
     this.sweep = damp(this.sweep, sweepT, 6, dt);
     this.fold = damp(this.fold, foldT, 6, dt);
     this.jawOpen = damp(this.jawOpen, jawT, 12, dt);
@@ -1362,7 +1435,9 @@ export class Ptero extends Dino {
       const side = i === 0 ? 1 : -1;
       const sh = r.shoulders[i];
       const wr = r.wrists[i];
-      sh.rotation.z = side * (0.1 + this.flapAmt * stroke * 0.75 - this.fold * 0.2);
+      // Landed corpse: wings level with the ground (cancel the body roll) and drooping onto it.
+      const flat = (-this.roll - side * 0.12) * this.wingFlat;
+      sh.rotation.z = side * (0.1 + this.flapAmt * stroke * 0.75 - this.fold * 0.2) + flat;
       sh.rotation.y = side * this.sweep * 0.9;
       sh.rotation.x = this.fold * 0.2;
       wr.rotation.z = side * (this.flapAmt * Math.sin(this.wingPhase - 0.9) * 0.45 - this.fold * 0.4);
@@ -1424,6 +1499,8 @@ export class Ptero extends Dino {
 
 /** Gait phase offsets (fraction of a cycle) for FL, FR, RL, RR in a lateral-sequence walk. */
 const TRIKE_OFFS = [0.25, 0.75, 0, 0.5];
+/** Exponential decay rate of the stumbling skid after a charge is stopped. */
+const SKID_DECAY = 2.8;
 
 export class Trike extends Dino {
   private r!: TrikeRig;
@@ -1492,17 +1569,21 @@ export class Trike extends Dino {
     this.playerPos(_p);
     const dist = this.distToPlayer;
     this.backing = false;
-    if (dist > this.attackRange) {
+    // Hysteresis: moveToward() stops a hair outside attackRange (float epsilon), so
+    // comparing against the bare range would keep it "approaching" forever.
+    if (dist > this.attackRange + 0.3) {
       this.moveToward(_p, this.speed, dt, this.attackRange);
       this.separate(dt);
       return;
     }
     this.faceToward(_p, dt, 2.5);
     if (dist < this.minCharge) {
-      // Too close to build up a charge: back up like a bull.
+      // Too close to build up a charge: back up like a bull — briskly when it's in the player's face.
       _v.set(this.root.position.x - _p.x, 0, this.root.position.z - _p.z).normalize();
-      this.root.position.addScaledVector(_v, this.speed * 0.9 * dt);
-      this.moveSpeed = this.speed * 0.9;
+      const close = clamp((this.impactDist + 2.5 - dist) / 2.5, 0, 1);
+      const spd = this.speed * lerp(0.9, 2.6, close);
+      this.root.position.addScaledVector(_v, spd * dt);
+      this.moveSpeed = spd;
       this.backing = true;
       return;
     }
@@ -1567,45 +1648,84 @@ export class Trike extends Dino {
     this.world.fx.dust(_w, 2);
     this.world.audio.play('crash', { volume: 0.8, vary: 0.1 });
     this.sfx('stomp', 1, 0.7);
-    // Veer past the player and leave (no points, no longer a threat).
+    // Veer off and leave (no points, no longer a threat): away on the side of the
+    // screen it's already on, so it clears the view quickly.
     this.playerPos(_p);
     const pos = this.root.position;
-    const fx = Math.sin(this.root.rotation.y);
-    const fz = Math.cos(this.root.rotation.y);
-    const cross = fx * (_p.z - pos.z) - fz * (_p.x - pos.x);
-    this.leaveSide = cross > 0 ? -1 : 1;
+    this.camFwd(_d);
+    const lateral = (pos.x - _p.x) * -_d.z + (pos.z - _p.z) * _d.x; // + = right of the view centre
+    const away = Math.atan2(pos.x - _p.x, pos.z - _p.z);
+    // Exit heading (away ± 55°, curving out to ± 83°, see leaveUpdate): pick the sign
+    // whose sideways drift matches the side of the view the trike is on.
+    const hx = Math.sin(away + 0.95);
+    const hz = Math.cos(away + 0.95);
+    const drift = hx * -_d.z + hz * _d.x;
+    if (Math.abs(lateral) > 0.3) this.leaveSide = drift * lateral > 0 ? 1 : -1;
+    else this.leaveSide = this.world.rng.chance(0.5) ? 1 : -1;
     this.setState('leave');
     this.hostile = false;
     this.world.shootables.removeOwner(this);
   }
 
+  /** Camera forward (flattened, normalised) in this entity's frame. */
+  private camFwd(out: THREE.Vector3): THREE.Vector3 {
+    this.world.camera.getWorldDirection(out);
+    out.y = 0;
+    if (out.lengthSq() < 1e-6) out.set(0, 0, -1);
+    if (this.frame === 'rig') out.applyQuaternion(_q.copy(this.world.rig.space.quaternion).invert());
+    out.y = 0;
+    return out.normalize();
+  }
+
   private leaveUpdate(dt: number) {
     const t = this.stateTime;
+    const pos = this.root.position;
     if (this.frame === 'rig' && this.world.rig.speed > 2) {
-      // Riding alongside a vehicle: peel away to the side and drop behind.
+      // Riding alongside a vehicle: peel away to the side, and only drop behind once
+      // clear of the lens (falling back while still ahead would drag it through the camera).
       this.playerPos(_p);
-      const out = this.root.position.x >= _p.x ? 1 : -1;
-      const k = Math.min(1, t / 0.8);
-      this.root.position.x += out * 6 * k * dt;
-      this.root.position.z += 5 * k * dt;
-      this.faceToward(_w.set(this.root.position.x + out * 3, 0, this.root.position.z - 6), dt, 3);
-      if (t > 3.2 || (t > 1.5 && !this.onScreen(1.3))) this.despawn();
+      const out = pos.x >= _p.x ? 1 : -1;
+      const k = Math.min(1, t / 0.4);
+      pos.x += out * 9 * k * dt;
+      pos.z += 6 * clamp((Math.abs(pos.x - _p.x) - 3) / 3, 0, 1) * dt;
+      this.faceToward(_w.set(pos.x + out * 3, 0, pos.z - 6), dt, 4);
+      const gone = !this.onScreen(1.15) && !this.partOnScreen(this.r.tail[this.r.tail.length - 1], 1.1);
+      if (t > 4 || (t > 0.8 && gone)) this.despawn();
       return;
     }
-    // Swing the head away from the camera, then gallop off to the side.
-    this.root.rotation.y += this.leaveSide * dt * (t < 0.7 ? 2.2 : 0.5);
-    const spd = t < 0.4 ? lerp(this.chargeSpeed, 5, t / 0.4) : Math.min(10, 5 + (t - 0.4) * 4);
-    const fx = Math.sin(this.root.rotation.y);
-    const fz = Math.cos(this.root.rotation.y);
-    this.root.position.x += fx * spd * dt;
-    this.root.position.z += fz * spd * dt;
+    this.playerPos(_p);
+    let spd: number;
+    if (t < 0.45) {
+      // Rear back out of the player's face (head tossing), starting to wheel round.
+      spd = lerp(5, 0.8, t / 0.45);
+      pos.x -= Math.sin(this.root.rotation.y) * spd * dt;
+      pos.z -= Math.cos(this.root.rotation.y) * spd * dt;
+      this.root.rotation.y += this.leaveSide * dt * 0.9;
+      this.backing = true;
+    } else {
+      // Wheel away from the camera and gallop off at an angle (rump to the lens, not
+      // broadside), then curve out to the side so it actually leaves the view.
+      const away = Math.atan2(pos.x - _p.x, pos.z - _p.z);
+      const target = away + this.leaveSide * lerp(0.95, 1.45, clamp((t - 0.9) / 1.0, 0, 1));
+      this.root.rotation.y += angleDelta(this.root.rotation.y, target) * (1 - Math.exp(-3.4 * dt));
+      spd = Math.min(10, 2 + (t - 0.45) * 7);
+      pos.x += Math.sin(this.root.rotation.y) * spd * dt;
+      pos.z += Math.cos(this.root.rotation.y) * spd * dt;
+      this.backing = false;
+    }
     this.moveSpeed = spd;
     // Keep clear of the camera while turning.
-    this.playerPos(_p);
-    _v.set(this.root.position.x - _p.x, 0, this.root.position.z - _p.z);
+    _v.set(pos.x - _p.x, 0, pos.z - _p.z);
     const d = _v.length();
-    if (d < 4.5 && d > 1e-3) this.root.position.addScaledVector(_v.divideScalar(d), (4.5 - d) * Math.min(1, dt * 8));
-    if (t > 3.2 || (t > 1.5 && !this.onScreen(1.3))) this.despawn();
+    const clear = 6.2;
+    if (d < clear && d > 1e-3) pos.addScaledVector(_v.divideScalar(d), (clear - d) * Math.min(1, dt * 8));
+    // Gone once even the tail end is out of view (the head leaves first).
+    if (t > 6 || (t > 1.2 && !this.partOnScreen(this.r.tail[this.r.tail.length - 1], 1.1))) this.despawn();
+  }
+
+  private partOnScreen(o: THREE.Object3D, margin: number): boolean {
+    o.getWorldPosition(_w).project(this.world.camera);
+    return _w.z < 1 && Math.abs(_w.x) < margin && Math.abs(_w.y) < margin;
   }
 
   protected override customUpdate(dt: number): void {
@@ -1619,19 +1739,38 @@ export class Trike extends Dino {
     const wasCharging = this.state === 'charge';
     super.stagger();
     if (this.state !== 'stagger') return;
-    this.skid = wasCharging ? this.chargeSpeed : 0;
+    // Skid out of the charge, but never into the lens: the skid decays as exp(-2.8 t),
+    // so a start speed of room * 2.8 covers at most `room` metres.
+    this.skid = wasCharging ? Math.min(this.chargeSpeed, this.skidRoom() * SKID_DECAY) : 0;
     this.chargeDmg = 0;
     this.cooldown = 1.2;
     this.sfx('dino_roar', 0.8, 1.3);
   }
 
+  /** Metres the root may still travel toward the player before the head would crowd the camera. */
+  private skidRoom(): number {
+    this.playerPos(_p);
+    const d = Math.hypot(_p.x - this.root.position.x, _p.z - this.root.position.z);
+    return Math.max(0, d - (this.impactDist + 0.6));
+  }
+
+  override die(hit: ShotHit | null): void {
+    // Veering off after ramming the player: not a target any more (explosions included).
+    if (this.state === 'leave') return;
+    super.die(hit);
+  }
+
   override update(dt: number): void {
     if (this.state === 'stagger' && this.skid > 0.1 && dt > 0) {
-      // Stumbling skid out of a charge.
-      this.root.position.x += Math.sin(this.root.rotation.y) * this.skid * dt;
-      this.root.position.z += Math.cos(this.root.rotation.y) * this.skid * dt;
-      this.skid *= Math.exp(-2.8 * dt);
-      this.moveSpeed = this.skid;
+      // Stumbling skid out of a charge (clamped so it stops short of the camera).
+      const step = Math.min(this.skid * dt, this.skidRoom());
+      if (step <= 1e-4) this.skid = 0;
+      else {
+        this.root.position.x += Math.sin(this.root.rotation.y) * step;
+        this.root.position.z += Math.cos(this.root.rotation.y) * step;
+        this.skid *= Math.exp(-SKID_DECAY * dt);
+        this.moveSpeed = step / dt;
+      }
     }
     super.update(dt);
   }
@@ -1736,7 +1875,12 @@ export class Trike extends Dino {
     this.lookYaw = damp(this.lookYaw, dying ? 0 : clamp(yawTo, -0.6, 0.6), 3, dt);
     r.neck.rotation.y = this.lookYaw * 0.5;
     r.neck.rotation.x = 0.12 + this.headDown * 0.18 + Math.sin(ph * 2) * 0.04 * g - this.flinch * 0.1;
-    const toss = st === 'stagger' ? Math.sin(t * 9) * 0.25 * (1 - t / this.staggerTime) : 0;
+    const toss =
+      st === 'stagger'
+        ? Math.sin(t * 9) * 0.25 * (1 - t / this.staggerTime)
+        : st === 'leave' && t < 0.8
+          ? Math.sin(t * 11) * 0.3 * (1 - t / 0.8)
+          : 0;
     r.head.rotation.x = 0.12 + this.headDown * 0.25 + (dying ? -0.3 * this.kneel : 0) - this.flinch * 0.1;
     r.head.rotation.z = toss + (st === 'windup' ? Math.sin(t * 7) * 0.05 : 0);
     r.head.rotation.y = this.lookYaw * 0.3;

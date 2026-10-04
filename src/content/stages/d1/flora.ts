@@ -268,10 +268,11 @@ export class Flora {
   }
 
   /** Flat ground-cover patch (moss, leaf litter) to break up the floor. */
+  /** Flat ground-colour patch, sunk just below the road/verge ribbons (top at y ≈ -0.03). */
   patch(rng: Rng): THREE.Group {
     const g = new THREE.Group();
     const s = rng.range(1.5, 4);
-    Kit.add(g, Kit.cyl(1, 1, 0.04, 7), Kit.mat(rng.pick([COL.groundDark, COL.groundLight, COL.litter])), 0, 0.03, 0, 0, rng.next() * 6, 0, s, 1, s * rng.range(0.5, 1));
+    Kit.add(g, Kit.cyl(1, 1, 0.04, 7), Kit.mat(rng.pick([COL.groundDark, COL.groundLight, COL.litter])), 0, -0.05, 0, 0, rng.next() * 6, 0, s, 1, s * rng.range(0.5, 1));
     return g;
   }
 }

@@ -42,7 +42,7 @@ const beats: Beat[] = [
     kind: 'move',
     label: 'leaving the city',
     to: D.PILEUP_STOP,
-    speed: 12,
+    speed: 11,
     onStart: (w) => {
       w.hud.prompt('HOLD TO FIRE!');
       w.later(2.5, () => w.hud.prompt(null));
@@ -52,25 +52,25 @@ const beats: Beat[] = [
       {
         start: { atD: 14 },
         spawns: [
-          { type: 'runner', pos: [-6.5, 0, 13], entry: 'leap', opts: { variant: 'civilian' } },
-          { type: 'runner', pos: [6.5, 0, 15], entry: 'leap', t: 0.7, opts: { variant: 'office' } },
+          { type: 'truck_runner', pos: [-6.5, 0, 13], entry: 'leap', opts: { variant: 'civilian' } },
+          { type: 'truck_runner', pos: [6.5, 0, 15], entry: 'leap', t: 0.7, opts: { variant: 'office' } },
         ],
       },
       {
         start: { atD: 50 },
         spawns: [
-          { type: 'walker', frame: 'world', pos: [-4, 0, 34], opts: { variant: 'civilian' } },
-          { type: 'walker', frame: 'world', pos: [4.2, 0, 38], opts: { variant: 'cop' } },
-          { type: 'walker', frame: 'world', pos: [-11.5, 0, 36], opts: { variant: 'office' } },
-          { type: 'runner', pos: [-4, 0, -7], entry: 'leap', t: 1.2, opts: { variant: 'biker' } },
+          { type: 'roadside_walker', frame: 'world', pos: [-2.6, 0, 25], opts: { variant: 'civilian' } },
+          { type: 'roadside_walker', frame: 'world', pos: [3.2, 0, 27], opts: { variant: 'cop' } },
+          { type: 'roadside_walker', frame: 'world', pos: [-5.2, 0, 29], opts: { variant: 'office' } },
+          { type: 'truck_runner', pos: [-4, 0, -7], entry: 'leap', t: 1.2, opts: { variant: 'biker' } },
         ],
       },
       {
         start: { atD: 92 },
         spawns: [
-          { type: 'runner', pos: [4, 0, -8], entry: 'leap', opts: { variant: 'worker' } },
-          { type: 'runner', pos: [-7, 0, 12], entry: 'leap', t: 0.5 },
-          { type: 'walker', frame: 'world', pos: [3.8, 0, 30], t: 0.2, opts: { variant: 'nurse' } },
+          { type: 'truck_runner', pos: [4, 0, -8], entry: 'leap', opts: { variant: 'worker' } },
+          { type: 'truck_runner', pos: [-7, 0, 12], entry: 'leap', t: 0.5 },
+          { type: 'roadside_walker', frame: 'world', pos: [2.6, 0, 25], t: 0.2, opts: { variant: 'nurse' } },
         ],
       },
     ],
@@ -87,7 +87,7 @@ const beats: Beat[] = [
         spawns: [
           { type: 'walker', pos: [-2.8, 0, 10.5], opts: { variant: 'cop' } },
           { type: 'walker', pos: [2.2, 0, 12.5], t: 0.5, opts: { variant: 'civilian' } },
-          { type: 'walker', pos: [-0.8, 0, 15.5], t: 0.9, opts: { variant: 'office' } },
+          { type: 'walker', pos: [-3.0, 0, 17], t: 0.9, opts: { variant: 'office' } },
           { type: 'crawler', pos: [1.6, 0, 8.5], entry: 'rise', t: 1.6 },
         ],
       },
@@ -97,16 +97,16 @@ const beats: Beat[] = [
           { type: 'walker', pos: [-9.5, 0, 9], opts: { variant: 'worker' } },
           { type: 'walker', pos: [-11.5, 0, 12], t: 0.4, opts: { variant: 'nurse' } },
           { type: 'crawler', pos: [-3.6, 0, 8], entry: 'rise', t: 1.0 },
-          { type: 'runner', pos: [4.5, 0, -5], entry: 'leap', t: 1.8, opts: { variant: 'civilian' } },
+          { type: 'truck_runner', pos: [4.5, 0, -5], entry: 'leap', t: 1.8, opts: { variant: 'civilian' } },
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'bloater', pos: [0.5, 0, 14.5] },
-          { type: 'walker', pos: [-2.4, 0, 15.5], t: 0.3, opts: { variant: 'patient' } },
-          { type: 'walker', pos: [2.8, 0, 16], t: 0.6, opts: { variant: 'doctor' } },
-          { type: 'runner', pos: [-7.5, 0, 12], entry: 'leap', t: 1.4 },
+          { type: 'bloater', pos: [3.7, 0, 17.5] },
+          { type: 'walker', pos: [-3.4, 0, 16], t: 0.3, opts: { variant: 'patient' } },
+          { type: 'walker', pos: [4.4, 0, 15.5], t: 0.6, opts: { variant: 'doctor' } },
+          { type: 'truck_runner', pos: [-7.5, 0, 12], entry: 'leap', t: 1.4 },
         ],
       },
     ],
@@ -122,13 +122,13 @@ const beats: Beat[] = [
       {
         start: { atD: 178 },
         spawns: [
-          { type: 'runner', pos: [-5, 0, -6], entry: 'leap', opts: { variant: 'biker' } },
-          { type: 'runner', pos: [5.5, 0, -7], entry: 'leap', t: 0.7 },
+          { type: 'truck_runner', pos: [-5, 0, -6], entry: 'leap', opts: { variant: 'biker' } },
+          { type: 'truck_runner', pos: [5.5, 0, -7], entry: 'leap', t: 0.7 },
         ],
       },
       {
         start: { atD: 200 },
-        spawns: [{ type: 'runner', pos: [6.8, 0, 12], entry: 'leap', opts: { variant: 'worker' } }],
+        spawns: [{ type: 'truck_runner', pos: [6.8, 0, 12], entry: 'leap', opts: { variant: 'worker' } }],
       },
     ],
   },
@@ -151,8 +151,9 @@ const beats: Beat[] = [
   },
   {
     kind: 'hold',
-    label: 'under the overpass',
-    look: { at: [0, 4.4, 16], blend: 0.8 },
+    label: 'ambush from the deck',
+    // Looking up at the deck edge (pitch ≈ 5°): walkers drop off it and a spitter holds the far end.
+    look: { at: [0.5, 3.4, 17], blend: 0.8 },
     pickups: [{ kind: 'health', pos: [-5.5, 8.8, 19.2], t: 1 }],
     waves: [
       {
@@ -160,16 +161,24 @@ const beats: Beat[] = [
           { type: 'walker', pos: [-1.5, 7.3, 19.2], entry: 'drop', opts: { variant: 'worker' } },
           { type: 'walker', pos: [3.2, 7.3, 19.4], entry: 'drop', t: 0.9, opts: { variant: 'civilian' } },
           { type: 'deck_spitter', pos: [12, 7.3, 19.6], t: 1.6 },
+          { type: 'walker', pos: [-5.5, 7.3, 19.3], entry: 'drop', t: 3.2, opts: { variant: 'soldier' } },
         ],
       },
+    ],
+  },
+  {
+    kind: 'hold',
+    label: 'under the overpass',
+    // Back down to the road (camera level) before anything can reach the truck.
+    look: { at: [0, 1.5, 14], blend: 0.9 },
+    waves: [
       {
-        start: { remaining: 1 },
         spawns: [
           { type: 'walker', pos: [0, 0, 30], opts: { variant: 'office' } },
           { type: 'walker', pos: [-3, 0, 32], t: 0.4, opts: { variant: 'patient' } },
           { type: 'walker', pos: [3, 0, 33], t: 0.8, opts: { variant: 'cop' } },
-          { type: 'runner', pos: [-7, 0, 6], entry: 'leap', t: 1.6 },
-          { type: 'walker', pos: [-5.5, 7.3, 19.3], entry: 'drop', t: 2.2, opts: { variant: 'soldier' } },
+          { type: 'truck_runner', pos: [-7, 0, 9], entry: 'leap', t: 1.6 },
+          { type: 'walker', pos: [-4.5, 7.3, 19.3], entry: 'drop', t: 2.4, opts: { variant: 'soldier' } },
         ],
       },
     ],
@@ -185,31 +194,31 @@ const beats: Beat[] = [
       {
         start: { atD: D.OVERPASS + 20 },
         spawns: [
-          { type: 'runner', pos: [-4, 0, -6], entry: 'leap', opts: { variant: 'nurse' } },
-          { type: 'runner', pos: [4.5, 0, -8], entry: 'leap', t: 0.6 },
+          { type: 'truck_runner', pos: [-4, 0, -6], entry: 'leap', opts: { variant: 'nurse' } },
+          { type: 'truck_runner', pos: [4.5, 0, -8], entry: 'leap', t: 0.6 },
         ],
       },
       {
         start: { atD: 322 },
         spawns: [
-          { type: 'walker', frame: 'world', pos: [-4, 0, 36], opts: { variant: 'doctor' } },
-          { type: 'walker', frame: 'world', pos: [4, 0, 39], opts: { variant: 'worker' } },
-          { type: 'walker', frame: 'world', pos: [7.5, 0, 42], opts: { variant: 'civilian' } },
+          { type: 'roadside_walker', frame: 'world', pos: [-3, 0, 26], opts: { variant: 'doctor' } },
+          { type: 'roadside_walker', frame: 'world', pos: [2.8, 0, 28], opts: { variant: 'worker' } },
+          { type: 'roadside_walker', frame: 'world', pos: [5.6, 0, 31], opts: { variant: 'civilian' } },
         ],
       },
       {
         start: { atD: 352 },
         spawns: [
-          { type: 'runner', pos: [6.5, 0, 10], entry: 'leap' },
-          { type: 'runner', pos: [-6.5, 0, 12], entry: 'leap', t: 0.5, opts: { variant: 'biker' } },
-          { type: 'runner', pos: [0.5, 0, -8], entry: 'leap', t: 1.0 },
+          { type: 'truck_runner', pos: [6.5, 0, 10], entry: 'leap' },
+          { type: 'truck_runner', pos: [-6.5, 0, 12], entry: 'leap', t: 0.5, opts: { variant: 'biker' } },
+          { type: 'truck_runner', pos: [0.5, 0, -8], entry: 'leap', t: 1.0 },
         ],
       },
       {
         start: { atD: 384 },
         spawns: [
-          { type: 'crawler', frame: 'world', pos: [-4, 0, 26], entry: 'rise' },
-          { type: 'crawler', frame: 'world', pos: [4.2, 0, 30], entry: 'rise', t: 0.4 },
+          { type: 'roadside_crawler', frame: 'world', pos: [-3, 0, 36], entry: 'rise' },
+          { type: 'roadside_crawler', frame: 'world', pos: [3.2, 0, 40], entry: 'rise', t: 0.3 },
         ],
       },
     ],
@@ -243,7 +252,7 @@ const beats: Beat[] = [
         ],
       },
       {
-        start: { remaining: 2, after: 9 },
+        start: { remaining: 1 },
         spawns: [
           { type: 'brute', pos: [3.8, 0, 22] },
           { type: 'walker', pos: [-11, 0, 15], t: 0.5, opts: { variant: 'nurse' } },
@@ -254,8 +263,8 @@ const beats: Beat[] = [
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'runner', pos: [7, 0, 9], entry: 'leap' },
-          { type: 'runner', pos: [-8, 0, 8], entry: 'leap', t: 0.6, opts: { variant: 'biker' } },
+          { type: 'truck_runner', pos: [7, 0, 9], entry: 'leap' },
+          { type: 'truck_runner', pos: [-8, 0, 8], entry: 'leap', t: 0.6, opts: { variant: 'biker' } },
           { type: 'spitter', pos: [-14, 0, 21], t: 1.0 },
           { type: 'bloater', pos: [3.8, 0, 21], t: 1.4 },
         ],
@@ -279,8 +288,8 @@ const beats: Beat[] = [
       {
         start: { atD: 470 },
         spawns: [
-          { type: 'runner', pos: [7, 0, 10], entry: 'leap', opts: { variant: 'worker' } },
-          { type: 'runner', pos: [-7, 0, 12], entry: 'leap', t: 0.5 },
+          { type: 'truck_runner', pos: [7, 0, 10], entry: 'leap', opts: { variant: 'worker' } },
+          { type: 'truck_runner', pos: [-7, 0, 12], entry: 'leap', t: 0.5 },
         ],
       },
       {
@@ -293,8 +302,8 @@ const beats: Beat[] = [
       {
         start: { atD: D.TUNNEL_FROM + 30 },
         spawns: [
-          { type: 'runner', pos: [-3.5, 0, -7], entry: 'leap', opts: { variant: 'patient' } },
-          { type: 'runner', pos: [3.5, 0, -9], entry: 'leap', t: 0.6 },
+          { type: 'truck_runner', pos: [-3.5, 0, -7], entry: 'leap', opts: { variant: 'patient' } },
+          { type: 'truck_runner', pos: [3.5, 0, -9], entry: 'leap', t: 0.6 },
           { type: 'crawler', pos: [0.8, 6, 10], entry: 'drop', t: 1.4 },
         ],
       },
@@ -329,8 +338,8 @@ const beats: Beat[] = [
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'runner', pos: [-2, 0, -9] },
-          { type: 'runner', pos: [3, 0, -11], t: 0.5 },
+          { type: 'truck_runner', pos: [-2, 0, -9] },
+          { type: 'truck_runner', pos: [3, 0, -11], t: 0.5 },
           { type: 'bloater', pos: [0.5, 0, 18], t: 1.0 },
           { type: 'walker', pos: [-2.5, 0, 20], t: 1.4, opts: { variant: 'doctor' } },
           { type: 'walker', pos: [3.2, 0, 21], t: 1.6, opts: { variant: 'cop' } },
@@ -358,17 +367,17 @@ const beats: Beat[] = [
       {
         start: { atD: D.STALL + 22 },
         spawns: [
-          { type: 'runner', pos: [-4, 0, -6], entry: 'leap', opts: { variant: 'office' } },
-          { type: 'runner', pos: [4, 0, -7.5], entry: 'leap', t: 0.6 },
+          { type: 'truck_runner', pos: [-4, 0, -6], entry: 'leap', opts: { variant: 'office' } },
+          { type: 'truck_runner', pos: [4, 0, -7.5], entry: 'leap', t: 0.6 },
         ],
       },
       {
         start: { atD: D.TUNNEL_TO + 14 },
         spawns: [
-          { type: 'walker', frame: 'world', pos: [-4, 0, 34], opts: { variant: 'soldier' } },
-          { type: 'walker', frame: 'world', pos: [4, 0, 37], opts: { variant: 'soldier' } },
-          { type: 'runner', pos: [6.5, 0, 11], entry: 'leap', t: 1.0 },
-          { type: 'runner', pos: [-6, 0, 12], entry: 'leap', t: 1.4 },
+          { type: 'roadside_walker', frame: 'world', pos: [-3, 0, 27], opts: { variant: 'soldier' } },
+          { type: 'roadside_walker', frame: 'world', pos: [3.4, 0, 30], opts: { variant: 'soldier' } },
+          { type: 'truck_runner', pos: [6.5, 0, 11], entry: 'leap', t: 1.0 },
+          { type: 'truck_runner', pos: [-6, 0, 12], entry: 'leap', t: 1.4 },
         ],
       },
     ],
@@ -404,11 +413,10 @@ const beats: Beat[] = [
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'runner', pos: [-7, 0, 10], entry: 'leap', opts: { variant: 'soldier' } },
-          { type: 'runner', pos: [7.5, 0, 12], entry: 'leap', t: 0.5, opts: { variant: 'soldier' } },
+          { type: 'truck_runner', pos: [-7, 0, 10], entry: 'leap', opts: { variant: 'soldier' } },
+          { type: 'truck_runner', pos: [7.5, 0, 12], entry: 'leap', t: 0.5, opts: { variant: 'soldier' } },
           { type: 'bloater', pos: [-1.5, 0, 16], t: 0.9 },
-          { type: 'walker', pos: [2, 0, 18], t: 1.3, opts: { variant: 'soldier' } },
-          { type: 'walker', pos: [-0.5, 0, 20], t: 1.6, opts: { variant: 'soldier' } },
+          { type: 'walker', pos: [1, 0, 19], t: 1.3, opts: { variant: 'soldier' } },
         ],
       },
     ],
@@ -437,8 +445,9 @@ const beats: Beat[] = [
     label: 'THE BEHEMOTH',
     boss: 'behemoth',
     pos: [9, 0, -27],
+    // (The Behemoth paces the truck itself from here on — see Behemoth.pace.)
     moveTo: D.BOSS_END,
-    speed: 5.5,
+    speed: 4,
     look: { yaw: 180, pitch: 7 },
     pickups: [
       { kind: 'health', pos: [-2.5, 2.6, -12], t: 24 },
@@ -449,8 +458,8 @@ const beats: Beat[] = [
       {
         start: { after: 18 },
         spawns: [
-          { type: 'runner', pos: [-5, 0, -10], entry: 'leap', opts: { variant: 'worker' } },
-          { type: 'runner', pos: [5, 0, -12], entry: 'leap', t: 0.6, opts: { variant: 'soldier' } },
+          { type: 'tail_runner', pos: [-5, 0, -11], entry: 'leap', opts: { variant: 'worker' } },
+          { type: 'tail_runner', pos: [5, 0, -13], entry: 'leap', t: 0.6, opts: { variant: 'soldier' } },
         ],
       },
     ],

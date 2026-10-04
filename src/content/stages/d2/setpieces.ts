@@ -151,7 +151,10 @@ export interface GlassOpts {
  */
 export class GlassWall {
   readonly root = new THREE.Group();
-  private pane: THREE.Mesh;
+  /** The glass itself — stops bullets while intact (see LabScene occluders). */
+  readonly pane: THREE.Mesh;
+  /** Called once when the pane shatters (the scene refreshes its occluder list). */
+  onBreak: (() => void) | null = null;
   private cracks = new THREE.Group();
   private teeth = new THREE.Group();
   broken = false;
@@ -164,6 +167,7 @@ export class GlassWall {
     const { w, h } = o;
     this.pane = Kit.add(this.root, Kit.box(w, h, 0.08), glassMat, 0, h / 2, 0);
     this.pane.renderOrder = 2;
+    this.pane.userData.surface = 'metal';
     // Steel frame.
     const steel = mat(0x5a6068, 'metal', 1.5);
     bakeInto(this.root, (g) => {
@@ -247,6 +251,7 @@ export class GlassWall {
   shatter(world: World, from?: THREE.Vector3) {
     if (this.broken) return;
     this.broken = true;
+    this.onBreak?.();
     this.pane.visible = false;
     this.cracks.visible = false;
     this.teeth.visible = true;
@@ -608,16 +613,29 @@ export class SkeletonDisplay {
     if (this.crushed) return;
     this.crushed = true;
     const pts = [this.skull.getWorldPosition(new THREE.Vector3()), this.root.localToWorld(new THREE.Vector3(0, 0, 0)), this.root.localToWorld(new THREE.Vector3(-5, 0, 2))];
+    let n = 0;
     for (const e of [...world.enemies()]) {
       if (e.state === 'dying' || e.isBoss) continue;
       e.root.getWorldPosition(_v);
       for (const p of pts) {
-        if (Math.hypot(_v.x - p.x, _v.z - p.z) < 3.4) {
+        if (Math.hypot(_v.x - p.x, _v.z - p.z) < 3.6) {
           e.die(null);
-          world.fx.blood(_v.setY(0.8), null, { amount: 1.5 });
+          world.fx.blood(_v.setY(0.8), null, { amount: 2 });
+          world.fx.gibs(_v, 0x7a0a0a, 6, 0.1);
+          n++;
           break;
         }
       }
+    }
+    if (n > 0) {
+      const sp = _w.copy(pts[0]).setY(1.2).project(world.camera);
+      if (sp.z < 1) {
+        const x = (sp.x * 0.5 + 0.5) * world.viewport.width;
+        const y = (-sp.y * 0.5 + 0.5) * world.viewport.height;
+        world.hud.popup(n > 1 ? `CRUSHED x${n}!` : 'CRUSHED!', x, y - 50, 'combo');
+      }
+      world.score.add(500 * n);
+      world.audio.play('bite', { volume: 0.8, pitch: 0.5 });
     }
   }
 

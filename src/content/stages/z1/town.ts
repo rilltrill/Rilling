@@ -514,9 +514,10 @@ export function buildTown(): Town {
     zones.A.add(down);
     // ROAD CLOSED board.
     const sign = new THREE.Group();
-    Kit.add(sign, Kit.box(2.0, 0.55, 0.05), M.white, 0, 0, 0);
-    Kit.add(sign, Kit.box(2.06, 0.6, 0.03), M.orange, 0, 0, -0.03);
-    const t = paintedText('ROAD CLOSED', 0x141414, 0.3);
+    Kit.add(sign, Kit.box(2.5, 0.55, 0.05), M.white, 0, 0, 0);
+    Kit.add(sign, Kit.box(2.56, 0.6, 0.03), M.orange, 0, 0, -0.03);
+    // 11 letters at 0.22 m ≈ 2.2 m wide: fits the 2.5 m board with a margin.
+    const t = paintedText('ROAD CLOSED', 0x141414, 0.22);
     t.position.z = 0.04;
     sign.add(t);
     put(sign, -2.35, z - 0.25, -0.05, 1.45);
@@ -700,13 +701,15 @@ export function buildTown(): Town {
     const can = new THREE.Group();
     Kit.add(can, Kit.box(12, 0.75, 18), Kit.mat(0xdedad0), 0, 0, 0);
     Kit.add(can, Kit.box(12.05, 0.32, 18.05), Kit.mat(0xa82a22), 0, -0.05, 0);
+    // Under-canopy lights: baked into their own mesh so they can go dark after the blast.
     const under = Kit.glow(0xf2f6ff, 1.25);
+    const ug = new THREE.Group();
     for (const x of [-3.5, 0, 3.5]) {
-      for (const z of [-6, -2, 2, 6]) {
-        const p = Kit.add(can, Kit.box(1.4, 0.05, 0.7), under, x, -0.4, z);
-        gas.underGlow.push(p);
-      }
+      for (const z of [-6, -2, 2, 6]) Kit.add(ug, Kit.box(1.4, 0.05, 0.7), under, x, -0.4, z);
     }
+    mergedGroup(ug);
+    can.add(ug);
+    gas.underGlow.push(ug);
     // GAS letters on the fascia (facing the street, +X).
     const t = addText(can, 'GAS', Kit.glow(0xffffff, 1.4), { size: 0.5, depth: 0.05 });
     t.rotation.y = Math.PI / 2;
@@ -714,14 +717,25 @@ export function buildTown(): Town {
     can.position.set(6, 0, 0);
     cg.add(can);
     mergedGroup(can);
-    // The merged under-glow meshes were removed by the merge: re-collect by material.
-    gas.underGlow.length = 0;
-    can.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).material === under) gas.underGlow.push(o);
-    });
     addDyn(cg, 'D');
-    // Pillars (static).
-    for (const x of [-79, -73]) for (const z of [cz - 6, cz + 6]) boxAt(0.45, 5.2, 0.45, M.white, x, 2.6, z, 0, 'D');
+    // Pillars: animated so they crumple under the buckling canopy instead of poking through it.
+    {
+      const pg = new THREE.Group();
+      pg.name = 'gasPillars';
+      for (const x of [-79, -73]) {
+        for (const z of [cz - 6, cz + 6]) {
+          const m = Kit.mesh(Kit.box(0.45, 5.2, 0.45), M.white);
+          m.position.set(x, 2.6, z);
+          pg.add(m);
+          // Marker just under the canopy roof above the pillar (canopy-local).
+          const marker = new THREE.Object3D();
+          marker.position.set(x - (pivot.x + 6), -0.1, z - cz);
+          can.add(marker);
+          gas.pillars.push({ mesh: m, marker, height: 5.2, tilt: (x > -76 ? -0.12 : 0.05) * (z > cz ? 1 : -0.7) });
+        }
+      }
+      addDyn(pg, 'D');
+    }
     // Pump islands (pumps themselves are destructibles).
     for (const x of [-79, -73]) boxAt(1.4, 0.22, 7, M.concrete, x, 0.11, cz, 0, 'D');
     // Store.
@@ -784,7 +798,24 @@ export function buildTown(): Town {
   // ─── Overturned school bus ───────────────────────────────────────────────
   let bus: BusWreck;
   {
+    // Bus axes in the world: long axis (front) and the direction its underside faces.
+    const yaw = Math.PI / 2 + BUS_YAW;
+    const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const roofDir = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     const body = schoolBus();
+    // It lies with its ROOF toward the street: big yellow face with roof lettering
+    // and hatches (the dark underside would read as a black slab at night).
+    const roofText = paintedText('SCHOOL BUS', 0x141414, 0.55);
+    // Text X → bus +Z (reads left→right from the street), text up → bus +X (world up), normal → bus +Y.
+    roofText.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)));
+    roofText.position.set(0.05, 3.02, -0.7);
+    body.add(roofText);
+    for (const z of [2.75, -4.2]) {
+      Kit.add(body, Kit.box(0.95, 0.07, 0.95), Kit.mat(0xb8b4a8), 0, 3.03, z);
+      Kit.add(body, Kit.box(0.75, 0.08, 0.75), Kit.mat(0x8a8678), 0, 3.04, z);
+    }
+    Kit.add(body, Kit.box(2.42, 0.04, 0.12), Kit.mat(0x18181a), 0, 3.01, 4.0);
+    Kit.add(body, Kit.box(2.42, 0.04, 0.12), Kit.mat(0x18181a), 0, 3.01, -5.2);
     mergedGroup(body);
     const door = new THREE.Group();
     Kit.add(door, Kit.box(1.9, 1.9, 0.12), Kit.mat(0xd29a16), 0, 0, 0);
@@ -797,16 +828,24 @@ export function buildTown(): Town {
     door.rotation.y = Math.PI;
     const holder = new THREE.Group();
     holder.add(body, door);
-    // Lie it on its right side, underside facing the street (+Z), front into the shop.
-    holder.rotation.set(0, Math.PI / 2 + BUS_YAW, -Math.PI / 2);
-    holder.position.set(BUS_POS[0], 1.25, BUS_POS[2]);
+    // Warning lights still flashing at both ends of the roof (alternating pairs).
+    for (let k = 0; k < 2; k++) {
+      const lg = new THREE.Group();
+      for (const z of [4.05, -5.15]) Kit.add(lg, Kit.box(0.34, 0.1, 0.22), Kit.glow(k ? 0xffa018 : 0xff3018, 1.5), k ? 0.75 : -0.75, 3.05, z);
+      mergedGroup(lg);
+      holder.add(lg);
+      anim.blinkers.push({ obj: lg, period: 0.9, duty: 0.5, phase: k * 0.45 });
+    }
+    // Lie it on its side, roof toward the street (+Z), front into the shop. Lying
+    // on this side the body extends from the holder toward the camera, so the
+    // holder sits 3 m back to keep the footprint (BUS_POS … BUS_POS + 3·roofDir).
+    holder.rotation.set(0, yaw, Math.PI / 2);
+    holder.position.set(BUS_POS[0], 1.25, BUS_POS[2]).addScaledVector(roofDir, 3.0);
     const engineFire = new FirePlume({ scale: 0.55, embers: 14, smoke: 10, spreadX: 0.5, spreadZ: 0.5, seed: 21 });
     bus = new BusWreck(new THREE.Group(), door, engineFire);
     bus.group.add(holder);
     addDyn(bus.group, 'D');
     // Engine fire at the crushed front end (world).
-    const fwd = new THREE.Vector3(Math.sin(Math.PI / 2 + BUS_YAW), 0, Math.cos(Math.PI / 2 + BUS_YAW));
-    const roofDir = new THREE.Vector3(Math.cos(Math.PI / 2 + BUS_YAW), 0, -Math.sin(Math.PI / 2 + BUS_YAW));
     const fp = new THREE.Vector3(BUS_POS[0], 0.6, BUS_POS[2]).addScaledVector(fwd, 5.2).addScaledVector(roofDir, 1.4);
     engineFire.group.position.copy(fp);
     addDyn(engineFire.group);

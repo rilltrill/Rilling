@@ -97,6 +97,11 @@ const STRIPE_RAGE = new THREE.Color(0xc070ff);
 const EYE = new THREE.Color(0x8af0ff);
 const EYE_RAGE = new THREE.Color(0xff4060);
 
+/** Dash / ring targets keep the boss's hips this far from pillar centres (body + tail clearance). */
+const PILLAR_CLEAR = 3.5;
+/** Where a pounce lands, in front of the camera (keeps head + ring in the middle of the view). */
+const POUNCE_STOP = 3.7;
+
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
 const _p = new THREE.Vector3();
@@ -186,6 +191,14 @@ export class SpecimenX extends Boss {
   private crashed = false;
   private deathYaw = 0;
   private deathReach = 1.6;
+  /** Seconds of the rearing scream before the fall / final leap. */
+  private deathRear = 0.8;
+  /** stateTime when the body hit the floor (collapse) — -1 until then. */
+  private fellAt = -1;
+  private deathSide = 1;
+  private deathRoll0 = 0;
+  private deathLift = 0;
+  private downAlready = false;
 
   constructor(world: World, spawn: EnemySpawn) {
     super(world, spawn);
@@ -194,7 +207,7 @@ export class SpecimenX extends Boss {
   protected override configure(): void {
     this.name = 'specimen_x';
     // `opts.hp` lets a stage (or a quick test) tune the fight length.
-    this.maxHp = typeof this.spawn.opts.hp === 'number' ? this.spawn.opts.hp : 205;
+    this.maxHp = typeof this.spawn.opts.hp === 'number' ? this.spawn.opts.hp : 170;
     this.speed = 9;
     this.points = 25000;
     this.sfxHit = 'hit_flesh';
@@ -417,8 +430,9 @@ export class SpecimenX extends Boss {
     this.flinchSide = d >= 0 ? 1 : -1;
     this.flinch = Math.min(1.2, this.flinch + 0.25 + amount * 0.08);
     if (this.winding) {
-      // Every solid hit counts: shooting the ring (even on the tail) can stop the attack.
-      this.interruptDmg += Math.max(amount, 1);
+      // Every solid hit counts: shooting the ring (even on the tail) can stop the
+      // attack; glowing weak points count extra.
+      this.interruptDmg += hit.part === 'weak' ? amount * 1.5 : Math.max(amount, 1);
       if (this.interruptDmg >= this.interruptThreshold()) this.interrupt();
     }
     // Being shot while faded gives away its position.
@@ -432,8 +446,8 @@ export class SpecimenX extends Boss {
   }
 
   private interruptThreshold() {
-    if (this.state === 'tailWind') return [4, 4.5, 5][this.phase] ?? 5;
-    return [5, 6, 7][this.phase] ?? 7;
+    if (this.state === 'tailWind') return [3.5, 4, 4.5][this.phase] ?? 4.5;
+    return [4, 5, 5][this.phase] ?? 5;
   }
 
   private interrupt() {
@@ -486,9 +500,17 @@ export class SpecimenX extends Boss {
     return d - step;
   }
 
+  /** Keep a target inside the arena and clear of the pillars (pushed out along z). */
   private clampArena(v: THREE.Vector3) {
     v.x = clamp(v.x, HALL.x0, HALL.x1);
     v.z = clamp(v.z, HALL.zFar, HALL.zNear);
+    for (const c of HALL.pillars) {
+      const dx = v.x - c.x;
+      const dz = v.z - c.z;
+      if (dx * dx + dz * dz >= PILLAR_CLEAR * PILLAR_CLEAR) continue;
+      const off = Math.sqrt(Math.max(0, PILLAR_CLEAR * PILLAR_CLEAR - dx * dx));
+      v.z = clamp(dz >= 0 ? c.z + off : c.z - off, HALL.zFar, HALL.zNear);
+    }
     return v;
   }
 
@@ -546,12 +568,12 @@ export class SpecimenX extends Boss {
     }
   }
 
-  private updateFocus(k: number) {
+  private updateFocus(k: number, onBoss = 0.72) {
     this.r.chest.getWorldPosition(_v);
     this.r.headMesh.getWorldPosition(_w);
     _v.lerp(_w, 0.4);
-    _u.copy(HALL.center).setY(2.0).lerp(_v, 0.72);
-    _u.y = clamp(_u.y, 1.5, 2.6);
+    _u.copy(HALL.center).setY(2.0).lerp(_v, onBoss);
+    _u.y = clamp(_u.y, onBoss > 0.9 ? 0.9 : 1.5, 2.6);
     this.focus.position.lerp(_u, k);
   }
 
@@ -561,17 +583,37 @@ export class SpecimenX extends Boss {
     return n;
   }
 
+  /**
+   * Call minions out of the specimen tank through its broken panes (straight
+   * down the hall between the pillars, so they arrive in the middle of the
+   * view rather than at the screen edges).
+   */
   private summon(type: string, n: number, variant?: string) {
     const w = this.world;
+    const lab = labs(w);
+    const exits: number[] = [];
+    // Panes 1 and 2 face the open floor between the pillars (pane 0 is behind one).
+    for (const i of [1, 2]) if (lab?.panes[i]?.broken) exits.push(HALL.paneXs[i]);
+    if (!exits.length) {
+      this.breakPane(1);
+      exits.push(HALL.paneXs[1]);
+    }
     for (let i = 0; i < n; i++) {
-      const left = (this.minionsCalled + i) % 2 === 0;
-      const pos = new THREE.Vector3(left ? -5.5 : 27.5, 0, HALL.gateZ + (i % 2) * 1.2);
-      if (type === 'compy') pos.set(2 + (i % 3) * 0.8, 0, HALL.tankZ + 1.5);
+      const x = exits[(this.minionsCalled + i) % exits.length] + ((i % 3) - 1) * 1.1;
+      const pos = new THREE.Vector3(x, 0, HALL.tankZ - 1.6 - (i % 2) * 0.8);
       const e = createEnemy(type, w, { pos, frame: 'world', entry: 'leap', hpMul: 1, speedMul: 1, opts: variant ? { variant: i % 2 ? 'tan' : variant } : {} });
       w.add(e);
       this.minionsCalled++;
     }
     w.audio.play(type === 'compy' ? 'compy_chirp' : 'raptor_screech', { volume: 0.8, pitch: type === 'compy' ? 1 : 1.1 });
+  }
+
+  /** Break a tank pane (phase changes: the pack is let out). */
+  private breakPane(i: number) {
+    const pane = labs(this.world)?.panes[i];
+    if (!pane || pane.broken) return;
+    pane.shatter(this.world, _w.set(HALL.paneXs[i], 0, HALL.tankZ + 0.5));
+    this.world.audio.play('alarm', { volume: 0.4, pitch: 0.7 });
   }
 
   private chooseAttack(): XState {
@@ -638,7 +680,7 @@ export class SpecimenX extends Boss {
       this.minionT -= dt;
       if (this.minionT <= 0) {
         this.minionT = this.enraged ? 11 : 14;
-        if (this.raptorCount() < 2 && this.minionsCalled < 10) this.summon('raptor', 1, 'green');
+        if (this.raptorCount() < 2 && this.minionsCalled < 10) this.summon('raptor', 1, 'tan');
       }
     }
 
@@ -739,7 +781,7 @@ export class SpecimenX extends Boss {
       }
       case 'pounceWind': {
         if (first) {
-          const base = this.shortFuse ? [1.15, 1.0, 0.85] : [1.5, 1.3, 1.05];
+          const base = this.shortFuse ? [1.25, 1.1, 1.0] : [1.5, 1.3, 1.1];
           this.windTime = base[this.phase] ?? 1.05;
           this.shortFuse = false;
           w.audio.play('raptor_screech', { volume: 0.8, pitch: 0.75 });
@@ -747,7 +789,8 @@ export class SpecimenX extends Boss {
         this.winding = true;
         this.cloakTarget = 0;
         const total = this.windTime + this.leapTime;
-        if (!this.telegraph) this.telegraph = { progress: 0, anchor: this.r.headMesh, radius: this.telegraphRadius };
+        // Ring on the chest: it stays in the middle of the view through the whole leap.
+        if (!this.telegraph) this.telegraph = { progress: 0, anchor: this.r.chest, radius: this.telegraphRadius };
         this.telegraph.progress = clamp(t / total, 0, 1);
         this.faceYaw(toPlayer, dt, 8);
         // Creep a little closer if far away.
@@ -763,14 +806,14 @@ export class SpecimenX extends Boss {
           // Leap!
           this.pFrom.copy(p);
           _v.subVectors(p, _p).setY(0).normalize();
-          this.pTo.copy(_p).addScaledVector(_v, 2.9);
+          this.pTo.copy(_p).addScaledVector(_v, POUNCE_STOP);
           w.audio.play('raptor_screech', { volume: 1, pitch: 0.6 });
           w.audio.play('whoosh', { volume: 0.8, pitch: 0.7 });
           const prog = this.telegraph.progress;
           this.setState('pounce');
           this.entering = false;
           this.winding = true;
-          this.telegraph = { progress: prog, anchor: this.r.headMesh, radius: this.telegraphRadius };
+          this.telegraph = { progress: prog, anchor: this.r.chest, radius: this.telegraphRadius };
         }
         break;
       }
@@ -778,21 +821,23 @@ export class SpecimenX extends Boss {
         const k = clamp(t / this.leapTime, 0, 1);
         p.x = lerp(this.pFrom.x, this.pTo.x, k);
         p.z = lerp(this.pFrom.z, this.pTo.z, k);
-        this.lift = Math.sin(Math.PI * k) * 1.3 + k * 0.4;
+        this.lift = Math.sin(Math.PI * k) * 1.1 + k * 0.3;
         this.faceYaw(toPlayer, dt, 12);
         T.air = 1;
         T.jaw = 1;
         T.arm = 1;
+        // Head up at eye level (not diving under the bottom HUD): jaws at the lens.
+        T.rear = 0.45;
         const total = this.windTime + this.leapTime;
         if (this.telegraph) this.telegraph.progress = clamp((this.windTime + t) / total, 0, 1);
         if (k >= 1) {
           this.telegraph = null;
           this.winding = false;
-          w.hurtPlayer(1, this.title);
+          w.hurtPlayer(1, this.title, this);
           w.audio.play('bite', { volume: 1, pitch: 0.7 });
           w.rig.shake(0.8);
           w.hitStop(0.06);
-          if (this.phase >= 2 && this.chain === 0 && w.rng.chance(0.5)) {
+          if (this.phase >= 2 && this.chain === 0 && w.rng.chance(0.35)) {
             this.chain = 1;
           } else this.chain = 0;
           this.pFrom.copy(p);
@@ -854,7 +899,7 @@ export class SpecimenX extends Boss {
         const done = this.telegraphAttack(
           dur,
           () => {
-            w.hurtPlayer(1, this.title);
+            w.hurtPlayer(1, this.title, this);
             w.audio.play('whoosh', { volume: 1, pitch: 0.6 });
             w.audio.play('hit_world', { volume: 0.8, pitch: 0.6 });
             w.rig.shake(0.7);
@@ -971,10 +1016,17 @@ export class SpecimenX extends Boss {
           this.roaringFor = this.pendingRoar;
           w.audio.play('boss_roar', { volume: 1, pitch: this.roaringFor >= 2 ? 1.35 : 1.2 });
           w.audio.play('raptor_screech', { volume: 1, pitch: 0.45 });
-          if (this.roaringFor === 1) w.hud.prompt('IT CALLED THE PACK!');
+          if (this.roaringFor === 1) {
+            w.hud.prompt('IT CALLED THE PACK!');
+            w.later(0.9, () => this.breakPane(1));
+          }
           if (this.roaringFor >= 2) {
             w.hud.prompt('SPECIMEN X IS ENRAGED!');
             this.enraged = true;
+            w.later(0.9, () => {
+              this.breakPane(1);
+              this.breakPane(2);
+            });
           }
           const lab = labs(w);
           if (lab) lab.alarm = this.roaringFor >= 2 ? 1 : 0.6;
@@ -1062,15 +1114,26 @@ export class SpecimenX extends Boss {
     const t = this.age;
     const pulse = 0.5 + 0.5 * Math.sin(t * (this.enraged ? 7 : 3.2));
     const base = this.enraged ? STRIPE_RAGE : STRIPE;
-    const dyingK = this.state === 'dying' ? clamp(1 - (this.stateTime - 2.5) / 2.5, 0, 1) : 1;
+    let dyingK = 1;
+    let eyeK = 1;
+    if (this.state === 'dying') {
+      // Flare on the killing blow, then the stripes stutter and die; the eyes go last.
+      const st = this.stateTime;
+      const fade0 = this.fellAt >= 0 ? this.fellAt + 0.3 : this.deathDuration - 2.6;
+      const k = clamp(1 - (st - fade0) / 2.2, 0, 1);
+      const stutter = st > fade0 && Math.sin(st * 23) + Math.sin(st * 37) > 0.9 ? 0.25 : 1;
+      dyingK = (st < 0.35 ? 1.8 : 1) * k * stutter;
+      eyeK = clamp(1 - (st - fade0 - 0.9) / 1.6, 0, 1);
+    }
     this.stripeMat.color.copy(base).multiplyScalar((1.1 + pulse * 0.7 + this.cloak * 0.4) * dyingK);
-    this.eyeMat.color.copy(this.enraged ? EYE_RAGE : EYE).multiplyScalar((1.7 + pulse * 0.4) * dyingK);
+    this.eyeMat.color.copy(this.enraged ? EYE_RAGE : EYE).multiplyScalar((1.7 + pulse * 0.4) * eyeK);
     this.haloMat.color.copy(this.enraged ? EYE_RAGE : EYE);
-    this.haloMat.opacity = (0.22 + 0.15 * pulse + this.cloak * 0.15) * dyingK;
+    this.haloMat.opacity = (0.22 + 0.15 * pulse + this.cloak * 0.15) * eyeK;
     this.breathT += dt;
     // Camera focus.
+    // Camera focus (fully on the beast while it dies, so the finale fills the frame).
     if (this.state !== 'dying') this.updateFocus(1 - Math.exp(-dt * 3));
-    else this.updateFocus(1 - Math.exp(-dt * 1.5));
+    else this.updateFocus(1 - Math.exp(-dt * 2.5), 0.95);
     // Footfalls.
     if (this.runAmt > 0.3 && this.lift < 0.05) {
       const s = Math.floor(this.gaitPhase / Math.PI);
@@ -1183,75 +1246,192 @@ export class SpecimenX extends Boss {
     }
   }
 
-  // ─── Death: staggers back through the tank glass ────────────────────────
+  // ─── Death ─────────────────────────────────────────────────────────────
+  //
+  // Rears up screaming (slow-mo), then either
+  //  • collapses where it stands — staggering back a couple of metres onto its
+  //    side, close to the camera — or
+  //  • when an intact tank pane is within ~12 m, makes a last convulsive leap
+  //    back into its tank and crashes through the glass.
+  // The stripes stutter out and the eyes fade last.
 
   protected override onDeath(_hit: ShotHit | null): void {
     this.telegraph = null;
-    const lab = labs(this.world);
+    this.winding = false;
+    const w = this.world;
+    const lab = labs(w);
     const p = this.root.position;
     this.deathFrom.copy(p);
     this.deathYaw = this.root.rotation.y;
+    this.deathSide = this.flinchSide >= 0 ? 1 : -1;
+    this.downAlready = this.roll > 0.5;
+    this.deathRoll0 = this.model.rotation.z;
+    this.deathLift = this.lift;
+    this.deathRear = this.downAlready ? 0 : 0.8;
+    this.fellAt = -1;
+    this.crashed = false;
     // Nearest intact pane.
     let best = -1;
     let bd = Infinity;
     const panes = lab?.panes ?? [];
     for (let i = 0; i < panes.length; i++) {
       if (panes[i].broken) continue;
-      const dd = Math.abs(HALL.paneXs[i] - p.x);
+      const dd = Math.hypot(HALL.paneXs[i] - p.x, HALL.tankZ + 1 - p.z);
       if (dd < bd) {
         bd = dd;
         best = i;
       }
     }
-    this.deathPane = best;
-    const x = best >= 0 ? HALL.paneXs[best] : p.x;
-    this.deathTo.set(x, 0, HALL.tankZ - 2.6);
-    const dist = Math.hypot(x - p.x, HALL.tankZ + 1 - p.z);
-    this.deathReach = clamp(dist / 8, 1.1, 2.8);
-    this.deathDuration = this.deathReach + 3.8;
+    this.deathPane = bd <= 12 && !this.downAlready ? best : -1;
+    if (this.deathPane >= 0) {
+      this.deathTo.set(HALL.paneXs[best], 0, HALL.tankZ - 2.6);
+      this.deathReach = this.deathRear + clamp(bd / 9, 0.55, 1.3);
+      this.deathDuration = this.deathReach + 3.6;
+    } else {
+      this.playerPos(_p);
+      _v.subVectors(p, _p).setY(0);
+      if (_v.lengthSq() < 1e-4) _v.set(0, 0, -1);
+      _v.normalize();
+      this.deathTo.copy(p).addScaledVector(_v, this.downAlready ? 0.4 : 2.2);
+      this.clampArena(this.deathTo);
+      this.deathDuration = this.deathRear + 4.6;
+    }
     this.cloakTarget = 0;
-    this.world.audio.play('raptor_screech', { volume: 1, pitch: 0.42 });
-    this.world.audio.play('dino_die', { volume: 1, pitch: 0.8 });
+    w.audio.play('raptor_screech', { volume: 1, pitch: 0.42 });
+    w.audio.play('dino_die', { volume: 1, pitch: 0.8 });
+    w.audio.play('boss_roar', { volume: 0.8, pitch: 1.4 });
+    w.rig.shake(0.4);
     if (lab) lab.alarm = 0;
   }
 
+  /** Death pose (joints): rearing scream → backward stagger → down and twitching. */
   private poseDeath(dt: number) {
     const r = this.r;
-    const k = 1 - Math.exp(-dt * 6);
+    const k = 1 - Math.exp(-dt * 7);
     const t = this.stateTime;
-    // Reeling: head thrown back, jaw slack, arms flailing.
-    for (let i = 0; i < r.neck.length; i++) r.neck[i].rotation.x += (SPEC.neck.rest[i] - (i === 0 ? 0.5 : 0.6) - r.neck[i].rotation.x) * k;
-    r.head.rotation.x += (SPEC.headRest - 0.7 - r.head.rotation.x) * k;
-    if (r.jaw) r.jaw.rotation.x += (0.7 - r.jaw.rotation.x) * k;
-    for (const a of r.arms) a.shoulder.rotation.x += (-0.4 + Math.sin(t * 12) * 0.4 - a.shoulder.rotation.x) * k;
-    const stagger = Math.sin(t * 7) * (this.crashed ? 0 : 0.4);
-    poseTheroLeg(SPEC, r.legs[0], t * 6, this.crashed ? 0 : 0.7, 0.3 + stagger * 0.3, 0, 0.5);
-    poseTheroLeg(SPEC, r.legs[1], t * 6 + Math.PI, this.crashed ? 0 : 0.7, 0.3 - stagger * 0.3, 0, 0.5);
-    for (let i = 0; i < r.tail.length; i++) r.tail[i].rotation.y += (Math.sin(t * 5 - i) * 0.15 - r.tail[i].rotation.y) * k;
+    const down = this.fellAt >= 0 || this.downAlready || this.crashed;
+    const rearing = !down && t < this.deathRear;
+    const thrash = down ? Math.exp(-Math.max(0, t - Math.max(0, this.fellAt)) * 0.8) : 1;
+    for (let i = 0; i < r.neck.length; i++) {
+      const goal = rearing ? (i === 0 ? 0.85 : 0.7) : down ? (i === 0 ? 0.15 : -0.1) : i === 0 ? 0.5 : 0.6;
+      r.neck[i].rotation.x += (SPEC.neck.rest[i] - goal + (down ? Math.sin(t * 9 + i) * 0.12 * thrash : 0) - r.neck[i].rotation.x) * k;
+      r.neck[i].rotation.y += (0 - r.neck[i].rotation.y) * k;
+    }
+    r.head.rotation.x += (SPEC.headRest - (rearing ? 1.0 : down ? 0.05 : 0.7) - r.head.rotation.x) * k;
+    r.head.rotation.z += ((rearing ? Math.sin(t * 24) * 0.08 : 0) - r.head.rotation.z) * k;
+    if (r.jaw) r.jaw.rotation.x += ((rearing ? 0.95 : down ? 0.45 + 0.2 * thrash * Math.max(0, Math.sin(t * 6)) : 0.75) - r.jaw.rotation.x) * k;
+    r.body.rotation.x += ((rearing ? -0.55 : down ? 0 : -0.2) - r.body.rotation.x) * k;
+    for (let i = 0; i < r.arms.length; i++) {
+      const a = r.arms[i];
+      a.shoulder.rotation.x += (-0.4 + Math.sin(t * 12 + i * 2) * 0.45 * thrash - a.shoulder.rotation.x) * k;
+      a.elbow.rotation.x += (ARM_REST.elbow + 0.6 - a.elbow.rotation.x) * k;
+    }
+    if (!down) {
+      // Stumbling BACKWARDS: the step cycle runs in reverse.
+      const ph = -t * 5.5;
+      const sway = Math.sin(t * 7) * 0.3;
+      poseTheroLeg(SPEC, r.legs[0], ph, rearing ? 0.25 : 0.65, 0.35 + sway * 0.3, 0, 0.5);
+      poseTheroLeg(SPEC, r.legs[1], ph + Math.PI, rearing ? 0.25 : 0.65, 0.35 - sway * 0.3, 0, 0.5);
+    } else {
+      // Down: legs kick, slowing.
+      poseTheroLeg(SPEC, r.legs[0], t * 9, 0.6 * thrash, 0.45, 0.2, 0.5);
+      poseTheroLeg(SPEC, r.legs[1], t * 9 + 2.1, 0.6 * thrash, 0.55, 0.2, 0.5);
+    }
+    for (let i = 0; i < r.tail.length; i++) {
+      r.tail[i].rotation.y += (Math.sin(t * (down ? 7 : 5) - i) * (0.08 + 0.22 * thrash) - r.tail[i].rotation.y) * k;
+    }
+    for (const q of this.quillPivots) {
+      const flare = rearing ? 1 : 0;
+      q.rotation.x += (-flare * 0.25 - q.rotation.x) * k;
+      q.scale.y += (1 + flare * 0.45 - q.scale.y) * k;
+    }
   }
 
   protected override updateDeath(dt: number): boolean {
+    this.root.rotation.y += angleDelta(this.root.rotation.y, this.deathYaw) * Math.min(1, dt * 3);
+    if (this.deathPane >= 0) this.deathThroughGlass(dt);
+    else this.deathCollapse(dt);
+    // Out of sight at the very end (the stage clears as the body is removed).
+    if (this.stateTime > this.deathDuration - 0.9) this.model.position.y -= dt * 0.5;
+    return this.stateTime > this.deathDuration;
+  }
+
+  private deathFootfall(t: number, dt: number) {
+    if (Math.floor((t - dt) * 2.6) !== Math.floor(t * 2.6)) {
+      this.world.audio.play('stomp', { volume: 0.8, pitch: 0.9 });
+      this.world.fx.blood(this.r.chest.getWorldPosition(_v), null, { color: this.bloodColor, amount: 1.4 });
+    }
+  }
+
+  /** Stagger back a couple of metres and crash down on its side, close to the camera. */
+  private deathCollapse(dt: number) {
+    const w = this.world;
+    const t = this.stateTime;
+    const p = this.root.position;
+    const fallStart = this.deathRear + (this.downAlready ? 0 : 1.0);
+    const fallDur = 0.5;
+    this.deathLift = damp(this.deathLift, 0, 6, dt);
+    if (t < fallStart) {
+      const k = clamp((t - this.deathRear * 0.5) / (fallStart - this.deathRear * 0.5), 0, 1);
+      const e = k * k * (3 - 2 * k);
+      p.x = lerp(this.deathFrom.x, this.deathTo.x, e);
+      p.z = lerp(this.deathFrom.z, this.deathTo.z, e);
+      this.model.rotation.z = lerp(this.deathRoll0, 0, clamp(t * 3, 0, 1)) + Math.sin(t * 6) * 0.1;
+      this.model.rotation.x = 0;
+      this.model.position.y = this.deathLift;
+      if (t > this.deathRear) this.deathFootfall(t, dt);
+      return;
+    }
+    const roll0 = this.downAlready ? this.deathRoll0 : Math.sin(fallStart * 6) * 0.1;
+    const goal = (this.downAlready ? Math.sign(this.deathRoll0 || 1) : this.deathSide) * 1.32;
+    const k = clamp((t - fallStart) / fallDur, 0, 1);
+    const e = k * k;
+    this.model.rotation.z = lerp(roll0, goal, e);
+    this.model.position.y = lerp(this.deathLift, -0.55, e);
+    if (k >= 1 && this.fellAt < 0) {
+      this.fellAt = t;
+      w.audio.play('stomp', { volume: 1, pitch: 0.55 });
+      w.audio.play('crash', { volume: 0.7, pitch: 0.45 });
+      w.fx.dust(this.worldPos(_v), 3.2, 0x8a8a8a);
+      w.fx.dust(this.r.chest.getWorldPosition(_v).setY(0.3), 2.2, 0x8a8a8a);
+      if (!this.downAlready) {
+        w.rig.shake(0.75);
+        w.hitStop(0.08);
+        w.slowMo(0.45, 0.7);
+      } else w.rig.shake(0.3);
+    }
+    if (this.fellAt >= 0) {
+      // Settle with a small bounce.
+      const tb = t - this.fellAt;
+      this.model.rotation.z = goal - Math.sin(Math.min(1, tb / 0.45) * Math.PI) * 0.12 * Math.sign(goal);
+    }
+  }
+
+  /** A last convulsive leap back into its tank, through the glass. */
+  private deathThroughGlass(dt: number) {
     const w = this.world;
     const t = this.stateTime;
     const p = this.root.position;
     const reach = this.deathReach;
+    this.deathLift = damp(this.deathLift, 0, 6, dt);
     if (!this.crashed) {
-      // Stumble backwards (facing the player) toward the glass.
-      const k = clamp(t / reach, 0, 1);
+      if (t < this.deathRear) {
+        this.model.position.y = this.deathLift;
+        this.model.rotation.z = lerp(this.deathRoll0, 0, clamp(t * 3, 0, 1)) + Math.sin(t * 6) * 0.1;
+        return;
+      }
+      const k = clamp((t - this.deathRear) / (reach - this.deathRear), 0, 1);
       const e = k * k * (3 - 2 * k);
       const glassZ = HALL.tankZ + 1.0;
       p.x = lerp(this.deathFrom.x, this.deathTo.x, e);
       p.z = lerp(this.deathFrom.z, glassZ, e);
-      this.root.rotation.y += angleDelta(this.root.rotation.y, this.deathYaw) * Math.min(1, dt * 3);
+      this.model.position.y = this.deathLift + Math.sin(Math.PI * k) * 1.3;
       this.model.rotation.z = Math.sin(t * 6) * 0.12;
       this.model.rotation.x = -e * 0.25;
-      if (Math.floor((t - dt) * 3) !== Math.floor(t * 3)) {
-        w.audio.play('stomp', { volume: 0.7, pitch: 1.0 });
-        w.fx.blood(this.r.chest.getWorldPosition(_v), null, { color: this.bloodColor, amount: 1.4 });
-      }
       const lab = labs(w);
-      if (lab && this.deathPane >= 0 && p.z < HALL.tankZ + 3.4 && !lab.panes[this.deathPane].broken) {
+      if (lab && p.z < HALL.tankZ + 3.4 && !lab.panes[this.deathPane].broken) {
         lab.panes[this.deathPane].shatter(w, this.worldPos(_v));
+        w.slowMo(0.35, 1.0);
       }
       if (k >= 1) {
         this.crashed = true;
@@ -1259,7 +1439,7 @@ export class SpecimenX extends Boss {
         w.rig.shake(0.8);
         this.deathFrom.copy(p);
       }
-      return false;
+      return;
     }
     // Through the glass: topple backwards into the tank, sliding on the wet floor.
     const tc = t - reach;
@@ -1271,13 +1451,12 @@ export class SpecimenX extends Boss {
     this.model.rotation.z = damp(this.model.rotation.z, 0.4, 3, dt);
     this.model.position.y = -e * 0.6;
     if (k >= 1 && tc - dt < 0.9) {
+      this.fellAt = t;
       w.audio.play('stomp', { volume: 1, pitch: 0.6 });
       w.audio.play('splash', { volume: 0.8, pitch: 0.6 });
       w.fx.dust(this.worldPos(_v), 3, 0x6a8aa0);
       w.rig.shake(0.6);
     }
-    if (tc > 2.6) this.model.position.y -= dt * 0.5;
-    return t > this.deathDuration;
   }
 }
 

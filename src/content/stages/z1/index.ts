@@ -40,7 +40,8 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'first contact',
     look: { at: [0, 1.3, 16], blend: 1.5 },
-    pickups: [{ kind: 'shotgun', pos: [1.9, 1.45, 6.8], t: 0.3 }],
+    // Floats over the dark, foggy road (not the lit cinema lobby) so its halo pops.
+    pickups: [{ kind: 'shotgun', pos: [-1.0, 1.6, 7], t: 0.3 }],
     waves: [
       { spawns: [{ type: 'walker', pos: [0.6, 0, 21], t: 0.8, opts: { variant: 'cop' } }] },
       { spawns: [{ type: 'walker', pos: [-4.4, 0, 15], opts: { variant: 'civilian' } }] },
@@ -144,7 +145,18 @@ const beats: Beat[] = [
     ],
   },
   // ── 5. The alley: they drop from the fire escapes ────────────────────────
-  { kind: 'move', label: 'into the alley', to: 184, speed: 3.5 },
+  {
+    kind: 'move',
+    label: 'into the alley',
+    to: 184,
+    speed: 3.9,
+    waves: [
+      // One shambles out of the alley mouth ahead-left…
+      { start: { atD: 138 }, spawns: [{ type: 'walker', pos: [-5.6, 0, -154.6], world: true, frame: 'world', opts: { variant: 'civilian' } }] },
+      // …and a crawler claws up out of the alley floor beyond the fire escapes.
+      { start: { atD: 170 }, spawns: [{ type: 'crawler', pos: [-35.3, 0, -156.4], world: true, frame: 'world', entry: 'rise' }] },
+    ],
+  },
   {
     kind: 'hold',
     label: 'alley',
@@ -170,7 +182,14 @@ const beats: Beat[] = [
     onEnd: (w) => w.rig.look('path'),
   },
   // ── 6. Rescue: a cop pinned against her cruiser ──────────────────────────
-  { kind: 'move', label: 'onto Second Street', to: 228, speed: 3.5 },
+  {
+    kind: 'move',
+    label: 'onto Second Street',
+    to: 228,
+    speed: 3.8,
+    // A straggler on the left sidewalk (the side the rescue's zombies come from).
+    waves: [{ start: { atD: 212 }, spawns: [{ type: 'walker', pos: [-62, 0, -186], world: true, frame: 'world', opts: { variant: 'office' } }] }],
+  },
   {
     kind: 'hold',
     label: 'rescue',
@@ -181,13 +200,13 @@ const beats: Beat[] = [
     waves: [
       {
         spawns: [
-          { type: 'walker', pos: [-5, 0, 13], t: 0.8, opts: { variant: 'soldier' } },
+          { type: 'walker', pos: [-5, 0, 13], t: 0.8, opts: { variant: 'biker' } },
           { type: 'walker', pos: [-3, 0, 18], t: 1.8, opts: { variant: 'civilian' } },
         ],
       },
       {
         spawns: [
-          { type: 'walker', pos: [-6.5, 0, 11], opts: { variant: 'cop' } },
+          { type: 'walker', pos: [-6.5, 0, 11], opts: { variant: 'office' } },
           { type: 'runner', pos: [-1, 0, 22], t: 1.5 },
         ],
       },
@@ -211,7 +230,7 @@ const beats: Beat[] = [
     waves: [
       {
         spawns: [
-          { type: 'walker', pos: [-14, 0, 12], t: 0.3, opts: { variant: 'worker' } },
+          { type: 'walker', pos: [-14, 0, 12], t: 0.3, opts: { variant: 'office' } },
           { type: 'walker', pos: [-19, 0, 9], t: 1.0, opts: { variant: 'civilian' } },
           { type: 'walker', pos: [-13, 0, 15], t: 1.8, opts: { variant: 'biker' } },
         ],
@@ -221,7 +240,7 @@ const beats: Beat[] = [
         spawns: [
           { type: 'bloater', pos: [-16, 0, 10] },
           { type: 'walker', pos: [-20, 0, 6.5], t: 0.8, opts: { variant: 'office' } },
-          { type: 'walker', pos: [-12.5, 0, 16], t: 1.4, opts: { variant: 'worker' } },
+          { type: 'walker', pos: [-12.5, 0, 16], t: 1.4, opts: { variant: 'biker' } },
         ],
       },
       {
@@ -307,16 +326,16 @@ const beats: Beat[] = [
         start: { remaining: 1, after: 16 },
         spawns: [
           { type: 'brute', pos: [0.5, 0, 22] },
-          { type: 'walker', pos: [-5, 0, 18], t: 1, opts: { variant: 'soldier' } },
-          { type: 'walker', pos: [5, 0, 17], t: 1.6, opts: { variant: 'cop' } },
+          { type: 'walker', pos: [-2.8, 0, 18], t: 1, opts: { variant: 'soldier' } },
+          { type: 'walker', pos: [3, 0, 17], t: 1.6, opts: { variant: 'cop' } },
           { type: 'spitter', pos: [4.3, 3.0, 8.9], t: 2.5, entry: 'rise' },
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'runner', pos: [-6, 0, 20] },
-          { type: 'runner', pos: [6, 0, 21], t: 0.5 },
+          { type: 'runner', pos: [-3, 0, 20] },
+          { type: 'runner', pos: [3.2, 0, 21], t: 0.5 },
           { type: 'bloater', pos: [0, 0, 19], t: 1.4 },
         ],
       },

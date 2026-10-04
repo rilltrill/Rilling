@@ -4,6 +4,7 @@ import type { WeaponId } from '../core/types';
 import { Overlay2D } from './Overlay2D';
 import { el, onTap, setStyle, setText, toggle } from './dom';
 import { SKULL_ICON, weaponIcon } from './art';
+import { bombSvg, heartSvg, infinitySvg, installPixelSprites, swapSvg } from './pixel';
 
 export interface HudCallbacks {
   pause(): void;
@@ -15,6 +16,12 @@ export interface HudCallbacks {
 const CYCLE: WeaponId[] = ['pistol', 'shotgun', 'smg', 'magnum'];
 const BOSS_INTRO = 2.4;
 const COMBO_CLASS = ['hud-combo', 'hud-combo live', 'hud-combo hot', 'hud-combo hot fire', 'hud-combo hot fire max'];
+const HEART_FULL = heartSvg(true);
+const HEART_EMPTY = heartSvg(false);
+const INF = infinitySvg();
+
+/** Arcade score: zero-padded to 7 digits (monospace pixel font → no layout shift). */
+export const arcadeScore = (n: number) => String(Math.max(0, Math.floor(n))).padStart(7, '0');
 
 /**
  * In-game heads-up display (DOM) + the 2D overlay canvas.
@@ -67,6 +74,7 @@ export class Hud implements HudApi {
   private splats: HTMLDivElement;
   private fpsEl: HTMLDivElement;
   private debugEl: HTMLDivElement;
+  private demoEl: HTMLDivElement;
   private progress: HTMLDivElement;
   private progressFill: HTMLDivElement;
   private progressDot: HTMLDivElement;
@@ -88,8 +96,10 @@ export class Hud implements HudApi {
   private popupPool: HTMLDivElement[] = [];
   /** A banner with exactly this text is swallowed once (see suppressBanner). */
   private bannerSuppress: string | null = null;
+  private lastBombs = -1;
 
   constructor(parent: HTMLElement, private cb: HudCallbacks) {
+    installPixelSprites();
     this.overlay = new Overlay2D(parent);
     const r = (this.root = el('div', 'hud hidden', parent));
     r.id = 'hud';
@@ -101,7 +111,9 @@ export class Hud implements HudApi {
     this.splats = el('div', 'hud-splats', r);
 
     const tl = el('div', 'hud-tl', r);
-    this.score = el('div', 'hud-score', tl, '0');
+    const sl = el('div', 'hud-score-line', tl);
+    el('span', 'hud-1p', sl, '1P');
+    this.score = el('div', 'hud-score', sl, arcadeScore(0));
     this.combo = el('div', 'hud-combo', tl);
     this.mult = el('div', 'hud-mult', this.combo, 'x1');
     const cbw = el('div', 'hud-combo-meter', this.combo);
@@ -110,7 +122,7 @@ export class Hud implements HudApi {
     this.comboHits = el('div', 'hud-combo-hits', cbw, '');
 
     const tr = el('div', 'hud-tr', r);
-    const pause = el('button', 'hud-btn hud-pause', tr, '<span></span><span></span>');
+    const pause = el('button', 'hud-btn hud-pause', tr, '<i class="hud-pause-ico"><span></span><span></span></i>');
     pause.setAttribute('aria-label', 'Pause');
     onTap(pause, () => this.cb.pause());
 
@@ -138,9 +150,9 @@ export class Hud implements HudApi {
 
     const bl = el('div', 'hud-bl', r);
     this.hearts = el('div', 'hud-hearts', bl);
-    this.bombBtn = el('button', 'hud-btn hud-bomb', bl, '<span class="hud-bomb-icon"></span>');
+    this.bombBtn = el('button', 'hud-btn hud-bomb', bl, `<span class="hud-bomb-icon">${bombSvg()}</span>`);
     this.bombBtn.setAttribute('aria-label', 'Bomb');
-    this.bombCount = el('span', 'hud-bomb-count', this.bombBtn, '1');
+    this.bombCount = el('span', 'hud-bomb-count', this.bombBtn, 'x1');
     onTap(this.bombBtn, () => this.cb.bomb());
 
     const br = el('div', 'hud-br', r);
@@ -150,7 +162,7 @@ export class Hud implements HudApi {
     const wtop = el('div', 'hud-wtop', this.weaponBox);
     this.weaponIconEl = el('div', 'hud-wicon', wtop, weaponIcon('pistol'));
     this.weaponName = el('div', 'hud-weapon-name', wtop, 'PISTOL');
-    el('div', 'hud-swap', wtop, '<span>⇄</span>');
+    el('div', 'hud-swap', wtop, swapSvg());
     this.ammoPips = el('div', 'hud-ammo', this.weaponBox);
     const wbot = el('div', 'hud-wbottom', this.weaponBox);
     this.slots = el('div', 'hud-slots', wbot);
@@ -163,7 +175,7 @@ export class Hud implements HudApi {
     this.reloadBtn = el('button', 'hud-btn hud-reload', br);
     this.reloadBtn.setAttribute('aria-label', 'Reload');
     this.reloadRing = el('div', 'hud-reload-ring', this.reloadBtn);
-    el('span', 'hud-reload-label', this.reloadBtn, 'RELOAD');
+    el('span', 'hud-reload-label', this.reloadBtn, '<span>RE</span><span>LOAD</span>');
     onTap(this.reloadBtn, () => this.cb.reload());
 
     this.bannerEl = el('div', 'hud-banner', r);
@@ -173,6 +185,21 @@ export class Hud implements HudApi {
     this.popups = el('div', 'hud-popups', r);
     this.fpsEl = el('div', 'hud-fps hidden', r);
     this.debugEl = el('div', 'hud-debug hidden', r);
+    // Demo scene cut: black (with a rolling sync bar) over everything but the DEMO PLAY banner.
+    el('div', 'hud-demo-cut', r, '<i></i>');
+    this.demoEl = el('div', 'hud-demo hidden', r, '<div class="hud-demo-title">DEMO PLAY</div><div class="hud-demo-press">PRESS START</div>');
+  }
+
+  /** Attract-mode demo: no buttons, a blinking DEMO PLAY / PRESS START banner. */
+  setDemo(on: boolean) {
+    toggle(this.root, 'demo', on);
+    toggle(this.demoEl, 'hidden', !on);
+    if (!on) this.demoCut(false);
+  }
+
+  /** Demo cut to black while the stage fast-forwards to the next fight. */
+  demoCut(on: boolean) {
+    toggle(this.root, 'demo-cut', on);
   }
 
   show(on: boolean) {
@@ -201,13 +228,14 @@ export class Hud implements HudApi {
     this.comboLevel = 0;
     this.lastBoss = null;
     this.shownScore = 0;
+    this.lastBombs = -1;
     this.bossLagFrac = 1;
     this.bossIntroT = 0;
     this.bossFillK = 1;
     this.swapHintT = 0;
     this.bannerTimer = 0;
     this.promptTimer = 0;
-    setText(this.score, '0');
+    setText(this.score, arcadeScore(0));
     toggle(this.bannerEl, 'show', false);
     toggle(this.promptEl, 'show', false);
     toggle(this.bossWrap, 'hidden', true);
@@ -228,7 +256,8 @@ export class Hud implements HudApi {
     const p = this.popupPool.pop() ?? el('div', '');
     p.className = `hud-popup pop-${style}`;
     p.textContent = text;
-    const margin = 60;
+    // Press Start 2P is monospace: half the text width keeps it on screen when centred.
+    const margin = Math.min(window.innerWidth / 2, 10 + text.length * (style === 'combo' ? 9 : 6.5));
     p.style.left = `${Math.max(margin, Math.min(window.innerWidth - margin, x))}px`;
     p.style.top = `${Math.max(40, Math.min(window.innerHeight - 40, y))}px`;
     this.popups.appendChild(p);
@@ -338,6 +367,8 @@ export class Hud implements HudApi {
       return;
     }
     setText(this.promptEl, text);
+    // Wide pixel font: long call-outs drop a size so they stay on one or two lines.
+    toggle(this.promptEl, 'long', text.length > 18);
     toggle(this.promptEl, 'show', true);
     this.promptTimer = 1.6;
   }
@@ -352,7 +383,7 @@ export class Hud implements HudApi {
       const diff = target - this.shownScore;
       this.shownScore += Math.sign(diff) * Math.max(1, Math.ceil(Math.abs(diff) * Math.min(1, dt * 12)));
       if (Math.abs(target - this.shownScore) < 1) this.shownScore = target;
-      setText(this.score, this.shownScore.toLocaleString('en-US'));
+      setText(this.score, arcadeScore(this.shownScore));
     }
 
     // Combo meter: x2 warms up, x3 catches fire, x4 is MAX.
@@ -381,13 +412,16 @@ export class Hud implements HudApi {
       for (let i = 0; i < w.player.maxHp; i++) {
         const lost = prev > hp && i >= hp && i < prev;
         const gain = prev >= 0 && prev < hp && i >= prev && i < hp;
-        html += `<span class="heart ${i < hp ? 'full' : 'empty'}${lost ? ' lost' : ''}${gain ? ' gain' : ''}"></span>`;
+        html += `<span class="heart ${i < hp ? 'full' : 'empty'}${lost ? ' lost' : ''}${gain ? ' gain' : ''}">${i < hp ? HEART_FULL : lost ? HEART_EMPTY + HEART_FULL : HEART_EMPTY}</span>`;
       }
       this.hearts.innerHTML = html;
       toggle(this.root, 'low-hp', hp === 1);
     }
-    setText(this.bombCount, String(w.player.bombs));
-    toggle(this.bombBtn, 'disabled', w.player.bombs <= 0);
+    if (w.player.bombs !== this.lastBombs) {
+      this.lastBombs = w.player.bombs;
+      setText(this.bombCount, `x${w.player.bombs}`);
+      toggle(this.bombBtn, 'disabled', w.player.bombs <= 0);
+    }
 
     // Weapon panel.
     const ws = w.weapons;
@@ -405,6 +439,7 @@ export class Hud implements HudApi {
       this.weaponBox.style.setProperty('--wc', def.color);
       if (weaponChanged) {
         this.weaponIconEl.innerHTML = weaponIcon(def.id);
+        this.weaponBox.dataset.w = def.id;
         this.weaponBox.classList.remove('swapped');
         void this.weaponBox.offsetWidth;
         this.weaponBox.classList.add('swapped');
@@ -420,7 +455,8 @@ export class Hud implements HudApi {
         for (let i = 0; i < def.mag; i++) html += `<span class="${pipClass}${i < st.inMag ? ' on' : ''}"></span>`;
         this.ammoPips.innerHTML = html;
         toggle(this.ammoPips, 'many', def.mag > 12);
-        setText(this.reserve, st.reserve === Infinity ? '∞' : `+${st.reserve}`);
+        if (st.reserve === Infinity) this.reserve.innerHTML = INF;
+        else setText(this.reserve, `+${st.reserve}`);
       }
       let slots = '';
       if (canSwap) for (const id of CYCLE) if (owned.includes(id)) slots += weaponIcon(id, id === def.id ? 'on' : '');

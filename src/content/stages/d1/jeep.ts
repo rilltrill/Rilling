@@ -6,6 +6,13 @@ import { merged } from './props';
 
 const _v = new THREE.Vector3();
 
+/** Gun pivot (holder space: metres right / up / back of the gunner's eye). */
+const GUN_X = 0.62;
+const GUN_Y = -0.86;
+const GUN_Z = -0.5;
+/** The body sits this much lower than the rig eye height implies (keeps the hood low in frame). */
+const BODY_DROP = 0.1;
+
 /**
  * First-person view model for the park-tour jeep: hood, folded windscreen,
  * sport bar + rear roll hoop and the pedestal-mounted gun.
@@ -51,47 +58,59 @@ export class JeepViewModel {
     const dark = Kit.mat(0x2a2e2c);
     const metal = Kit.mat(0x5a5e60);
     const mud = Kit.mat(0x8a6e48);
-    // Short safari hood (the gunner stands mid-vehicle at z = 0; ground at y = 0).
-    Kit.add(b, Kit.box(1.92, 0.55, 4.0), olive, 0, 0.6, -0.75);
-    Kit.add(b, Kit.box(1.64, 0.14, 1.25), khaki, 0, 0.94, -2.12, 0.05, 0, 0);
-    Kit.add(b, Kit.box(0.28, 0.1, 1.25), olive, 0, 0.99, -2.12, 0.05, 0, 0);
-    Kit.add(b, Kit.box(0.45, 0.03, 0.35), mud, -0.5, 1.02, -2.4, 0.05, 0.3, 0);
-    Kit.add(b, Kit.box(0.3, 0.03, 0.25), mud, 0.6, 1.02, -1.9, 0.05, -0.2, 0);
+    const hoop = Kit.mat(0x5a6a48);
+    // The gunner stands mid-vehicle at z = 0 (ground at y = 0, eye ≈ 2.15 m above
+    // the body after BODY_DROP). Everything ahead is kept short and low so the
+    // front edge (bull bar) sits ≥ 26° below the eye: a compy 4 m in front of the
+    // bumper is still fully visible above it.
+    Kit.add(b, Kit.box(1.92, 0.5, 3.5), olive, 0, 0.6, -0.5);
+    Kit.add(b, Kit.box(1.6, 0.08, 1.05), khaki, 0, 0.88, -1.72, 0.04, 0, 0);
+    Kit.add(b, Kit.box(0.26, 0.05, 1.05), olive, 0, 0.93, -1.72, 0.04, 0, 0);
+    Kit.add(b, Kit.box(0.42, 0.03, 0.3), mud, -0.48, 0.93, -2.0, 0.04, 0.3, 0);
+    Kit.add(b, Kit.box(0.28, 0.03, 0.22), mud, 0.58, 0.93, -1.5, 0.04, -0.2, 0);
     // Park emblem on the hood.
-    Kit.add(b, Kit.cyl(0.24, 0.24, 0.04, 14), Kit.mat(0xf0c040), 0.42, 1.02, -2.35, 0.05, 0, 0);
-    Kit.add(b, Kit.cyl(0.18, 0.18, 0.05, 14), Kit.mat(0xd8401c), 0.42, 1.025, -2.35, 0.05, 0, 0);
+    Kit.add(b, Kit.cyl(0.2, 0.2, 0.04, 14), Kit.mat(0xf0c040), 0.42, 0.93, -1.95, 0.04, 0, 0);
+    Kit.add(b, Kit.cyl(0.15, 0.15, 0.05, 14), Kit.mat(0xd8401c), 0.42, 0.935, -1.95, 0.04, 0, 0);
     for (const sx of [-1, 1]) {
       // Fenders + wheels.
-      Kit.add(b, Kit.box(0.34, 0.18, 1.1), olive, sx * 0.9, 0.88, -2.2, 0, 0, sx * -0.18);
-      Kit.add(b, Kit.cyl(0.44, 0.44, 0.34, 12), dark, sx * 0.86, 0.44, -2.2, 0, 0, Math.PI / 2);
-      Kit.add(b, Kit.cyl(0.44, 0.44, 0.34, 12), dark, sx * 0.86, 0.44, 0.6, 0, 0, Math.PI / 2);
+      Kit.add(b, Kit.box(0.34, 0.16, 1.0), olive, sx * 0.9, 0.84, -1.75, 0, 0, sx * -0.18);
+      Kit.add(b, Kit.cyl(0.44, 0.44, 0.34, 12), dark, sx * 0.86, 0.44, -1.75, 0, 0, Math.PI / 2);
+      Kit.add(b, Kit.cyl(0.44, 0.44, 0.34, 12), dark, sx * 0.86, 0.44, 0.75, 0, 0, Math.PI / 2);
       // Headlights (glow, kept separate by the merge).
-      Kit.add(b, Kit.cyl(0.12, 0.12, 0.1, 10), metal, sx * 0.62, 0.86, -2.78, Math.PI / 2, 0, 0);
-      Kit.add(b, Kit.cyl(0.09, 0.09, 0.11, 10), Kit.glow(0xfff2c8, 1.1), sx * 0.62, 0.86, -2.79, Math.PI / 2, 0, 0);
+      Kit.add(b, Kit.cyl(0.11, 0.11, 0.1, 10), metal, sx * 0.62, 0.7, -2.28, Math.PI / 2, 0, 0);
+      Kit.add(b, Kit.cyl(0.08, 0.08, 0.11, 10), Kit.glow(0xfff2c8, 1.1), sx * 0.62, 0.7, -2.29, Math.PI / 2, 0, 0);
       // Rear bed walls (seen when looking sideways / back).
       Kit.add(b, Kit.box(0.08, 0.45, 2.4), olive, sx * 0.92, 1.08, 0.05);
       Kit.add(b, Kit.box(0.12, 0.07, 2.4), khaki, sx * 0.92, 1.32, 0.05);
       Kit.add(b, Kit.box(0.16, 0.12, 0.05), Kit.glow(0xff2a1a, 1.1), sx * 0.72, 0.92, 1.26);
       // Waist-high roll bar in front of the gunner (peeks in at the bottom when the gun swings).
       Kit.add(b, Kit.cyl(0.032, 0.032, 0.6, 8), dark, sx * 0.84, 1.15, -0.74, 0, 0, sx * 0.1);
+      // Rear roll hoop behind the gunner (seen at the bottom corners when looking back).
+      Kit.add(b, Kit.cyl(0.035, 0.035, 0.42, 8), hoop, sx * 0.8, 1.53, 1.0);
+      Kit.add(b, Kit.sphere(0.05, 8, 6), hoop, sx * 0.8, 1.74, 1.0);
+      Kit.add(b, Kit.cyl(0.028, 0.028, 0.6, 6), hoop, sx * 0.8, 1.53, 0.78, 0.72, 0, 0);
     }
     Kit.add(b, Kit.cyl(0.032, 0.032, 1.62, 8), dark, 0, 1.44, -0.76, 0, 0, Math.PI / 2);
-    // Grille + bull bar.
-    Kit.add(b, Kit.box(1.4, 0.42, 0.1), dark, 0, 0.74, -2.76);
-    Kit.add(b, Kit.cyl(0.05, 0.05, 1.7, 6), metal, 0, 0.96, -2.94, 0, 0, Math.PI / 2);
-    Kit.add(b, Kit.cyl(0.05, 0.05, 1.7, 6), metal, 0, 0.56, -2.97, 0, 0, Math.PI / 2);
-    for (const sx of [-0.55, 0.55]) Kit.add(b, Kit.cyl(0.045, 0.045, 0.5, 6), metal, sx, 0.78, -2.94);
+    Kit.add(b, Kit.cyl(0.035, 0.035, 1.6, 8), hoop, 0, 1.74, 1.0, 0, 0, Math.PI / 2);
+    // Tied-down jerry can.
+    Kit.add(b, Kit.box(0.34, 0.46, 0.18), Kit.mat(0x8a2a1a), 0.55, 1.14, 1.08);
+    // Grille + bull bar (the front-most, highest-on-screen part of the jeep).
+    Kit.add(b, Kit.box(1.4, 0.38, 0.1), dark, 0, 0.62, -2.28);
+    Kit.add(b, Kit.cyl(0.05, 0.05, 1.7, 6), metal, 0, 0.86, -2.46, 0, 0, Math.PI / 2);
+    Kit.add(b, Kit.cyl(0.05, 0.05, 1.7, 6), metal, 0, 0.5, -2.5, 0, 0, Math.PI / 2);
+    for (const sx of [-0.55, 0.55]) Kit.add(b, Kit.cyl(0.045, 0.045, 0.42, 6), metal, sx, 0.68, -2.47);
     // Folded windscreen frame lying on the hood.
-    Kit.add(b, Kit.box(1.5, 0.05, 0.05), metal, 0, 1.0, -1.58);
-    Kit.add(b, Kit.box(1.5, 0.05, 0.05), metal, 0, 1.02, -1.98);
-    for (const sx of [-0.72, 0.72]) Kit.add(b, Kit.box(0.05, 0.05, 0.42), metal, sx, 1.01, -1.78);
-    Kit.add(b, Kit.box(1.36, 0.02, 0.34), Kit.mat(0x7a9aa8, { emissive: 0x18303a, emissiveIntensity: 0.5 }), 0, 1.0, -1.78);
+    Kit.add(b, Kit.box(1.5, 0.05, 0.05), metal, 0, 0.93, -1.08);
+    Kit.add(b, Kit.box(1.5, 0.05, 0.05), metal, 0, 0.95, -1.46);
+    for (const sx of [-0.72, 0.72]) Kit.add(b, Kit.box(0.05, 0.05, 0.4), metal, sx, 0.94, -1.27);
+    Kit.add(b, Kit.box(1.36, 0.02, 0.32), Kit.mat(0x7a9aa8, { emissive: 0x18303a, emissiveIntensity: 0.5 }), 0, 0.93, -1.27);
     // Front seats (below the view).
     for (const sx of [-0.45, 0.45]) Kit.add(b, Kit.box(0.6, 0.6, 0.16), Kit.mat(0x7a5a3c), sx, 0.98, -0.75, -0.15, 0, 0);
-    // Tailgate + spare wheel.
+    // Tailgate + spare wheel (its top arc and the roll hoop frame the bottom of the
+    // screen when looking back at the boss, like the hood does ahead).
     Kit.add(b, Kit.box(1.84, 0.5, 0.08), olive, 0, 0.95, 1.26);
-    Kit.add(b, Kit.cyl(0.4, 0.4, 0.26, 12), dark, 0, 1.1, 1.42, Math.PI / 2, 0, 0);
-    Kit.add(b, Kit.cyl(0.18, 0.18, 0.28, 8), khaki, 0, 1.1, 1.42, Math.PI / 2, 0, 0);
+    Kit.add(b, Kit.cyl(0.42, 0.42, 0.26, 14), dark, 0, 1.27, 1.42, Math.PI / 2, 0, 0);
+    Kit.add(b, Kit.cyl(0.2, 0.2, 0.28, 10), khaki, 0, 1.27, 1.42, Math.PI / 2, 0, 0);
     // Floor of the rear bed + ammo crate.
     Kit.add(b, Kit.box(1.76, 0.06, 2.4), Kit.mat(0x4a4a40), 0, 0.88, 0.05);
     Kit.add(b, Kit.box(0.5, 0.35, 0.35), Kit.mat(0x4a5a34), -0.55, 1.08, 0.8);
@@ -105,25 +124,26 @@ export class JeepViewModel {
     const metal = Kit.mat(0x2e3134);
     const dark = Kit.mat(0x1a1b1d);
     const olive = Kit.mat(0x4a5a34);
-    // Pedestal rising from the bed floor.
-    Kit.add(mount, Kit.cyl(0.05, 0.07, 0.75, 8), metal, 0.4, -1.12, -0.55);
+    // Pedestal rising from the bed floor. The gun sits low and to the right with a
+    // short barrel so it never covers the centre-right of the view.
+    Kit.add(mount, Kit.cyl(0.05, 0.07, 0.75, 8), metal, GUN_X, GUN_Y - 0.4, GUN_Z);
     mount.add(this.gunKick);
     const k = this.gunKick;
-    k.position.set(0.4, -0.72, -0.55);
+    k.position.set(GUN_X, GUN_Y, GUN_Z);
     Kit.add(k, Kit.box(0.1, 0.12, 0.18), metal, 0, -0.04, 0);
     Kit.add(k, Kit.box(0.14, 0.15, 0.6), dark, 0, 0.03, -0.3);
     Kit.add(k, Kit.box(0.16, 0.045, 0.4), metal, 0, 0.12, -0.28);
     Kit.add(k, Kit.box(0.15, 0.15, 0.22), olive, -0.15, 0.0, -0.26);
     for (const sx of [-0.07, 0.07]) Kit.add(k, Kit.box(0.04, 0.12, 0.04), dark, sx, -0.02, 0.04);
     // Barrel shroud + barrel + muzzle brake.
-    Kit.add(k, Kit.cyl(0.065, 0.065, 0.6, 10), metal, 0, 0.03, -0.88, Math.PI / 2, 0, 0);
-    for (let i = 0; i < 3; i++) Kit.add(k, Kit.cyl(0.072, 0.072, 0.035, 10), dark, 0, 0.03, -0.66 - i * 0.18, Math.PI / 2, 0, 0);
-    const barrel = Kit.add(k, Kit.cyl(0.036, 0.036, 0.42, 8), metal, 0, 0.03, -1.38, Math.PI / 2, 0, 0);
-    const brake = Kit.add(k, Kit.cyl(0.05, 0.05, 0.14, 8), metal, 0, 0.03, -1.64, Math.PI / 2, 0, 0);
-    Kit.add(k, Kit.box(0.025, 0.07, 0.025), dark, 0, 0.1, -1.56);
+    Kit.add(k, Kit.cyl(0.065, 0.065, 0.5, 10), metal, 0, 0.03, -0.82, Math.PI / 2, 0, 0);
+    for (let i = 0; i < 3; i++) Kit.add(k, Kit.cyl(0.072, 0.072, 0.035, 10), dark, 0, 0.03, -0.64 - i * 0.15, Math.PI / 2, 0, 0);
+    const barrel = Kit.add(k, Kit.cyl(0.036, 0.036, 0.34, 8), metal, 0, 0.03, -1.22, Math.PI / 2, 0, 0);
+    const brake = Kit.add(k, Kit.cyl(0.05, 0.05, 0.13, 8), metal, 0, 0.03, -1.44, Math.PI / 2, 0, 0);
+    Kit.add(k, Kit.box(0.025, 0.07, 0.025), dark, 0, 0.1, -1.36);
     this.heatParts.push(barrel, brake);
     const flash = new THREE.Group();
-    flash.position.set(0, 0.03, -1.76);
+    flash.position.set(0, 0.03, -1.55);
     k.add(flash);
     const fm = Kit.glow(0xffd27a, 2.2);
     Kit.add(flash, Kit.cone(0.08, 0.38, 5), fm, 0, 0, -0.15, -Math.PI / 2, 0, 0);
@@ -153,7 +173,7 @@ export class JeepViewModel {
     this.time += dt;
     // Keep the body aligned with the vehicle and its wheels on the ground.
     this.body.rotation.y = angleDelta(holder.rotation.y, rig.space.rotation.y);
-    this.body.position.y = -rig.eyeHeight;
+    this.body.position.y = -rig.eyeHeight - BODY_DROP;
     this.gun.position.y = 0;
     // Engine rumble + occasional bumps on the dirt road.
     const moving = Math.min(1, rig.speed / 10);
@@ -164,7 +184,7 @@ export class JeepViewModel {
     this.body.rotation.z = Math.sin(this.time * 1.7) * 0.006 * moving;
     // Gun recoil + flash.
     this.recoil = Math.max(0, this.recoil - dt * 0.6);
-    this.gunKick.position.z = -0.55 + this.recoil;
+    this.gunKick.position.z = GUN_Z + this.recoil;
     // The gun follows the camera's pitch (the jeep body does not).
     this.pitch += (w.camera.rotation.x - this.pitch) * Math.min(1, dt * 10);
     this.gun.rotation.x = this.pitch;

@@ -42,9 +42,11 @@ const _e = new THREE.Euler();
 
 type Layer = 'verge' | 'near' | 'mid' | 'fill' | 'far' | 'patch' | 'rock';
 
-const ROAD_MIN: Record<Layer, number> = { verge: 4.3, near: 6.4, mid: 9, fill: 7.5, far: 17, patch: 3.9, rock: 4.6 };
+const ROAD_MIN: Record<Layer, number> = { verge: 4.3, near: 6.4, mid: 9, fill: 7.5, far: 17, patch: 4.6, rock: 4.6 };
 
 const FOG_FAR = 140;
+/** Ground plane height: below ground patches (≈ -0.03), verges (0), road (0.02+). */
+const GROUND_Y = -0.08;
 
 let current: JungleEnv | null = null;
 
@@ -104,6 +106,8 @@ export class JungleEnv {
   private carBounced = false;
   private herd!: Herd;
   private stampedeTriggered = false;
+  private heatTip = false;
+  private heatTipShown = false;
   // Water.
   private streaks!: THREE.InstancedMesh;
   private streakPhase: number[] = [];
@@ -147,6 +151,9 @@ export class JungleEnv {
 
     this.build();
     world.scene.add(this.root);
+    // Bullet impacts on the occluders: wood on the gate, metal on the tour car.
+    this.gate.pillars.traverse((o) => (o.userData.surface = 'wood'));
+    this.car.traverse((o) => (o.userData.surface = 'metal'));
     this.environment = {
       root: this.root,
       occluders: [this.gate.pillars, this.car],
@@ -210,9 +217,11 @@ export class JungleEnv {
   private allowed(d: number, lat: number, layer: Layer, p: THREE.Vector3): boolean {
     const a = Math.abs(lat);
     if (this.distRail(p.x, p.z, d) < ROAD_MIN[layer]) return false;
-    const dr = this.distRiver(p.x, p.z);
-    const riverPad = layer === 'verge' || layer === 'patch' || layer === 'rock' ? 0.8 : layer === 'fill' ? 1.6 : 3.2;
-    if (dr < RIVER_WIDTH / 2 + riverPad) return false;
+    // The river only exists from the waterfall pool on (d ≈ 440, far left) — skip the scan before that.
+    if (d > RIVER[0][0] - 40) {
+      const riverPad = layer === 'verge' || layer === 'patch' || layer === 'rock' ? 0.8 : layer === 'fill' ? 1.6 : 3.2;
+      if (this.distRiver(p.x, p.z) < RIVER_WIDTH / 2 + riverPad) return false;
+    }
     if (Math.abs(d - D.GATE) < 2.4 && a < 36) return false;
     if (d > D.MEADOW_FROM && d < D.MEADOW_TO) {
       if ((layer === 'mid' || layer === 'near' || layer === 'fill') && a < 46) return false;
@@ -224,7 +233,7 @@ export class JungleEnv {
     if (Math.hypot(d - D.CAR, lat - D.CAR_SIDE) < 6) return false;
     if (Math.hypot(d - (D.CAR + 2), lat - 12.5) < 5.5 && layer !== 'patch') return false;
     if (lat < -15 && d > D.CLIFF_FROM && d < D.CLIFF_TO && (layer === 'mid' || layer === 'far' || (layer === 'fill' && d < 438))) return false;
-    if (d > D.BOSS_START - 20) {
+    if (d > D.BOSS_CLEAR) {
       // Keep the riverside road open: the boss runs alongside and tumbles into the river.
       if ((layer === 'mid' || layer === 'near' || layer === 'fill') && lat > -12 && lat < 26) return false;
     }
@@ -242,7 +251,12 @@ export class JungleEnv {
     EnvKit.lights(root, { sky: 0xeaf6ff, ground: 0x5a7430, hemi: 1.35, sun: 0xfff0d2, sunIntensity: 2.3, sunDir: [0.45, 1, 0.3] });
 
     this.buildBackdrop();
-    root.add(EnvKit.ground(1600, COL.ground, 0, -340));
+    // Subdivided (a 2-triangle 1.6 km plane loses depth precision and flickers
+    // through the road) and sunk well below the road/verge ribbons.
+    const ground = new THREE.Mesh(Kit.plane(1600, 1600, 48, 48), Kit.mat(COL.ground));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(0, GROUND_Y, -340);
+    root.add(ground);
     this.buildRoad();
     this.buildRiver();
     this.buildVegetation();
@@ -298,10 +312,11 @@ export class JungleEnv {
     const g = new THREE.Group();
     const c = this.curve;
     const to = this.len;
+    // Layers ≥ 1.5 cm apart so they never z-fight: verge 0 < road 0.02 < edges 0.035 < tracks 0.05 < puddles.
     g.add(EnvKit.ribbon(c, 7.2, Kit.mat(COL.road), { y: 0.02, step: 2, to }));
-    for (const off of [-1.1, 1.1]) g.add(EnvKit.ribbon(c, 0.7, Kit.mat(COL.roadTrack), { y: 0.035, step: 2, offset: off, to }));
-    for (const off of [-3.55, 3.55]) g.add(EnvKit.ribbon(c, 0.5, Kit.mat(0x86704c), { y: 0.03, step: 2, offset: off, to }));
-    for (const off of [-4.4, 4.4]) g.add(EnvKit.ribbon(c, 1.8, Kit.mat(COL.verge), { y: 0.015, step: 2, offset: off, to }));
+    for (const off of [-1.1, 1.1]) g.add(EnvKit.ribbon(c, 0.7, Kit.mat(COL.roadTrack), { y: 0.05, step: 2, offset: off, to }));
+    for (const off of [-3.55, 3.55]) g.add(EnvKit.ribbon(c, 0.5, Kit.mat(0x86704c), { y: 0.035, step: 2, offset: off, to }));
+    for (const off of [-4.4, 4.4]) g.add(EnvKit.ribbon(c, 1.8, Kit.mat(COL.verge), { y: 0.0, step: 2, offset: off, to }));
     // Puddles + embedded stones.
     const rng = new Rng(5);
     for (let d = 8; d < this.len; d += rng.range(10, 22)) {
@@ -309,7 +324,7 @@ export class JungleEnv {
       const p = this.P(d, lat, 0.045);
       if (Math.abs(d - D.FORD) < 14) continue;
       if (rng.chance(0.45)) {
-        Kit.add(g, Kit.cyl(1, 1, 0.02, 9), Kit.mat(0x6b7f78, { emissive: 0x1a2a2a, emissiveIntensity: 0.5 }), p.x, 0.04, p.z, 0, rng.next() * 6, 0, rng.range(0.6, 1.3), 1, rng.range(0.4, 0.8));
+        Kit.add(g, Kit.cyl(1, 1, 0.02, 9), Kit.mat(0x6b7f78, { emissive: 0x1a2a2a, emissiveIntensity: 0.5 }), p.x, 0.06, p.z, 0, rng.next() * 6, 0, rng.range(0.6, 1.3), 1, rng.range(0.4, 0.8));
       } else {
         Kit.add(g, this.flora.rockGeo(rng), Kit.mat(0x8c8270), p.x, 0.02, p.z, 0, rng.next() * 6, 0, 0.25, 0.1, 0.2);
       }
@@ -445,7 +460,7 @@ export class JungleEnv {
       });
       layer('near', 6.5, [6.5, 14], (r, d) => {
         const x = r.next();
-        if (d > D.BOSS_START - 20) return null;
+        if (d > D.BOSS_CLEAR) return null;
         return x < 0.45 ? f.palm(r) : x < 0.7 ? f.cycad(r) : f.bush(r, r.range(1.1, 1.6));
       });
       layer('mid', 10, [10, 24], (r) => {
@@ -515,13 +530,14 @@ export class JungleEnv {
         }
       }
     }
-    // Dilo hiding bushes at the fallen tree, and the boulder for the bomb pickup in the meadow.
+    // Bushes the dilos burst out of at the fallen tree (beside/behind their spots, never
+    // between them and the camera), and the boulder for the bomb pickup in the meadow.
     const extra = new THREE.Group();
     for (const [d, l, s] of [
-      [D.TREE - 2, -7.6, 1.25],
-      [D.TREE - 1.5, 7.8, 1.2],
-      [D.TREE - 6, -9.5, 1.1],
-      [D.TREE - 5, 10.5, 1.15],
+      [D.TREE + 1.2, -9.3, 1.15],
+      [D.TREE + 1.8, 9.4, 1.1],
+      [D.TREE - 6, -9.8, 1.0],
+      [D.TREE - 5, 10.8, 1.05],
     ] as [number, number, number][]) {
       const b = f.bush(rng, s, true);
       b.position.copy(this.P(d, l));
@@ -728,6 +744,11 @@ export class JungleEnv {
 
   // ─── Set pieces (called from beats) ────────────────────────────────────────
 
+  /** Arm (or cancel) the one-off 'WATCH THE HEAT!' tip, shown the first time the turret runs hot. */
+  armHeatTip(on: boolean) {
+    this.heatTip = on && !this.heatTipShown;
+  }
+
   openGate(w: World) {
     if (this.gateT >= 0) return;
     this.gateT = 0;
@@ -799,9 +820,10 @@ export class JungleEnv {
   /** Fuel drums along the river road the player can shoot as the boss runs past. */
   spawnBossDrums(w: World) {
     for (const [d, lat] of [
-      [560, -4.4],
-      [598, 4.2],
-      [636, -4.6],
+      [552, -4.4],
+      [594, 4.2],
+      [634, -4.6],
+      [672, 4.4],
     ] as [number, number][]) {
       w.add(fuelDrum(w, this.P(d, lat)));
     }
@@ -814,6 +836,11 @@ export class JungleEnv {
     const t = this.time;
     const d = w.rig.d;
     this.backdrop.position.set(w.camera.position.x, 0, w.camera.position.z);
+    if (this.heatTip && (w.weapons.heat > 0.5 || w.weapons.overheated)) {
+      this.heatTip = false;
+      this.heatTipShown = true;
+      w.hud.prompt('WATCH THE HEAT!');
+    }
     // Chunks fully inside the fog can't be seen: skip them.
     const cam = w.camera.position;
     for (let i = 0; i < this.chunks.length; i++) {
@@ -868,8 +895,8 @@ export class JungleEnv {
       }
     }
 
-    // Fallen tree halves fly apart.
-    if (this.treeT < 0 && d > D.TREE - 6) this.treeT = 5;
+    // Fallen tree halves fly apart (snap to the cleared pose if the run starts past it).
+    if (this.treeT < 0 && d > D.TREE_HOLD + 0.5) this.treeT = 2.9;
     if (this.treeT >= 0 && this.treeT < 3) {
       this.treeT += dt;
       const k = clamp(this.treeT / 1.1, 0, 1);
@@ -937,16 +964,27 @@ export class JungleEnv {
       }
     }
     if (this.foam.visible) {
-      const rl = 1 / this.riverCurve.getLength();
+      // Walk the pre-sampled river polyline (2 m spacing): no curve evaluation or allocation per frame.
+      const rx = this.riverX;
+      const rz = this.riverZ;
+      const last = rx.length - 1;
+      const du = dt * 1.6 / (last * 2);
       for (let i = 0; i < this.foamU.length; i++) {
-        let u = this.foamU[i] + dt * 1.6 * rl;
-        if (u > 1) u -= 1;
+        let u = this.foamU[i] + du;
+        if (u >= 1) u -= 1;
         this.foamU[i] = u;
-        this.riverCurve.getPointAt(u, _v);
-        this.riverCurve.getTangentAt(u, _w);
+        const f = u * last;
+        const j = Math.min(last - 1, Math.floor(f));
+        const k = f - j;
+        let tx = rx[j + 1] - rx[j];
+        let tz = rz[j + 1] - rz[j];
+        const tl = Math.hypot(tx, tz) || 1;
+        tx /= tl;
+        tz /= tl;
+        _v.set(rx[j] + (rx[j + 1] - rx[j]) * k, 0, rz[j] + (rz[j + 1] - rz[j]) * k);
         const off = (((i * 0.618) % 1) - 0.5) * (RIVER_WIDTH - 2);
-        _v.x += -_w.z * off;
-        _v.z += _w.x * off;
+        _v.x += -tz * off;
+        _v.z += tx * off;
         _v.y = 0.09;
         _q.identity();
         _s.set(0.5 + (i % 3) * 0.3, 1, 0.3 + (i % 2) * 0.2);

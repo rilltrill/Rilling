@@ -11,6 +11,7 @@ import { M, bake } from './bake';
 import { car } from './props';
 import { z3Scene } from './env';
 import { BRIDGE } from './scenery';
+import { D } from './layout';
 
 /**
  * THE BEHEMOTH — a 7.6 m construction worker turned giant, rebar speared
@@ -73,10 +74,15 @@ interface Joint {
 const _d = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 
+/** Highest launch point of a thrown car/slab above the deck (keeps the flight out from under the boss bar). */
+const THROW_MAX_Y = 5.6;
+
 /**
  * Boss projectile. The base Projectile aims 0.9 m along rig −Z (straight ahead
  * of the truck); during this chase the camera looks BACK, so retarget the end
- * point just in front of where the camera actually looks.
+ * point just in front of where the camera actually looks. The launch point is
+ * kept at most THROW_MAX_Y above the deck so that, with the low arc, the whole
+ * flight crosses the middle of the screen instead of skimming the top edge.
  */
 class Throwable extends Projectile {
   private onKill: (() => void) | null;
@@ -88,7 +94,13 @@ class Throwable extends Projectile {
     super.onAdded();
     const w = this.world;
     const rig = w.rig;
-    const to = (this as unknown as { to?: THREE.Vector3 }).to;
+    const self = this as unknown as { to?: THREE.Vector3; from?: THREE.Vector3 };
+    const from = self.from;
+    if (from) {
+      from.y = Math.min(from.y, THROW_MAX_Y);
+      this.root.position.copy(from);
+    }
+    const to = self.to;
     if (!to) return;
     w.camera.getWorldDirection(_d);
     _d.applyQuaternion(_q.copy(rig.space.quaternion).invert()).setY(0);
@@ -229,8 +241,9 @@ export class Behemoth extends Boss {
     const bone = M.lam(0xd8cfb0);
     const shirt = M.lam(0x5a5a4a, 'cloth', 1, 0.6);
     const conc = M.lam(0x8a847c, 'concrete', 1, 0.7);
-    this.weakMat = Kit.glow(0xff5a1a, 1.7);
-    this.weakHot = Kit.glow(0xffb040, 2.2);
+    // Weak points glow yellow (reads against the orange hi-vis vest); white-hot once enraged.
+    this.weakMat = Kit.glow(0xffe25a, 1.9);
+    this.weakHot = Kit.glow(0xfff8e0, 2.6);
     this.whiteMat = Kit.glow(0xffffff, 2);
     const eyeMat = Kit.glow(0xffd040, 2.4);
 
@@ -296,6 +309,11 @@ export class Behemoth extends Boss {
       // Ribs framing the wound.
       for (let i = 0; i < 3; i++) for (const s of [-1, 1]) Kit.add(g, Kit.box(0.5, 0.1, 0.1), bone, s * 0.38, 0.95 - i * 0.28, 1.0, 0, 0, s * 0.35);
       Kit.add(g, Kit.box(1.1, 1.2, 0.08), gore, 0, 0.55, 0.93);
+      // Blood-soaked vest edges: a dark frame so the glowing wound pops off the hi-vis orange.
+      const soak = M.lam(0x2e0806);
+      for (const s of [-1, 1]) Kit.add(g, Kit.box(0.34, 1.55, 0.14), soak, s * 0.77, 0.52, 1.0);
+      Kit.add(g, Kit.box(1.6, 0.24, 0.14), soak, 0, -0.22, 1.0);
+      Kit.add(g, Kit.box(1.4, 0.2, 0.14), soak, 0, 1.3, 1.0);
     });
     // Rebar speared through the torso (armour — sparks) with a lump of concrete.
     this.skin(this.chest, 'armor', (g) => {
@@ -312,7 +330,7 @@ export class Behemoth extends Boss {
     // The wound: glowing core in a ribcage (WEAK).
     this.wound = Kit.pivot(this.chest, 0, 0.55, 1.0, 'wound');
     this.core = Kit.add(this.wound, Kit.ico(0.5, 1), this.weakMat, 0, 0, 0, 0, 0, 0, 1.25, 1.15, 0.6);
-    const rim = Kit.add(this.wound, Kit.box(1.2, 1.25, 0.1), Kit.glow(0xff2a10, 1.2), 0, 0, -0.04);
+    const rim = Kit.add(this.wound, Kit.box(1.2, 1.25, 0.1), Kit.glow(0xff3010, 1.4), 0, 0, -0.04);
     for (const w of [this.core, rim]) {
       this.hitbox(w, 'weak');
       this.weakMeshes.push(w);
@@ -579,14 +597,31 @@ export class Behemoth extends Boss {
     this.root.rotation.y += angleDelta(this.root.rotation.y, yaw) * (1 - Math.exp(-rate * dt));
   }
 
+  /**
+   * Where the look-back camera aims. The pitch follows the head: the split
+   * skull sits ~20° above the view centre (clear of the boss health bar), and
+   * the pitch never exceeds ~14°, so the deck right behind the truck — where
+   * the minions attack from — stays in frame even when the giant is close.
+   */
   private updateFocus(k: number) {
+    const rig = this.world.rig;
     const p = this.root.position;
-    const near = clamp((16 - p.z) / 7, 0, 1);
-    _v.set(p.x * 0.6, lerp(4.4, 5.0, near) + this.model.position.y * 0.5, p.z);
-    this.focus.position.lerp(_v, k);
+    const ex = rig.offset.x;
+    const ez = rig.offset.z;
+    const eye = rig.eyeHeight + rig.offset.y;
+    this.head.getWorldPosition(_v);
+    rig.space.worldToLocal(_v);
+    const hFlat = Math.max(3, Math.hypot(_v.x - ex, _v.z - ez));
+    const eHead = Math.atan2(_v.y + 0.9 - eye, hFlat);
+    const pitch = clamp(eHead - 0.36, 0.05, 0.245);
+    const fx = p.x * 0.6;
+    const fz = Math.max(4, p.z);
+    _w.set(fx, eye + Math.tan(pitch) * Math.hypot(fx - ex, fz - ez), fz);
+    this.focus.position.lerp(_w, k);
   }
 
-  private spawnMinion(type: 'runner' | 'crawler') {
+  /** Runners leap onto the deck off the girders, or ride the giant's back and drop off it. */
+  private spawnMinion(type: 'leap' | 'drop') {
     const w = this.world;
     let n = 0;
     for (const e of w.enemies()) if (!e.isBoss && e.state !== 'dying') n++;
@@ -595,14 +630,14 @@ export class Behemoth extends Boss {
     const side = this.minionFlip ? 1 : -1;
     this.minionFlip = !this.minionFlip;
     const pos =
-      type === 'runner'
-        ? new THREE.Vector3(clamp(p.x + side * 4, -6, 6), 0, Math.max(9, p.z - 3))
-        : new THREE.Vector3(clamp(p.x + side * 1.5, -5, 5), 5.5, Math.max(8, p.z - 2.5));
+      type === 'leap'
+        ? new THREE.Vector3(clamp(p.x + side * 4, -6, 6), 0, Math.max(10, p.z - 3))
+        : new THREE.Vector3(clamp(p.x + side * 1.6, -5, 5), 5.2, Math.max(9, p.z - 2));
     try {
-      const e = createEnemy(type, w, {
+      const e = createEnemy('tail_runner', w, {
         pos,
         frame: 'rig',
-        entry: type === 'runner' ? 'leap' : 'drop',
+        entry: type,
         hpMul: 1,
         speedMul: 1,
         opts: { variant: this.world.rng.pick(['worker', 'soldier', 'civilian', 'biker']) },
@@ -635,7 +670,7 @@ export class Behemoth extends Boss {
       {
         from: _v.clone(),
         flightTime: kind === 'car' ? (fast ? 1.65 : 1.95) : fast ? 1.4 : 1.6,
-        arc: kind === 'car' ? 1.6 : 1.2,
+        arc: kind === 'car' ? 0.5 : 0.4,
         damage: 1,
         hp: kind === 'car' ? 4 : 3,
         points: kind === 'car' ? 400 : 250,
@@ -660,10 +695,25 @@ export class Behemoth extends Boss {
 
   // ─── Behaviour ────────────────────────────────────────────────────────────
 
+  /**
+   * Keep the truck rolling for the whole fight. The rest of the bridge is
+   * rationed by the giant's remaining health, so a long fight slows the chase
+   * down (and the giant's run with it) instead of parking the truck while the
+   * Behemoth sprints on the spot.
+   */
+  private pace() {
+    const rig = this.world.rig;
+    const left = D.BOSS_END - rig.d;
+    if (left <= 0.3) return;
+    const frac = clamp(this.hp / this.maxHp, 0, 1);
+    rig.moveTo(D.BOSS_END, clamp(left / (14 + 80 * frac), 1.8, 6));
+  }
+
   protected override customUpdate(dt: number): void {
     const w = this.world;
     const t = this.stateTime;
     const p = this.root.position;
+    this.pace();
     // Approach the desired spot behind the truck (rig frame).
     const zRate = this.bs === 'leap' ? 0 : this.bs === 'clubWind' || this.bs === 'swipeWind' ? 2.2 : 1.1;
     if (zRate > 0 && this.bs !== 'intro') {
@@ -676,8 +726,8 @@ export class Behemoth extends Boss {
       this.minionT -= dt;
       if (this.minionT <= 0) {
         this.minionT = this.phase >= 2 ? 11 : 14;
-        this.spawnMinion(this.phase >= 2 && this.minionFlip ? 'crawler' : 'runner');
-        if (this.phase >= 2) w.later(0.8, () => this.state !== 'dying' && this.spawnMinion('runner'));
+        this.spawnMinion(this.phase >= 2 && this.minionFlip ? 'drop' : 'leap');
+        if (this.phase >= 2) w.later(0.8, () => this.state !== 'dying' && !this.removed && this.spawnMinion('leap'));
       }
     }
 
@@ -809,7 +859,7 @@ export class Behemoth extends Boss {
       }
       case 'clubWind': {
         this.faceTruck(dt, 6);
-        this.targetZ = 8.5;
+        this.targetZ = 9.2;
         this.targetX = 1.2;
         if (t < 0.7) break;
         if (
@@ -835,7 +885,7 @@ export class Behemoth extends Boss {
         this.faceTruck(dt);
         if (t > 0.75) {
           this.leapFrom.copy(p);
-          this.leapTo.set(clamp(p.x * 0.3, -2, 2), 0, 7.5);
+          this.leapTo.set(clamp(p.x * 0.3, -2, 2), 0, 8.2);
           w.audio.play('boss_roar', { volume: 0.8, pitch: 1.1 });
           w.audio.play('whoosh', { pitch: 0.5 });
           this.go('leap');
@@ -869,7 +919,7 @@ export class Behemoth extends Boss {
       }
       case 'swipeWind': {
         this.faceTruck(dt, 6);
-        this.targetZ = 7;
+        this.targetZ = 8;
         if (
           this.windAttack(1.45, this.wound, 1.7, () => {
             w.hurtPlayer(1, this.title);
@@ -977,7 +1027,8 @@ export class Behemoth extends Boss {
     const gs = rig.speed + 1.5;
     this.stride += dt * (2.2 + gs * 0.32) * (running ? 1 : 0.3);
     const ph = this.stride;
-    const run = running ? 1 : 0;
+    // A slow truck gets a heavy lumber, not a sprint on the spot.
+    const run = running ? clamp((rig.speed + 0.8) / 4.6, 0.3, 1) : 0;
     const sw = Math.sin(ph);
     const foot = Math.floor(ph / Math.PI);
     if (running && foot !== this.lastFoot) {
@@ -1069,22 +1120,23 @@ export class Behemoth extends Boss {
         break;
       }
       case 'throwWind': {
+        // Side-arm hurl: the car is hauled back at shoulder height, torso coiled.
         const k = smoothstep(0, 0.5, t);
         const tremble = Math.sin(t * 30) * 0.04 * k;
-        this.set(this.spine, lerp(0.5, -0.2, k), -0.35 * k, 0);
-        this.set(this.shR, lerp(-1.0, -2.9, k) + tremble, 0, -0.3);
-        this.set(this.elR, lerp(-0.2, -0.9, k));
-        this.set(this.shL, -1.2 * k, 0, 0.4);
+        this.set(this.spine, lerp(0.6, 0.22, k), -0.55 * k, 0.06 * k);
+        this.set(this.shR, lerp(-1.0, 0.25, k) + tremble, 0, lerp(-0.35, -1.25, k));
+        this.set(this.elR, lerp(-0.2, -0.75, k));
+        this.set(this.shL, -1.3 * k, 0, 0.45);
         this.set(this.elL, -0.4);
-        this.set(this.neck, -0.55);
+        this.set(this.neck, -0.5);
         this.set(this.jaw, 0.5 * k);
         break;
       }
       case 'throw': {
         const k = smoothstep(0, 0.2, t);
-        this.set(this.spine, lerp(-0.2, 0.75, k), 0.35 * k, 0);
-        this.set(this.shR, lerp(-2.9, -0.5, k), 0, -0.3);
-        this.set(this.elR, lerp(-0.9, -0.1, k));
+        this.set(this.spine, lerp(0.22, 0.6, k), lerp(-0.55, 0.5, k), 0);
+        this.set(this.shR, lerp(0.25, -1.55, k), 0, lerp(-1.25, -0.35, k));
+        this.set(this.elR, lerp(-0.75, -0.1, k));
         this.set(this.shL, 0.4, 0, 0.4);
         break;
       }
@@ -1245,6 +1297,16 @@ export class Behemoth extends Boss {
     this.deathTravel = Math.max(1, BRIDGE.R + 0.6 - off);
     this.vy = 0;
     w.audio.play('boss_roar', { volume: 1, pitch: 0.6 });
+    // The horde breaks off: minions drop where they stand and anything in the air
+    // is blown apart, so nothing can land a hit during the death cinematic.
+    for (const e of w.enemies()) if (e !== this && e.state !== 'dying') e.die(null);
+    for (const e of w.entities) {
+      if (e instanceof Projectile && !e.removed) {
+        e.removed = true;
+        e.root.getWorldPosition(_w);
+        w.fx.explosion(_w, 0.6);
+      }
+    }
     // Camera tracks the body but never dips below the deck (we watch it go over the rail).
     this.deathFocus.position.copy(this.root.position).setY(4.5);
     w.scene.add(this.deathFocus);
@@ -1258,6 +1320,8 @@ export class Behemoth extends Boss {
   protected override updateDeath(dt: number): boolean {
     const w = this.world;
     const t = this.stateTime;
+    // Anything that still arrives (a scheduled minion wave) is cut down at once: no hits during the finale.
+    for (const e of w.enemies()) if (e !== this && e.hostile && e.state !== 'dying') e.die(null);
     // Explosions from the wound and across the body.
     if (t < 3.0 && Math.floor((t - dt) * 5) !== Math.floor(t * 5)) {
       this.wound.getWorldPosition(_v);

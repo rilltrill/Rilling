@@ -6,13 +6,14 @@ import { EnvKit } from '../../kit/EnvKit';
 import { Rng } from '../../../core/Rng';
 import { clamp, damp, lerp } from '../../../core/math';
 import type { AnimMats, Animator, Ctx } from './ctx';
-import { ROOMS, TUNNEL, dAtZ } from './layout';
+import { ROOMS, TUNNEL, ceilingAt, dAtZ } from './layout';
 import { buildLobby, buildShop } from './lobby';
 import { buildGreenhouse, buildHatchery } from './green';
 import { buildKitchen, buildServers } from './kitchen';
 import { buildPump, buildTunnel } from './tunnels';
 import { buildHall, buildWing } from './containment';
 import type { BurstDoor, GlassWall, SkeletonDisplay } from './setpieces';
+import type { Enemy } from '../../../gameplay/Enemy';
 
 interface Zone {
   id: string;
@@ -102,6 +103,8 @@ export class LabScene {
   private bulkOpen = 0;
   private bulkD = 0;
   private skyBase = new THREE.Color(0x0a1428);
+  /** Vent drops already moved under the ceiling. */
+  private drops = new WeakSet<Enemy>();
 
   constructor(readonly world: World, readonly curve: THREE.CatmullRomCurve3) {
     const am = (this.am = {
@@ -184,8 +187,8 @@ export class LabScene {
       { d: z(-50), sky: 0x9ab0d8, ground: 0x463a3e, hemi: 2.19, fog: 0x0e121c, near: 16, far: 66 },
       { d: z(-60), sky: 0xb0a8c0, ground: 0x4a3c34, hemi: 2.12, fog: 0x12101a, near: 12, far: 48 },
       { d: z(-80), sky: 0xb0a8c0, ground: 0x4a3c34, hemi: 2.12, fog: 0x12101a, near: 12, far: 48 },
-      { d: z(-86), sky: 0x8ab4c0, ground: 0x2c3a24, hemi: 2.31, fog: 0x0c1a1c, near: 14, far: 56 },
-      { d: z(-120), sky: 0x8ab4c0, ground: 0x2c3a24, hemi: 2.31, fog: 0x0c1a1c, near: 14, far: 56 },
+      { d: z(-86), sky: 0x8ab4c0, ground: 0x40392e, hemi: 2.31, fog: 0x0c1a1c, near: 14, far: 56 },
+      { d: z(-120), sky: 0x8ab4c0, ground: 0x40392e, hemi: 2.31, fog: 0x0c1a1c, near: 14, far: 56 },
       { d: z(-128), sky: 0xb4d4cc, ground: 0x3a4a44, hemi: 2.38, fog: 0x0c1816, near: 12, far: 48 },
       { d: z(-158), sky: 0xb4d4cc, ground: 0x3a4a44, hemi: 2.38, fog: 0x0c1816, near: 12, far: 48 },
       { d: z(-166), sky: 0xb0bccc, ground: 0x3e3e40, hemi: 2.31, fog: 0x10141a, near: 12, far: 46 },
@@ -202,7 +205,8 @@ export class LabScene {
     this.accents = [
       { from: 0, to: z(-54), pos: V(-3, 7, -30), color: 0xff2a18, intensity: 22, distance: 28, mode: 'pulse' },
       { from: z(-54), to: z(-79), pos: V(4.5, 3.4, -74), color: 0xffa860, intensity: 14, distance: 14, mode: 'flicker' },
-      { from: z(-79), to: z(-123), pos: V(6, 1.6, -104), color: 0x60ffc8, intensity: 18, distance: 18, mode: 'steady' },
+      // Warm grow-lamp over the planting beds: green/olive dinos pop against the dark foliage.
+      { from: z(-79), to: z(-123), pos: V(-3.5, 3.4, -104), color: 0xffc888, intensity: 22, distance: 20, mode: 'steady' },
       { from: z(-123), to: z(-161), pos: V(0, 2.2, -142), color: 0x40ff70, intensity: 12, distance: 16, mode: 'pulse' },
       { from: z(-161), to: z(-193), pos: V(0, 3.4, -179), color: 0xc8dcff, intensity: 16, distance: 18, mode: 'flicker' },
       { from: z(-193), to: z(-216), pos: V(0, 3.0, -206), color: 0x3060ff, intensity: 16, distance: 16, mode: 'steady' },
@@ -211,9 +215,33 @@ export class LabScene {
       { from: z(-295), to: z(-327), pos: V(11, 6.2, -312), color: 0xff8a20, intensity: 18, distance: 20, mode: 'rotate' },
       { from: z(-327), to: 1e9, pos: V(11, 5.5, -366), color: 0x40b0ff, intensity: 30, distance: 26, mode: 'steady' },
     ];
+    // Intact glass stops bullets (nothing gets shot through a closed enclosure).
+    for (const g of [...this.cells, ...this.panes]) g.onBreak = () => (this.occKey = -1);
     this.doorList = Object.values(this.doors);
     this.world.scene.add(this.root);
     this.update(0);
+  }
+
+  /**
+   * The engine's 'drop' entry always starts 6 m up, which is above the
+   * ceilings in here: move fresh vent drops to just under the ceiling and
+   * puff the vent they come out of.
+   */
+  private fixVentDrops() {
+    const w = this.world;
+    for (const e of w.enemies()) {
+      if (e.spawn.entry !== 'drop' || e.state !== 'entry' || this.drops.has(e)) continue;
+      this.drops.add(e);
+      const p = e.root.position;
+      const ceil = ceilingAt(p.x, p.z);
+      if (ceil > 20) continue;
+      const g = w.groundAt(p.x, p.z);
+      p.y = Math.min(p.y, Math.max(g + 0.5, ceil - 0.6));
+      _v.set(p.x, ceil - 0.05, p.z);
+      w.fx.dust(_v, 0.55, 0x7a7c82);
+      w.fx.debris(_v, 0x5a5e66);
+      w.audio.play('metal_clang', { volume: 0.35, pitch: 1.7, vary: 0.15 });
+    }
   }
 
   /** Register an object that should only be visible near rail distance d. */
@@ -238,8 +266,15 @@ export class LabScene {
     if (key !== this.occKey) {
       this.occKey = key;
       this.occluders.length = 0;
-      for (let i = 0; i < this.zones.length; i++) if (key & (1 << i)) this.occluders.push(...this.zones[i].shell);
+      for (let i = 0; i < this.zones.length; i++) {
+        if (!(key & (1 << i))) continue;
+        const zn = this.zones[i];
+        this.occluders.push(...zn.shell);
+        const glass = zn.id === 'wing' ? this.cells : zn.id === 'hall' ? this.panes : null;
+        if (glass) for (const g of glass) if (!g.broken) this.occluders.push(g.pane);
+      }
     }
+    this.fixVentDrops();
     for (const c of this.cullables) c.obj.visible = c.d > d - 16 && c.d < d + 60;
 
     // Animated materials.

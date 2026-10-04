@@ -46,20 +46,30 @@ export type ZombieVariant = (typeof ZOMBIE_VARIANTS)[number];
 // ─── Shared material + geometry baking ──────────────────────────────────────
 
 const _col = new THREE.Color();
-const geoCache = new Map<string, THREE.BufferGeometry>();
-let cacheLive = false;
+/** Baked geometries owned by live zombies (disposed with their zombie, or at stage end). */
+const liveGeos = new Set<THREE.BufferGeometry>();
+let guardLive = false;
 let zMat: THREE.MeshLambertMaterial | null = null;
 
-/** Register a sentinel with Kit so the bake cache empties when a stage's GPU resources are disposed. */
-function cacheGuard() {
-  if (cacheLive) return;
-  cacheLive = true;
+/** Register a sentinel with Kit so any still-live baked geometry is freed when the stage's GPU resources are disposed. */
+function stageGuard() {
+  if (guardLive) return;
+  guardLive = true;
   Kit.track({
     dispose() {
-      geoCache.clear();
-      cacheLive = false;
+      for (const g of liveGeos) g.dispose();
+      liveGeos.clear();
+      guardLive = false;
     },
   });
+}
+
+/** Free baked geometries (called when their zombie is removed). */
+export function releaseGeos(list: THREE.BufferGeometry[]) {
+  for (const g of list) {
+    if (liveGeos.delete(g)) g.dispose();
+  }
+  list.length = 0;
 }
 
 /**
@@ -93,23 +103,17 @@ const _nm = new THREE.Matrix3();
 /**
  * Merge meshes into one non-indexed geometry in their parent's space, in a
  * single pass (no intermediate clones). Lambert parts get an RGBA colour
- * attribute (alpha = 1 − emission). Results are cached for the stage.
+ * attribute (alpha = 1 − emission). Palettes and gore are random per zombie,
+ * so the result is owned by that zombie (see `releaseGeos`) rather than cached.
  */
 function mergedGeo(list: THREE.Mesh[], colored: boolean): THREE.BufferGeometry {
-  cacheGuard();
-  let key = colored ? 'c' : 'g';
+  stageGuard();
   let count = 0;
   for (const m of list) {
     m.updateMatrix();
     const g = m.geometry;
     count += g.index ? g.index.count : g.attributes.position.count;
-    key += `|${g.uuid}`;
-    if (colored) key += `:${colorOf(m)}:${m.userData.e ?? 0}`;
-    const e = m.matrix.elements;
-    for (let i = 0; i < 15; i++) if (i % 4 !== 3) key += `,${Math.round(e[i] * 1e4)}`;
   }
-  const cached = geoCache.get(key);
-  if (cached) return cached;
   const pos = new Float32Array(count * 3);
   const nor = new Float32Array(count * 3);
   const col = colored ? new Float32Array(count * 4) : null;
@@ -169,9 +173,10 @@ function mergedGeo(list: THREE.Mesh[], colored: boolean): THREE.BufferGeometry {
   merged.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   if (col) merged.setAttribute('color', new THREE.BufferAttribute(col, 4));
   merged.computeBoundingSphere();
+  merged.computeBoundingBox();
+  // 'shared' keeps World.dispose() from touching it; the owning zombie frees it.
   merged.userData.shared = true;
-  Kit.track(merged);
-  geoCache.set(key, merged);
+  liveGeos.add(merged);
   return merged;
 }
 
@@ -181,7 +186,7 @@ function mergedGeo(list: THREE.Mesh[], colored: boolean): THREE.BufferGeometry {
  * materials, e.g. glowing eyes, merge per material). Hidden meshes, meshes
  * with children and `userData.keep` meshes are left untouched.
  */
-export function bakeTree(root: THREE.Object3D) {
+export function bakeTree(root: THREE.Object3D, out: THREE.BufferGeometry[] = []) {
   const nodes: THREE.Object3D[] = [];
   root.traverse((o) => {
     if (!(o as THREE.Mesh).isMesh) nodes.push(o);
@@ -201,7 +206,9 @@ export function bakeTree(root: THREE.Object3D) {
     for (const [key, list] of groups) {
       const lam = key.endsWith('|lam');
       if (!lam && list.length < 2) continue;
-      const mesh = new THREE.Mesh(mergedGeo(list, lam), lam ? zombieMaterial() : (list[0].material as THREE.Material));
+      const geo = mergedGeo(list, lam);
+      out.push(geo);
+      const mesh = new THREE.Mesh(geo, lam ? zombieMaterial() : (list[0].material as THREE.Material));
       mesh.userData.z = list[0].userData.z ?? 'none';
       mesh.userData.baked = true;
       for (const m of list) p.remove(m);
@@ -237,6 +244,8 @@ export class ZBody {
   headMesh!: THREE.Mesh;
   readonly pelvis: THREE.Mesh;
   readonly neckMesh: THREE.Mesh;
+  /** Geometry created by the bake (owned by this body). */
+  readonly geos: THREE.BufferGeometry[] = [];
   private zoneOf = new Map<THREE.Object3D, Zone>();
   private skinMat: THREE.Material;
 
@@ -346,7 +355,7 @@ export class ZBody {
 
   /** Bake static meshes and collect hit-zone lists. Call once, after all dressing. */
   finish() {
-    bakeTree(this.rig.root);
+    bakeTree(this.rig.root, this.geos);
     const zones = this.zones;
     const root = this.rig.root;
     root.traverse((o) => {
@@ -365,6 +374,11 @@ export class ZBody {
       (this.rig.head.children.find((c) => (c as THREE.Mesh).isMesh && c.userData.z === 'head' && c.userData.baked && (c as THREE.Mesh).material === zombieMaterial()) as THREE.Mesh | undefined) ??
       zones.head[0] ??
       this.rig.headMesh;
+  }
+
+  /** Free the baked geometry (the zombie and its severed limbs must be gone). */
+  dispose() {
+    releaseGeos(this.geos);
   }
 }
 
@@ -588,6 +602,17 @@ export function maybeLongHair(b: ZBody, variant: string, hair: number | null, rn
   if (variant === 'civilian' || variant === 'nurse' || variant === 'patient' || variant === 'office') {
     if (rng.chance(0.3)) longHair(b, hair);
   }
+}
+
+// ─── Joint positions ───────────────────────────────────────────────────────
+
+/**
+ * World position of a foot sole. (The bake merges the foot mesh into the shin,
+ * so `LegLimb.foot` is no longer in the scene — measure from the knee.)
+ */
+export function footWorld(l: LegLimb, out: THREE.Vector3): THREE.Vector3 {
+  l.knee.updateWorldMatrix(true, false);
+  return l.knee.localToWorld(out.set(0, -0.44, 0.05));
 }
 
 // ─── Poses ──────────────────────────────────────────────────────────────────
