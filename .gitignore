@@ -17,3 +17,6 @@ ios/DerivedData/
 *.ipa
 OVERRUN-simulator.zip
 ios/App/CapApp-SPM/.build/
+
+# Agents' / developers' temporary tests (never committed)
+tests/unit/tmp-*
