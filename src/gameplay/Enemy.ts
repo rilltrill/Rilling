@@ -120,6 +120,7 @@ export abstract class Enemy extends Entity {
   protected entryFrom = new THREE.Vector3();
   protected entryTo = new THREE.Vector3();
   private flashTime = 0;
+  private flashCrit = false;
   private meshes: THREE.Mesh[] | null = null;
   private origMats: (THREE.Material | THREE.Material[])[] = [];
   /** True while this enemy holds one of the world's limited attack slots. */
@@ -686,6 +687,13 @@ export abstract class Enemy extends Entity {
     const mat = critical ? RED_FLASH_MAT : FLASH_MAT;
     for (const m of this.meshes!) if (m.userData.noFlash !== true) m.material = mat;
     this.flashTime = 0.06;
+    this.flashCrit = critical;
+  }
+
+  /** Current hit flash: 0 none, 1 white, 2 red (ART: SPRITES flashes the sprite with it). */
+  get flashKind(): 0 | 1 | 2 {
+    if (this.flashTime <= 0) return 0;
+    return this.flashCrit ? 2 : 1;
   }
 
   private restoreMaterials() {

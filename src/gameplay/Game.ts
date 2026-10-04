@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Engine } from '../core/Engine';
 import { Input } from '../core/Input';
 import { Save } from '../core/Save';
-import type { CampaignId, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
+import type { ArtStyle, CampaignId, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
 import { AudioSystem } from '../audio/Audio';
 import type { MusicId } from '../audio/names';
 import { Hud } from '../ui/Hud';
@@ -21,6 +21,7 @@ import type { Entity } from './Entity';
 import { Projectile } from './Projectile';
 import { prewarmFxAtlases } from '../fx/Fx';
 import { buildWarmupSet } from './Warmup';
+import { SpriteArt, parseLook } from './SpriteArt';
 
 export interface DebugFlags {
   stage?: string;
@@ -37,6 +38,8 @@ export interface DebugFlags {
    * tooling gets clean screenshots. Undefined = the player's DISPLAY setting.
    */
   retro?: RetroMode;
+  /** Forced character art (`&art=sprites|3d`); undefined = the player's ART setting. */
+  art?: ArtStyle;
 }
 
 /** Attract-mode demo length (wall-clock seconds of live action; cuts don't count). */
@@ -133,6 +136,8 @@ export class Game implements MenuActions {
   runner: StageRunner | null = null;
   shooter: Shooter | null = null;
   autoplay: AutoPlayer | null = null;
+  /** ART: SPRITES renderer for the current world (null in ART: 3D). */
+  sprites: SpriteArt | null = null;
   private run: Run | null = null;
   /** Stage being built across the next frames (see startStage). */
   private loading: Loading | null = null;
@@ -285,6 +290,30 @@ export class Game implements MenuActions {
       this.redrawUntil = performance.now() + 100;
     }
     this.gridW = -1; // re-derive the overlay's pixel grid (quality changes its line count)
+    if (this.world) this.syncSprites(this.world);
+  }
+
+  /** Character art in effect (URL flag over the ART setting). */
+  get artStyle(): ArtStyle {
+    return this.flags.art ?? this.save.settings.art ?? 'sprites';
+  }
+
+  /** Create / drop the sprite renderer for `w` to match the ART setting (also mid-stage). */
+  private syncSprites(w: World) {
+    const want = this.artStyle === 'sprites' && !this.engine.contextLost;
+    if (want && !this.sprites) {
+      this.sprites = new SpriteArt(this.engine.renderer, w, () => {
+        const { width, height } = this.engine.size;
+        return this.engine.retro.targetSize(width, height);
+      });
+      // Debug: `&spriteLook=bands:6,k:1` tunes the pixel-art pass.
+      if (typeof location !== 'undefined') this.sprites.look = parseLook(new URLSearchParams(location.search).get('spriteLook'));
+      this.redrawUntil = performance.now() + 100;
+    } else if (!want && this.sprites) {
+      this.sprites.dispose();
+      this.sprites = null;
+      this.redrawUntil = performance.now() + 100;
+    }
   }
 
   /** SFX / music volumes (SFX ducked under the attract demo, silent while it fast-forwards). */
@@ -386,6 +415,7 @@ export class Game implements MenuActions {
       this.run.banked = 0;
     }
     this.world = w;
+    this.syncSprites(w);
     this.shooter = new Shooter(w);
     this.runner = new StageRunner(w, stage);
     // HUD wiring first: the opening beat (usually a banner, or a boss when
@@ -458,6 +488,8 @@ export class Game implements MenuActions {
       w.scene.add(set.group);
       w.scene.updateMatrixWorld();
       this.engine.precompile(w.scene, w.scene);
+      // ART: SPRITES draws characters into an offscreen target: compile those variants too.
+      this.sprites?.precompile(set.group);
       set.dispose();
       if (this.flags.debug) console.info(`[game] warm-up: ${set.count} prototypes, programs ${before} → ${this.engine.renderer.info.programs?.length ?? 0}`);
     } catch (err) {
@@ -528,6 +560,10 @@ export class Game implements MenuActions {
     // Don't let a stage's roars/alarms carry into menus or restarts.
     this.audio.stopSfx();
     this.audio.setPaused(false);
+    if (this.sprites) {
+      this.sprites.dispose();
+      this.sprites = null;
+    }
     if (this.world) {
       this.world.dispose();
       this.world = null;
@@ -1011,7 +1047,17 @@ export class Game implements MenuActions {
     this.renderedW = width;
     this.renderedH = height;
     this.renderedDpr = this.engine.pixelRatio;
-    this.engine.render(w.scene);
+    const sp = this.sprites;
+    if (!sp || this.engine.contextLost) {
+      this.engine.render(w.scene);
+      return;
+    }
+    sp.beginFrame();
+    try {
+      this.engine.render(w.scene);
+    } finally {
+      sp.endFrame();
+    }
   }
 
   private renderBackdrop(dt: number) {

@@ -126,6 +126,7 @@ function cleanSettings(s: Settings): Settings {
   const shake = Number(s.screenShake);
   s.screenShake = Number.isFinite(shake) ? Math.min(1, Math.max(0, shake)) : DEFAULT_SETTINGS.screenShake;
   s.reduceFlashes = !!s.reduceFlashes;
+  if (s.art !== '3d' && s.art !== 'sprites') s.art = DEFAULT_SETTINGS.art;
   return s;
 }
 
