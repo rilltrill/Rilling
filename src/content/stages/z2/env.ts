@@ -4,8 +4,8 @@ import type { World } from '../../../gameplay/World';
 import { EnvKit } from '../../kit/EnvKit';
 import { Kit } from '../../kit/ModelKit';
 import { Rng } from '../../../core/Rng';
-import { clamp, damp } from '../../../core/math';
-import { B, R, RAIL_LENGTH, dAt, groundAt } from './layout';
+import { clamp } from '../../../core/math';
+import { B, RAIL_LENGTH, dAt, groundAt } from './layout';
 import { bake } from './bake';
 import { type Z2Scene, type AccentLight, clearZ2Scene, setZ2Scene } from './scene';
 import type { ZoneCtx } from './zonekit';
@@ -494,7 +494,7 @@ function openDrawer(w: World, dr: Z2Scene['drawers'][number]) {
 function dropVent(w: World, v: Z2Scene['vents'][number]) {
   v.dropped = true;
   v.vy = 0.5;
-  v.spin = 3 + Math.random() * 0;
+  v.spin = w.rng.range(3, 6) * (w.rng.chance(0.5) ? 1 : -1);
   w.audio.play('metal_clang', { volume: 0.8, vary: 0.2, pitch: 1.2 });
   w.fx.dust(_v.copy(v.pos).setY(v.pos.y - 0.2), 0.5, 0x8a8a80);
 }
@@ -518,10 +518,10 @@ function updateAmbulance(w: World, ar: NonNullable<Z2Scene['ambulance']>, dt: nu
     const k = ar.t;
     a.root.visible = true;
     a.root.position.lerpVectors(ar.from, ar.to, k);
-    // Swerve.
-    const sw = Math.sin(k * Math.PI) * 1.4;
-    a.root.position.x += -Math.sin(ar.yawFrom + Math.PI / 2) * sw * 0.0;
-    a.root.position.z += sw * 0.6;
+    // Swerve (perpendicular to the travel direction).
+    const sw = Math.sin(k * Math.PI) * 1.2;
+    a.root.position.x += Math.cos(ar.yawFrom) * sw;
+    a.root.position.z -= Math.sin(ar.yawFrom) * sw;
     a.root.rotation.y = ar.yawFrom + Math.cos(k * Math.PI) * 0.12;
     a.body.rotation.z = Math.sin(k * Math.PI * 2) * 0.05;
     if (k >= 1) {
@@ -578,6 +578,3 @@ function updateAmbulance(w: World, ar: NonNullable<Z2Scene['ambulance']>, dt: nu
   }
 }
 
-/** Small helper for set pieces: damp a value (re-exported to keep imports tidy). */
-export const dampTo = damp;
-export { R };

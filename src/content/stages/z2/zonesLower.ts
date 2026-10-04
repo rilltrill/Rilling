@@ -178,6 +178,8 @@ export function buildMorgue(ctx: ZoneCtx): THREE.Group {
     const door = new THREE.Group();
     door.position.set(faceX, fy - 0.05, hingeZ);
     door.rotation.y = side === 'e' ? -Math.PI / 2 : Math.PI / 2;
+    door.userData.baseRy = door.rotation.y;
+    door.userData.openSign = -1;
     ctx.dyn.add(door);
     bakeInto(door, (h) => {
       box(h, 0.68, 0.62, 0.04, M(C.steel, 'metal', 3, 0.6), 0.34, 0, 0);
@@ -318,7 +320,6 @@ export function buildOR(ctx: ZoneCtx): THREE.Group {
   });
   // Observation gallery behind the glass.
   sideRoom(g, ga.x0 + 0.15, ga.x1, ga.z0, ga.z1, ga.y, ga.h, 0x1a2622);
-  box(g, ga.x1 - ga.x0, 0.3, ga.z1 - ga.z0, M(0x2a302c), (ga.x0 + ga.x1) / 2 + 0.07, ga.y - 0.15, (ga.z0 + ga.z1) / 2);
   box(g, 0.04, 1.8, ga.z1 - ga.z0, Kit.mat(0x7ab8b0, { transparent: true, opacity: 0.16 }), r.x1, ga.y + 0.9, (ga.z0 + ga.z1) / 2);
   for (let k = 0; k < 4; k++) box(g, 0.08, 1.8, 0.08, M(0x5a6260), r.x1, ga.y + 0.9, ga.z0 + 1.8 + k * 1.8);
   box(g, 0.1, 0.06, ga.z1 - ga.z0, M(0x8a908c), ga.x0 + 0.5, ga.y + 0.95, (ga.z0 + ga.z1) / 2);
@@ -469,8 +470,8 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
       zMin: [{ at: 40, w: 2.4, h: 2.6 }],
     },
   });
-  sideRoom(g, 38.6, 41.4, -104.5 + 0, -105.85, B, 2.9, 0x141a18);
-  sideRoom(g, 38.6, 41.4, -137.5, -136.15, B, 2.9, 0x141a18);
+  sideRoom(g, 38.6, 41.4, -105.85, -103, B, 2.9, 0x141a18);
+  sideRoom(g, 38.6, 41.4, -139, -136.15, B, 2.9, 0x141a18);
   // Balconies.
   const D = BALCONY_DEPTH;
   const slab = M(C.balcony, 'concrete', 1, 0.5);

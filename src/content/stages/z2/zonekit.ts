@@ -106,6 +106,7 @@ export function danglingPanel(ctx: ZoneCtx, g: THREE.Object3D, x: number, y: num
   const hang = new THREE.Group();
   pivot.add(hang);
   hang.rotation.x = 1.15;
+  hang.userData.baseX = 1.15;
   bakeInto(hang, (h) => {
     box(h, 0.66, 0.05, 1.26, M(0xb8bcb4), 0, -0.02, 0.63);
     box(h, 0.01, 0.5, 0.01, M(0x1a1a1a), 0.25, -0.25, 0.0);
