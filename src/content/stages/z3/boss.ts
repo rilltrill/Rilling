@@ -1446,7 +1446,7 @@ export class Behemoth extends Boss {
       if (T < dBoss - 4 || T > dCam) continue;
       const ratio = (dCam - T) / Math.max(1, dCam - dBoss);
       if (ratio < 0.45) continue;
-      if (T + 6 <= dCam - 9) shift = T + 6 - dBoss;
+      if (T + 6 <= dCam - 9) shift = Math.min(12, T + 6 - dBoss); // ≤ ~7 m/s: a lunge, not a slide
       else shift = Math.max(-10, Math.min(0, dCam - (dCam - T) / 0.45 - dBoss));
     }
     return shift;
