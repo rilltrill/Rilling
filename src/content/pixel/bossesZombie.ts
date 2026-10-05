@@ -324,7 +324,6 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
   f.cone(f.at(nk, 0, -0.25, -0.05), f.at(nk, 0, 0.62, 0.02), 0.74 * s, 0.56 * s, M.flesh).k(0.3 * s).u(3.1);
   // Tumours breaking the mound's outline (lumpy, not a smooth egg).
   f.ball(f.at(bd, -2.45, 1.35, 0.2), 0.55 * s, M.flesh).k(0.25 * s);
-  f.ball(f.at(bd, 2.5, 1.25, -0.1), 0.5 * s, M.dark).k(0.25 * s);
   // Front details (decals, only while the front faces us).
   const front = f.facing(f.at(tor, 0, 0.8, 1.4), f.dir(tor, 0, 0, 1));
   if (front > -0.05) {
@@ -356,7 +355,6 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
     }
     // Weeping sores.
     f.decal(f.at(tor, -1.0, 0.55, 1.25), f.at(tor, -0.92, 0.48, 1.27), 0.13 * s, 0.11 * s, M.sore).flag(D).rag(0.03 * s, PF.SPIKY).seed(31);
-    f.decal(f.at(bd, 1.6, 1.2, 1.75), f.at(bd, 1.7, 1.12, 1.75), 0.11 * s, 0.1 * s, M.sore).flag(D).rag(0.03 * s, PF.SPIKY).seed(32);
   }
 
   // ── Bone spikes breaking through the shoulders, the spine ridge ──
@@ -392,8 +390,8 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
     f.decal(f.at(R.heart, 0.02, -0.02, 0.4), f.at(R.heart, 0.02, -0.02, 0.4), (0.18 + 0.1 * beat) * hs, (0.18 + 0.1 * beat) * hs, M.heartCore).flag(D | PF.GLOW);
     f.decal(f.at(R.heart, -0.17, 0.18, 0.4), f.at(R.heart, -0.13, 0.2, 0.4), 0.055 * hs, 0.04 * hs, M.white).flag(D | PF.GLOW | PF.NO_OUTLINE).min(0.5);
     // Vessels tying it into the cavity.
-    for (let i = 0; i < 2; i++) {
-      const a = 0.9 + i * 2.6;
+    for (let i = 0; i < 1; i++) {
+      const a = 2.2;
       f.cone(f.at(R.heart, Math.cos(a) * 0.32, Math.sin(a) * 0.32, 0.1), f.at(R.heart, Math.cos(a) * 0.62, Math.sin(a) * 0.62, 0.05), 0.07 * hs, 0.05 * hs, M.vessel).k(0.04 * hs).part(PART.TORSO);
     }
   }
@@ -431,10 +429,8 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
   f.layer(0.16 * sh, PART.TORSO, rot);
   f.ellipsoid(h, 0, 0.72, -0.06, 0.98, 0.95, 0.9, M.face).k(0.12 * sh).u(0.2).seed(41);
   f.ellipsoid(h, -0.6, 0.95, -0.2, 0.5, 0.5, 0.5, M.raw).k(0.18 * sh).seed(43);
-  f.ellipsoid(h, 0.55, 1.15, -0.3, 0.4, 0.4, 0.4, M.dark).k(0.18 * sh).seed(45);
-  // Puffy cheeks, swollen bags under the eye cluster, a stubby rotted nose.
+  // Puffy cheeks, a stubby rotted nose.
   for (let sd = 1; sd >= -1; sd -= 2) f.ball(f.at(h, sd * 0.5, 0.38, 0.6), 0.3 * sh, M.face).k(0.14 * sh);
-  f.cone(f.at(h, -0.55, 0.58, 0.8), f.at(h, 0.55, 0.58, 0.8), 0.1 * sh, 0.1 * sh, M.face).k(0.08 * sh).z(-0.04);
   f.cone(f.at(h, 0, 0.62, 0.9), f.at(h, 0, 0.44, 1.0), 0.09 * sh, 0.12 * sh, M.face).k(0.06 * sh).z(-0.06);
   // The throat behind the mouth (fills the gap as the jaw drops).
   f.ellipsoid(h, 0, 0.05, 0.45, 0.44, 0.36, 0.36, M.gullet).k(0.06 * sh);
@@ -479,8 +475,18 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
     }
   }
 
-  // ── Eyes (weak): veiny socket, amber glowing ball, hot iris, slit pupil, glint ──
-  f.layer(0.004 * s, PART.WEAK, 0, -0.12 * s);
+  // ── Eyes (weak): veiny sockets (tilted discs, like the rims), then amber glowing balls,
+  // a hot iris, a slit pupil tracking you, a glint ──
+  f.layer(0.004 * s, PART.TORSO, 0, -0.04 * s);
+  for (let i = 0; i < R.eyes.length; i++) {
+    const e = R.eyes[i];
+    const hold = e.mesh.parent;
+    const r = mem.eyeR[i] ?? 0.2;
+    if (!hold || r < 0.195 || e.lid.visible) continue;
+    if (f.facing(f.at(hold, 0, 0, 0), f.dir(hold, 0, 0, 1)) < -0.6) continue;
+    f.ellipsoid(hold, 0, 0, -0.3 * r, r * 1.32, r * 1.32, r * 0.35, M.socket);
+  }
+  f.layer(0.004 * s, PART.WEAK, 0, -0.15 * s);
   for (let i = 0; i < R.eyes.length; i++) {
     const e = R.eyes[i];
     const hold = e.mesh.parent;
@@ -488,9 +494,8 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
     const r = mem.eyeR[i] ?? 0.2;
     const es = scaleOf(hold);
     const c = f.at(hold, 0, 0, 0);
-    // Only eyes facing the camera (the mound hides the rest).
-    if (f.facing(c, f.dir(hold, 0, 0, 1)) < -0.25) continue;
-    if (r >= 0.195) f.ball(f.at(hold, 0, 0, -0.3 * r), r * 1.32 * es, M.socket).part(PART.TORSO).flag(PF.FLAT).z(0.04);
+    // (Eyes turned away are still drawn: their hit spheres poke out of the flesh; depth hides the rest.)
+    if (f.facing(c, f.dir(hold, 0, 0, 1)) < -0.6) continue;
     if (e.lid.visible) {
       // Burst: a stitched-shut lid.
       f.ellipsoid(e.lid, 0, 0, 0, r * 1.1, r * 1.1, r * 0.6, M.lid).part(PART.TORSO);
@@ -518,8 +523,6 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
     f.ellipsoid(v, 0, 0.01, 0, 0.14, 0.17, 0.15, M.skin).k(0.05 * vs);
     if (f.facing(f.at(v, 0, 0, 0.14), f.dir(v, 0, 0, 1)) > 0.05) {
       f.decal(f.at(v, -0.07, 0.05, 0.14), f.at(v, 0.07, 0.05, 0.14), 0.026 * vs, 0.026 * vs, dying ? M.vMouth : M.vEye).flag(D | PF.GLOW).min(0.5);
-      const mp = f.at(v, 0, -0.07, 0.14);
-      f.decal(mp, f.at(v, 0, -0.1, 0.14), 0.035 * vs, 0.03 * vs, M.vMouth).flag(D).min(0.5);
     }
   }
   for (let i = 0; i < mem.arms.length; i++) {
@@ -530,7 +533,6 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
     f.cone(f.at(a, 0, 0.02, 0), f.at(a, 0, 0.58, 0.01), 0.085 * as, 0.065 * as, M.skin);
     const wr = f.at(a, tw, 0.97, 0.25);
     f.cone(f.at(a, 0, 0.55, 0.01), wr, 0.07 * as, 0.05 * as, M.skin);
-    if (i === 0) f.decal(f.at(a, 0, 0.85, 0.18), f.at(a, 0, 0.9, 0.21), 0.055 * as, 0.055 * as, M.band).flag(D).min(0.5);
     const len = f.px(wr, 0.17 * as) / f.kHint;
     if (len >= 3 && len < 11) {
       const e0 = f.project(f.at(a, 0, 0.6, 0.02), P0);
@@ -551,11 +553,14 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
     const r1 = 0.11;
     const wave = armed ? 2 : 1;
     const thick = dying ? 0.9 : 1;
+    // Segments along the curve: more when it is stretched (the slam reaches the player).
+    const len = P[0].distanceTo(P[1]) + P[1].distanceTo(P[2]) + P[2].distanceTo(P[3]);
+    const nSeg = Math.min(9, Math.max(5, Math.ceil(len / 1.5)));
     let prev = bez(f, bd, P, 0);
     let rPrev = r0 * thick * (1 + wave * 0.16 * Math.sin(-t * 4)) * s;
     let u = 0;
-    for (let k = 1; k < TENT_S.length; k++) {
-      const q = TENT_S[k];
+    for (let k = 1; k <= nSeg; k++) {
+      const q = k / nSeg;
       const p = bez(f, bd, P, q);
       const r = (r0 + (r1 - r0) * Math.pow(q, 0.85)) * thick * (1 + wave * 0.16 * Math.sin(q * 10 - t * 4)) * s;
       f.cone(prev, p, rPrev, r, M.tent).u(u).k(0.05 * s).seed(ti * 7 + k);
