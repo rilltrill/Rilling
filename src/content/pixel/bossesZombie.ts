@@ -745,8 +745,8 @@ function bem() {
     M.skinDark = Mat.deadSkin(0x66784e, 0.5);
     M.face = Mat.deadSkin(0x90aa72, 0.4);
     M.vest = Mat.hivis(0xf06a18);
-    M.tape = material('bz|tape', () => ({ ramp: makeRamp(0xe2e4cc, { light: 0.8, dark: 0.55 }), pattern: PAT.NONE, scale: 0.1, strength: 0, secondary: 0, glow: false, dither: 0.05, spec: 0.8 }));
-    M.shirt = Mat.cloth(0x5e5e4c, { stain: Mat.blood(0x4a0a08) });
+    M.tape = material('bz|tape', () => ({ ramp: makeRamp(0xf0f2e0, { light: 0.85, dark: 0.6 }), pattern: PAT.NONE, scale: 0.1, strength: 0, secondary: 0, glow: false, dither: 0.05, spec: 0.8 }));
+    M.shirt = Mat.cloth(0x55585e, { stain: Mat.blood(0x4a0a08) });
     M.jeans = Mat.denim(0x3a475a, Mat.blood(0x3a0a08));
     M.belt = Mat.leather(0x2a1e16);
     M.buckle = Mat.gloss(0xb0a070);
@@ -934,11 +934,11 @@ export function paintBehemoth(f: PixelFigure, R: BehemothRig, st: BehemothPose):
     const ws = scaleOf(w);
     // (Pulled forward over the vest's front while it faces us; from the side the chest hides it.)
     f.layer(0.03 * s, PART.WEAK, 0, -0.12 * s * Math.min(1, Math.max(0, front * 1.6)));
-    f.ellipsoid(w, 0, 0, 0.0, 0.66, 0.68, 0.06, flash ? M.white : coreOn ? M.rim : M.rimDead)
+    f.ellipsoid(w, 0, 0, 0.0, 0.72, 0.74, 0.06, flash ? M.white : coreOn ? M.rim : M.rimDead)
       .flag(PF.FLAT | (coreOn || flash ? PF.GLOW : 0))
-      .rag(0.06 * ws, PF.SPIKY)
+      .rag(0.08 * ws, PF.SPIKY)
       .seed(41);
-    f.ellipsoid(R.core, 0, 0, 0, 0.5, 0.5, 0.5, flash ? M.white : !coreOn ? M.coreDead : hot ? M.coreHot : M.core).flag(coreOn || flash ? PF.GLOW : 0).z(-0.04);
+    f.ellipsoid(R.core, 0, 0, 0, 0.46, 0.46, 0.5, flash ? M.white : !coreOn ? M.coreDead : hot ? M.coreHot : M.core).flag(coreOn || flash ? PF.GLOW : 0).z(-0.04);
     if (coreOn && !flash) {
       const cs = scaleOf(R.core);
       f.decal(f.at(R.core, -0.1, 0.12, 0.45), f.at(R.core, -0.1, 0.12, 0.45), 0.22 * cs, 0.2 * cs, hot ? M.coreHi : M.coreHot).flag(D | PF.GLOW);
@@ -1017,12 +1017,13 @@ export function paintBehemoth(f: PixelFigure, R: BehemothRig, st: BehemothPose):
   // ── Hard hat (armour): scuffed dome, ridge, brim, sticker, glint ──
   // (The dome's lower half is inside the head: only the cap above the brim is drawn.)
   f.layer(0.02 * s, PART.ARMOR, 0, -0.24 * s);
-  f.ellipsoid(h, 0, 1.08, -0.02, 0.6, 0.27, 0.63, M.hat).k(0.02 * s);
-  f.cone(f.at(h, 0, 1.33, -0.55), f.at(h, 0, 1.35, 0.52), 0.08 * hs, 0.08 * hs, M.hatDark).k(0.03 * s).z(-0.03);
+  f.ellipsoid(h, 0, 1.06, -0.02, 0.62, 0.33, 0.65, M.hat).k(0.02 * s);
   f.cone(f.at(h, -0.8, 0.955, 0.06), f.at(h, 0.8, 0.955, 0.06), 0.06 * hs, 0.06 * hs, M.hat).k(0.02 * s).tone(-0.06);
   f.cone(f.at(h, 0, 0.955, -0.72), f.at(h, 0, 0.935, 0.9), 0.065 * hs, 0.06 * hs, M.hat).k(0.02 * s).tone(-0.06);
   if (f.facing(f.at(h, 0, 1.1, 0.6), f.dir(h, 0, 0.2, 1)) > 0.05) {
     f.decal(f.at(h, -0.17, 1.1, 0.62), f.at(h, 0.17, 1.1, 0.62), 0.09 * hs, 0.09 * hs, M.sticker).flag(D);
+    // The raised centre ridge, front to back.
+    f.decal(f.at(h, 0, 1.38, -0.1), f.at(h, 0, 1.24, 0.5), 0.07 * hs, 0.06 * hs, M.hatDark).flag(D);
     f.decal(f.at(h, -0.25, 1.22, 0.45), f.at(h, -0.15, 1.27, 0.42), 0.05 * hs, 0.04 * hs, M.glint).flag(D | PF.GLOW | PF.NO_OUTLINE).min(0.5);
   }
 
@@ -1097,12 +1098,22 @@ export function paintBehemoth(f: PixelFigure, R: BehemothRig, st: BehemothPose):
     const y0 = b.min.y;
     const yb = y0 + hh * 0.42;
     f.layer(0.05 * s, PART.WEAK);
-    f.coneE(f.at(c, cx - hl + hh * 0.26, yb, cz), f.at(c, cx + hl - hh * 0.26, yb, cz), f.dir(c, 0, 1, 0), f.dir(c, 0, 0, 1), hh * 0.27 * cs, hw * cs, hh * 0.27 * cs, hw * cs, M.car).k(0.03 * s);
+    // Body: a slab with small rounded corners (two edge rods melted together, not one fat capsule).
+    for (let k = 0; k < 2; k++) {
+      const y = yb + (k === 0 ? -1 : 1) * hh * 0.13;
+      f.coneE(f.at(c, cx - hl + hh * 0.15, y, cz), f.at(c, cx + hl - hh * 0.15, y, cz), f.dir(c, 0, 1, 0), f.dir(c, 0, 0, 1), hh * 0.15 * cs, hw * cs, hh * 0.15 * cs, hw * cs, M.car).k(0.12 * s).u(k * 0.2);
+    }
     f.coneE(f.at(c, cx - hl * 0.36, y0 + hh * 0.76, cz), f.at(c, cx + hl * 0.24, y0 + hh * 0.76, cz), f.dir(c, 0, 1, 0), f.dir(c, 0, 0, 1), hh * 0.21 * cs, hw * 0.86 * cs, hh * 0.21 * cs, hw * 0.86 * cs, M.glass).k(0.08 * s);
     for (let i = 0; i < 4; i++) {
       const wx = cx + (i < 2 ? -1 : 1) * hl * 0.6;
       const wz = cz + (i % 2 ? -1 : 1) * hw * 0.92;
-      f.ellipsoid(c, wx, y0 + hh * 0.2, wz, hh * 0.22, hh * 0.22, 0.14, M.tyre).k(0.01 * s);
+      f.ellipsoid(c, wx, y0 + hh * 0.21, wz, hh * 0.25, hh * 0.25, 0.16, M.tyre).k(0.01 * s);
+    }
+    // Windows along the side, a dark sill line.
+    for (let sd = -1; sd <= 1; sd += 2) {
+      const z = cz + sd * hw * 0.98;
+      f.decal(f.at(c, cx - hl * 0.3, y0 + hh * 0.72, z), f.at(c, cx + hl * 0.2, y0 + hh * 0.72, z), hh * 0.12 * cs, hh * 0.12 * cs, M.glass).flag(D);
+      f.decal(f.at(c, cx - hl * 0.9, yb - hh * 0.08, z), f.at(c, cx + hl * 0.9, yb - hh * 0.08, z), 0.03 * cs, 0.03 * cs, M.car).flag(D | PF.SHADE_ONLY).tone(-0.35).min(0.5);
     }
     for (let i = 0; i < 2; i++) {
       const lp = f.at(c, cx + hl * 0.98, yb + hh * 0.04, cz + (i ? -1 : 1) * hw * 0.62);
