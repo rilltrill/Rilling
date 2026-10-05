@@ -13,6 +13,8 @@ import { z3Scene } from './env';
 import { BRIDGE } from './scenery';
 import { D } from './layout';
 import { ventGun } from './minions';
+import type { PixelFigure } from '../../../gameplay/pixel/figure';
+import { behemothPose, paintBehemoth, type BehemothRig } from '../../pixel/bossesZombie';
 
 /**
  * THE BEHEMOTH — a 7.6 m construction worker turned giant, rebar speared
@@ -1360,6 +1362,21 @@ export class Behemoth extends Boss {
       }
     }
     this.updateFocus(1 - Math.exp(-5.5 * dt));
+  }
+
+  // ─── ART: SPRITES (PixelCast painter: content/pixel/bossesZombie.ts) ─────
+  private beRig: BehemothRig | null = null;
+  private readonly bePose = behemothPose();
+
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.model.visible) return false;
+    this.beRig ??= { hips: this.hips, spine: this.spine, chest: this.chest, neck: this.neck, head: this.head, jaw: this.jaw, shL: this.shL, shR: this.shR, elL: this.elL, elR: this.elR, handL: this.handL, handR: this.handR, hipL: this.hipL, hipR: this.hipR, kneeL: this.kneeL, kneeR: this.kneeR, wound: this.wound, core: this.core, weak: this.weakMeshes, heldCar: this.heldCar, heldSlab: this.heldSlab, club: this.club };
+    const p = this.bePose;
+    p.time = this.age;
+    p.bs = this.state === 'dying' ? 'dying' : this.bs;
+    p.stateTime = this.stateTime;
+    p.phase = this.phase;
+    return paintBehemoth(f, this.beRig, p);
   }
 
   // ─── Death: shudders, bursts open, topples over the railing into the bay ──

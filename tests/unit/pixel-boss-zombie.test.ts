@@ -248,3 +248,102 @@ describe('PixelCast alignment: Patient Zero (z2 boss)', () => {
     expect(f.layout(1, 24, 256)).toBe(true);
   });
 });
+
+describe('PixelCast alignment: the Behemoth (z3 boss)', () => {
+  // The truck camera looks back at the giant (eye ~2.6 m up, slight upward pitch).
+  const EYE = new THREE.Vector3(0, 2.6, 0);
+  const LOOK = new THREE.Vector3(0, 4.4, -15);
+
+  function behemoth() {
+    const { world, camera } = makeWorld();
+    const e = spawn(world, 'behemoth', new THREE.Vector3(0, 0, -15));
+    run(e, 5.0);
+    return { world, camera, e, b: e as unknown as Any };
+  }
+  /** Stand it in front of the camera (the pose comes from the joints, the place is free). */
+  function place(e: Enemy, yaw = 0, z = -15) {
+    e.root.position.set(0, 0, z);
+    e.root.rotation.set(0, yaw, 0);
+    e.root.updateMatrixWorld(true);
+  }
+
+  it('lumbering run: front and 3/4 views', () => {
+    const { world, camera, e, b } = behemoth();
+    expect(b.bs).toBe('chase');
+    place(e);
+    const c = check(world, camera, e, EYE, LOOK);
+    expectAligned(c, 'behemoth run');
+    expect(c.weakShown, 'core / eyes / skull drawn as weak').toBeGreaterThanOrEqual(3);
+    place(e, 0.7);
+    expectAligned(check(world, camera, e, EYE, LOOK), 'behemoth 3/4');
+    place(e, -1.2);
+    expectAligned(check(world, camera, e, EYE, LOOK), 'behemoth side');
+  });
+
+  it('attacks: car hauled back to throw (car = weak), double-fist slam windup, the slam', () => {
+    const { world, camera, e, b } = behemoth();
+    b.go('grab');
+    run(e, 1.3);
+    expect(b.bs).toBe('throwWind');
+    place(e);
+    expectAligned(check(world, camera, e, EYE, LOOK), 'behemoth throw windup (car)');
+    b.holding = null;
+    b.heldCar.visible = false;
+    b.go('slamWind');
+    run(e, 1.0);
+    place(e);
+    expectAligned(check(world, camera, e, EYE, LOOK), 'behemoth slam windup');
+    run(e, 0.6);
+    place(e);
+    expectAligned(check(world, camera, e, EYE, LOOK), 'behemoth slam');
+  });
+
+  it('phase 2: concrete slab, lamp-post club windup; phase 3: hot core, swipe windup; staggered', () => {
+    const { world, camera, e, b } = behemoth();
+    b.phase = 1;
+    b.roared = 1;
+    b.pendingRoar = 1;
+    b.attacks = 2;
+    b.go('grab');
+    run(e, 1.3);
+    expect(b.holding).toBe('slab');
+    place(e);
+    expectAligned(check(world, camera, e, EYE, LOOK), 'behemoth slab windup');
+    b.holding = null;
+    b.heldSlab.visible = false;
+    b.hasClub = true;
+    b.club.visible = true;
+    b.go('clubWind');
+    run(e, 1.3);
+    place(e, 0.3, -12);
+    expectAligned(check(world, camera, e, EYE, LOOK), 'behemoth club windup');
+    b.phase = 2;
+    b.roared = 2;
+    b.pendingRoar = 2;
+    b.go('swipeWind');
+    run(e, 1.0);
+    place(e, 0, -12);
+    expectAligned(check(world, camera, e, EYE, LOOK), 'behemoth swipe windup (hot core)');
+    b.go('reel');
+    run(e, 0.8);
+    place(e);
+    expectAligned(check(world, camera, e, EYE, LOOK), 'behemoth staggered');
+  });
+
+  it('death: staggering, then toppling (still painted, no overflow)', () => {
+    const { world, camera, e } = behemoth();
+    e.die(null);
+    for (const t of [1.0, 1.4]) {
+      run(e, t);
+      world.scene.updateMatrixWorld(true);
+      camera.position.copy(e.root.getWorldPosition(new THREE.Vector3())).add(new THREE.Vector3(0, 2.6, 15));
+      camera.lookAt(e.root.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 3, 0)));
+      camera.updateMatrixWorld();
+      const f = new PixelFigure();
+      f.begin(camera, GW, GH);
+      expect(e.paintPixels!(f)).toBe(true);
+      expect(f.overflow).toBe(0);
+      expect(f.layout(1, 24, 256)).toBe(true);
+    }
+  });
+});
