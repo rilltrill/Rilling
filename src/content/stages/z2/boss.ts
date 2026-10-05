@@ -1624,6 +1624,11 @@ export class PatientZero extends Boss {
     p.armed = this.state === ST.slam && !this.fired && this.slamTent ? this.tents.indexOf(this.slamTent) : -1;
     p.spit = this.state === ST.spit && this.telegraph ? this.telegraph.progress : 0;
     p.flinch = this.flinchK;
+    // The last hit flash (latched by the painter: a 0.06 s flash between redraws still shows).
+    const hit = this.lastHit?.object;
+    p.flashAt = this.lastFlash;
+    p.flashObj = (hit?.userData.flashAs as THREE.Object3D | undefined) ?? hit ?? null;
+    p.flashCrit = this.lastHit?.part === 'weak' || this.lastHit?.part === 'head';
     return paintPatientZero(f, this.pzRig, p);
   }
 

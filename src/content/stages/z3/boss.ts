@@ -1370,7 +1370,7 @@ export class Behemoth extends Boss {
 
   override paintPixels(f: PixelFigure): boolean {
     if (!this.model.visible) return false;
-    this.beRig ??= { hips: this.hips, spine: this.spine, chest: this.chest, neck: this.neck, head: this.head, jaw: this.jaw, shL: this.shL, shR: this.shR, elL: this.elL, elR: this.elR, handL: this.handL, handR: this.handR, hipL: this.hipL, hipR: this.hipR, kneeL: this.kneeL, kneeR: this.kneeR, wound: this.wound, core: this.core, weak: this.weakMeshes, heldCar: this.heldCar, heldSlab: this.heldSlab, club: this.club };
+    this.beRig ??= { root: this.root, hips: this.hips, spine: this.spine, chest: this.chest, neck: this.neck, head: this.head, jaw: this.jaw, shL: this.shL, shR: this.shR, elL: this.elL, elR: this.elR, handL: this.handL, handR: this.handR, hipL: this.hipL, hipR: this.hipR, kneeL: this.kneeL, kneeR: this.kneeR, wound: this.wound, core: this.core, weak: this.weakMeshes, heldCar: this.heldCar, heldSlab: this.heldSlab, club: this.club };
     const p = this.bePose;
     p.time = this.age;
     p.bs = this.state === 'dying' ? 'dying' : this.bs;
