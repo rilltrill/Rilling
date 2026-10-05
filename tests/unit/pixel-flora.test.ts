@@ -536,8 +536,8 @@ describe.each([
     let floating = 0;
     // (Plants perched on d1's cliff tops / rock faces stand where their 3D twins do, off the ground by design.)
     const perched = new Set(bb.userData.floraPerched as Uint32Array);
-    // (d2: vines hang from the greenhouse roof and the lobby palms stand in pots; z2: 2 of its 5 plants are potted.)
-    expect(perched.size / g.instanceCount, `${id} perched plants`).toBeLessThan(id === 'z2' ? 0.5 : id === 'd2' ? 0.3 : 0.12);
+    // (d2: vines hang from the greenhouse roof and the lobby palms stand in pots; z2: 5 of its 8 plants are potted.)
+    expect(perched.size / g.instanceCount, `${id} perched plants`).toBeLessThan(id === 'z2' ? 0.7 : id === 'd2' ? 0.3 : 0.12);
     for (let i = 0; i < g.instanceCount; i++) {
       if (perched.has(i)) continue;
       p.fromBufferAttribute(pos, i);
