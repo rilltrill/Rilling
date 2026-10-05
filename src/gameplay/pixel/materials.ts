@@ -60,6 +60,12 @@ export const PAT = {
   PLATE: 15,
   /** Bold dark dapples over the back and flanks (dilos), pale belly underneath. */
   SPOTS: 16,
+  /**
+   * Big-creature flesh: ROT's blotches (secondary), bruises (tertiary), creases and
+   * veins at the material's own `scale` (blotch size, metres) — a 6 m boss gets
+   * blotches a few texels across, not ROT's human-sized per-texel speckle.
+   */
+  MEAT: 17,
 } as const;
 export type PatternId = (typeof PAT)[keyof typeof PAT];
 

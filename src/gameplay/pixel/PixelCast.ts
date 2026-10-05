@@ -478,6 +478,17 @@ const PAINT_FRAG = /* glsl */ `
       float sc = hash12(vec2(floor(bU * 40.0 + bV * 25.0), floor(bV * 60.0) + sd));
       if (sc > 0.93) tone += 0.16 * str;
       if (abs(bV) > 0.0 && fract(bU / scale) < 0.08 && hash12(vec2(floor(bU / scale), sd)) > 0.4 && abs(abs(bV) - 0.04) < 0.012) tone += 0.25;
+    } else if (pat == 17) {
+      // MEAT: ROT at the material's own scale (big creatures): blotches, bruises, creases, veins.
+      vec2 q = uv / scale;
+      float n = vnoise(q + sd);
+      float n2 = vnoise(q * 1.4 + sd + 9.0);
+      float ter = floor(m2.a * 255.0 + 0.5);
+      if (sec > 0.5 && n > 1.06 - 0.5 * str) mat = sec;
+      else if (ter > 0.5 && n2 > 1.2 - 0.5 * str) mat = ter;
+      else if (n2 > 0.64) tone -= 0.1 * str;
+      float v = abs(vnoise(q * 0.55 + sd + 3.0) - 0.5);
+      if (v < 0.022) tone -= 0.2 * str;
     }
     // Cloth folds: short drawn creases bunching toward the joints (elbows, knees, waist).
     if (pat == 1 || pat == 2 || pat == 3 || pat == 12 || pat == 13) {
