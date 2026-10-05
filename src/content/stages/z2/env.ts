@@ -199,7 +199,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
         o.getWorldPosition(foot);
         flora2d.fit(o.userData.flora as string, foot.x, foot.y, foot.z, floraReach(o, foot), fb.max.y - foot.y, {
           // (Blades in a pot stand on its rim.)
-          perched: foot.y > 0.2,
+          perched: foot.y - groundAt(foot.x, foot.z) > 0.2,
           sway: o.userData.flora === 'deadTree' ? 0.05 : 0,
         });
         vg.attach(o);
