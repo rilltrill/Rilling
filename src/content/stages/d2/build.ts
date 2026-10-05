@@ -3,6 +3,8 @@ import { Kit } from '../../kit/ModelKit';
 import { glow } from './bake';
 import { pixelText, textWidth } from './font';
 import { S } from './surf';
+import { floraReach } from '../../pixel/floraField';
+import type { Ctx, FloraPlace } from './ctx';
 
 /**
  * Small scenery vocabulary shared by every room: boxes from bounds, walls
@@ -168,15 +170,25 @@ export function hazardBand(g: THREE.Object3D, x0: number, x1: number, z: number,
   floorQuad(g, S.hazard(), x0, x1, z - d / 2, z + d / 2, 0.012);
 }
 
-/** Potted / planted palm: segmented trunk + drooping fronds. */
-export function palm(g: THREE.Object3D, x: number, z: number, h: number, rng: () => number, pot = true) {
+/**
+ * Potted / planted palm: segmented trunk + drooping fronds. `potInto` puts the
+ * pot in another group (same place): the plant itself becomes a billboard in
+ * ART: SPRITES, the pot stays a 3D prop.
+ */
+export function palm(g: THREE.Object3D, x: number, z: number, h: number, rng: () => number, pot = true, potInto?: THREE.Object3D) {
   const p = new THREE.Group();
   p.position.set(x, 0, z);
   p.rotation.y = rng() * Math.PI * 2;
   g.add(p);
   if (pot) {
-    Kit.add(p, Kit.cyl(0.42, 0.32, 0.6, 8), S.stucco(0x8a5034), 0, 0.3, 0);
-    Kit.add(p, Kit.cyl(0.38, 0.38, 0.06, 8), S.stucco(0x3a2a1c), 0, 0.6, 0);
+    const q = potInto ? new THREE.Group() : p;
+    if (potInto) {
+      q.position.copy(p.position);
+      q.rotation.copy(p.rotation);
+      potInto.add(q);
+    }
+    Kit.add(q, Kit.cyl(0.42, 0.32, 0.6, 8), S.stucco(0x8a5034), 0, 0.3, 0);
+    Kit.add(q, Kit.cyl(0.38, 0.38, 0.06, 8), S.stucco(0x3a2a1c), 0, 0.6, 0);
   }
   const trunk = S.bark(0x6a5238);
   const segs = Math.max(3, Math.round(h / 0.7));
@@ -204,6 +216,28 @@ export function palm(g: THREE.Object3D, x: number, z: number, h: number, rng: ()
     Kit.add(f, Kit.box(0.34, 0.02, len * 0.5), i % 2 ? leafDark : leaf, 0, -0.38, len * 0.72, -0.9, 0, 0);
   }
   return p;
+}
+
+const _fb = new THREE.Box3();
+const _ff = new THREE.Vector3();
+
+/**
+ * Record plant `o` (a group under `veg`, foot at x, y, z in world space) for the
+ * ART: SPRITES billboards: its reach and height (`floraReach`, the bounding box
+ * top). `veg` must sit at the world origin (rooms are built in world space).
+ */
+export function floraRecord(ctx: Ctx, o: THREE.Object3D, key: string, x: number, y: number, z: number, extra: Partial<FloraPlace> = {}) {
+  o.updateMatrixWorld(true);
+  _fb.setFromObject(o);
+  _ff.set(x, y, z);
+  ctx.flora.push({ key, x, y, z, w: floraReach(o, _ff), h: _fb.max.y - y, ...extra });
+}
+
+/** A new empty group under `g` (one plant, so it can be measured on its own). */
+export function sub(g: THREE.Object3D): THREE.Group {
+  const s = new THREE.Group();
+  g.add(s);
+  return s;
 }
 
 /** Leafy bush (jittered icosahedrons). */

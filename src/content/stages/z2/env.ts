@@ -7,6 +7,12 @@ import { Rng } from '../../../core/Rng';
 import { clamp } from '../../../core/math';
 import { B, RAIL_LENGTH, dAt, groundAt } from './layout';
 import { bake } from './bake';
+import { FloraField, floraArtToggle, floraAtlas, floraReach } from '../../pixel/floraField';
+import { DEAD_TREE, GRASS } from '../../pixel/floraSpecies';
+import { Z2_BIOME } from '../../pixel/floraBiomes';
+
+/** The hospital's plants as pixel billboards (ART: SPRITES): dead trees in the car park, potted plants' blades. */
+export const Z2_FLORA = [DEAD_TREE, GRASS];
 import { type Z2Scene, type AccentLight, clearZ2Scene, setZ2Scene } from './scene';
 import type { ZoneCtx } from './zonekit';
 import { snapAmbulanceCrashed } from './setpieces';
@@ -165,7 +171,43 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
 
   // ─── Zones (each baked to a handful of draws, culled by rail distance) ───
   const zones: { g: THREE.Group; from: number; to: number }[] = [];
+  // ART: SPRITES plants: anything tagged `userData.flora` (the car park's dead trees, the potted
+  // plants' blades) is a pixel billboard; its 3D meshes leave the zone for a zone group of their
+  // own under `veg3D` (ART: 3D, culled with the zone).
+  const veg3D = new THREE.Group();
+  veg3D.name = 'z2-veg3d';
+  const flora2d = new FloraField(floraAtlas(Z2_FLORA, Z2_BIOME, 'z2'), {
+    far: 70,
+    rim: 0x8aa0d0,
+    rimStrength: 0.12,
+    gain: 0.8,
+    localCap: 0.3,
+  });
+  const fb = new THREE.Box3();
+  const foot = new THREE.Vector3();
   const addZone = (g: THREE.Group, from: number, to: number) => {
+    g.updateMatrixWorld(true);
+    const found: THREE.Object3D[] = [];
+    g.traverse((o) => {
+      if (o.userData.flora) found.push(o);
+    });
+    if (found.length) {
+      const vg = new THREE.Group();
+      vg.name = `${g.name}-veg`;
+      for (const o of found) {
+        fb.setFromObject(o);
+        o.getWorldPosition(foot);
+        flora2d.fit(o.userData.flora as string, foot.x, foot.y, foot.z, floraReach(o, foot), fb.max.y - foot.y, {
+          // (Blades in a pot stand on its rim.)
+          perched: foot.y > 0.2,
+          sway: o.userData.flora === 'deadTree' ? 0.05 : 0,
+        });
+        vg.attach(o);
+      }
+      bake(vg);
+      veg3D.add(vg);
+      zones.push({ g: vg, from, to });
+    }
     bake(g);
     root.add(g);
     zones.push({ g, from, to });
@@ -187,6 +229,11 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   buildCrashAmbulance(ctx);
   zones.push({ g: buildShafts(ctx), from: D.or, to: Infinity });
   buildCocoon(ctx);
+  const vegPx = new THREE.Group();
+  vegPx.name = 'z2-vegPx';
+  vegPx.add(flora2d.build());
+  root.add(veg3D, vegPx);
+  const untoggle = floraArtToggle(scene, [vegPx], [veg3D]);
 
   // ─── Oxygen / gas cylinder spots (spawned as Destructibles in setup) ──────
   // (filled by the zone builders' exported constants in index.ts)
@@ -580,6 +627,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     groundAt,
     update,
     dispose() {
+      untoggle();
       clearZ2Scene(world);
     },
   };

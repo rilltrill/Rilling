@@ -13,7 +13,10 @@ import {
 } from '../../src/content/pixel/floraField';
 import { ALL_SPECIES, floraMats, type FloraSpecies } from '../../src/content/pixel/floraSpecies';
 import { STREET_PROPS } from '../../src/content/pixel/floraProps';
-import { D1_BIOME, D3_BIOME, Z1_BIOME } from '../../src/content/pixel/floraBiomes';
+import { D1_BIOME, D2_BIOME, D3_BIOME, Z1_BIOME, Z2_BIOME, Z3_BIOME } from '../../src/content/pixel/floraBiomes';
+import { D2_FLORA } from '../../src/content/stages/d2/env';
+import { Z2_FLORA } from '../../src/content/stages/z2/env';
+import { Z3_FLORA } from '../../src/content/stages/z3/env';
 import { FloraPalette, RIM_ALPHA } from '../../src/content/pixel/floraPaint';
 import { hexToOklch } from '../../src/gameplay/pixel/materials';
 import { cameraAtBeat, render3D, renderBillboards } from './floraProxy';
@@ -129,6 +132,10 @@ describe('FLORA atlas', () => {
     ['d1', paintFloraAtlas(ALL_SPECIES, D1_BIOME, 'd1'), ALL_SPECIES],
     ['d3', paintFloraAtlas(ALL_SPECIES, D3_BIOME, 'd3'), ALL_SPECIES],
     ['z1', paintFloraAtlas(Z1_SPECIES, Z1_BIOME, 'z1'), Z1_SPECIES],
+    // (The final pass: the d2 greenhouse beds, z2's car park + potted plants, z3's dusk verges.)
+    ['d2', paintFloraAtlas(D2_FLORA, D2_BIOME, 'd2'), D2_FLORA],
+    ['z2', paintFloraAtlas(Z2_FLORA, Z2_BIOME, 'z2'), Z2_FLORA],
+    ['z3', paintFloraAtlas(Z3_FLORA, Z3_BIOME, 'z3'), Z3_FLORA],
   ] as const;
 
   it('paints every variant of every species at every painted level, packed without overlaps', () => {
@@ -229,9 +236,10 @@ describe('FLORA atlas', () => {
       [0.71, 0.55],
       [0.13, 0.83],
     ];
-    for (const [id, a] of atlases.slice(0, 2)) {
-      for (const key of ['grass', 'fern', 'fernWide', 'cycad', 'palm']) {
-        for (const sp of a.sprites.get(key)!) {
+    // (d1 / d3 strand plants; the dead tree's twigs too.)
+    for (const [id, a] of atlases.filter(([id]) => id === 'd1' || id === 'd3' || id === 'z3')) {
+      for (const key of ['grass', 'fern', 'fernWide', 'cycad', 'palm', 'deadTree']) {
+        for (const sp of a.sprites.get(key) ?? []) {
           let prev = 0;
           for (let k = 0; k < 30; k++) {
             const rho = 0.9 * Math.pow(2 / 0.9, k / 29);
@@ -275,7 +283,7 @@ describe('FLORA atlas', () => {
   });
 
   it('night biomes never paint a plant pale; street props keep their saturated identity colours (never white)', () => {
-    for (const b of [D3_BIOME, Z1_BIOME]) {
+    for (const b of [D3_BIOME, Z1_BIOME, Z2_BIOME, D2_BIOME]) {
       const pal = new FloraPalette();
       const m = floraMats(pal, b);
       const plantMats = [m.leaf, m.leafLight, m.leafDark, m.frond, m.frondDark, m.fern, m.fernLight, m.bark, m.palmTrunk, m.grass, m.ear, m.vine];
@@ -470,12 +478,16 @@ function railDist(curve: THREE.Curve<THREE.Vector3>, p: THREE.Vector3): number {
  * 1.15, d3 b7 0.94, z1 b4 0.90 — within ±15 %); it guards against the gain /
  * local-light clamp / night caps regressing (without them d3 runs ~1.7×).
  */
-const LUM_BEATS: Record<string, number[]> = { d1: [], d3: [3, 7], z1: [4] };
+const LUM_BEATS: Record<string, number[]> = { d1: [], d3: [3, 7], z1: [4], d2: [], z2: [], z3: [] };
 
 describe.each([
   ['d1', 'd1-vegPx', 'd1-veg3d', 600, 3.4],
   ['d3', 'd3-vegPx', 'd3-veg3d', 600, 3.4],
   ['z1', 'z1-vegPx', 'z1-veg3d', 40, 4.5],
+  // (The final pass: d2's greenhouse + lobby, z2's car park + potted plants, z3's verges.)
+  ['d2', 'd2-vegPx', 'd2-veg3d', 90, 1.8],
+  ['z2', 'z2-vegPx', 'z2-veg3d', 5, 4],
+  ['z3', 'z3-vegPx', 'z3-veg3d', 60, 9],
 ] as const)('FLORA in stage %s', (id, pxName, d3Name, minPlants, roadClear) => {
   afterAll(() => Kit.disposeAll());
 
@@ -524,7 +536,8 @@ describe.each([
     let floating = 0;
     // (Plants perched on d1's cliff tops / rock faces stand where their 3D twins do, off the ground by design.)
     const perched = new Set(bb.userData.floraPerched as Uint32Array);
-    expect(perched.size / g.instanceCount, `${id} perched plants`).toBeLessThan(0.12);
+    // (d2: vines hang from the greenhouse roof and the lobby palms stand in pots; z2: 2 of its 5 plants are potted.)
+    expect(perched.size / g.instanceCount, `${id} perched plants`).toBeLessThan(id === 'z2' ? 0.5 : id === 'd2' ? 0.3 : 0.12);
     for (let i = 0; i < g.instanceCount; i++) {
       if (perched.has(i)) continue;
       p.fromBufferAttribute(pos, i);

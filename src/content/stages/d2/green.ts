@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import { EnvKit } from '../../kit/EnvKit';
 import { bake, bakeInto, glow, mat } from './bake';
-import { beacon, box, bush, cyl, decal, fern, floorQuad, frameX, frameZ, lightPanel, palm, pipe, sign, slab, wallX, wallZ } from './build';
+import { beacon, box, bush, cyl, decal, fern, floorQuad, floraRecord, frameX, frameZ, lightPanel, palm, pipe, sign, slab, sub, wallX, wallZ } from './build';
 import type { Ctx, RoomOut } from './ctx';
 import { pixelText } from './font';
 import { ROOMS, dAtZ, railXAtZ } from './layout';
@@ -19,6 +19,9 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
   root.name = 'green';
   const stat = new THREE.Group();
   const shellG = new THREE.Group();
+  // The planting: its own baked group (ART: 3D) and recorded for the pixel billboards (ART: SPRITES).
+  const veg = new THREE.Group();
+  veg.name = 'd2-veg3d';
   const am = ctx.am;
   const wallTop = 7;
   const ridge = R.h;
@@ -92,8 +95,11 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
     const x = s * (17 + rnd() * 6);
     const z = R.z0 + 2 - i * 3.6 - rnd() * 2;
     const h = 7 + rnd() * 6;
-    cyl(stat, trunkDark, x, h / 2, z, 0.25, h, 6);
-    Kit.add(stat, Kit.jitter(Kit.ico(1, 1), 0.3, i + 3), dark, x, h, z, 0, i, 0, 3 + rnd() * 1.5, 2.2, 3 + rnd() * 1.5);
+    const t = sub(veg);
+    cyl(t, trunkDark, x, h / 2, z, 0.25, h, 6);
+    Kit.add(t, Kit.jitter(Kit.ico(1, 1), 0.3, i + 3), dark, x, h, z, 0, i, 0, 3 + rnd() * 1.5, 2.2, 3 + rnd() * 1.5);
+    // (Night silhouettes beyond the glass: the 3D crowns' near-black green.)
+    floraRecord(ctx, t, 'canopyTree', x, 0, z, { tint: 0.42 });
   }
 
   // Pond on the right with rocks, lily pads and a little fountain.
@@ -129,7 +135,7 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
     bedSpots.push([-9.5 - rnd() * 2.5, z - rnd() * 2, 1]);
     if (Math.abs(z - pond.z) > 6) bedSpots.push([8.5 + rnd() * 3, z - rnd() * 2, 1]);
   }
-  for (const [x, z] of bedSpots) if (!blocked(x, z, 1.8)) palm(stat, x, z, 4 + rnd() * 3, rnd, false);
+  for (const [x, z] of bedSpots) if (!blocked(x, z, 1.8)) floraRecord(ctx, palm(veg, x, z, 4 + rnd() * 3, rnd, false), 'palm', x, 0, z);
   // Plants are placed relative to the (curving) path so they never grow into it.
   const fromPath = (z: number, s: number, a: number, b: number) => clampX(railXAtZ(z) + s * (a + rnd() * (b - a)));
   const clampX = (x: number) => Math.max(R.x0 + 1.2, Math.min(R.x1 - 1.2, x));
@@ -138,8 +144,10 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
     const z = R.z0 - 2 - rnd() * (len - 4);
     const x = fromPath(z, s, 3.6, 12);
     if (Math.hypot(x - pond.x, z - pond.z) < 5.2 || blocked(x, z, 3)) continue;
-    if (i % 3 === 0) bush(stat, x, z, 0.7 + rnd() * 0.7, i + 11, rnd() < 0.5 ? 0x2c6428 : 0x386e2a);
-    else fern(stat, x, z, 1.1 + rnd() * 0.7, rnd);
+    const pl = sub(veg);
+    if (i % 3 === 0) bush(pl, x, z, 0.7 + rnd() * 0.7, i + 11, rnd() < 0.5 ? 0x2c6428 : 0x386e2a);
+    else fern(pl, x, z, 1.1 + rnd() * 0.7, rnd);
+    floraRecord(ctx, pl, i % 3 === 0 ? 'bush' : 'fern', x, 0, z);
   }
   const petals = [0xe04a6a, 0xf0c040, 0xe8e8f0, 0xd06aa0];
   for (let i = 0; i < 40; i++) {
@@ -147,8 +155,11 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
     const z = R.z0 - 3 - rnd() * (len - 6);
     const x = fromPath(z, s, 2.4, 5.5);
     if (Math.hypot(x - pond.x, z - pond.z) < 5.0) continue;
-    cyl(stat, S.leaves(0x2e6a28), x, 0.2, z, 0.015, 0.4, 4);
-    Kit.add(stat, Kit.ico(0.09, 0), S.plain(petals[i % 4]), x, 0.42, z);
+    const fl = sub(veg);
+    cyl(fl, S.leaves(0x2e6a28), x, 0.2, z, 0.015, 0.4, 4);
+    Kit.add(fl, Kit.ico(0.09, 0), S.plain(petals[i % 4]), x, 0.42, z);
+    // (Variant = the petal colour: the biome's flowers are the same four.)
+    floraRecord(ctx, fl, 'flower', x, 0, z, { variant: i % 4 });
   }
   // Giant leaves (monstera-like) near the path edges.
   for (let i = 0; i < 10; i++) {
@@ -156,8 +167,10 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
     const z = R.z0 - 5 - i * 3.8;
     const x = fromPath(z, s, 3.0, 4.5);
     if (Math.hypot(x - pond.x, z - pond.z) < 5) continue;
-    Kit.add(stat, Kit.cyl(0.6, 0.6, 0.02, 9), S.leaves(0x2e8a3a), x, 0.7, z, 0.6 * s, rnd() * 3, 0.4, 1, 1, 1.4);
-    cyl(stat, S.leaves(0x2e6a28), x, 0.35, z, 0.02, 0.7, 4);
+    const ear = sub(veg);
+    Kit.add(ear, Kit.cyl(0.6, 0.6, 0.02, 9), S.leaves(0x2e8a3a), x, 0.7, z, 0.6 * s, rnd() * 3, 0.4, 1, 1, 1.4);
+    cyl(ear, S.leaves(0x2e6a28), x, 0.35, z, 0.02, 0.7, 4);
+    floraRecord(ctx, ear, 'ear', x, 0, z);
   }
   for (let i = 0; i < 18; i++) {
     const x = R.x0 + 1.5 + rnd() * (R.x1 - R.x0 - 3);
@@ -165,8 +178,12 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
     if (Math.abs(x - railXAtZ(z)) < 2.2) continue;
     const top = wallTop + (ridge - wallTop) * (1 - Math.abs(x) / R.x1) - 0.2;
     const l = 1.5 + rnd() * 3;
-    pipe(stat, S.leaves(0x2a5a26), new THREE.Vector3(x, top, z), new THREE.Vector3(x + rnd() * 0.4 - 0.2, top - l, z), 0.035, 4);
-    Kit.add(stat, Kit.ico(0.14, 0), S.leaves(0x3a7a30), x, top - l, z);
+    const ex = x + rnd() * 0.4 - 0.2;
+    const vn = sub(veg);
+    pipe(vn, S.leaves(0x2a5a26), new THREE.Vector3(x, top, z), new THREE.Vector3(ex, top - l, z), 0.035, 4);
+    Kit.add(vn, Kit.ico(0.14, 0), S.leaves(0x3a7a30), x, top - l, z);
+    // Hanging from the roof: the billboard's foot is the vine's lowest point.
+    floraRecord(ctx, vn, 'vines', x, top - l - 0.14, z, { perched: true });
   }
   // Misting line under the roof.
   for (const x of [-5, 5]) {
@@ -201,7 +218,9 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
 
   bake(stat);
   bake(shellG);
-  root.add(stat, shellG);
+  bake(veg);
+  root.add(stat, shellG, veg);
+  ctx.veg3D.push(veg);
   return { root, shell: shellG.children.slice() };
 }
 

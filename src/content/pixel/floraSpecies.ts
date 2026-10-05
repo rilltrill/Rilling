@@ -1208,3 +1208,172 @@ export const VINES: FloraSpecies = {
 };
 
 export const ALL_SPECIES = [JUNGLE_TREE, CANOPY_TREE, PALM, FERN, FERN_WIDE, BUSH, BUSH_WIDE, GRASS, CYCAD, EAR, STREET_TREE, CLIFF_TOP, VINES];
+
+// ─── Dead wood and bedding plants (z2 / z3 verges, the d2 greenhouse beds) ──
+
+/** Point `t` (0…1) on the quadratic a → (control c) → b, into `out`. */
+function quad(ax: number, ay: number, qx: number, qy: number, bx: number, by: number, t: number, out: number[]) {
+  const u = 1 - t;
+  out[0] = u * u * ax + 2 * u * t * qx + t * t * bx;
+  out[1] = u * u * ay + 2 * u * t * qy + t * t * by;
+}
+
+/**
+ * A bare bough from (ax, ay): a tapering curve bowed upward, with forked
+ * twigs (1-texel strands, never outlined) off its outer half. Twigs are drawn
+ * by `density` so a balanced coarser level keeps the crown's weight (the RNG
+ * is drawn either way: every level shares one layout).
+ */
+function bough(
+  c: FloraCanvas,
+  ax: number,
+  ay: number,
+  side: number,
+  el: number,
+  len: number,
+  w0: number,
+  mat: number,
+  rng: FloraRng,
+  o: { z: number; bias: number; twigs: number; id: number; thin?: number },
+) {
+  const bx = ax + side * Math.cos(el) * len;
+  const by = ay + Math.sin(el) * len;
+  const qx = ax + (bx - ax) * 0.42;
+  const qy = ay + (by - ay) * 0.78 + len * 0.08;
+  // (`thin`: a balanced coarse level below this density leaves the whole bough out — its 1-texel
+  // strokes would weigh far more than at full size; the RNG is still drawn: one layout per level.)
+  const hide = o.thin !== undefined && c.density < o.thin;
+  if (!hide) c.curve(ax, ay, qx, qy, bx, by, w0, Math.max(0.6, w0 * 0.3), mat, { z: o.z, bias: o.bias });
+  const p: number[] = [0, 0];
+  for (let k = 0; k < o.twigs; k++) {
+    const t = rng.range(0.42, 0.98);
+    quad(ax, ay, qx, qy, bx, by, t, p);
+    const up = rng.chance(0.65);
+    const ta = up ? rng.range(0.7, 1.35) : rng.range(-0.25, 0.3);
+    const tl = rng.range(5, 12) * (1.1 - t * 0.4);
+    const ex = p[0] + side * Math.cos(ta) * tl;
+    const ey = p[1] + Math.sin(ta) * tl;
+    const fork = rng.chance(0.6);
+    const fa = ta + rng.range(0.35, 0.7) * (rng.chance(0.5) ? 1 : -1);
+    const fl = tl * rng.range(0.4, 0.7);
+    if (hide || (o.id * 0.618034 + k * 0.381966 + 0.13) % 1 >= c.density) continue;
+    const tone = 0.5 + o.bias + (up ? 0.08 : -0.06);
+    c.line(p[0], p[1], ex, ey, mat, tone, o.z + 0.5);
+    if (fork) {
+      const mx = p[0] + (ex - p[0]) * 0.55;
+      const my = p[1] + (ey - p[1]) * 0.55;
+      c.line(mx, my, mx + side * Math.cos(fa) * fl, my + Math.sin(fa) * fl, mat, tone - 0.04, o.z + 0.5);
+    }
+  }
+}
+
+/**
+ * Dead tree (the z2 car park, z3's dusk verges): a fissured trunk on a root
+ * flare, leaning a little, 4–5 bare boughs (the back ones a step darker) that
+ * break into forked twigs, a knot hole, and a snapped or tapering top — the
+ * 3D model's cylinder trunk and four stick branches, as a sprite artist draws
+ * winter wood.
+ */
+export const DEAD_TREE: FloraSpecies = {
+  key: 'deadTree',
+  w: 104,
+  h: 128,
+  heightM: 6,
+  variants: 4,
+  balance: true,
+  paint(c, m, rng, v) {
+    const W = this.w;
+    const H = this.h;
+    const cx = W / 2 + rng.spread(2);
+    const lean = rng.spread(7);
+    const top = H * rng.range(0.6, 0.72);
+    const snapped = v === 2;
+    const n = 7;
+    const pts: number[] = [];
+    const ws: number[] = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      pts.push(cx + lean * t * t, top * t);
+      ws.push(t < 0.05 ? 4.4 : 3.8 - 2 * t);
+    }
+    const at = (t: number): [number, number, number] => {
+      const x = cx + lean * t * t;
+      return [x, top * t, 3.8 - 2 * t];
+    };
+    const nb = 4 + (v % 2);
+    const first = v % 2 ? 1 : -1;
+    const limbs: { t: number; side: number; el: number; len: number; back: boolean }[] = [];
+    for (let k = 0; k < nb; k++) {
+      const t = 0.42 + (k / Math.max(1, nb - 1)) * 0.55 + rng.spread(0.04);
+      limbs.push({
+        t: Math.min(0.98, t),
+        side: k % 2 ? -first : first,
+        el: rng.range(0.45, 1.05) + t * 0.2,
+        len: rng.range(26, 40) * (1.15 - t * 0.45),
+        back: k === 1 || k === 4,
+      });
+    }
+    // Back boughs (a step darker, behind the trunk), the trunk on its flare, then the near boughs.
+    limbs.forEach((l, k) => {
+      if (!l.back) return;
+      const [x, y, w] = at(l.t);
+      bough(c, x, y, l.side, l.el, l.len, Math.max(1.2, w * 0.55), m.barkDark, rng, { z: -6, bias: -0.1, twigs: 4, id: k, thin: 0.45 });
+    });
+    c.stroke(pts, ws, m.bark, { bark: 1.3, seed: v * 2.1, z: 0 });
+    footFlare(c, cx, 3.8, 7, 3.4, m.bark);
+    // Knot hole and a broken stub low on the trunk.
+    const [kx, ky] = at(rng.range(0.25, 0.4));
+    c.ellipse(kx + rng.spread(1), ky, 1.2, 1.8, m.barkDark, { z: 3, bias: -0.42, amp: 0.3 });
+    const [sx, sy] = at(rng.range(0.18, 0.3));
+    const sd = rng.chance(0.5) ? 1 : -1;
+    c.curve(sx, sy, sx + sd * 3, sy + 2, sx + sd * 6, sy + 3, 1.5, 1.1, m.bark, { z: 2, bias: -0.02 });
+    if (snapped) {
+      // A jagged break: splinters standing up from the stump of the leader.
+      const [tx, ty, tw] = at(1);
+      c.poly([tx - tw, ty - 1, tx + tw, ty - 1, tx + tw * 0.7, ty + 5, tx + 0.2, ty + 2, tx - tw * 0.4, ty + 7], m.bark, 0.42, { z: 2 });
+    } else {
+      // The leader tapers on up into the crown.
+      const [tx, ty] = at(1);
+      c.curve(tx, ty - 1, tx + lean * 0.3, ty + (H - 6 - ty) * 0.5, tx + lean * 0.5 + rng.spread(4), H - rng.range(4, 10), 1.8, 0.6, m.bark, { z: 1 });
+    }
+    limbs.forEach((l, k) => {
+      if (l.back) return;
+      const [x, y, w] = at(l.t);
+      bough(c, x, y, l.side, l.el, l.len, Math.max(1.3, w * 0.6), m.bark, rng, { z: 4, bias: 0, twigs: 5, id: k + 7 });
+    });
+  },
+};
+
+/**
+ * Bedding flower (the d2 greenhouse paths): a tuft of lance leaves and one or
+ * two stalks, each topped by a bloom in the biome's flower colour `variant`
+ * (lit petals, an unlit pale eye).
+ */
+export const FLOWER: FloraSpecies = {
+  key: 'flower',
+  w: 24,
+  h: 24,
+  heightM: 0.5,
+  variants: 4,
+  paint(c, m, rng, v) {
+    const cx = this.w / 2;
+    const fm = m.flowers.length ? m.flowers[v % m.flowers.length] : m.leafLight;
+    contact(c, cx, 5, m.leafDark);
+    for (let i = 0; i < 4; i++) {
+      const side = i % 2 ? 1 : -1;
+      const el = rng.range(0.55, 1.15);
+      c.leaf(cx + side * 0.5, 1, side > 0 ? el : Math.PI - el, rng.range(6, 9), 1.4, i < 2 ? m.leafDark : m.leaf, { z: i < 2 ? -2 : 2, bias: i < 2 ? -0.1 : 0, flag: FF.SOFT });
+    }
+    const ns = v % 2 ? 2 : 1;
+    for (let j = 0; j < ns; j++) {
+      const sx = cx + (ns === 2 ? (j ? 3 : -3) : 0) + rng.spread(1.5);
+      const top = rng.range(15, 20) - j * 2;
+      c.curve(cx, 1, (cx + sx) / 2 + rng.spread(1), top * 0.5, sx, top, 0.7, 0.55, m.leaf, { z: 1, bias: -0.05, flag: FF.SOFT });
+      c.ellipse(sx, top, 3.4, 2.7, fm, { z: 6 + j, bias: 0.1 });
+      c.ellipse(sx - 0.5, top + 0.4, 1, 1, fm, { z: 7 + j, bias: 0.42, flag: FF.FLAT });
+    }
+  },
+};
+
+/** The bedding / dead-wood set (not in ALL_SPECIES: the d1 / d3 atlases don't paint it). */
+export const EXTRA_SPECIES = [DEAD_TREE, FLOWER];
