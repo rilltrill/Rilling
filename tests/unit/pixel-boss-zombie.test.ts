@@ -1,3 +1,4 @@
+import { appendFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import '../../src/content';
@@ -136,6 +137,8 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: TH
 
 function expectAligned(c: Check, label: string) {
   const info = `${label} prims ${c.prims} centres ${c.centreHits}/${c.centres} [${c.centreMiss.join(' ')}] iou ${c.iou.toFixed(2)} agree ${c.partAgree.toFixed(2)} (${c.conf})`;
+  // (BOSSZ_REPORT=file: append each case's numbers there — look-dev / reports.)
+  if (process.env.BOSSZ_REPORT) appendFileSync(process.env.BOSSZ_REPORT, `${label}: prims ${c.prims}, centres ${c.centreHits}/${c.centres}, iou ${c.iou.toFixed(2)}, agree ${c.partAgree.toFixed(2)}\n`);
   // Never a hitbox centre on an empty texel; a weak point seen at its own centre is drawn as weak
   // (the eyes' invisible fat-finger hit spheres reach past the drawn eye — there the flesh may show).
   expect(c.centreMiss.filter((m) => m.endsWith('empty')), `${info}: hitbox centre on an empty texel`).toEqual([]);
@@ -228,6 +231,15 @@ describe('PixelCast alignment: Patient Zero (z2 boss)', () => {
     b.nextAttack = 99;
     run(e, 0.8);
     expectAligned(check(world, camera, e, EYE, LOOK), 'pz frenzy');
+    // Worst case for the primitive table: frenzy veins + an armed tentacle's charge vein.
+    b.beginSlam();
+    run(e, 1.0);
+    const worst = check(world, camera, e, EYE, LOOK);
+    expectAligned(worst, 'pz frenzy slam armed');
+    expect(worst.prims).toBeLessThanOrEqual(MAX_PRIMS - 6);
+    e.setState('idle');
+    b.nextAttack = 99;
+    run(e, 0.3);
     b.burstEye((b.eyes as unknown[])[0]);
     run(e, 0.1);
     expectAligned(check(world, camera, e, EYE, LOOK), 'pz burst eye');
