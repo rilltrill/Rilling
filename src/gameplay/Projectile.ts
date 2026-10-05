@@ -3,6 +3,8 @@ import { Entity, type ShotHit, type ShotOutcome } from './Entity';
 import type { World } from './World';
 import { Kit } from '../content/kit/ModelKit';
 import type { SfxName } from '../audio/names';
+import type { PixelFigure } from './pixel/figure';
+import { paintThrown, thrownKind, thrownState, type ThrownKind, type ThrownState } from '../content/pixel/castThrown';
 
 export interface ProjectileOptions {
   /** Launch point in WORLD coordinates. */
@@ -25,11 +27,19 @@ export interface ProjectileOptions {
   sfxDestroy: SfxName;
   /** FX when destroyed: 'goo' (splat), 'debris' (sparks/dust) or 'explode'. */
   burst: 'goo' | 'debris' | 'explode';
+  /**
+   * ART: SPRITES — what the pixel-art painter draws ('glob', 'hook', 'barrel',
+   * 'car', 'rock'…; see content/pixel/castThrown). Default: recognised from the
+   * other options and the mesh.
+   */
+  pixel?: ThrownKind;
 }
 
 const _v = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+/** Per-projectile variety for the pixel art (a counter, never the world RNG). */
+let thrownSeq = 0;
 
 /**
  * A thrown/spat object flying at the camera (acid spit, barrels, rocks, cars…).
@@ -42,6 +52,10 @@ export class Projectile extends Entity {
   protected to = new THREE.Vector3();
   private hp: number;
   private mesh: THREE.Object3D;
+  /** Built with its own mesh (vs the default glowing blob). */
+  private custom: boolean;
+  /** ART: SPRITES — the pixel-art painter's state (made at the first paint). */
+  private px: ThrownState | null = null;
 
   constructor(world: World, opts: Partial<ProjectileOptions> & { from: THREE.Vector3 }) {
     super(world);
@@ -60,6 +74,7 @@ export class Projectile extends Entity {
       ...opts,
     };
     this.hp = this.opts.hp;
+    this.custom = !!this.opts.mesh;
     this.hostile = true;
     this.assistable = true;
     this.frame = 'rig';
@@ -104,6 +119,34 @@ export class Projectile extends Entity {
       this.world.hurtPlayer(this.opts.damage, this.opts.source, this);
       if (this.opts.burst === 'goo') this.world.fx.screenSplat(this.opts.color);
     }
+  }
+
+  /**
+   * ART: SPRITES: painted pixel art (content/pixel/castThrown) in the tumbling
+   * mesh's frame. (A thrower may assign its own `paintPixels` per projectile.)
+   */
+  override paintPixels(f: PixelFigure): boolean {
+    let st = this.px;
+    const o = this.opts;
+    if (!st) {
+      st = this.px = thrownState(this.mesh, o.color, o.size, (++thrownSeq * 0.618) % 1);
+      thrownKind(st, { color: o.color, size: o.size, burst: o.burst, source: o.source, pixel: o.pixel, hasMesh: this.custom });
+      // Translucent parts (a bile skin) are painted, not kept as live 3D over the sprite.
+      this.mesh.traverse((m) => {
+        const mat = (m as THREE.Mesh).material as THREE.Material | undefined;
+        if (mat?.transparent) m.userData.spriteKeep3D = false;
+      });
+    }
+    st.time = this.age;
+    // Flight direction (world): the path's tangent (lerp + arc), through the rig frame.
+    const k = Math.min(1, this.age / o.flightTime);
+    _dir.subVectors(this.to, this.from);
+    _dir.y += Math.PI * Math.cos(k * Math.PI) * o.arc;
+    if (_dir.lengthSq() < 1e-8) _dir.set(0, 0, 1);
+    if (this.root.parent) _dir.transformDirection(this.root.parent.matrixWorld);
+    else _dir.normalize();
+    st.vel.copy(_dir);
+    return paintThrown(f, st, this.world.camera);
   }
 
   override onShot(hit: ShotHit): ShotOutcome {

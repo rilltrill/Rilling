@@ -4,6 +4,8 @@ import { Entity, type ShotHit, type ShotOutcome } from './Entity';
 import type { World } from './World';
 import { Kit } from '../content/kit/ModelKit';
 import { WEAPONS } from './Weapons';
+import type { PixelFigure } from './pixel/figure';
+import { paintPickup, type PickupParts } from '../content/pixel/castPickups';
 
 const COLORS: Record<PickupKind, number> = {
   health: 0xff3b3b,
@@ -44,6 +46,14 @@ export class Pickup extends Entity {
     this.baseY = pos.y;
     this.root.add(this.model);
     this.buildModel();
+    this.pixel = { model: this.model, halo: this.halo, color: COLORS[this.kind] };
+  }
+
+  /** ART: SPRITES — what the PixelCast painter draws (the model frame: it spins and bobs). */
+  private pixel: PickupParts;
+
+  override paintPixels(f: PixelFigure): boolean {
+    return paintPickup(f, this.kind, this.pixel, this.age, this.world.camera);
   }
 
   private buildModel() {
