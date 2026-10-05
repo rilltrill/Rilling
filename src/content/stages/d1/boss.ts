@@ -23,23 +23,26 @@ import { JungleRaptor } from './pack';
  *                 BITE (rears up, jaws wide)           — ring on the head, throat exposed
  *                 TAIL SWEEP (phase 2+, from the side) — ring on the tail
  *                 ROCK FLING (phase 2+, a volley of shootable rocks)
+ *                 ROCK RUSH  (phase 2+: a volley that ends in a ram behind the last rock)
  *   Every windup is interrupted by landing enough hits before the ring closes
  *   (the beast stumbles, jaws open → free hits on the throat). The stagger meter
  *   counts raw gun damage weighted by where it lands — eyes/throat ×2, the rest
  *   of the head ×0.15, body ×0.05 — and only after a short grace (DEVIL_TUNE):
  *   fire already resting on the eyes can't cancel a ring the instant it shows, it
- *   takes ~5 eye hits of steady fire (≈ 0.35 s of the mounted gun on target), so
- *   a ram or bite breaks around 0.8 s into its 1.2–1.9 s ring for a player who
- *   keeps the gun on the eyes. During the tail sweep the ring sits on the tail and
- *   tail hits count in full. The intro roar prompts HOLD FIRE ON ITS EYES!
+ *   takes 4–5 eye hits of steady fire after it (≈ 0.4 s of the mounted gun on
+ *   target), so a ram or bite breaks ≈ 1 s into its 1.33–1.65 s ring for a player
+ *   who keeps the gun on the eyes. During the tail sweep the ring sits on the tail
+ *   and tail hits count in full. The intro roar prompts HOLD FIRE ON ITS EYES!
  *   Fairness with the mounted gun: every windup/throw starts only when its ring is
  *   inside the play area (not under the HUD or the boss bar) and vents the turret,
  *   so an overheat lockout can never eat a telegraph. Rocks are lobbed low enough
  *   that their whole flight stays on screen (see Boulder).
- *   phase 2 : roars and calls the raptor pack; raptors on screen pounce alongside
- *             its windups (JungleRaptor.rally); attacks may chain.
- *   phase 3 : frenzy (faster, more chains, bigger rock volleys).
- *   mercy   : on the last two hearts its rings break much sooner (DEVIL_TUNE.mercy).
+ *   phase 2 : (from 75 % health) roars and calls the raptor pack. Pack hunters prowl
+ *             in view (free targets) and hold their pounce for its call: up to two
+ *             pounce alongside each windup and volley (JungleRaptor.rally) — two or
+ *             three rings at once; attacks may chain.
+ *   phase 3 : (from 40 %) frenzy (faster, more chains, bigger rock volleys, more rushes).
+ *   mercy   : on the last heart its rings break much sooner (DEVIL_TUNE.mercy).
  *   death   : tumbles off the road into the river.
  */
 
@@ -76,7 +79,7 @@ const VENT_HEAT = 0.3;
  * throat hit fills 1.6, the rest of the head barely anything.
  */
 export const DEVIL_TUNE = {
-  /** Health: ≈ 60–75 s of fight for a decent mounted-gun player (three ~20 s phases). */
+  /** Health: ≈ 55–80 s of fight for a decent mounted-gun player (phases at 75 % / 40 %). */
   hp: 420,
   /** Damage multiplier on the weak points while it stumbles / roars (jaws hanging open). */
   openBonus: 1.25,
@@ -86,45 +89,68 @@ export const DEVIL_TUNE = {
    * the player has to keep it there. (The ring is up from its first frame and the
    * grace overlaps a 0.25–0.4 s reaction, so it costs a reacting player little.)
    */
-  grace: 0.45,
+  grace: 0.55,
   /**
-   * Meter that breaks a RAM, by phase: 5 eye hits after the grace (≈ 0.35 s of
-   * mounted-gun fire on the eyes, 14 rounds/s). The ram's ring is the longest
-   * (1.9 s; 1.75 s / 1.6 s in phases 2 / 3): steady fire on the eyes breaks it
-   * ≈ 0.95 s in (measured with perfect aim — the gun's spread costs rounds on the
-   * small eyes); hosing the skull or the body doesn't stop it.
+   * Meter that breaks a RAM, by phase (an eye hit fills 1.6): 4 / 4 / 5 eye hits
+   * after the grace (≈ 0.35–0.45 s of mounted-gun fire on the eyes, 12 rounds/s).
+   * The ram's ring is the longest (`ramRing`: 1.65 s; 1.52 s / 1.40 s in phases
+   * 2 / 3) and its eyes are the smallest target (head down): the accuracy test.
+   * Perfect aim with a 0.4 s reaction breaks it ≈ 0.9 s in.
+   * Hosing the skull or the body doesn't stop it.
    */
-  ramGuard: [6.6, 7, 7.4],
+  ramGuard: [6.4, 6.4, 7.4],
+  /** The ram's ring (s) in phase 1 (×0.92 in phase 2, ×0.85 in the frenzy). */
+  ramRing: 1.65,
   /**
-   * Meter that breaks a BITE (shorter ring: 1.45 s; 1.33 s / 1.23 s in phases
-   * 2 / 3; the open throat counts as a weak point too): 4 eye/throat hits after
-   * the grace — it breaks ≈ 1.0 s in with perfect aim. Phase 3's ring is the
-   * shortest, so it asks no more than phase 2 (with a rallied raptor up at the
-   * same time a 0.4 s reaction still has to make it).
+   * Meter that breaks a BITE (the open throat is a big weak point): 5 / 5 / 4
+   * eye/throat hits after the grace — a race against the clock more than a test of
+   * aim. Phase 3's ring is the shortest, so it asks for one hit less.
    */
-  biteGuard: [6.4, 6.6, 6.4],
+  biteGuard: [8, 8, 6.4],
+  /**
+   * The bite's ring (s) by phase. Perfect aim with a 0.4 s reaction breaks it
+   * ≈ 1.0 s in (≈ 1.15 s after first breaking a raptor rallied alongside).
+   */
+  biteRing: [1.45, 1.45, 1.33],
   /** Meter that breaks a tail sweep (ring on the tail; tail, body and eye hits count in full): ≈ 5–6 tail hits. */
   tailGuard: [4.6, 4.6, 5.2],
   /** Stumble (jaws hanging open) after a broken attack. */
   stumble: 1.0,
   /** Chase time before the next attack after a stumble / after an attack, by phase. */
-  stumbleGap: [1.1, 1.0, 0.6],
-  gap: [1.9, 1.5, 1.1],
+  stumbleGap: [1.0, 0.9, 0.6],
+  gap: [1.4, 1.2, 1.0],
   /** Rocks per scoop, by phase (phase 2+ only scoops). */
   rocks: [1, 2, 3],
+  /**
+   * ROCK RUSH: chance by phase that a volley ends with the beast charging in behind
+   * its last rock — a ram whose ring starts `rushDelay` s after that rock's (shoot
+   * the rock down during the ram's grace, then the eyes: ≈ 1.0 s of work with
+   * perfect aim against a ≥ 1.40 s ring).
+   */
+  rush: [0, 0.8, 1],
+  rushDelay: 0.15,
   /** Chance of a chained follow-up attack straight after one that landed or was dodged, by phase. */
   chain: [0, 0.3, 0.5],
-  /** Raptors on screen called into a pounce alongside each ram / bite / sweep, by phase. */
-  rally: [0, 1, 2],
+  /** Pack hunters called into a pounce alongside each ram / bite / sweep / volley, by phase. */
+  rally: [0, 2, 2],
   /**
-   * Arcade mercy, by hearts left: on the last two hearts a ring breaks much
-   * sooner (short grace, lighter meter: ≈ 3 eye hits), so one bad patch doesn't
-   * snowball into a continue. [hearts ≤, grace, meter ×]
+   * Seconds into a windup during which the call stays open: a raptor whose pounce
+   * can't start yet (the view still swinging after the boss) joins once it can —
+   * each joiner's own ring still starts framed and runs its full length.
    */
-  mercy: [
-    [1, 0.15, 0.55],
-    [2, 0.2, 0.65],
-  ] as [number, number, number][],
+  rallyWindow: 0.6,
+  /** Pack upkeep, by phase: raptors kept on the field (topped up one at a time)… */
+  pack: [0, 2, 3],
+  /** …every this many seconds of chase… */
+  packEvery: [0, 3.5, 3],
+  /** …up to this many called in the whole fight. */
+  packMax: 14,
+  /**
+   * Arcade mercy, by hearts left: on the last heart a ring breaks much sooner
+   * (short grace, lighter meter: ≈ 3 eye hits), so one bad patch doesn't snowball
+   * into a continue. [hearts ≤, grace, meter ×]
+   */
+  mercy: [[1, 0.15, 0.55]] as [number, number, number][],
 };
 
 /**
@@ -182,7 +208,7 @@ interface FlashEntry {
 
 export class Carnotaur extends Boss {
   override title = 'HORNED DEVIL';
-  override phases = [0.66, 0.33];
+  override phases = [0.75, 0.4];
 
   // Rig.
   private hips!: THREE.Group;
@@ -239,6 +265,12 @@ export class Carnotaur extends Boss {
   private raptorsCalled = 0;
   private frenzy = false;
   private chain = 0;
+  /** This volley ends in a ROCK RUSH (see DEVIL_TUNE.rush). */
+  private rushing = false;
+  /** The next windup is a rush (no pack call: the rock is its second target). */
+  private rushIn = false;
+  /** Raptors that answered the call of the current windup (see rallyPack). */
+  private rallied = 0;
   /** Attack picked when the cooldown ran out, waiting for its ring to be framed in the play area. */
   private nextAttack: CState | null = null;
   private attackWait = 0;
@@ -653,6 +685,8 @@ export class Carnotaur extends Boss {
   private go(s: CState) {
     this.telegraph = null;
     this.winding = false;
+    this.rallied = 0;
+    if (s !== 'chase') this.rushIn = false;
     this.interruptDmg = 0;
     this.entering = true;
     this.setState(s);
@@ -703,7 +737,7 @@ export class Carnotaur extends Boss {
   private callRaptors(n: number) {
     const w = this.world;
     for (let i = 0; i < n; i++) {
-      const left = i % 2 === 0;
+      const left = this.raptorsCalled % 2 === 0;
       // Beside/behind the boss in the rear view: they leap past its flanks and land mid-frame ~6 m out.
       const pos = new THREE.Vector3(left ? -5 - i : 5 + i, 0, 12 + i * 2);
       const e = createEnemy('jungle_raptor', w, {
@@ -712,7 +746,7 @@ export class Carnotaur extends Boss {
         entry: 'leap',
         hpMul: 1,
         speedMul: 1,
-        opts: { variant: i % 2 ? 'red' : 'tan' },
+        opts: { variant: i % 2 ? 'red' : 'tan', pack: true },
       });
       w.add(e);
       w.fx.debris(e.worldPos(_v), 0x3d7a2c);
@@ -721,12 +755,19 @@ export class Carnotaur extends Boss {
     w.audio.play('raptor_screech', { volume: 0.9 });
   }
 
-  /** Phase 2+: raptors that could strike right now pounce alongside the windup (two rings, two targets). */
-  private rallyPack() {
-    let n = DEVIL_TUNE.rally[Math.min(this.phase, 2)];
+  /**
+   * Phase 2+: pack hunters that could strike right now pounce alongside the windup
+   * (`t` = seconds since the call; it stays open for `rallyWindow`).
+   */
+  private rallyPack(t: number) {
+    if (t > DEVIL_TUNE.rallyWindow) return;
+    let n = DEVIL_TUNE.rally[Math.min(this.phase, 2)] - this.rallied;
     for (const e of this.world.enemies()) {
       if (n <= 0) break;
-      if (e instanceof JungleRaptor && e.rally()) n--;
+      if (e instanceof JungleRaptor && e.rally()) {
+        n--;
+        this.rallied++;
+      }
     }
   }
 
@@ -740,10 +781,10 @@ export class Carnotaur extends Boss {
     const r = this.world.rng.next();
     const p = this.phase;
     let pick: CState;
-    // The ram (the longest ring, the bull's signature move) leads every phase.
-    if (p === 0) pick = r < 0.6 ? 'ramWind' : 'biteWind';
-    else if (p === 1) pick = r < 0.35 ? 'ramWind' : r < 0.65 ? 'biteWind' : r < 0.85 ? 'flank' : 'scoop';
-    else pick = r < 0.3 ? 'ramWind' : r < 0.55 ? 'biteWind' : r < 0.78 ? 'flank' : 'scoop';
+    // Bites (a race against the clock) and rams (a test of aim on the small eyes) share the load.
+    if (p === 0) pick = r < 0.5 ? 'ramWind' : 'biteWind';
+    else if (p === 1) pick = r < 0.28 ? 'ramWind' : r < 0.62 ? 'biteWind' : r < 0.8 ? 'flank' : 'scoop';
+    else pick = r < 0.22 ? 'ramWind' : r < 0.5 ? 'biteWind' : r < 0.7 ? 'flank' : 'scoop';
     if (pick === this.lastAttack && ++this.repeatCount >= 2) {
       pick = pick === 'ramWind' ? 'biteWind' : 'ramWind';
       this.repeatCount = 0;
@@ -899,8 +940,8 @@ export class Carnotaur extends Boss {
         if (t >= dur) {
           const which = this.roaringFor;
           this.roarsDone.add(which);
-          if (which === 1) this.callRaptors(2);
-          if (which === 2) this.callRaptors(this.roarsDone.has(1) ? 2 : 3);
+          // The roar calls the pack in (tops it up to its size for the phase, at least one).
+          if (which >= 1) this.callRaptors(Math.max(1, DEVIL_TUNE.pack[Math.min(which, 2)] - this.raptorCount()));
           this.pendingRoar = this.nextRoar();
           if (this.pendingRoar === 1 && which === 2) {
             this.roarsDone.add(1);
@@ -924,36 +965,39 @@ export class Carnotaur extends Boss {
           // Only start a telegraph the player can see and shoot; re-pick if it stays unframed.
           const pick = (this.nextAttack ??= this.chooseAttack());
           if (this.canStart(pick)) {
+            const rush = this.rushIn;
             this.nextAttack = null;
             this.attackWait = 0;
             this.go(pick);
+            // A rush's second target is its rock: the pack sits this one out.
+            if (rush) this.rallied = Infinity;
             break;
           }
           this.attackWait += dt;
           if (this.attackWait > 2) {
             this.nextAttack = null;
             this.attackWait = 0;
+            this.rushIn = false;
           }
         }
-        // Phase 2+: keep a couple of raptors around.
+        // Phase 2+: keep the pack topped up.
         if (this.phase >= 1) {
           this.raptorTimer -= dt;
           if (this.raptorTimer <= 0) {
-            this.raptorTimer = this.frenzy ? 9 : 11;
-            if (this.raptorCount() < 2 && this.raptorsCalled < 7) this.callRaptors(1);
+            const ph = Math.min(this.phase, 2);
+            this.raptorTimer = DEVIL_TUNE.packEvery[ph];
+            if (this.raptorCount() < DEVIL_TUNE.pack[ph] && this.raptorsCalled < DEVIL_TUNE.packMax) this.callRaptors(1);
           }
         }
         break;
       }
       case 'ramWind': {
         // Lowers the horns, paws the ground, snorts — then charges in the last 0.45 s.
-        const dur = this.windupTime(1.9);
+        const dur = this.windupTime(DEVIL_TUNE.ramRing);
         const chargeAt = dur - 0.45;
         this.winding = true;
-        if (first) {
-          this.ventGun(true);
-          this.rallyPack();
-        }
+        if (first) this.ventGun(true);
+        this.rallyPack(t);
         this.faceYaw(this.yawToJeep(), dt, 6);
         if (t < chargeAt) {
           this.steer(0, 12.5, 4, dt);
@@ -990,12 +1034,10 @@ export class Carnotaur extends Boss {
         break;
       }
       case 'biteWind': {
-        const dur = this.windupTime(1.45);
+        const dur = DEVIL_TUNE.biteRing[Math.min(this.phase, 2)];
         this.winding = true;
-        if (first) {
-          this.ventGun(true);
-          this.rallyPack();
-        }
+        if (first) this.ventGun(true);
+        this.rallyPack(t);
         this.steer(0.8, 7.3, 9, dt);
         this.faceYaw(this.yawToJeep(), dt, 6);
         const k = clamp(t / dur, 0, 1);
@@ -1040,10 +1082,8 @@ export class Carnotaur extends Boss {
         // Coil the tail away from the jeep, then whip it across.
         const dur = this.windupTime(1.6);
         this.winding = true;
-        if (first) {
-          this.ventGun(true);
-          this.rallyPack();
-        }
+        if (first) this.ventGun(true);
+        this.rallyPack(t);
         this.steer(-7.4, 1.2, 5, dt);
         const whipAt = dur - 0.3;
         if (t < whipAt) {
@@ -1085,11 +1125,28 @@ export class Carnotaur extends Boss {
         this.faceYaw(this.yawToJeep(), dt, 5);
         // A volley in phase 2+: one rock at a time to shoot down, each with its own ring.
         const throws = DEVIL_TUNE.rocks[Math.min(this.phase, 2)];
+        const every = this.frenzy ? 0.6 : 0.7;
+        if (first) this.rushing = w.rng.chance(DEVIL_TUNE.rush[Math.min(this.phase, 2)]);
         this.neckTarget = t < 0.7 ? 0.6 : -0.4;
         this.jawTarget = t < 0.7 ? 0.3 : 0.5;
         for (let i = 0; i < throws; i++) {
-          const at = 0.75 + i * (this.frenzy ? 0.6 : 0.7);
+          const at = 0.75 + i * every;
           if (t >= at && t - dt < at) this.flingRock();
+        }
+        // The pack charges in under the volley (a rush's second target is its rock instead).
+        if (!this.rushing && t >= 0.75) this.rallyPack(t - 0.75);
+        if (this.rushing && t >= 0.75 + (throws - 1) * every + DEVIL_TUNE.rushDelay) {
+          // ROCK RUSH: charges in behind its last rock — two rings, two targets
+          // (shoot the rock down, then hold fire on the eyes). The windup still waits
+          // for its ring to be framed (see chase).
+          this.rushing = false;
+          this.rushIn = true;
+          this.chain = 0;
+          this.nextAttack = this.lastAttack = 'ramWind';
+          this.attackWait = 0;
+          this.cooldown = 0;
+          this.go('chase');
+          break;
         }
         if (t > 0.9 + throws * 0.7) this.afterAttack();
         break;

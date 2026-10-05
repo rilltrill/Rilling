@@ -17,15 +17,23 @@ export const PACK_TUNE = {
   guard: 2.4,
   /**
    * Interrupt damage that breaks a pounce the Horned Devil called (alongside its own
-   * windup): five body hits or two head hits (~0.4 s of fire) — two rings, two targets.
+   * windup): four body hits or two head hits (~0.35 s of fire) — two rings, two
+   * targets. With two raptors called, breaking the boss first (≈ 1.0 s) and then
+   * both raptors on the chest still beats their 1.68 s rings with perfect aim.
    */
-  rallyGuard: 4,
+  rallyGuard: 3.2,
   /** Seconds after landing from the entry leap in which an ambusher may spring straight into its pounce… */
   ambushWindow: 2.5,
   /** …from up to this far beyond its striking range (a longer leap). */
   ambushReach: 2.5,
   /** A raptor answers the boss's call only if its own attack cooldown is about done. */
-  rallyCooldown: 0.6,
+  rallyCooldown: 1.2,
+  /**
+   * PACK HUNTERS (the raptors the Horned Devil calls, `opts.pack`): they prowl in
+   * view and hold their pounce for the boss's call — for up to this many seconds,
+   * then they strike on their own (a stock pounce, first round breaks it).
+   */
+  patience: 6,
   /**
    * Arcade mercy: on the last two hearts every pounce breaks at the first round
    * again (no guard), so one bad patch never snowballs into a continue.
@@ -63,6 +71,8 @@ export class JungleRaptor extends Raptor {
   private ambushT = 0;
   /** True while a shot is being resolved (stagger() from bombs / continues always applies). */
   private resolvingShot = false;
+  /** Pack hunter: seconds spent waiting for the boss's call since its last attack. */
+  private waitT = 0;
 
   private attacking(): boolean {
     return this.state === 'windup' || this.state === 'pounce';
@@ -71,6 +81,13 @@ export class JungleRaptor extends Raptor {
   protected override onWindup() {
     super.onWindup();
     this.meter = 0;
+    this.waitT = 0;
+  }
+
+  /** A pack hunter while its boss is still fighting (see PACK_TUNE.patience). */
+  private huntsWithPack(): boolean {
+    const b = this.world.boss;
+    return !!this.spawn.opts.pack && !!b && !b.removed && b.state !== 'dying';
   }
 
   override setState(s: string) {
@@ -87,6 +104,11 @@ export class JungleRaptor extends Raptor {
         this.ambushT = 0;
         return;
       }
+    }
+    // Pack hunter: prowl (a free target meanwhile) and keep the pounce for the boss's call.
+    if (this.huntsWithPack()) {
+      this.waitT += dt;
+      if (this.waitT < PACK_TUNE.patience) this.cooldown = Math.max(this.cooldown, 0.25);
     }
     super.advanceUpdate(dt);
   }

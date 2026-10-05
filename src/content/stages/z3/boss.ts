@@ -79,11 +79,40 @@ const _q = new THREE.Quaternion();
 /** Highest launch point of a thrown car/slab above the deck (keeps the flight out from under the boss bar). */
 const THROW_MAX_Y = 5.6;
 /**
- * The giant's difficulty dials (measured with tests/unit/humanbot.test.ts — see the stage header).
+ * The giant's difficulty dials (measured with tests/unit/humanbot.test.ts at 60 fps — see the stage header).
  *   interruptNeed  weak-point damage that staggers a wind-up, per phase (Behemoth.interruptNeed)
+ *   grace          seconds into a wind-up before weak-point fire starts to count
  *   pincerLag      seconds from a runner's ring opening to the pincer slam (Behemoth.pincerCue)
+ *   throwChain     the one-two: a slam while the thrown car is still in the air
+ *   mercy          lighter wind-ups on the last two hearts
+ * A clean aim breaks every lone wind-up (the overlaps catch it now and then);
+ * the giant mostly costs a loose aim (≈ 2–2.5 hearts at σ 0.05), and the fight
+ * runs ≈ 50 s / 75–80 s.
  */
-export const BEHEMOTH_TUNE = { interruptNeed: [7, 8, 9], pincerLag: 0.25 };
+export const BEHEMOTH_TUNE = {
+  interruptNeed: [6, 6, 7],
+  /**
+   * Seconds at the start of a wind-up in which weak-point fire doesn't fill the
+   * stagger meter, by phase: fire already resting on the wound can't cancel the
+   * ring the instant it shows — the player has to keep it there. (The ring is up
+   * from its first frame and the grace overlaps a 0.25–0.4 s reaction, so it
+   * costs a reacting player little; it's the overlapping threats — a runner's
+   * ring, a car in the air — that make it bite.)
+   */
+  grace: [0.3, 0.35, 0.35],
+  pincerLag: 0.25,
+  /** Chance, by phase, that a throw chains straight into a slam while the car / slab is still in the air. */
+  throwChain: [0, 0.6, 0.85],
+  /**
+   * Arcade mercy, by hearts left: on the last hearts a wind-up breaks sooner
+   * (shorter grace, lighter meter), so one bad patch doesn't snowball into a
+   * continue. [hearts ≤, grace, meter ×]
+   */
+  mercy: [
+    [1, 0.2, 0.6],
+    [2, 0.3, 0.8],
+  ] as [number, number, number][],
+};
 
 /**
  * Boss projectile. The base Projectile aims 0.9 m along rig −Z (straight ahead
@@ -193,6 +222,8 @@ export class Behemoth extends Boss {
   private lastFoot = 0;
   private interrupt = 0;
   private winding = false;
+  /** Boss age when the current wind-up's ring opened (see BEHEMOTH_TUNE.grace). */
+  private ringOpenAt = 0;
   private flinch = 0;
   private flinchV = 0;
   private attacks = 0;
@@ -203,6 +234,8 @@ export class Behemoth extends Boss {
   private minionFlip = false;
   /** A runner's ring just opened: the next attack is a slam right on its heels (see pincerCue). */
   private pincer = false;
+  /** This throw chains into a slam while the car is in the air (BEHEMOTH_TUNE.throwChain). */
+  private chained = false;
   private leapFrom = new THREE.Vector3();
   private leapTo = new THREE.Vector3();
   private focus = new THREE.Object3D();
@@ -231,7 +264,8 @@ export class Behemoth extends Boss {
 
   protected override configure(): void {
     this.name = 'behemoth';
-    this.maxHp = 390;
+    // ≈ 50 s for a clean aim at 60 fps (12 rounds/s on the glow), ≈ 75 s for a loose one.
+    this.maxHp = 420;
     this.speed = 0;
     this.points = 30000;
     this.phases = [0.66, 0.33];
@@ -556,7 +590,7 @@ export class Behemoth extends Boss {
     const weak = hit.part === 'weak' || hit.part === 'head';
     this.flinchV += clamp(amount * (weak ? 0.5 : 0.15), 0, 1.2);
     if (weak) this.world.fx.sparks(hit.point, hit.normal, 3);
-    if (this.winding && weak) {
+    if (this.winding && weak && this.age - this.ringOpenAt >= this.graceNow()) {
       this.interrupt += amount;
       if (this.interrupt >= this.interruptNeed()) this.stagger2();
     }
@@ -564,16 +598,30 @@ export class Behemoth extends Boss {
 
   /**
    * Weak-point damage needed to stagger a wind-up (BEHEMOTH_TUNE.interruptNeed,
-   * 7/8/9 by phase): 5, 5 and 6 twin-gun rounds on any glowing weak point —
-   * wound, eyes, split skull — at 1.6 a round, i.e. ~0.5 s of on-target fire
-   * inside a 1.0–1.5 s ring (the World vents an overheated gun as the ring
-   * opens). Answer the ring on the glow and it breaks in time; spray the body or
-   * react late and it lands. The giant's real test is the pincer (pincerCue):
-   * the same burst, right after dropping a runner.
+   * 6/6/7 by phase): 4, 4 and 5 twin-gun rounds on any glowing weak point —
+   * wound, eyes, split skull — at 1.6 a round, landed after the grace
+   * (0.3–0.35 s, inside a reaction), i.e. a ring breaks ~0.75 s in with steady
+   * fire on the glow, inside a 1.0–1.5 s ring (the World vents an overheated
+   * gun as the ring opens). Answer the ring on the glow and it breaks in time;
+   * spray the body or react late and it lands. The giant's real tests are the
+   * overlaps: the pincer (pincerCue) — the same burst right after dropping a
+   * runner — and the one-two (throwChain) — the burst while a car is in the air.
    */
   private interruptNeed() {
     const need = BEHEMOTH_TUNE.interruptNeed;
-    return need[Math.min(this.phase, need.length - 1)];
+    return need[Math.min(this.phase, need.length - 1)] * (this.mercy()?.[2] ?? 1);
+  }
+
+  /** Seconds into a wind-up before weak-point fire starts to count (BEHEMOTH_TUNE.grace). */
+  private graceNow() {
+    const g = BEHEMOTH_TUNE.grace;
+    return Math.min(g[Math.min(this.phase, g.length - 1)], this.mercy()?.[1] ?? Infinity);
+  }
+
+  /** The mercy row for the player's hearts left (BEHEMOTH_TUNE.mercy), if any. */
+  private mercy(): [number, number, number] | undefined {
+    const hp = this.world.player.hp;
+    return BEHEMOTH_TUNE.mercy.find((m) => hp <= m[0]);
   }
 
   protected override onPhase(phase: number): void {
@@ -622,6 +670,7 @@ export class Behemoth extends Boss {
 
   /** Telegraphed wind-up; returns true when it lands. */
   private windAttack(dur: number, anchor: THREE.Object3D, radius: number, land: () => void): boolean {
+    if (!this.telegraph) this.ringOpenAt = this.age;
     this.winding = true;
     this.telegraphRadius = radius;
     return this.telegraphAttack(dur, land, anchor);
@@ -893,7 +942,19 @@ export class Behemoth extends Boss {
       }
       case 'throw': {
         this.faceTruck(dt);
-        if (t >= 0.14 && this.holding) this.release(this.holding);
+        if (t >= 0.14 && this.holding) {
+          this.release(this.holding);
+          const chain = BEHEMOTH_TUNE.throwChain;
+          this.chained = w.rng.chance(chain[Math.min(this.phase, chain.length - 1)]);
+        }
+        if (this.chained && t > 0.3) {
+          // THE ONE-TWO: the fists come down while the car is still in the air — shoot it
+          // down and pump the wound (two rings, two places on screen).
+          this.chained = false;
+          this.lastAttack = 'slamWind';
+          this.go('slamWind');
+          break;
+        }
         if (t > 0.7) this.backToChase(this.phase >= 2 ? 1.4 : 2.2);
         break;
       }
@@ -1000,7 +1061,10 @@ export class Behemoth extends Boss {
   /** Like windup(), but the ring starts `offset` seconds into the state. */
   private windupFrom(offset: number, dur: number, anchor: THREE.Object3D, radius: number, land: () => void): boolean {
     this.winding = true;
-    if (!this.telegraph) this.telegraph = { progress: 0, anchor, radius };
+    if (!this.telegraph) {
+      this.telegraph = { progress: 0, anchor, radius };
+      this.ringOpenAt = this.age;
+    }
     this.telegraph.progress = clamp((this.stateTime - offset) / dur, 0, 1);
     if (this.stateTime - offset >= dur) {
       this.telegraph = null;
