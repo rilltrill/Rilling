@@ -96,7 +96,12 @@ export function dinoMats(spec: TheroSpec): DinoMats {
   const stripes = spec.stripes;
   const belly = Mat.hide(p.belly, { scale: 0.2 });
   m = {
-    hide: stripes > 0 ? Mat.hide(p.base, { stripes: 0.85, belly, stripe: p.stripe, scale: 0.26 / Math.max(0.6, stripes / 2) }) : Mat.hide(p.base, { belly, scale: 0.2 }),
+    hide:
+      stripes > 0
+        ? Mat.hide(p.base, { stripes: 0.85, belly, stripe: p.stripe, scale: 0.26 / Math.max(0.6, stripes / 2) })
+        : spec.spots
+          ? Mat.hide(p.base, { spots: 0.9, belly, stripe: p.stripe, scale: 0.11 })
+          : Mat.hide(p.base, { belly, scale: 0.2 }),
     back: Mat.hide(p.back, { scale: 0.2 }),
     limb: Mat.hide(p.base, { scale: 0.18 }),
     belly,
@@ -196,6 +201,15 @@ export function paintTheropod(f: PixelFigure, r: TheroRig, s: TheroSpec, st: The
         .k(0.001)
         .z(0.03)
         .seed(5 + sd);
+    }
+  }
+  // Twin half-moon head crests (dilophosaurus): thin bony fans standing up off the skull.
+  if (s.crests) {
+    for (let sd = 1; sd >= -1; sd -= 2) {
+      f.ellipsoid(h, sd * 0.028, sk.r[1] * 0.85, sk.len * 0.45 + sn.len * 0.2, 0.014, 0.11, 0.22, sd > 0 ? M.acc : M.acc2)
+        .part(PART.HEAD)
+        .k(0.01 * sc)
+        .z(0.01);
     }
   }
   // Crest quills (the alpha's are big and bright): two rows splayed outward (a V
@@ -340,7 +354,7 @@ export function paintTheropod(f: PixelFigure, r: TheroRig, s: TheroSpec, st: The
     const mid = f.depth(f.at(leg.knee, 0, 0, 0));
     f.layer(0.05 * sc, PART.LIMB, mid > torsoDepth + 0.08 ? -0.1 : 0);
     // Drumstick thigh: deep front-to-back, a lit crescent down its front.
-    f.coneE(f.at(leg.hip, 0, 0.08, 0.01), f.at(leg.hip, 0, -s.thigh, 0), X(f, leg.hip), Z(f, leg.hip), 0.11 * L * sc, 0.175 * L * sc, 0.054 * L * sc, 0.07 * L * sc, M.hide).u(1.0 + i * 0.3);
+    f.coneE(f.at(leg.hip, 0, 0.07 * L, 0.01), f.at(leg.hip, 0, -s.thigh, 0), X(f, leg.hip), Z(f, leg.hip), 0.11 * L * sc, 0.175 * L * sc, 0.054 * L * sc, 0.07 * L * sc, M.hide).u(1.0 + i * 0.3);
     f.decal(f.at(leg.hip, 0, 0.02, 0.15 * L), f.at(leg.hip, 0, -s.thigh * 0.55, 0.1 * L), 0.012 * sc, 0.01 * sc, M.hide).flag(PF.FLAT | PF.SHADE_ONLY).tone(0.22).min(0.5);
     // Thin shin, sinewy metatarsus.
     f.coneE(f.at(leg.knee, 0, 0.04, 0), f.at(leg.knee, 0, -s.shin, 0), X(f, leg.knee), Z(f, leg.knee), 0.058 * L * sc, 0.078 * L * sc, 0.032 * L * sc, 0.038 * L * sc, M.limb).k(0.04 * sc);
@@ -368,6 +382,18 @@ export function paintTheropod(f: PixelFigure, r: TheroRig, s: TheroSpec, st: The
 
   // ── Arms ─────────────────────────────────────────────────────────────────
   const a = s.arm;
+  if (s.compact) {
+    // Compact rigs carry the arms folded into the torso: tiny clawed arms under the chest.
+    f.layer(0.01 * sc, PART.TORSO);
+    for (let side = 1; side >= -1; side -= 2) {
+      const sh = f.at(r.chest, side * T.r0[0] * 0.55, -T.r1[1] * 0.3, T.len * 0.8);
+      const el = f.at(r.chest, side * T.r0[0] * 0.6, -T.r1[1] * 0.3 - a.upper * 0.95, T.len * 0.8 + a.upper * 0.3);
+      const wr = f.at(r.chest, side * T.r0[0] * 0.6, -T.r1[1] * 0.3 - a.upper * 0.8, T.len * 0.8 + a.upper * 0.3 + a.fore);
+      f.cone(sh, el, a.r * sc, a.r * 0.8 * sc, M.limb).min(0.5);
+      f.cone(el, wr, a.r * 0.8 * sc, a.r * 0.5 * sc, M.limb).min(0.5);
+      f.cone(wr, f.add(wr, f.dir(r.chest, 0, -1, 0.4), a.claw * sc), 0.006 * sc, 0.002 * sc, M.claw).min(0.5);
+    }
+  }
   for (let i = 0; i < r.arms.length; i++) {
     const arm = r.arms[i];
     const side = i === 0 ? 1 : -1;
@@ -457,4 +483,47 @@ function theroSmears(f: PixelFigure, r: TheroRig, M: DinoMats, st: TheroPose, sc
   mem.chest.copy(chest);
   mem.t = st.time;
   mem.valid = true;
+}
+
+const frillMats = { y: 0, o: 0, r: 0, k: 0 };
+
+/**
+ * Dilophosaurus neck frill (the weak point): two fans of petals around the head,
+ * yellow → orange → a scalloped red rim, dark speckles; drawn while the fan is
+ * open (its pivot's scale opens and folds it like the 3D one).
+ */
+export function paintFrill(f: PixelFigure, pivots: readonly THREE.Object3D[], s: TheroSpec) {
+  if (!frillMats.y) {
+    frillMats.y = Mat.flat(0xffd21e, 'frill');
+    frillMats.o = Mat.flat(0xff8a1a, 'frill');
+    frillMats.r = Mat.flat(0xd8281a, 'frill');
+    frillMats.k = Mat.flat(0x1c1410, 'frill');
+  }
+  const R = 0.46;
+  // The two half fans together ring the neck: each is drawn as its whole disc
+  // (the union is the same), in concentric bands, ribbed and speckled.
+  for (let i = 0; i < pivots.length; i++) {
+    const p = pivots[i];
+    if (!p.visible) continue;
+    const sc = scaleOf(p);
+    if (sc < 0.3) continue;
+    f.layer(0.02 * sc, PART.WEAK);
+    f.ellipsoid(p, 0, 0, 0, R * 0.96, R * 0.96, 0.02, frillMats.r).flag(PF.FLAT).rag(0.03 * sc).seed(4 + i);
+    f.ellipsoid(p, 0, 0, 0, R * 0.8, R * 0.8, 0.02, frillMats.o).flag(PF.FLAT).z(-0.01).k(0.002);
+    f.ellipsoid(p, 0, 0, 0, R * 0.55, R * 0.55, 0.02, frillMats.y).flag(PF.FLAT).z(-0.02).k(0.002);
+    const c = f.at(p, 0, 0, 0);
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2 + i * 0.4;
+      f.decal(f.at(p, Math.cos(a) * R * 0.2, Math.sin(a) * R * 0.2, 0), f.at(p, Math.cos(a) * R * 0.92, Math.sin(a) * R * 0.92, 0), 0.007 * sc, 0.009 * sc, frillMats.y)
+        .flag(PF.FLAT | PF.SHADE_ONLY)
+        .tone(-0.35)
+        .min(0.5);
+      if (k % 2 === 1) {
+        const sp = f.at(p, Math.cos(a + 0.35) * R * 0.68, Math.sin(a + 0.35) * R * 0.68, 0);
+        f.decal(sp, sp, 0.024 * sc, 0.024 * sc, frillMats.k).flag(PF.FLAT).min(0.5);
+      }
+    }
+    void c;
+  }
+  void s;
 }

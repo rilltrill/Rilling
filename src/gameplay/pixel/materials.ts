@@ -58,6 +58,8 @@ export const PAT = {
   RIBS: 14,
   /** Armour plate: brushed metal, scratches, rivets. */
   PLATE: 15,
+  /** Bold dark dapples over the back and flanks (dilos), pale belly underneath. */
+  SPOTS: 16,
 } as const;
 export type PatternId = (typeof PAT)[keyof typeof PAT];
 
@@ -309,10 +311,10 @@ export const Mat = {
    * Reptile hide: scales + body stripes; `belly` = the underside material id,
    * `stripe` = the stripes' own colour (hex; else a darker shade of the hide).
    */
-  hide(hex: number, o: { stripe?: number; belly?: number; stripes?: number; scale?: number } = {}): number {
-    return material(`hide|${h6(hex)}|${o.stripe ?? 0}|${o.belly ?? 0}|${o.stripes ?? 0}|${o.scale ?? 0}`, () =>
-      base(makeRamp(hex, { light: 0.55, sat: 1.12 }), o.stripes ? PAT.STRIPES : PAT.SCALES, {
-        strength: o.stripes ?? 0.6,
+  hide(hex: number, o: { stripe?: number; belly?: number; stripes?: number; scale?: number; spots?: number } = {}): number {
+    return material(`hide|${h6(hex)}|${o.stripe ?? 0}|${o.belly ?? 0}|${o.stripes ?? 0}|${o.scale ?? 0}|${o.spots ?? 0}`, () =>
+      base(makeRamp(hex, { light: 0.55, sat: 1.12 }), o.spots ? PAT.SPOTS : o.stripes ? PAT.STRIPES : PAT.SCALES, {
+        strength: o.spots ?? o.stripes ?? 0.6,
         scale: o.scale ?? 0.16,
         secondary: o.belly ?? 0,
         tertiary: o.stripe !== undefined ? material(`stripe|${h6(o.stripe)}`, () => base(makeRamp(o.stripe!, { light: 0.5, sat: 1.15 }), PAT.SCALES, { strength: 0.4, scale: 0.16, dither: 0.1 })) : 0,

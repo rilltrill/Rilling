@@ -48,6 +48,8 @@ interface Check {
   centreMiss: string[];
   iou: number;
   partAgree: number;
+  /** Most common disagreements (ray part → sprite part: count). */
+  conf: string;
 }
 
 const _v = new THREE.Vector3();
@@ -101,6 +103,7 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity): Check 
   let both = 0;
   let either = 0;
   let agree = 0;
+  const confusion: Record<string, number> = {};
   for (let y = 0.5; y < f.H; y += 2) {
     for (let x = 0.5; x < f.W; x += 2) {
       const px = f.ox + x * f.kpx;
@@ -113,10 +116,19 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity): Check 
       if (want && got) {
         both++;
         if (want === got) agree++;
+        else {
+          const k = `${PART_NAME[want]}→${PART_NAME[got]}`;
+          confusion[k] = (confusion[k] ?? 0) + 1;
+        }
       }
     }
   }
-  return { centres, centreHits, centreMiss, iou: both / Math.max(1, either), partAgree: agree / Math.max(1, both) };
+  const conf = Object.entries(confusion)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([k, v]) => `${k}:${v}`)
+    .join(' ');
+  return { centres, centreHits, centreMiss, iou: both / Math.max(1, either), partAgree: agree / Math.max(1, both), conf };
 }
 
 function hitOn(e: Enemy, obj: THREE.Object3D, part: HitPart, damage: number): ShotHit {
@@ -144,7 +156,7 @@ function expectAligned(c: Check, label: string) {
   expect(c.centreHits / Math.max(1, c.centres), info).toBeGreaterThanOrEqual(0.75);
   // The silhouettes match and the parts agree almost everywhere they overlap.
   expect(c.iou, `${label} silhouette IoU`).toBeGreaterThan(0.72);
-  expect(c.partAgree, `${label} part agreement`).toBeGreaterThan(0.85);
+  expect(c.partAgree, `${label} part agreement (${c.conf})`).toBeGreaterThan(0.85);
 }
 
 describe('PixelCast figures', () => {
@@ -260,6 +272,29 @@ describe('PixelCast alignment (sprite parts land on the hitboxes)', () => {
       expectAligned(check(world, camera, e), `${variant} head-on windup`);
       run(e, e.windup * 0.1 + 0.15);
       expectAligned(check(world, camera, e), `${variant} head-on pounce`);
+    });
+  }
+});
+
+describe('PixelCast alignment: the rest of the z1 / d1 rosters', () => {
+  const cases: [string, number, number, Record<string, unknown>][] = [
+    ['crawler', 0.2, -4, {}],
+    ['bloater', 0.3, -5.5, {}],
+    ['spitter', -0.3, -6, {}],
+    ['brute', 0.2, -7, {}],
+    ['compy', 0.2, -4, {}],
+    ['dilo', 0.3, -7, {}],
+  ];
+  for (const [id, x, z, opts] of cases) {
+    it(`${id}: advancing and winding up`, () => {
+      const { world, camera } = makeWorld();
+      const e = spawn(world, id, x, z, opts);
+      e.root.rotation.y = 0.4;
+      run(e, 0.3);
+      expectAligned(check(world, camera, e), `${id} advance`);
+      e.setState('windup');
+      run(e, Math.min(e.windup * 0.7, 1));
+      expectAligned(check(world, camera, e), `${id} windup`);
     });
   }
 });

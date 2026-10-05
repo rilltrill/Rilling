@@ -145,7 +145,7 @@ const PAINT_FRAG = /* glsl */ `
       if (p.x < lb.x || p.y < lb.y || p.x > lb.z || p.y > lb.w) continue;
       int i0 = int(uLayerRange[L].x + 0.5);
       int i1 = int(uLayerRange[L].y + 0.5);
-      float lD = 1e9, lR = 1.0, lZ = 0.0;
+      float lD = 1e9, lR = 1.0, lZ = 0.0, lQ = 1.0;
       vec2 lG = vec2(0.0, 1.0);
       float cD = 1e9, cZ = 1e9, cMat = 0.0, cU = 0.0, cV = 0.0, cTone = 0.0, cSeed = 0.0, cT = 0.0, cAbs = -1.0, cFore = 1.0;
       bool cCov = false;
@@ -237,20 +237,25 @@ const PAINT_FRAG = /* glsl */ `
         float wb = clamp(0.5 + 0.5 * (lD - d) / k, 0.0, 1.0);
         float hh = max(k - abs(lD - d), 0.0) / k;
         float z = mix(T1.z, T1.w, t);
+        // Depth ratio of the cross-section (1 = round; flat plates / discs less).
+        float q = 1.0 - fract(T4.w);
         if (lD > 1e8) {
           lG = g;
           lR = R;
           lZ = z;
+          lQ = q;
         } else {
           lG = mix(lG, g, wb);
           lR = mix(lR, R, wb);
           lZ = mix(lZ, z, wb);
+          lQ = mix(lQ, q, wb);
         }
         lD = min(lD, d) - hh * hh * k * 0.25;
         // Material / pattern frame: the front-most primitive covering the texel
         // (else the nearest one, in the blend fillets).
         float xr = min(l / R, 1.0);
-        float zf = z - R * z / uTexS * sqrt(max(0.0, 1.0 - xr * xr));
+        // (Flat shapes — membranes, decals, plates — don't bulge toward the camera.)
+        float zf = (flags & 64) != 0 ? z : z - R * q * z / uTexS * sqrt(max(0.0, 1.0 - xr * xr));
         bool covers = d < 0.0;
         if (covers ? (!cCov || zf < cZ) : (!cCov && d < cD)) {
           cCov = covers;
@@ -275,12 +280,12 @@ const PAINT_FRAG = /* glsl */ `
         // Flatter in the middle, rolling off at the edge: broad lit planes, not pillows.
         float xs = xp * xp * (1.6 - 0.6 * xp);
         vec2 g2 = length(lG) > 1e-4 ? normalize(lG) : vec2(0.0, 1.0);
-        float rm = lR * lZ / uTexS;
-        float z = lZ - rm * nz;
+        float rm = lR * lQ * lZ / uTexS;
+        bool flatN = (cFlags & 64) != 0;
+        float z = flatN ? lZ : lZ - rm * nz;
         if (z < bZ) {
           bZ = z;
           bLayer = float(L);
-          bool flatN = (cFlags & 64) != 0;
           bN = flatN ? vec3(0.0, 0.0, 1.0) : normalize(vec3(g2 * xs, sqrt(max(0.0, 1.0 - xs * xs))));
           bMat = cMat;
           bTone = cTone;
@@ -387,6 +392,22 @@ const PAINT_FRAG = /* glsl */ `
       q.x += mod(floor(q.y), 2.0) * 0.5;
       vec2 f = fract(q);
       if (f.x < 0.2 || f.y < 0.2) tone -= 0.06;
+      if (sec > 0.5 && bN.y < -0.42 && length(bN.xy) > 0.5) mat = sec;
+    } else if (pat == 16) {
+      // SPOTS: bold dark dapples over the back and flanks, a few small ones between,
+      // fading above the pale belly; scale seams.
+      float vert = clamp(bN.y * 1.4, -1.0, 1.0);
+      vec2 q = uv / scale;
+      float n = vnoise(q + sd);
+      float n2 = vnoise(q * 2.4 + sd + 4.0);
+      float ter = floor(m2.a * 255.0 + 0.5);
+      float fade = smoothstep(-0.45, 0.05, vert);
+      if (n > 0.64 + 0.3 * (1.0 - fade)) {
+        if (ter > 0.5) mat = ter;
+        else tone -= 0.3 * str;
+      } else if (n2 > 0.8 && fade > 0.5) tone -= 0.14 * str;
+      vec2 c = fract(uv / 0.035 + vec2(mod(floor(uv.y / 0.035), 2.0) * 0.5, 0.0));
+      if (c.x < 0.2 || c.y < 0.2) tone -= 0.06;
       if (sec > 0.5 && bN.y < -0.42 && length(bN.xy) > 0.5) mat = sec;
     } else if (pat == 12) {
       // GOWN: little print dots.

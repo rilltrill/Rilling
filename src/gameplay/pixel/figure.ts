@@ -348,7 +348,10 @@ export class PixelFigure {
 
   /** Hit part this primitive draws (tests / gore); default: the layer's. */
   part(p: PartCode): this {
-    if (this.last >= 0) this.data[this.last * PRIM_FLOATS + PARTI] = p;
+    if (this.last >= 0) {
+      const o = this.last * PRIM_FLOATS + PARTI;
+      this.data[o] = p + (this.data[o] - Math.floor(this.data[o]));
+    }
     return this;
   }
   /** Smooth-blend radius (metres) with what the layer holds so far. */
@@ -410,6 +413,19 @@ export class PixelFigure {
     if (this.last >= 0) this.data[this.last * PRIM_FLOATS + SEED] = n;
     return this;
   }
+  /**
+   * How deep the shape is toward the camera relative to its on-screen radius
+   * (0..1; 1 = round). The paint pass bulges a layer toward the viewer by its
+   * radius × this, so a broad flat chest plate or a disc seen face-on doesn't
+   * pretend to be a ball. Set by `coneE` / `ellipsoid` from their cross-sections.
+   */
+  private depthRatio(q: number) {
+    if (this.last < 0) return;
+    const o = this.last * PRIM_FLOATS + PARTI;
+    const c = Math.min(1, Math.max(0.05, q));
+    this.data[o] = Math.floor(this.data[o]) + Math.min(0.999, 1 - c);
+  }
+
   /** Smallest radius in texels (default 0.55 — one-texel lines survive). */
   min(px: number): this {
     if (this.last >= 0) this.minPx[this.last] = px;
@@ -529,7 +545,13 @@ export class PixelFigure {
       ra = Math.max(rxA * Math.hypot(uxx, uxy), ryA * Math.hypot(uyx, uyy));
       rb = Math.max(rxB * Math.hypot(uxx, uxy), ryB * Math.hypot(uyx, uyy));
     }
+    // Depth of the cross-section toward the camera (view z of the semi-axes) vs its screen radius.
+    const uxz = V[2] * ux.x + V[6] * ux.y + V[10] * ux.z;
+    const uyz = V[2] * uy.x + V[6] * uy.y + V[10] * uy.z;
+    const dz = Math.hypot((rxA + rxB) * 0.5 * uxz, (ryA + ryB) * 0.5 * uyz);
+    const sr = (ra + rb) * 0.5;
     this.emit(a, b, ra, rb, mat, 0, o);
+    if (sr > 1e-6) this.depthRatio(dz / sr);
     return this;
   }
 
@@ -547,6 +569,7 @@ export class PixelFigure {
     let m00 = 0;
     let m01 = 0;
     let m11 = 0;
+    let m22 = 0;
     for (let i = 0; i < 3; i++) {
       const r = i === 0 ? rx : i === 1 ? ry : rz;
       const wx = e[i * 4] * r;
@@ -554,9 +577,11 @@ export class PixelFigure {
       const wz = e[i * 4 + 2] * r;
       const vx = V[0] * wx + V[4] * wy + V[8] * wz;
       const vy = V[1] * wx + V[5] * wy + V[9] * wz;
+      const vz = V[2] * wx + V[6] * wy + V[10] * wz;
       m00 += vx * vx;
       m01 += vx * vy;
       m11 += vy * vy;
+      m22 += vz * vz;
     }
     const tr = (m00 + m11) / 2;
     const dd = Math.sqrt(Math.max(0, ((m00 - m11) / 2) ** 2 + m01 * m01));
@@ -571,6 +596,7 @@ export class PixelFigure {
     const a = this.vec().set(c.x + V[0] * ux + V[1] * uy, c.y + V[4] * ux + V[5] * uy, c.z + V[8] * ux + V[9] * uy);
     const b = this.vec().set(c.x - V[0] * ux - V[1] * uy, c.y - V[4] * ux - V[5] * uy, c.z - V[8] * ux - V[9] * uy);
     this.emit(a, b, B, B, mat, 0, o);
+    this.depthRatio(Math.sqrt(m22) / Math.max(B, 1e-6));
     return this;
   }
 
@@ -673,7 +699,7 @@ export class PixelFigure {
   get(i: number, field: 'ax' | 'ay' | 'bx' | 'by' | 'ra' | 'rb' | 'layer' | 'part' | 'mat' | 'flags'): number {
     const o = i * PRIM_FLOATS;
     const f = { ax: AX, ay: AY, bx: BX, by: BY, ra: RA, rb: RB, layer: LAYER, part: PARTI, mat: MA, flags: FLAGS }[field];
-    return this.data[o + f];
+    return field === 'part' ? Math.floor(this.data[o + f]) : this.data[o + f];
   }
 
   // ─── Layout ───────────────────────────────────────────────────────────────
@@ -860,7 +886,7 @@ export class PixelFigure {
         out.depth = lZ;
         out.layer = cur;
         out.prim = cI;
-        out.part = d[cI * PRIM_FLOATS + PARTI] as PartCode;
+        out.part = Math.floor(d[cI * PRIM_FLOATS + PARTI]) as PartCode;
         out.mat = d[cI * PRIM_FLOATS + MA];
       }
     };
@@ -918,7 +944,8 @@ export class PixelFigure {
       const cxp = ax + dx * t;
       const cyp = ay + dy * t;
       const xr = Math.min(Math.hypot(x - cxp, y - cyp) / R, 1);
-      const zf = z - ((R * z) / this.texS) * Math.sqrt(Math.max(0, 1 - xr * xr));
+      const q = 1 - (d[o + PARTI] - Math.floor(d[o + PARTI]));
+      const zf = d[o + FLAGS] & PF.FLAT ? z : z - ((R * q * z) / this.texS) * Math.sqrt(Math.max(0, 1 - xr * xr));
       const covers = di < 0;
       if (covers ? !cCov || zf < cZ : !cCov && di < cD) {
         cCov = covers;

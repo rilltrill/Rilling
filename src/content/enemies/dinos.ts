@@ -29,7 +29,7 @@ import {
   type TrikeRig,
 } from './dinoKit';
 import type { PixelFigure } from '../../gameplay/pixel/figure';
-import { paintTheropod, theroMem, type TheroPose } from '../pixel/theropod';
+import { paintFrill, paintTheropod, theroMem, type TheroPose } from '../pixel/theropod';
 
 /**
  * PRIMAL ISLAND dinosaur roster:
@@ -696,6 +696,7 @@ const COMPY_PAL: Palette = {
 };
 
 export class Compy extends Theropod {
+  protected override pixelArt = true;
   private hopT = 0;
   private hopDur = 0.26;
   private hopH = 0.18;
@@ -775,6 +776,12 @@ export class Compy extends Theropod {
       compact: true,
       texDensity: 3,
     };
+  }
+
+  protected override build() {
+    super.build();
+    // Too small for a quill row: a few bristles.
+    this.pose2d.dorsal = 0.35;
   }
 
   protected override speedFactor(): number {
@@ -1002,8 +1009,11 @@ const FRILL_K = 0x1c1410;
 const VENOM = 0xa8f040;
 
 export class Dilo extends Theropod {
+  protected override pixelArt = true;
   private frill: THREE.Group[] = [];
   private frillOpen = 0;
+  /** ART: SPRITES — the neck frill fans (weak point) painted behind the head. */
+  private readonly paintFrill = (f: PixelFigure) => paintFrill(f, this.frill, this.spec);
 
   protected override configure() {
     const rng = this.world.rng;
@@ -1105,6 +1115,7 @@ export class Dilo extends Theropod {
     }
     this.refreshMeshes();
     this.applyFrill();
+    this.pose2d.extra = this.paintFrill;
   }
 
   private applyFrill() {

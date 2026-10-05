@@ -11,6 +11,8 @@ import { PART_MULT } from '../../../core/types';
 import { Civilian } from '../../../gameplay/Civilian';
 import { clamp } from '../../../core/math';
 import { registerEnemy } from '../../registry';
+import { Mat } from '../../../gameplay/pixel/materials';
+import { PART, PF } from '../../../gameplay/pixel/figure';
 
 const _p = new THREE.Vector3();
 const _n = new THREE.Vector3();
@@ -415,6 +417,16 @@ export class RiotBrute extends Brute {
     const brow = Kit.add(head, Kit.box(0.045 * hs, 0.09 * hs, 0.02), glow, -0.02 * hs, 0.215 * hs, 0.125 * hs, 0, 0, 0.35);
     this.hitbox(crown, 'head');
     this.hitbox(brow, 'head');
+    // ART: SPRITES — the glowing split skull (it teaches "shoot the head") over the brute's painting.
+    const base = this.pose2d.extra;
+    const gm = Mat.glow(BRAIN);
+    this.pose2d.extra = (f) => {
+      base?.(f);
+      if (this.headless) return;
+      f.layer(0.006, PART.HEAD, 0, -0.02);
+      f.cone(f.at(head, -0.07 * hs, 0.255 * hs, 0.02), f.at(head, 0.095 * hs, 0.27 * hs, -0.02), 0.022, 0.018, gm).flag(PF.GLOW);
+      f.cone(f.at(head, -0.005 * hs, 0.26 * hs, 0.125 * hs), f.at(head, -0.04 * hs, 0.17 * hs, 0.13 * hs), 0.016, 0.01, gm).flag(PF.GLOW).min(0.5);
+    };
   }
 
   override onAdded(): void {

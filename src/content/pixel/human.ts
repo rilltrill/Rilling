@@ -157,6 +157,12 @@ export interface HumanPose {
   torso?: (f: PixelFigure) => void;
   /** Extra layers after the figure (armour plates, spikes, glowing weak spots). */
   extra?: (f: PixelFigure) => void;
+  /** Thickness multipliers matching scaled 3D limbs: arms [left, right], legs, neck (brutes, bloaters). */
+  armW?: readonly number[];
+  legW?: number;
+  neckW?: number;
+  /** false = no pelvis (crawlers torn in half). */
+  pelvis?: boolean;
 }
 
 /** World scale of a joint (its matrix's X column length). */
@@ -263,8 +269,9 @@ function mats(L: HumanLook): Mats {
   m = {
     skin,
     face: L.dead ? Mat.deadSkin(L.skin, 0.4) : skin,
-    shirt: cloth(L.jacket ?? L.shirt, L.shirtPat),
-    sleeve: cloth(L.jacket ?? L.sleeveColor, L.shirtPat),
+    // (A shirt the colour of the skin is a bare torso: brutes.)
+    shirt: L.shirt === L.skin && L.jacket === null ? skin : cloth(L.jacket ?? L.shirt, L.shirtPat),
+    sleeve: L.sleeveColor === L.skin && L.jacket === null ? skin : cloth(L.jacket ?? L.sleeveColor, L.shirtPat),
     pants: L.bareLegs ? skin : cloth(L.pants, L.pantsPat),
     shoes: L.bareLegs ? skin : Mat.leather(L.shoes),
     hair: Mat.hair(L.hair ?? 0x2a2018),
@@ -363,22 +370,33 @@ export function paintHuman(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: Hum
   const hipZ = f.dir(r.hips, 0, 0, 1);
   const spX = f.dir(r.spine, 1, 0, 0);
   const spZ = f.dir(r.spine, 0, 0, 1);
-  // Pelvis (trousers): wide hips, a seat behind.
-  f.coneE(f.at(r.hips, 0, -0.085, -0.004), f.at(r.hips, 0, 0.05, 0), hipX, hipZ, 0.168 * b * s, 0.108 * sb * s, 0.152 * b * s, 0.1 * sb * s, M.pants);
-  // Belly → ribcage: narrow waist, deep chest; zombies sag forward (hunch) inside the torso box.
+  // The trunk is built from horizontal SLICES (hips → waist → ribs → chest), each a
+  // flat pill across the body whose ends are the flanks — melted together they make
+  // one torso that narrows at the waist and fills out at the chest, without the
+  // round caps of a vertical tube bulging past the hips (and bulky bodies stay
+  // inside their boxes). From the side each slice is the trunk's depth there.
+  const spY = f.dir(r.spine, 0, 1, 0);
+  const hipY = f.dir(r.hips, 0, 1, 0);
   const hz = 0.022 * hunch;
-  f.coneE(f.at(r.spine, 0, 0.0, 0.006), f.at(r.spine, 0, 0.2, 0.012 + hz * 0.5), spX, spZ, 0.148 * b * s, 0.1 * sb * s, 0.16 * b * s, 0.108 * sb * s, M.shirt);
-  f.coneE(f.at(r.spine, 0, 0.17, 0.012), f.at(r.spine, 0, 0.36 - 0.012 * hunch, hz), spX, spZ, 0.162 * b * s, 0.108 * sb * s, 0.186 * b * s, 0.11 * sb * s, M.shirt).u(0.17);
+  if (st.pelvis !== false) trunkSlice(f, r.hips, hipY, hipZ, -0.025, 0.0, 0.168 * b, 0.078, 0.104 * sb, s, M.pants).u(0);
+  trunkSlice(f, r.spine, spY, spZ, 0.08, 0.008 + hz * 0.3, 0.15 * b, 0.085, 0.1 * sb, s, M.shirt).u(0.08);
+  trunkSlice(f, r.spine, spY, spZ, 0.23, 0.012 + hz * 0.6, 0.163 * b, 0.1, 0.108 * sb, s, M.shirt).u(0.23);
+  trunkSlice(f, r.spine, spY, spZ, 0.37 - 0.012 * hunch, hz, 0.185 * b, 0.09, 0.11 * sb, s, M.shirt).u(0.37);
+  void hipX;
+  void spX;
   // Upper-back hump (a rounded back in profile).
   f.cone(f.at(r.spine, 0, 0.27, -0.035 - 0.015 * hunch), f.at(r.spine, 0, 0.4, -0.03 - 0.02 * hunch), 0.085 * sb * s, 0.08 * sb * s, M.shirt).k(0.05 * s);
   // Shoulder girdle: traps sloping from the neck into each deltoid; one shoulder drops.
   const shX = 0.2 * b + 0.018;
+  const trapX = 0.19 * b + 0.026;
   for (let side = 1; side >= -1; side -= 2) {
     const drop = 0.016 * slump * side;
-    f.cone(f.at(r.chest, side * 0.05, 0.035, -0.01), f.at(r.chest, side * shX, -0.035 - drop, hz * 0.6), 0.058 * s, 0.07 * s, M.shirt).k(0.05 * s);
+    f.cone(f.at(r.chest, side * 0.05, 0.035, -0.01), f.at(r.chest, side * trapX, -0.035 - drop, hz * 0.6), 0.058 * s, 0.07 * s, M.shirt).k(0.05 * s);
   }
   // Neck: thrust forward on the hunched dead.
-  f.cone(f.at(r.chest, 0, -0.02, -0.006 + hz), f.at(r.neck, 0, 0.075, 0.004), 0.054 * s, 0.047 * s, M.skin).k(0.03 * s);
+  const nw = st.neckW ?? 1;
+  // (A thick neck stays thick at the shoulders, not under the jaw: the head is shot there.)
+  f.cone(f.at(r.chest, 0, -0.02, -0.006 + hz), f.at(r.neck, 0, nw > 1.2 ? 0.04 : 0.075, 0.004), 0.054 * nw * s, 0.047 * Math.min(nw, 1.3) * s, M.skin).k(0.03 * s);
   // Untucked shirts: a hem that hangs over the waistband (ragged on the dead) — a silhouette break.
   const untucked = L.outfit === 'casual' || L.outfit === 'worker' || L.outfit === 'flannel' || L.outfit === 'biker' || L.outfit === 'patient' || L.outfit === 'nurse';
   if (untucked) {
@@ -447,7 +465,7 @@ export function paintHuman(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: Hum
     if (sev >= 2) continue; // (stump painted with the trunk)
     const mid = f.depth(f.at(arm.shoulder, 0, -0.25, 0));
     f.layer(0.035 * s, PART.LIMB, mid > torsoDepth + 0.05 ? -0.1 : 0);
-    paintArm(f, arm.shoulder, sev >= 1 ? null : arm.elbow, side, L, M, s, st, r.chest);
+    paintArm(f, arm.shoulder, sev >= 1 ? null : arm.elbow, side, L, M, s * (st.armW?.[side > 0 ? 0 : 1] ?? 1), st, r.chest);
   }
 
   // ── Legs ───────────────────────────────────────────────────────────────
@@ -456,7 +474,7 @@ export function paintHuman(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: Hum
       const leg = side > 0 ? r.legL : r.legR;
       const mid = f.depth(f.at(leg.knee, 0, 0, 0));
       f.layer(0.04 * s, PART.LIMB, mid > torsoDepth + 0.06 ? -0.09 : 0);
-      paintLeg(f, leg.hip, leg.knee, side, L, M, s);
+      paintLeg(f, leg.hip, leg.knee, side, L, M, s * (st.legW ?? 1));
     }
   }
   if (st.extra) st.extra(f);
@@ -466,6 +484,16 @@ export function paintHuman(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: Hum
     f.warp(f.at(r.hips, 0, -0.9, 0), 1 + 0.07 * q, 1 - 0.06 * q);
   }
   return true;
+}
+
+/**
+ * One horizontal slice of the trunk on joint `j`: a pill across the body at height
+ * `y` (joint units), half-width `hw`, half-height `rv` (both × bulk already), depth
+ * half `rd` toward z; `z` pushes it forward (hunch).
+ */
+function trunkSlice(f: PixelFigure, j: THREE.Object3D, up: THREE.Vector3, fwd: THREE.Vector3, y: number, z: number, hw: number, rv: number, rd: number, s: number, mat: number): PixelFigure {
+  const x = Math.max(0.001, hw - rv);
+  return f.coneE(f.at(j, -x, y, z), f.at(j, x, y, z), up, fwd, rv * s, rd * s, rv * s, rd * s, mat).k(0.06 * s);
 }
 
 /**
@@ -766,7 +794,8 @@ function paintHead(f: PixelFigure, r: HumanoidRig, h: THREE.Object3D, L: HumanLo
   }
   // Hats: their own layer (outlined, composited by depth over the head).
   if (M.hat) {
-    f.layer(0.01 * s, PART.NONE);
+    // (A hat is on the head joint: a shot there is a head shot.)
+    f.layer(0.01 * s, PART.HEAD);
     paintHat(f, h, L, M, s, hs);
   }
 }
