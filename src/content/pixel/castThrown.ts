@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PART, PF, type PixelFigure } from '../../gameplay/pixel/figure';
+import { PART, PF, type PartCode, type PixelFigure } from '../../gameplay/pixel/figure';
 import { Mat, PAT } from '../../gameplay/pixel/materials';
 import { BOX, box, camRight, camUp, castMat, castView, castWorldLight, cylinder, enamelMat, faceShown, faceTone, hash01, hoop, line, paint, scaleOf, screenOff, sparkle, woodMat } from './castKit';
 
@@ -388,8 +388,9 @@ function gooMats(color: number): Goo {
     g = {
       edge: Mat.glow(c(hsl.h - 0.035, hsl.s * 0.72, hsl.l * 0.3)),
       deep: Mat.glow(c(hsl.h - 0.012, hsl.s * 0.92, hsl.l * 0.62)),
-      body: Mat.glow(color),
-      light: Mat.glow(c(hsl.h - 0.045, hsl.s, hsl.l + (1 - hsl.l) * 0.3)),
+      // (The 3D glob's glow intensity lifts its lime toward yellow: the body sits a notch up.)
+      body: Mat.glow(c(hsl.h - 0.02, hsl.s, hsl.l + (1 - hsl.l) * 0.16)),
+      light: Mat.glow(c(hsl.h - 0.05, hsl.s, hsl.l + (1 - hsl.l) * 0.42)),
       hot: Mat.glow(c(hsl.h - 0.1, 1, 0.84)),
       spec: Mat.glow(0xffffff),
       membrane: Mat.glow(c(hsl.h - 0.03, hsl.s * 0.62, hsl.l * 0.42)),
@@ -409,6 +410,8 @@ export function paintThrown(f: PixelFigure, st: ThrownState, cam: THREE.Camera):
   const M = tm();
   const s = scaleOf(g);
   f.maxTexels = 150;
+  // In the dark, hard props sit in the night like the 3D ones instead of reading lit by day.
+  nightTone = st.kind === 'glob' ? 0 : -0.17 * f.night;
   switch (st.kind) {
     case 'glob':
       glob(f, st, s);
@@ -447,6 +450,13 @@ export function paintThrown(f: PixelFigure, st: ThrownState, cam: THREE.Camera):
 }
 
 const _p = new THREE.Vector3();
+
+/** Tone bias of this redraw's lit layers: hard props sink with the night (unlit goo, fire and glints keep their glow). */
+let nightTone = 0;
+/** `f.layer` with this redraw's night tone. */
+function lay(f: PixelFigure, k?: number, part?: PartCode, tone = 0, depth = 0): PixelFigure {
+  return f.layer(k, part, tone + nightTone, depth);
+}
 
 /** Point `back` metres behind world point p along the flight (plus a sideways wobble) — scratch vector. */
 function behind(f: PixelFigure, p: THREE.Vector3, st: ThrownState, back: number, wobX = 0, wobY = 0): THREE.Vector3 {
@@ -516,7 +526,7 @@ function glob(f: PixelFigure, st: ThrownState, s: number) {
   const side = Math.min(1, Math.hypot(vx, vy));
   const lx = GLX * R;
   const ly = GLY * R;
-  f.layer(R * 0.3, PART.TORSO);
+  lay(f, R * 0.3, PART.TORSO);
   // The mass: the edge colour's silhouette, the body over it shifted toward the light
   // (the edge shows as a 1–2 texel crescent on the shadow side only). The bile: its dark
   // membrane all round, the glowing core inside, still offset toward the light.
@@ -610,7 +620,7 @@ function glob(f: PixelFigure, st: ThrownState, s: number) {
   f.ball(screenOff(f, c, lx * 0.3, ly * 0.3), R * 0.18, G.hot).flag(GF).z(-0.03).min(0.8);
   f.ball(screenOff(f, c, lx * 0.58, ly * 0.58), R * 0.08, G.spec).flag(GF).z(-0.04).min(0.6);
   // Loose droplets: falling off the drips; side-on, fading off the streak's end.
-  f.layer(R * 0.04, PART.TORSO);
+  lay(f, R * 0.04, PART.TORSO);
   for (let j = 0; j < 2; j++) {
     const ph = (t * 1.25 + j * 0.5 + seed) % 1;
     if (tail && j === 0) {
@@ -627,7 +637,7 @@ function glob(f: PixelFigure, st: ThrownState, s: number) {
 function hook(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownState) {
   const t = st.time;
   // Chain stub swinging off the eye (behind everything).
-  f.layer(0.01 * s, PART.TORSO, 0, 0.05);
+  lay(f, 0.01 * s, PART.TORSO, 0, 0.05);
   const eye = f.at(g, -0.33, 0.52, 0);
   let prev = eye;
   for (let i = 1; i <= 3; i++) {
@@ -637,7 +647,7 @@ function hook(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
     prev = p;
   }
   // The hook: shank up the left, a J round the bottom, up to a barbed point.
-  f.layer(0.025 * s, PART.TORSO);
+  lay(f, 0.025 * s, PART.TORSO);
   f.cone(f.at(g, -0.221, -0.011, 0), f.at(g, -0.323, 0.491, 0), 0.066 * s, 0.06 * s, M.steel);
   const N = 9;
   let px = 0;
@@ -661,7 +671,7 @@ function hook(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
   line(f, g, -0.2, -0.22, 0.06, 0.1, -0.31, 0.06, 0.03, -0.25, M.steel);
   paint(f, g, 0.25, -0.12, 0.05, 0.3, -0.04, 0.05, 0.035, M.blood);
   // A hunk of meat on the hook: ragged, marbled with fat, a bone end, dripping.
-  f.layer(0.05 * s, PART.TORSO, 0, -0.03);
+  lay(f, 0.05 * s, PART.TORSO, 0, -0.03);
   f.ellipsoid(g, 0.02, -0.12, 0, 0.245, 0.2, 0.17, M.meat).rag(0.022);
   f.ellipsoid(g, -0.08, -0.03, 0.02, 0.14, 0.12, 0.12, M.meat).rag(0.02);
   // The fat strip (the 3D's pale bar across the chunk).
@@ -670,7 +680,7 @@ function hook(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
   paint(f, g, -0.06, -0.2, 0.13, 0.1, -0.23, 0.1, 0.016, M.fat);
   line(f, g, -0.1, -0.15, 0.15, 0.08, -0.1, 0.14, 0.01, -0.3, M.meat);
   // Blood drops streaming off the meat.
-  f.layer(0.004 * s, PART.TORSO);
+  lay(f, 0.004 * s, PART.TORSO);
   for (let i = 0; i < 3; i++) {
     const ph = (t * 1.7 + i * 0.37 + st.seed) % 1;
     const p = behind(f, f.at(g, 0.02 + (i - 1) * 0.08, -0.28, 0.05), st, ph * 0.5, 0, -ph * 0.1);
@@ -685,7 +695,7 @@ function hook(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
 function barrel(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownState) {
   const R = 0.34;
   const H = 0.475;
-  f.layer(0.01 * s, PART.TORSO);
+  lay(f, 0.01 * s, PART.TORSO);
   const cap = cylinder(f, f.at(g, 0, -H, 0), f.at(g, 0, H, 0), R * s, M.drumRed, M.drumRed, 1.1, 0.01 * s);
   // Rolling hoops (raised) and the lids' lips.
   hoop(f, g, 1, 0.25, R + 0.008, 0.024, M.drumRim, false, 12);
@@ -727,7 +737,7 @@ function barrel(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownS
 // ── Police-car door ──
 
 function door(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownState) {
-  f.layer(0.006 * s, PART.TORSO);
+  lay(f, 0.006 * s, PART.TORSO);
   // Window frame: top bar and posts (white), then the panel.
   box(f, g, 0.05, 0.55, 0, 0.5, 0.03, 0.04, M.doorWhite, 0.005);
   box(f, g, 0.55, 0.3, 0, 0.04, 0.25, 0.04, M.doorWhite, 0.005);
@@ -750,7 +760,7 @@ function door(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
   // Torn hinge edge: ragged dark metal along the front.
   f.cone(f.at(g, -0.585, -0.5, 0), f.at(g, -0.585, 0.08, 0), 0.02 * s, 0.025 * s, M.steelDark).rag(0.015, PF.SPIKY);
   // The window: dark glass, a sky reflection, cracks.
-  f.layer(0.004 * s, PART.TORSO, 0, 0.01);
+  lay(f, 0.004 * s, PART.TORSO, 0, 0.01);
   box(f, g, 0.05, 0.31, 0, 0.47, 0.21, 0.025, M.glass, 0.004, 0.6);
   for (let k = 0; k < 2; k++) {
     if (!(BOX.mask & (1 << (4 + k)))) continue;
@@ -810,7 +820,8 @@ function carBar(f: PixelFigure, g: THREE.Object3D, x0: number, y0: number, z0: n
  */
 function car(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownState) {
   const C = st.car;
-  const P = carPaint(C.paint, M);
+  // The paint as the scene's key light colours it (the z3 sunset warms a silver car pink-orange, like the 3D).
+  const P = carPaint(warmBy(C.paint, st.light, 0.5), M);
   sceneLight(st, 0.65);
   const base = C.y0 + C.wheelR * 0.9;
   const hw = C.w / 2;
@@ -826,7 +837,7 @@ function car(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownStat
     const z = i & 2 ? -wz : wz;
     const x = sx * (hw - 0.08);
     const y = C.y0 + R;
-    f.layer(0.004 * s, PART.TORSO);
+    lay(f, 0.004 * s, PART.TORSO);
     cylinder(f, f.at(g, x - 0.13, y, z), f.at(g, x + 0.13, y, z), R * s, M.tyre, M.tyre, 0.7);
     for (let k = 0; k < 6; k++) {
       const a = (k / 6) * Math.PI * 2 + i;
@@ -838,7 +849,7 @@ function car(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownStat
     }
     _p.set(x + sx * 0.14, y, z).applyMatrix4(g.matrixWorld);
     if (f.facing(_p, f.dir(g, sx, 0, 0)) > 0.1) {
-      f.layer(0.002 * s, PART.TORSO, 0, -0.01);
+      lay(f, 0.002 * s, PART.TORSO, 0, -0.01);
       const hp = f.at(g, x + sx * 0.14, y, z);
       f.ball(hp, R * 0.56 * s, M.chrome).flag(PF.FLAT);
       f.ball(hp, R * 0.3 * s, M.hub).flag(PF.FLAT).z(-0.005);
@@ -846,7 +857,7 @@ function car(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownStat
     }
   }
   // Body.
-  f.layer(0.02 * s, PART.TORSO);
+  lay(f, 0.02 * s, PART.TORSO);
   box(f, g, 0, base + C.bodyH / 2, 0, hw, C.bodyH / 2, hl, P, 0.04, 1.2);
   const bm = BOX.mask;
   // Chrome bumpers (a bright bar with a highlight line along the top).
@@ -925,7 +936,7 @@ function car(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownStat
   }
   // Glasshouse: glass block, the roof and pillars in the body paint.
   if (C.cabH > 0) {
-    f.layer(0.02 * s, PART.TORSO);
+    lay(f, 0.02 * s, PART.TORSO);
     const gy = top + C.cabH / 2;
     box(f, g, 0, gy, C.cabZ, hw * 0.86, C.cabH / 2, C.cabLen / 2, M.glass, 0.03, 0.7);
     const gm = BOX.mask;
@@ -967,6 +978,17 @@ function car(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownStat
   if (Math.sin(st.time * 7 + st.seed * 5) > 0.6) sparkle(f, f.at(g, hw * 0.7, top + C.cabH, C.cabZ + C.cabLen * 0.4), 0.22, M.shine, 0.5);
 }
 
+/** `hex` lit by light `L`'s colour (normalised to its brightest channel), by `k` (0..1). */
+function warmBy(hex: number, L: THREE.DirectionalLight | null, k: number): number {
+  if (!L) return hex;
+  const c = L.color;
+  const m = Math.max(c.r, c.g, c.b, 1e-3);
+  const f = (v: number, l: number) => Math.min(255, Math.round(v * (1 - k + (k * l) / m)));
+  // (Quantised so a flickering light can't mint a new material every redraw.)
+  const q = (v: number) => (v >> 3) << 3;
+  return (q(f((hex >> 16) & 255, c.r)) << 16) | (q(f((hex >> 8) & 255, c.g)) << 8) | q(f(hex & 255, c.b));
+}
+
 const carCache = new Map<number, number>();
 /** Car paint: the colour on a beat-up ramp — dirt mottling, scratches and rust blooms (ROT with rust as its patches). */
 function carPaint(hex: number, M: TM): number {
@@ -982,14 +1004,14 @@ function carPaint(hex: number, M: TM): number {
 
 function slab(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownState) {
   // Rusty rebar first (behind the slab where it sinks into it).
-  f.layer(0.01 * s, PART.TORSO);
+  lay(f, 0.01 * s, PART.TORSO);
   // The 3D bar: 1.2 m along a rotated Y at (0.8, 0.3, 0.5), plus two bent stubs out of the broken end.
   f.cone(f.at(g, 0.8 + 0.18, 0.3 - 0.47, 0.5 - 0.32), f.at(g, 0.8 - 0.18, 0.3 + 0.47, 0.5 + 0.32), 0.05 * s, 0.045 * s, M.rebar).min(0.6);
   f.cone(f.at(g, -1.05, 0.15, -0.4), f.at(g, -1.4, 0.32, -0.45), 0.035 * s, 0.03 * s, M.rebar).min(0.6);
   f.cone(f.at(g, -1.4, 0.32, -0.45), f.at(g, -1.55, 0.25, -0.62), 0.03 * s, 0.025 * s, M.rebar).min(0.6);
   f.cone(f.at(g, -1.05, -0.1, 0.35), f.at(g, -1.38, -0.18, 0.42), 0.035 * s, 0.03 * s, M.rebar).min(0.6);
   // The slab.
-  f.layer(0.02 * s, PART.TORSO);
+  lay(f, 0.02 * s, PART.TORSO);
   box(f, g, 0, 0, 0, 1.1, 0.3, 0.8, M.concrete, 0.03, 1.15);
   const bm = BOX.mask;
   for (let i = 0; i < 6; i++) {
@@ -1018,7 +1040,7 @@ function slab(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
     }
   }
   // Crumbs trailing off the broken end.
-  f.layer(0.004 * s, PART.TORSO);
+  lay(f, 0.004 * s, PART.TORSO);
   for (let i = 0; i < 3; i++) {
     const ph = (st.time * 1.3 + i * 0.33) % 1;
     f.ball(behind(f, f.at(g, -1.1, 0, (i - 1) * 0.4), st, 0.2 + ph * 0.6, (i - 1) * 0.1, -ph * 0.25), (0.06 - i * 0.012) * s, M.concrete).min(0.6);
@@ -1097,7 +1119,7 @@ function rock(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
   const F = facetsOf(rm);
   const mat = big ? M.rockT : M.rock;
   const seed = st.seed;
-  f.layer(0.005 * s, PART.TORSO);
+  lay(f, 0.005 * s, PART.TORSO);
   if (!F) {
     f.ellipsoid(rm, 0, 0, 0, R.r, R.r, R.r, mat);
     return;
@@ -1191,7 +1213,7 @@ function rock(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
     u1.normalize();
     const u2 = f.vec().crossVectors(out, u1);
     const tr = R.tr;
-    f.layer(0.012 * s, PART.TORSO);
+    lay(f, 0.012 * s, PART.TORSO);
     for (let i = 0; i < 4; i++) {
       const a = i * 1.6 + seed * 4;
       const p = f.vec().copy(tc).addScaledVector(u1, Math.cos(a) * tr * 0.6 * s).addScaledVector(u2, Math.sin(a) * tr * 0.6 * s).addScaledVector(out, -tr * 0.3 * s);
@@ -1207,7 +1229,7 @@ function rock(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
     }
   }
   // Two grit crumbs trailing (small, low-key).
-  f.layer(0.004 * s, PART.TORSO);
+  lay(f, 0.004 * s, PART.TORSO);
   for (let i = 0; i < 2; i++) {
     const ph = (st.time * 1.6 + i * 0.5) % 1;
     f.ball(behind(f, f.at(g, 0, 0, 0), st, R.r * (1.2 + ph * 1.4) * s, (i - 0.5) * R.r * 0.5, -ph * R.r * 0.4), R.r * (0.09 - i * 0.025) * s, mat).tone(-0.15).min(0.6);
@@ -1257,7 +1279,7 @@ const _pe = new THREE.Vector3();
  */
 function palm(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownState) {
   const t = st.time;
-  f.layer(0.012 * s, PART.TORSO);
+  lay(f, 0.012 * s, PART.TORSO);
   for (let i = 0; i < 8; i++) {
     const j = (i >> 1) * 3;
     const sg = i & 1 ? -1 : 1;
@@ -1292,7 +1314,7 @@ function palm(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
     f.decal(P(f, g, 0.02, 0), P(f, g, 0.7, 0), 0.014 * s, 0.006 * s, M.frond).flag(PF.FLAT | PF.SHADE_ONLY | PF.NO_OUTLINE).tone(0.32).min(0.5);
   }
   // Trunk: irregular width (a few bulges), chevron leaf scars stacked up it.
-  f.layer(0.03 * s, PART.TORSO);
+  lay(f, 0.03 * s, PART.TORSO);
   const z0 = -1.18;
   const z1 = 1.12;
   // (The snapped foot ends flat, like the 3D trunk: an exact cylinder there.)
@@ -1327,7 +1349,7 @@ function palm(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
       line(f, g, Math.cos(a) * 0.04, Math.sin(a) * 0.04, -1.21, Math.cos(a) * 0.2, Math.sin(a) * 0.2, -1.21, 0.012, -0.35, M.splinter);
     }
   }
-  f.layer(0.006 * s, PART.TORSO);
+  lay(f, 0.006 * s, PART.TORSO);
   for (let k = 0; k < 7; k++) {
     const a = (k / 7) * Math.PI * 2 + 0.4;
     const l = 0.08 + 0.14 * hash01(k + st.seed * 7);
@@ -1349,11 +1371,11 @@ function palm(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
 function panel(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownState) {
   const t = st.time;
   // Dangling hinge strap (behind the panel's layer).
-  f.layer(0.004 * s, PART.TORSO);
+  lay(f, 0.004 * s, PART.TORSO);
   const sw = Math.sin(t * 7 + st.seed * 5) * 0.06;
   f.cone(f.at(g, -0.68, 0.3, 0), f.at(g, -0.78, 0.18, 0.02), 0.025 * s, 0.022 * s, M.steelDark).min(0.6);
   f.cone(f.at(g, -0.78, 0.18, 0.02), f.at(g, -0.86 + sw, 0.0, 0.04), 0.022 * s, 0.018 * s, M.rust).min(0.6);
-  f.layer(0.006 * s, PART.TORSO);
+  lay(f, 0.006 * s, PART.TORSO);
   box(f, g, 0, 0, 0, 0.65, 0.5, 0.05, M.panel, 0.01, 1.2);
   // Torn front edge: jagged metal sticking out past the frame, hinge knuckles at the back.
   f.cone(f.at(g, 0.66, -0.48, 0), f.at(g, 0.66, 0.46, 0), 0.03 * s, 0.025 * s, M.panel).rag(0.03, PF.SPIKY).seed(st.seed * 9);
@@ -1392,7 +1414,7 @@ function branch(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownS
   const t = st.time;
   // Leafy clump round the crown end (the 3D cone: base at z 0.6, tip at z 1.8): bumpy
   // leaf masses, light over dark, pointed leaves sticking out of the outline.
-  f.layer(0.06 * s, PART.TORSO);
+  lay(f, 0.06 * s, PART.TORSO);
   f.ellipsoid(g, 0, 0, 1.1, 0.42, 0.4, 0.55, M.frondDark).rag(0.045).seed(st.seed * 7);
   f.ellipsoid(g, 0.1, 0.13, 1.42, 0.3, 0.28, 0.36, M.frond).rag(0.04).seed(st.seed * 7 + 2);
   f.ellipsoid(g, -0.13, -0.06, 0.82, 0.3, 0.28, 0.3, M.frond).rag(0.035).seed(st.seed * 7 + 4).tone(-0.05);
@@ -1407,7 +1429,7 @@ function branch(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownS
   // Bough + twigs.
   // (The bough mesh is tilted in the group: its own frame, axis = local Y, burning end at −Y.)
   const tr = g.children[0] ?? g;
-  f.layer(0.02 * s, PART.TORSO);
+  lay(f, 0.02 * s, PART.TORSO);
   f.cone(f.at(tr, 0, -0.85, 0), f.at(tr, 0, 0.85, 0), 0.18 * s, 0.13 * s, M.bark);
   f.cone(f.at(tr, 0.05, 0.1, 0.08), f.at(tr, 0.32, 0.35, 0.38), 0.05 * s, 0.015 * s, M.bark).min(0.5);
   f.cone(f.at(tr, -0.05, -0.3, -0.06), f.at(tr, -0.3, -0.15, -0.3), 0.045 * s, 0.012 * s, M.bark).min(0.5);
@@ -1418,7 +1440,7 @@ function branch(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownS
   // uneven ember bed, ragged tongues that flicker every redraw, each leaning its own way
   // back from the fall — deep red outside, orange, yellow inside — a licking flame or
   // two breaking off, and a small hot heart low in the bed (no round ball).
-  f.layer(0.025 * s, PART.TORSO, 0, -0.3);
+  lay(f, 0.025 * s, PART.TORSO, 0, -0.3);
   const fire = f.at(g, 0, 0, -0.85);
   const fl = PF.GLOW | PF.NO_OUTLINE | PF.FLAT;
   const fr = Math.floor(t * 14);
@@ -1446,7 +1468,7 @@ function branch(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownS
     .min(0.5);
   f.cone(screenOff(f, fire, -0.03, -0.03), screenOff(f, fire, 0.02, 0.05), 0.045 * s, 0.03 * s, M.flameHot).flag(fl).z(-0.05).min(0.6);
   // A dark smoke wisp and a couple of embers trailing (low contrast: the fire stays the target).
-  f.layer(0.004 * s, PART.TORSO, 0, 0.05);
+  lay(f, 0.004 * s, PART.TORSO, 0, 0.05);
   for (let i = 0; i < 2; i++) {
     const ph = (t * 1.2 + i * 0.5) % 1;
     f.ball(behind(f, fire, st, 0.35 + ph * 0.7, Math.sin(i * 2.3 + t) * 0.1, 0.12 + ph * 0.3), (0.08 + ph * 0.08) * s, M.smoke).flag(PF.NO_OUTLINE).tone(-0.1).min(0.6);
@@ -1464,7 +1486,7 @@ function chunk(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSt
   const r = Math.max(0.12, st.size * 0.85);
   let mat = chunkCache.get(st.color);
   if (mat === undefined) chunkCache.set(st.color, (mat = castMat(st.color, PAT.CAMO, { scale: 0.1, strength: 0.5 })));
-  f.layer(r * 0.25 * s, PART.TORSO);
+  lay(f, r * 0.25 * s, PART.TORSO);
   f.ellipsoid(g, 0, 0, 0, r, r * 0.85, r * 0.9, mat);
   f.ellipsoid(g, r * 0.4, r * 0.3, 0, r * 0.55, r * 0.5, r * 0.55, mat);
   f.ellipsoid(g, -r * 0.35, -r * 0.25, r * 0.2, r * 0.55, r * 0.5, r * 0.5, mat);

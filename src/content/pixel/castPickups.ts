@@ -175,7 +175,7 @@ function halo(f: PixelFigure, g: THREE.Object3D, P: PickupParts, H: HaloM, s: nu
   // a little, as if seen from a touch above — the near arc dips, the far arc rises.
   _hc.setFromMatrixPosition(g.matrixWorld);
   const up = f.dir(g, 0, 1, 0);
-  const open = Math.max(0, 0.2 - Math.abs(f.facing(_hc, up))) * r;
+  const open = Math.max(0, 0.14 - Math.abs(f.facing(_hc, up))) * r;
   _hn.subVectors(f.eye, _hc).normalize();
   // One thin glowing line round the item: the arc toward the camera bright, the far arc
   // dim (and behind the item: the layer composites by depth), 1–2 texels wide.
@@ -509,7 +509,7 @@ function gem(f: PixelFigure, g: THREE.Object3D, s: number, time: number, gl: num
       _n.crossVectors(_e1.subVectors(Bv, A), _e2.subVectors(C, A)).normalize().negate();
       _m.copy(A).add(Bv).add(C).divideScalar(3);
       if (f.facing(_m, _n) <= 0.02) continue;
-      const t = faceTone(_n, 2.2) + (kind === 1 ? -0.16 : kind === 2 ? 0.14 : -0.1);
+      const t = faceTone(_n, 2.2) + (kind === 1 ? -0.16 : kind === 2 ? 0.1 : -0.2);
       facetKind[n] = kind;
       facetIdx[n] = i;
       // Five steps by the light, every other facet a step deeper (cut stones flash light / dark round the ring).
