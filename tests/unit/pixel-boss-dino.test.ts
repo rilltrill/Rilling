@@ -54,6 +54,9 @@ interface Check {
   /** Grid points where a ray hits a weak point / of those, the sprite shows WEAK. */
   weakRays: number;
   weakShown: number;
+  /** Armour hitbox centres in view / of those, drawn as ARMOR. */
+  armorCentres: number;
+  armorShown: number;
 }
 
 const _v = new THREE.Vector3();
@@ -61,8 +64,12 @@ const _box = new THREE.Box3();
 const ray = new THREE.Raycaster();
 const sample: FigureSample = { layer: -1, prim: -1, part: 0, mat: 0, depth: 0 };
 
-/** Paint `e` seen from `eye` looking at `look`, compare sprite parts with raycasts. */
-function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: THREE.Vector3, look: THREE.Vector3): Check {
+/**
+ * Paint `e` seen from `eye` looking at `look`, compare sprite parts with raycasts.
+ * `seeThroughLive`: rays pass through parts drawn live over the sprite (a soft halo
+ * enclosing the whole thing, like the dart's) and are compared on what is inside.
+ */
+function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: THREE.Vector3, look: THREE.Vector3, seeThroughLive = false): Check {
   world.scene.updateMatrixWorld(true);
   camera.position.copy(eye);
   camera.lookAt(look);
@@ -86,6 +93,13 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: TH
   const shoot = (ndc: THREE.Vector2): number => {
     ray.setFromCamera(ndc, camera);
     const hits = ray.intersectObjects(boxes, false);
+    if (seeThroughLive) {
+      // Through the live glow to what is inside it; a ray that only grazes the glow is left out.
+      const solid = hits.find((h) => !keepLive(h.object));
+      lastHit = solid?.object ?? null;
+      if (!solid) return hits.length ? -1 : 0;
+      return PART_OF[(solid.object.userData.shot as { part: HitPart }).part];
+    }
     lastHit = hits[0]?.object ?? null;
     if (!hits.length) return 0;
     if (keepLive(hits[0].object)) return -1;
@@ -93,6 +107,8 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: TH
   };
   let centres = 0;
   let centreHits = 0;
+  let armorCentres = 0;
+  let armorShown = 0;
   const centreMiss: string[] = [];
   for (const b of boxes) {
     const m = b as THREE.Mesh;
@@ -108,6 +124,10 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: TH
     if (want <= 0) continue;
     centres++;
     f.sample(Math.floor(t.tx) + 0.5, Math.floor(t.ty) + 0.5, sample);
+    if (want === PART.ARMOR) {
+      armorCentres++;
+      if (sample.part === PART.ARMOR) armorShown++;
+    }
     if (sample.part === want) centreHits++;
     else {
       const label = `${PART_NAME[want]}(${wantPart}@${m.parent?.name || m.parent?.parent?.name || '?'})→${sample.layer < 0 ? 'empty' : PART_NAME[sample.part]}`;
@@ -116,8 +136,9 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: TH
         let nb = '';
         const tx = Math.floor(t.tx);
         const ty = Math.floor(t.ty);
-        for (let dy = 2; dy >= -2; dy--) {
-          for (let dx = -2; dx <= 2; dx++) nb += f.sample(tx + dx + 0.5, ty + dy + 0.5, sample).layer < 0 ? '.' : String(sample.part);
+        const R = Number(process.env.BOSSD_NB ?? 2);
+        for (let dy = R; dy >= -R; dy--) {
+          for (let dx = -R; dx <= R; dx++) nb += f.sample(tx + dx + 0.5, ty + dy + 0.5, sample).layer < 0 ? '.' : process.env.BOSSD_LAYERS ? sample.layer.toString(16) : String(sample.part);
           nb += '|';
         }
         ray.setFromCamera(t.ndc, camera);
@@ -173,11 +194,12 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: TH
     .slice(0, process.env.BOSSD_DEBUG ? 10 : 4)
     .map(([k, v]) => `${k}:${v}`)
     .join(' ');
-  return { centres, centreHits, centreMiss, iou: both / Math.max(1, either), partAgree: agree / Math.max(1, both), conf, prims: f.count, weakRays, weakShown, area: spriteN / Math.max(1, rayN) };
+  return { centres, centreHits, centreMiss, iou: both / Math.max(1, either), partAgree: agree / Math.max(1, both), conf, prims: f.count, weakRays, weakShown, area: spriteN / Math.max(1, rayN), armorCentres, armorShown };
 }
 
 function expectAligned(c: Check, label: string, o: { iou?: number; agree?: number } = {}) {
-  const info = `${label} centres ${c.centreHits}/${c.centres} [${c.centreMiss.join(' ')}] iou ${c.iou.toFixed(2)} agree ${c.partAgree.toFixed(2)} (${c.conf}) prims ${c.prims} weak ${c.weakShown}/${c.weakRays}`;
+  const info = `${label} centres ${c.centreHits}/${c.centres} [${c.centreMiss.join(' ')}] iou ${c.iou.toFixed(2)} agree ${c.partAgree.toFixed(2)} (${c.conf}) prims ${c.prims} weak ${c.weakShown}/${c.weakRays} area ${c.area.toFixed(2)}`;
+  if (process.env.BOSSD_REPORT) console.log(`BOSSD ${info}`);
   // Never a hitbox centre on an empty texel; a head centre always shows head.
   expect(c.centreMiss.filter((m) => m.endsWith('empty')), `${info}: hitbox centre on an empty texel`).toEqual([]);
   expect(c.centreMiss.filter((m) => m.includes('(head)')), `${info}: head hitbox centre not drawn as head`).toEqual([]);
@@ -247,6 +269,34 @@ describe('PixelCast alignment: Specimen X (d2)', () => {
     expectAligned(check(world, camera, e, ORIGIN, chest(e)), 'x cloaked');
   });
 
+  it('fading into the dark (cloak 0.6): the dark quills still cover their hitboxes', () => {
+    const { world, camera, e, pin } = setup(0.6, -9, -1.3);
+    run(e, 0.6, pin);
+    e.go('hide');
+    e.hissT = 99;
+    run(e, 0.6, pin);
+    // (The hide state drives the cloak to 1; hold it mid-fade for the redraw.)
+    e.cloak = 0.6;
+    const c = check(world, camera, e, ORIGIN, chest(e));
+    expectAligned(c, 'x cloak 0.6');
+    expect(c.armorCentres, 'quill hitboxes in view').toBeGreaterThan(0);
+    expect(c.armorShown, 'quill hitbox centres drawn as armour').toBeGreaterThanOrEqual(Math.ceil(c.armorCentres * 0.5));
+  });
+
+  it('worst case for the primitive budget: enraged, quills up, flinching, head-on maw', () => {
+    const { world, camera, e, pin } = setup(0.3, -9, 0);
+    e.enraged = true;
+    run(e, 0.3, pin);
+    e.go('pounceWind');
+    run(e, 1.3, pin);
+    e.quillRaise = 1;
+    // (A hit's squash, part-way through: the warp moves the sprite off the hitboxes at its peak.)
+    e.flinch = 0.3;
+    const c = check(world, camera, e, ORIGIN, chest(e));
+    expectAligned(c, 'x worst case');
+    expect(c.prims, 'within the boss budget (docs: <= 130 with headroom under the 160 cap)').toBeLessThanOrEqual(130);
+  });
+
   it('side-on tail whip wind-up (ring on the glowing tail base)', () => {
     const { world, camera, e, pin } = setup(0.4, -8.5, 1.45);
     run(e, 0.3, pin);
@@ -287,7 +337,9 @@ describe('PixelCast alignment: Specimen X (d2)', () => {
     dart.paintPixels = bossDDart(dart.root);
     world.add(dart);
     run(dart, 0.4);
-    const c = check(world, camera, dart, ORIGIN, dart.root.getWorldPosition(new THREE.Vector3()));
+    // (Its soft halo stays a live glow: compared on the quill and the glowing bead inside it.)
+    expect(dart.root.children[0].children.some((o) => keepLive(o))).toBe(true);
+    const c = check(world, camera, dart, ORIGIN, dart.root.getWorldPosition(new THREE.Vector3()), true);
     expectAligned(c, 'dart', { iou: 0.6 });
     expect(c.centres).toBeGreaterThan(0);
   });

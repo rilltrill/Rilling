@@ -4,6 +4,7 @@ import { PART, PF, type PixelFigure } from '../../gameplay/pixel/figure';
 import { Mat } from '../../gameplay/pixel/materials';
 import { STAMP, stampSize } from '../../gameplay/pixel/stamps';
 import { dinoMats, type DinoMats } from './theropod';
+import { hoop } from './castKit';
 
 /**
  * ─── PixelCast dinosaur bosses ─────────────────────────────────────────────
@@ -67,17 +68,37 @@ function bossDLevel(c: THREE.Color): number {
 // SPECIMEN X (d2)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Hide materials of one cloak level. */
+interface BossDXSkin {
+  hide: number;
+  back: number;
+  limb: number;
+  belly: number;
+  quill: number;
+  quillTip: number;
+}
+
 export interface BossDSpecimenRig {
   r: TheroRig;
   s: TheroSpec;
-  /** The same spec in the cloak's dark slate palette (materials while it fades into the dark). */
-  sCloak: TheroSpec;
+  /** Hide palettes, one per cloak level (`SX_CK`): the albino sinking into the dark like the 3D's cloak material. */
+  skins: readonly BossDXSkin[];
   /** Quill pivots: neck, chest, hips, tail base (they raise / rattle / scale). */
   quills: readonly THREE.Object3D[];
   eyes: readonly THREE.Object3D[];
   halos: readonly THREE.Object3D[];
   mem: BossDMem;
 }
+
+/**
+ * Cloak levels: cloak amounts at which the hide's lightness steps evenly (the 3D
+ * multiplies the skin by (0.9, 0.95, 1.1) · (1 − 0.86·cloak) in linear light).
+ * Nearest level per redraw: the fade is a classic palette fade of half-ramp steps.
+ */
+const SX_CK = [0, 0.37, 0.65, 0.86, 1];
+/** Tiger-band period along the body (metres) and their colour: a cool grey-taupe on the albino. */
+const SX_BAND = 0.34;
+const SX_STRIPE = 0x8a7f86;
 
 /** Quill rows as built by the boss (pivot-local): count, length, spread, z0, z1, y. */
 const SX_QUILLS: readonly (readonly [number, number, number, number, number, number])[] = [
@@ -87,15 +108,48 @@ const SX_QUILLS: readonly (readonly [number, number, number, number, number, num
   [3, 0.26, 0.06, -0.05, -0.38, 0.204],
 ];
 
+function bossDLin(c: number): number {
+  const v = c / 255;
+  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+}
+function bossDSrgb(v: number): number {
+  const c = Math.min(1, Math.max(0, v));
+  return Math.round((c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055) * 255);
+}
+/** `hex` under the cloak material at cloak `ck` (linear-light multiply, cool). */
+function bossDCloakHex(hex: number, ck: number): number {
+  if (ck <= 0) return hex;
+  const c = 1 - 0.86 * ck;
+  const r = bossDSrgb(bossDLin((hex >> 16) & 255) * c * 0.9);
+  const g = bossDSrgb(bossDLin((hex >> 8) & 255) * c * 0.95);
+  const b = bossDSrgb(bossDLin(hex & 255) * c * 1.1);
+  return (r << 16) | (g << 8) | b;
+}
+
 /**
  * What the painter reads from the boss (built once). `weak` = the boss's weak
- * meshes in registration order (eye, halo, eye, halo, stripes…). The soft halos
- * stay live alpha-blended glows over the sprite (like every glow halo); the
- * painter draws the crisp eye and a ring of light inside them.
+ * meshes in registration order (eye, halo, eye, halo, stripes…). The soft eye
+ * halos are painted (light on the skin round a crisp eye; the far one behind the
+ * head), so SpriteArt hides them with the model instead of drawing them live.
  */
 export function bossDSpecimenRig(r: TheroRig, s: TheroSpec, quills: readonly THREE.Object3D[], weak: readonly THREE.Object3D[]): BossDSpecimenRig {
-  const sCloak: TheroSpec = { ...s, pal: { ...s.pal, key: 'sxcloak', base: 0x3c3e48, back: 0x2c2c36, belly: 0x4c4e5a, stripe: 0x282830, accent: 0x5c5c66, accent2: 0x34343e, claw: 0x16161c, teeth: 0x9a9a98, mouth: 0x2a0a14 } };
-  return { r, s, sCloak, quills, eyes: [weak[0], weak[2]], halos: [weak[1], weak[3]], mem: bossDMem() };
+  const p = s.pal;
+  const skins: BossDXSkin[] = [];
+  for (let i = 0; i < SX_CK.length; i++) {
+    const ck = SX_CK[i];
+    const belly = Mat.hide(bossDCloakHex(p.belly, ck), { scale: 0.2 });
+    skins.push({
+      hide: Mat.hide(bossDCloakHex(p.base, ck), { stripes: 0.9, belly, stripe: bossDCloakHex(SX_STRIPE, ck), scale: SX_BAND }),
+      back: Mat.hide(bossDCloakHex(p.back, ck), { scale: 0.2 }),
+      limb: Mat.hide(bossDCloakHex(p.base, ck), { scale: 0.18 }),
+      belly,
+      quill: Mat.bone(bossDCloakHex(p.accent, ck)),
+      quillTip: Mat.bone(bossDCloakHex(p.accent2, ck)),
+    });
+  }
+  weak[1].userData.spriteKeep3D = false;
+  weak[3].userData.spriteKeep3D = false;
+  return { r, s, skins, quills, eyes: [weak[0], weak[2]], halos: [weak[1], weak[3]], mem: bossDMem() };
 }
 
 const XM = {
@@ -106,52 +160,46 @@ const XM = {
   eyeR: [0, 0, 0, 0],
   core: 0,
   coreR: 0,
+  rim: 0,
+  rimR: 0,
   spill: 0,
   spillR: 0,
-  spill2: 0,
-  spill2R: 0,
-  quill: 0,
-  quillTip: 0,
-  quillDark: 0,
-  quillTipDark: 0,
   scythe: 0,
   edge: 0,
   gum: 0,
   deep: 0,
   tongue: 0,
-  throatGlow: 0,
   dart: 0,
+  dartTip: 0,
   dartGlow: 0,
-  dartHalo: 0,
-  dartHalo2: 0,
+  dartRing: 0,
 };
 
 function xm() {
   if (!XM.ready) {
     XM.ready = true;
-    // Stripes: off (dead tissue), dim, glowing, flaring — cyan, purple when enraged.
-    XM.stripe = [Mat.flat(0x5a6670, 'sxdead'), Mat.glow(0x2a9ec4), Mat.glow(0x5ae0ff), Mat.glow(0xb8f6ff)];
-    XM.stripeR = [XM.stripe[0], Mat.glow(0x7a3cb0), Mat.glow(0xc070ff), Mat.glow(0xead0ff)];
-    XM.eye = [Mat.flat(0x3a4048, 'sxeye'), Mat.glow(0x3aa8c8), Mat.glow(0x8af0ff), Mat.glow(0xd8fcff)];
-    XM.eyeR = [XM.eye[0], Mat.glow(0xa02838), Mat.glow(0xff4060), Mat.glow(0xffb0b8)];
+    // Stripes: off (dead tissue), dim, glowing, flaring — a pale cyan like the 3D's
+    // over-bright glow (purple when enraged).
+    XM.stripe = [Mat.flat(0x5a6670, 'sxdead'), Mat.glow(0x3ab8d8), Mat.glow(0x7aeaff), Mat.glow(0xc8faff)];
+    XM.stripeR = [XM.stripe[0], Mat.glow(0x8a44c0), Mat.glow(0xc880ff), Mat.glow(0xecd6ff)];
+    XM.eye = [Mat.flat(0x3a4048, 'sxeye'), Mat.glow(0x4ac0dc), Mat.glow(0x9af2ff), Mat.glow(0xdcfcff)];
+    XM.eyeR = [XM.eye[0], Mat.glow(0xb02840), Mat.glow(0xff4a68), Mat.glow(0xffb8c0)];
     XM.core = Mat.glow(0xf2ffff);
     XM.coreR = Mat.glow(0xfff0f4);
-    // Light spilling from the eyes onto the skin (the halo hitboxes): lit hide, then a glow ring.
-    XM.spill = Mat.hide(0xb6e2ea, { scale: 0.2 });
-    XM.spillR = Mat.hide(0xeab8c6, { scale: 0.2 });
-    XM.spill2 = Mat.glow(0x78d8ee);
-    XM.spill2R = Mat.glow(0xe87890);
-    XM.quill = Mat.bone(0xe8e2d4);
-    XM.quillTip = Mat.bone(0x9a9284);
+    // A dim glow rim hugging the eye; the light it throws on the skin round it.
+    XM.rim = Mat.glow(0x2a8cb0);
+    XM.rimR = Mat.glow(0x902038);
+    XM.spill = Mat.hide(0xb8dce4, { scale: 0.2 });
+    XM.spillR = Mat.hide(0xe4bcc4, { scale: 0.2 });
     XM.scythe = Mat.gloss(0x24262c);
     XM.edge = Mat.flat(0xc8d0dc, 'sxedge');
-    XM.gum = Mat.gore(0x8a2a3a);
+    XM.gum = Mat.gore(0x9a2c3c);
     XM.deep = Mat.mouth(0x2a0810);
-    XM.tongue = Mat.gore(0xa84858);
-    XM.dart = Mat.bone(0xe8e2d4);
-    XM.dartGlow = Mat.glow(0x60e8ff);
-    XM.dartHalo = Mat.glow(0x2a8ab0);
-    XM.dartHalo2 = Mat.glow(0x9af4ff);
+    XM.tongue = Mat.gore(0xb04a5c);
+    XM.dart = Mat.bone(0xe0dac8);
+    XM.dartTip = Mat.bone(0xf6f2e6);
+    XM.dartGlow = Mat.glow(0x8af0ff);
+    XM.dartRing = Mat.glow(0x4ac8ec);
   }
   return XM;
 }
@@ -166,10 +214,14 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
   f.maxTexels = 240;
   const r = R.r;
   const s = R.s;
-  // Cloak: the hide sinks down its ramp, then into a dark slate palette (glows stay lit).
+  // Cloak: the nearest palette level, plus a continuous shade that deepens it.
   const ck = Math.min(1, Math.max(0, cloak));
-  const M = dinoMats(ck >= 0.5 ? R.sCloak : s);
-  const dark = ck < 0.5 ? -0.9 * (ck / 0.5) : -0.25 - 0.45 * ((ck - 0.5) / 0.5);
+  let li = 0;
+  for (let i = 1; i < SX_CK.length; i++) if (Math.abs(ck - SX_CK[i]) < Math.abs(ck - SX_CK[li])) li = i;
+  const C = R.skins[li];
+  const M = dinoMats(s);
+  // (The 3D's lit hide barely darkens at mid cloak, then sinks to near black.)
+  const dark = -0.4 * ck * ck * ck;
   const XS = xm();
   const sc = scaleOf(r.pelvis);
   const T = s.torso;
@@ -177,7 +229,9 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
   const sn = s.snout;
   const J = s.jaw;
   const h = r.head;
-  const lvS = bossDLevel(stripeC);
+  // Glows: the 3D's flare (it brightens while cloaked) reads a level up.
+  const lv0 = bossDLevel(stripeC);
+  const lvS = lv0 > 0 ? Math.min(3, lv0 + (ck > 0.3 ? 1 : 0)) : 0;
   const lvE = bossDLevel(eyeC);
   const stripeM = rage ? XS.stripeR[lvS] : XS.stripe[lvS];
   const eyeM = rage ? XS.eyeR[lvE] : XS.eye[lvE];
@@ -187,53 +241,80 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
   const sr0y = sk.r[1] * 0.78;
   const snoutTip = f.at(h, 0, snoutY0 - sn.drop, sk.len + sn.len);
   const headOn = f.facing(snoutTip, Z(f, h));
-  const maw = headOn > 0.6;
+  const jawA = r.jaw ? r.jaw.rotation.x : 0;
+  // Head-on (the leap, a bite) or glaring down at the lens with the snout hanging
+  // toward it (the pounce wind-up): the MAW. A head turned to look at the camera
+  // from a 3/4 body still reads as a profile head.
+  const pe = f.project(f.at(h, 0, 0, sk.len * 0.42), P0);
+  const ps = f.project(snoutTip, P1);
+  const hang = pe.y - ps.y > 1.5 * Math.abs(pe.x - ps.x);
+  const maw = headOn > 0.88 || (headOn > 0.6 && hang);
   const headTx = f.px(f.at(h, 0, 0, sk.len * 0.5), sk.r[1] * 2 * sc) / f.kHint;
+  // Rearing (roar, the death scream): the chest's front slims into the neck.
+  const rear = Math.min(1, Math.max(0, -r.body.rotation.x / 0.5));
 
   // ── Smears: a pounce streaks back along its path ──
-  bossDSmear(f, R.mem, f.at(h, 0, 0, sk.len * 0.5), f.at(r.chest, 0, 0, T.len * 0.5), sk.r[1] * 0.9 * sc, T.r1[1] * 0.8 * sc, M.hide, time, dark);
+  bossDSmear(f, R.mem, f.at(h, 0, 0, sk.len * 0.5), f.at(r.chest, 0, 0, T.len * 0.5), sk.r[1] * 0.9 * sc, T.r1[1] * 0.8 * sc, C.hide, time, dark);
 
   // ── Body line: snout → skull → neck → chest → hips → tail (one melted layer) ──
+  // (Pattern u runs in metres along the body, so the tiger bands flow on unbroken.)
   if (maw) f.layer(0.04 * sc, PART.HEAD, dark);
   else f.layer(0.05 * sc, PART.TORSO, dark);
   let u = 0;
   const hx = X(f, h);
   const hy = Y(f, h);
   // Head: a long wedge (skull tapering into the snout), the cranium swelling behind the eyes.
-  f.coneE(snoutTip, f.at(h, 0, snoutY0 * 0.5, sk.len * 0.35), hx, hy, sn.r1[0] * sc, sn.r1[1] * sc, sr0x * 0.98 * sc, sr0y * 1.05 * sc, M.hide).part(PART.HEAD).u(u).k(0.03 * sc);
-  u += sn.len + sk.len * 0.6;
-  f.ellipsoid(h, 0, sk.r[1] * 0.06, sk.len * 0.3, sk.r[0] * 0.94, sk.r[1] * 0.92, sk.len * 0.62, M.hide).part(PART.HEAD).u(u).k(0.045 * sc);
-  u += sk.len * 0.5;
+  f.coneE(snoutTip, f.at(h, 0, snoutY0 * 0.5, sk.len * 0.35), hx, hy, sn.r1[0] * sc, sn.r1[1] * sc, sr0x * 0.98 * sc, sr0y * 1.05 * sc, C.hide).part(PART.HEAD).u(u).k(0.03 * sc);
+  u += (sn.len + sk.len * 0.6) * sc;
+  f.ellipsoid(h, 0, sk.r[1] * 0.06, sk.len * 0.3, sk.r[0] * 0.94, sk.r[1] * 0.92, sk.len * 0.62, C.hide).part(PART.HEAD).u(u).k(0.045 * sc);
+  u += sk.len * 0.5 * sc;
+  // The bony nasal ridge between the brows, running down onto the snout.
+  f.cone(f.at(h, 0, sk.r[1] * 0.62, sk.len * 0.15), f.at(h, 0, sk.r[1] * 0.42, sk.len * 1.3), sk.r[0] * 0.42 * sc, sk.r[0] * 0.3 * sc, C.hide).part(PART.HEAD).k(0.03 * sc);
   // Heavy brow ridges (a V of bone from the front: the scowl).
   for (let sd = 1; sd >= -1; sd -= 2) {
-    f.cone(f.at(h, sd * sk.r[0] * 0.66, sk.r[1] * 0.82, sk.len * 0.8), f.at(h, sd * sk.r[0] * 0.48, sk.r[1] * 0.92, sk.len * 0.1), 0.026 * sc, 0.034 * sc, M.back).part(PART.HEAD).k(0.02 * sc);
+    f.cone(f.at(h, sd * sk.r[0] * 0.66, sk.r[1] * 0.82, sk.len * 0.8), f.at(h, sd * sk.r[0] * 0.48, sk.r[1] * 0.92, sk.len * 0.1), 0.026 * sc, 0.034 * sc, C.back).part(PART.HEAD).k(0.02 * sc);
   }
-  // Jaw: its own primitive on the jaw joint, a small blend so the gape stays open.
+  // Jaw: its own primitive on the jaw joint, a small blend so the gape stays open;
+  // a wedge (deep at the hinge, a sharp chin), tooth rows along both rims.
   if (r.jaw) {
-    f.coneE(f.at(r.jaw, 0, 0, -0.04), f.at(r.jaw, 0, -0.005, J.len - 0.03), X(f, r.jaw), Y(f, r.jaw), J.r0[0] * sc, J.r0[1] * sc, J.r1[0] * sc, J.r1[1] * sc, M.hide).part(PART.HEAD).u(0.1).k(0.012 * sc);
-    for (let sd = 1; sd >= -1; sd -= 2) {
-      f.cone(f.at(r.jaw, sd * J.r0[0] * 0.7, J.r0[1] * 0.7, 0.04), f.at(r.jaw, sd * J.r1[0] * 0.6, J.r1[1] * 0.65, J.len * 0.9), 0.02 * sc, 0.013 * sc, M.teeth).part(PART.HEAD).flag(PF.TEETH | PF.NO_OUTLINE).k(0.001).z(0.03).seed(2 + sd);
+    f.coneE(f.at(r.jaw, 0, 0, -0.04), f.at(r.jaw, 0, -0.005, J.len - 0.03), X(f, r.jaw), Y(f, r.jaw), J.r0[0] * sc, J.r0[1] * sc, J.r1[0] * 0.85 * sc, J.r1[1] * 0.8 * sc, C.hide).part(PART.HEAD).u(0.1).k((jawA < 0.15 ? 0.04 : 0.012) * sc);
+    if (!maw) {
+      for (let sd = 1; sd >= -1; sd -= 2) {
+        f.cone(f.at(r.jaw, sd * J.r0[0] * 0.7, J.r0[1] * 0.7, 0.04), f.at(r.jaw, sd * J.r1[0] * 0.6, J.r1[1] * 0.65, J.len * 0.9), 0.02 * sc, 0.013 * sc, M.teeth).part(PART.HEAD).flag(PF.TEETH | PF.NO_OUTLINE).k(0.001).z(0.03).seed(2 + sd);
+      }
+      f.cone(f.at(r.jaw, 0, -J.r0[1] * 0.6, 0.02), f.at(r.jaw, 0, -J.r0[1] * 1.5, -0.04), J.r0[0] * 0.55 * sc, J.r0[0] * 0.3 * sc, C.belly).k(0.02 * sc).part(PART.HEAD);
     }
-    if (!maw) f.cone(f.at(r.jaw, 0, -J.r0[1] * 0.6, 0.02), f.at(r.jaw, 0, -J.r0[1] * 1.5, -0.04), J.r0[0] * 0.55 * sc, J.r0[0] * 0.3 * sc, M.belly).k(0.02 * sc).part(PART.HEAD);
   }
-  for (let sd = 1; sd >= -1; sd -= 2) {
-    f.cone(f.at(h, sd * sr0x * 0.75, snoutY0 - sr0y * 0.68, sk.len * 0.85), f.at(h, sd * sn.r1[0] * 0.7, snoutY0 - sn.drop - sn.r1[1] * 0.7, sk.len + sn.len * 0.9), 0.022 * sc, 0.015 * sc, M.teeth).part(PART.HEAD).flag(PF.TEETH | PF.NO_OUTLINE).k(0.001).z(0.03).seed(5 + sd);
+  if (!maw) {
+    for (let sd = 1; sd >= -1; sd -= 2) {
+      f.cone(f.at(h, sd * sr0x * 0.75, snoutY0 - sr0y * 0.68, sk.len * 0.85), f.at(h, sd * sn.r1[0] * 0.7, snoutY0 - sn.drop - sn.r1[1] * 0.7, sk.len + sn.len * 0.9), 0.022 * sc, 0.015 * sc, M.teeth).part(PART.HEAD).flag(PF.TEETH | PF.NO_OUTLINE).k(0.001).z(0.03).seed(5 + sd);
+    }
   }
   // Crest quills on the skull (two rows splayed into a V), bristling.
   const q = s.quills * (1 + quill * 0.35);
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < (maw ? 1 : 2); i++) {
     for (let sd = 1; sd >= -1; sd -= 2) {
       const z = sk.len * 0.55 - i * 0.12 * s.quills;
       const len = 0.11 * q * (1 - i * 0.12);
       const sway = Math.sin(time * (7 + quill * 30) + i + sd) * (0.006 + quill * 0.01);
-      f.cone(f.at(h, sd * sk.r[0] * 0.3, sk.r[1] * 0.78, z), f.at(h, sd * (sk.r[0] * 0.3 + len * 0.35) + sway, sk.r[1] * 0.78 + len * 0.6, z - len * 0.75), 0.02 * s.quills * sc, 0.004 * sc, (i + (sd > 0 ? 0 : 1)) % 2 ? M.acc2 : M.acc)
+      f.cone(f.at(h, sd * sk.r[0] * 0.3, sk.r[1] * 0.78, z), f.at(h, sd * (sk.r[0] * 0.3 + len * 0.35) + sway, sk.r[1] * 0.78 + len * 0.6, z - len * 0.75), 0.02 * s.quills * sc, 0.004 * sc, (i + (sd > 0 ? 0 : 1)) % 2 ? C.quillTip : C.quill)
         .part(PART.NONE)
         .k(0.01 * sc)
         .min(0.5);
     }
   }
+  // The halos (weak): the glow's light on the skin round each eye — lit, cyan-tinted
+  // hide melted into the head, a little over half the halo's size (the soft rest of
+  // the 3D glow is left out: drawn whole it reads as goggles). The far one only
+  // where it shows past the skull.
+  for (let i = 0; i < R.halos.length; i++) {
+    const sd = i === 0 ? 1 : -1;
+    if (!R.halos[i].visible || f.facing(f.at(R.eyes[i], 0, 0, 0), f.dir(h, sd, 0.2, maw ? 0.6 : 0.3)) < -0.1) continue;
+    const hr = maw ? 0.072 : 0.06;
+    f.ellipsoid(R.halos[i], 0, 0, 0, hr, hr, 0.062, lvE > 0 ? (rage ? XS.spillR : XS.spill) : C.hide).part(PART.WEAK).flag(PF.FLAT).tone(lvE > 0 ? 0.1 : 0).k(0.01 * sc).z(-0.01 * sc);
+  }
   if (maw) {
-    bossDSpecimenMaw(f, R, M, XS, sc, snoutTip, eyeM, rage, headTx, dark);
+    bossDSpecimenMaw(f, R, C, M, XS, sc, snoutTip, eyeM, rage, dark, jawA);
     f.layer(0.05 * sc, PART.TORSO, dark);
   }
   // Neck.
@@ -255,28 +336,29 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
       (r0[1] + (r1[1] - r0[1]) * t1) * 0.93 * sc,
       (r0[0] + (r1[0] - r0[0]) * t0) * 0.93 * sc,
       (r0[1] + (r1[1] - r0[1]) * t0) * 0.93 * sc,
-      M.hide,
+      C.hide,
     )
       .u(u)
       .k(0.05 * sc);
-    u += len;
+    u += len * sc;
   }
   // Deep chest tapering to the hips (breathing swells it), hips, whip tail.
   const br = r.torso.scale.y;
-  // (Two slices: the 3D torso bulges ~10 % at mid-length.)
+  // (Two slices: the 3D torso bulges ~10 % at mid-length; rearing, the chest's front slims.)
   const cx = X(f, r.chest);
   const cy = Y(f, r.chest);
   const mx = (T.r0[0] + T.r1[0]) * 0.5 * 1.05;
   const my = (T.r0[1] + T.r1[1]) * 0.5 * 1.05;
-  f.coneE(f.at(r.chest, 0, T.rise, T.len), f.at(r.chest, 0, T.rise * 0.25, T.len * 0.48), cx, cy, T.r1[0] * 0.96 * sc * br, T.r1[1] * 1.02 * sc * br, mx * sc * br, my * sc * br, M.hide)
+  const fr = 1 - 0.24 * rear;
+  f.coneE(f.at(r.chest, 0, T.rise * (1 - 0.3 * rear), T.len * (1 - 0.1 * rear)), f.at(r.chest, 0, T.rise * 0.25, T.len * 0.48), cx, cy, T.r1[0] * 0.96 * fr * sc * br, T.r1[1] * 1.02 * fr * sc * br, mx * sc * br, my * sc * br, C.hide)
     .u(u)
     .k(0.07 * sc);
-  f.coneE(f.at(r.chest, 0, T.rise * 0.25, T.len * 0.48), f.at(r.chest, 0, 0, 0.0), cx, cy, mx * sc * br, my * sc * br, T.r0[0] * 0.96 * sc * br, T.r0[1] * 0.97 * sc * br, M.hide)
-    .u(u + T.len * 0.5)
+  f.coneE(f.at(r.chest, 0, T.rise * 0.25, T.len * 0.48), f.at(r.chest, 0, 0, 0.0), cx, cy, mx * sc * br, my * sc * br, T.r0[0] * 0.96 * sc * br, T.r0[1] * 0.97 * sc * br, C.hide)
+    .u(u + T.len * 0.52 * sc)
     .k(0.07 * sc);
-  u += T.len;
-  f.ellipsoid(r.body, 0, 0.02, -0.08, s.hips[0] * 0.9, s.hips[1] * 0.95, s.hips[2] * 0.95, M.hide).u(u).k(0.08 * sc);
-  u += s.hips[2];
+  u += T.len * sc;
+  f.ellipsoid(r.body, 0, 0.02, -0.08, s.hips[0] * 0.9, s.hips[1] * 0.95, s.hips[2] * 0.95, C.hide).u(u).k(0.08 * sc);
+  u += s.hips[2] * sc;
   let trx = s.tail.r0[0];
   let try_ = s.tail.r0[1];
   for (let i = 0; i < r.tail.length; i++) {
@@ -285,8 +367,8 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
     const last = i === r.tail.length - 1;
     const r1x = last ? 0.012 : trx * s.tail.taper;
     const r1y = last ? 0.014 : try_ * s.tail.taper;
-    f.coneE(f.at(seg, 0, 0, 0.04), f.at(seg, 0, 0, -len), X(f, seg), Y(f, seg), trx * 0.93 * sc, try_ * 0.93 * sc, r1x * 0.93 * sc, r1y * 0.93 * sc, M.hide).part(PART.TAIL).u(u).k(0.05 * sc);
-    u += len * (1.25 + i * 0.25);
+    f.coneE(f.at(seg, 0, 0, 0.04), f.at(seg, 0, 0, -len), X(f, seg), Y(f, seg), trx * 0.93 * sc, try_ * 0.93 * sc, r1x * 0.93 * sc, r1y * 0.93 * sc, C.hide).part(PART.TAIL).u(u).k(0.05 * sc);
+    u += len * sc;
     trx = r1x;
     try_ = r1y;
   }
@@ -295,7 +377,7 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
     for (let sd = 1; sd >= -1; sd -= 2) {
       const eyeP = f.at(h, sd * sk.r[0] * 0.86, sk.r[1] * 0.32, sk.len * 0.42);
       if (f.facing(eyeP, f.dir(h, sd, 0.25, 0.35)) < 0.05) continue;
-      f.decal(f.at(h, sd * sk.r[0] * 0.8, sk.r[1] * 0.3, sk.len * 0.9), f.at(h, sd * sk.r[0] * 0.8, sk.r[1] * 0.36, sk.len * 0.02), 0.024 * sc, 0.028 * sc, M.hide)
+      f.decal(f.at(h, sd * sk.r[0] * 0.8, sk.r[1] * 0.3, sk.len * 0.9), f.at(h, sd * sk.r[0] * 0.8, sk.r[1] * 0.36, sk.len * 0.02), 0.024 * sc, 0.028 * sc, C.hide)
         .part(PART.HEAD)
         .flag(PF.FLAT | PF.SHADE_ONLY)
         .tone(-0.3);
@@ -308,19 +390,27 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
     }
   }
 
-  // ── Throat behind the gape (dark, wet) ──
-  if (r.jaw && r.jaw.rotation.x > 0.08 && !maw) {
-    f.layer(0.02 * sc, PART.HEAD, dark * 0.5, 0.04 * sc);
-    const tipU = f.at(h, 0, snoutY0 - sn.drop - sn.r1[1] * 0.5, sk.len + sn.len * 0.7);
-    const tipJ = f.at(r.jaw, 0, J.r1[1] * 0.5, J.len * 0.7);
-    const mid = f.mix(tipU, tipJ, 0.5);
-    const gap = tipU.distanceTo(tipJ);
-    const hinge = f.mix(f.at(h, 0, snoutY0 - sr0y * 0.4, sk.len * 0.3), f.at(r.jaw, 0, J.r0[1] * 0.3, 0.06), 0.5);
-    f.cone(hinge, mid, sk.r[1] * 0.12 * sc, Math.min(sk.r[1] * 0.4 * sc, Math.max(0.008, gap * 0.22)), XS.gum);
-    f.cone(hinge, f.mix(hinge, mid, 0.6), sk.r[1] * 0.08 * sc, Math.min(sk.r[1] * 0.2 * sc, Math.max(0.006, gap * 0.1)), M.throat).z(-0.01);
+  // ── The gape (jaws apart, not head-on): one screaming mouth — wet gums, a dark
+  // throat and the tongue fill the wedge between the lips; the tooth rows on both
+  // rims point into it. Its own layer just behind the jaws (they outline it). ──
+  if (r.jaw && jawA > 0.05 && !maw) {
+    f.layer(0.004 * sc, PART.HEAD, dark * 0.5, 0.05 * sc);
+    const tipU = f.at(h, 0, snoutY0 - sn.drop - sn.r1[1] * 0.3, sk.len + sn.len * 0.86);
+    const tipJ = f.at(r.jaw, 0, J.r1[1] * 0.3, J.len * 0.86);
+    const hinge = f.mix(f.at(h, 0, snoutY0 - sr0y * 0.5, sk.len * 0.35), f.at(r.jaw, 0, J.r0[1] * 0.3, 0.04), 0.5);
+    // (Gums pushed back so the gullet and tongue drawn over them win; the two
+    // corners of the mouth give the wedge its width when the face turns to us.)
+    for (let sd = 1; sd >= -1; sd -= 2) {
+      const hs = f.mix(f.at(h, sd * sr0x * 0.8, snoutY0 - sr0y * 0.5, sk.len * 0.35), f.at(r.jaw, sd * J.r0[0] * 0.8, J.r0[1] * 0.3, 0.04), 0.5);
+      f.tri(hs, tipU, tipJ, XS.gum, 0.006 * sc).z(0.3 * sc);
+    }
+    const a = f.mix(hinge, tipU, 0.72);
+    const b = f.mix(hinge, tipJ, 0.72);
+    f.tri(f.mix(hinge, a, 0.1), a, b, XS.deep, 0.004 * sc);
+    f.cone(f.mix(hinge, tipJ, 0.25), f.mix(hinge, tipJ, 0.8), 0.026 * sc, 0.018 * sc, XS.tongue).z(-0.3 * sc).min(0.5);
   }
 
-  // ── Bioluminescent stripes (weak): glowing arcs on the side facing us ──
+  // ── Bioluminescent stripes (weak): glowing arcs on the sides facing us ──
   f.layer(0.004 * sc, PART.WEAK, 0, -0.05 * sc);
   for (let sd = 1; sd >= -1; sd -= 2) {
     if (f.facing(f.at(r.chest, sd * T.r0[0], 0, T.len * 0.5), f.dir(r.chest, sd, 0.15, 0)) > -0.02) {
@@ -348,7 +438,7 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
   // Crest line down the skull.
   f.cone(f.at(h, 0, sk.r[1] * 1.0, sk.len * 0.72), f.at(h, 0, sk.r[1] * 0.97, sk.len * 0.72 - 0.3), 0.022 * sc, 0.018 * sc, stripeM).min(0.6);
 
-  // ── Eyes (weak): a ring of light, the glowing eye, a slit pupil ──
+  // ── Eyes (weak): a dim glow rim hugging the eye, the glowing eye, a slit pupil ──
   if (!maw) {
     f.layer(0.004 * sc, PART.WEAK, 0, -0.08 * sc);
     for (let i = 0; i < R.eyes.length; i++) {
@@ -357,7 +447,7 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
       const c = f.at(e, 0, 0, 0);
       const sd = i === 0 ? 1 : -1;
       if (f.facing(c, f.dir(h, sd, 0.2, 0.4)) < -0.15) continue;
-      if (lvE > 0) f.ellipsoid(R.halos[i], 0, 0, 0, 0.045, 0.045, 0.045, rage ? XS.spill2R : XS.spill2).flag(PF.FLAT).min(0.6);
+      if (lvE > 0) f.ellipsoid(e, 0, 0, 0, 0.05, 0.038, 0.07, rage ? XS.rimR : XS.rim).flag(PF.FLAT).min(0.6);
       f.ellipsoid(e, 0, 0, 0, 0.034, 0.026, 0.05, eyeM).flag(PF.FLAT).z(-0.01).min(0.6);
       if (headTx >= 9 && lvE > 0) {
         const size = stampSize(headTx * 1.5);
@@ -369,8 +459,6 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
 
   // ── Quills (armour): bone spikes along the spine, raised and rattling ──
   f.layer(0.006 * sc, PART.ARMOR, dark * 0.7);
-  const qM = ck >= 0.5 ? XS.quillDark : XS.quill;
-  const qT = ck >= 0.5 ? XS.quillTipDark : XS.quillTip;
   const camSide = f.facing(f.at(r.chest, 0, 0, T.len * 0.5), f.dir(r.chest, 1, 0, 0)) >= 0 ? 1 : -1;
   for (let p = 0; p < R.quills.length && p < SX_QUILLS.length; p++) {
     const pv = R.quills[p];
@@ -387,17 +475,16 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
       const t = n > 1 ? i / (n - 1) : 0;
       const z = z0 + (z1 - z0) * t;
       const l = len * (0.75 + 0.35 * Math.sin(Math.PI * t));
-      // Centre quill (tilted back), then the side quill on the camera's side (the chest row: both).
+      // Centre quill (tilted back), then the thin side quills: the camera's side, and
+      // on the chest and hips the far one too (they stick up past the back).
       const cl = l * 1.1;
       const base = f.at(pv, 0, y - 0.01, z - 0.01);
-      f.cone(base, f.at(pv, 0, y + 0.01 + cl * 0.4085, z - 0.02 - cl * 0.9128), 0.03 * sc, 0.004 * sc, qM).mat2(qT, 0.7).k(0.01 * sc).min(0.5);
-      // Thin side quills (no outline: pale needles between the big ones): both rows
-      // on the chest and hips, where they stick up past the back from either side.
+      f.cone(base, f.at(pv, 0, y + 0.01 + cl * 0.4085, z - 0.02 - cl * 0.9128), 0.03 * sc, 0.004 * sc, C.quill).mat2(C.quillTip, 0.7).k(0.01 * sc).min(0.5);
       for (let sd = 1; sd >= -1; sd -= 2) {
         if ((p === 0 || p === 3) && sd !== camSide) continue;
         const dx = -Math.sin(sd * 0.3);
-        f.cone(f.at(pv, sd * spread, y, z), f.at(pv, sd * spread + dx * l, y + l * 0.4754, z - l * 0.8286), 0.013 * sc, 0.003 * sc, qM)
-          .mat2(qT, 0.75)
+        f.cone(f.at(pv, sd * spread, y, z), f.at(pv, sd * spread + dx * l, y + l * 0.4754, z - l * 0.8286), 0.014 * sc, 0.003 * sc, C.quill)
+          .mat2(C.quillTip, 0.75)
           .flag(PF.NO_OUTLINE)
           .tone(sd === camSide ? 0 : -0.1)
           .k(0.004 * sc)
@@ -406,7 +493,7 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
     }
   }
 
-  // ── Legs ──
+  // ── Legs: drumstick thigh, a bony knee, the shin tapering from the calf, sinewy metatarsus ──
   const L = s.legR;
   for (let i = 0; i < r.legs.length; i++) {
     const leg = r.legs[i];
@@ -414,26 +501,26 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
     const mid = f.depth(f.at(leg.knee, 0, 0, 0));
     f.layer(0.05 * sc, PART.LIMB, (mid > torsoDepth + 0.1 ? -0.1 : 0) + dark);
     // (Starts below the hip joint: the 3D thigh's top is flat, the round cap must not rise over the hips.)
-    f.coneE(f.at(leg.hip, 0, -0.1 * L, 0.01), f.at(leg.hip, 0, -s.thigh, 0), X(f, leg.hip), Z(f, leg.hip), 0.11 * L * sc, 0.17 * L * sc, 0.054 * L * sc, 0.07 * L * sc, M.hide).u(1.0 + i * 0.3);
-    f.decal(f.at(leg.hip, 0, 0.02, 0.15 * L), f.at(leg.hip, 0, -s.thigh * 0.55, 0.1 * L), 0.012 * sc, 0.01 * sc, M.hide).flag(PF.FLAT | PF.SHADE_ONLY).tone(0.22).min(0.5);
-    f.coneE(f.at(leg.knee, 0, 0.04, 0), f.at(leg.knee, 0, -s.shin, 0), X(f, leg.knee), Z(f, leg.knee), 0.066 * L * sc, 0.086 * L * sc, 0.038 * L * sc, 0.046 * L * sc, M.limb).k(0.04 * sc);
-    f.coneE(f.at(leg.ankle, 0, 0.03, 0), f.at(leg.ankle, 0, -s.meta, 0), X(f, leg.ankle), Z(f, leg.ankle), 0.042 * L * sc, 0.05 * L * sc, 0.036 * L * sc, 0.042 * L * sc, M.limb).k(0.03 * sc);
+    f.coneE(f.at(leg.hip, 0, -0.1 * L, 0.01), f.at(leg.hip, 0, -s.thigh, 0), X(f, leg.hip), Z(f, leg.hip), 0.11 * L * sc, 0.165 * L * sc, 0.05 * L * sc, 0.064 * L * sc, C.hide).u(1.0 + i * 0.3);
+    // The drumstick's swell (the 3D thigh bulges at mid-length), a lit crescent down its front.
+    f.ellipsoid(leg.hip, 0, -s.thigh * 0.42, 0.012, 0.1 * L, s.thigh * 0.36, 0.17 * L, C.hide).u(1.2 + i * 0.3).k(0.04 * sc);
+    if (!maw) f.decal(f.at(leg.hip, 0, -0.02, 0.15 * L), f.at(leg.hip, 0, -s.thigh * 0.6, 0.11 * L), 0.012 * sc, 0.01 * sc, C.hide).flag(PF.FLAT | PF.SHADE_ONLY).tone(0.22).min(0.5);
+    f.ball(f.at(leg.knee, 0, -0.005, 0.012), 0.056 * L * sc, C.limb).k(0.02 * sc);
+    f.coneE(f.at(leg.knee, 0, 0.0, -0.008), f.at(leg.knee, 0, -s.shin, 0), X(f, leg.knee), Z(f, leg.knee), 0.064 * L * sc, 0.088 * L * sc, 0.032 * L * sc, 0.038 * L * sc, C.limb).k(0.03 * sc);
+    f.coneE(f.at(leg.ankle, 0, 0.03, 0), f.at(leg.ankle, 0, -s.meta, 0), X(f, leg.ankle), Z(f, leg.ankle), 0.042 * L * sc, 0.05 * L * sc, 0.032 * L * sc, 0.036 * L * sc, C.limb).k(0.03 * sc);
     const to = leg.toe;
     const fh = s.footH;
-    f.ball(f.at(to, 0, -fh * 0.4, 0), 0.056 * L * sc, M.limb).k(0.02 * sc);
+    f.ball(f.at(to, 0, -fh * 0.4, 0), 0.054 * L * sc, C.limb).k(0.02 * sc);
+    // Two forward toes, each tapering into its claw.
     for (let t = 0; t < 2; t++) {
       const x = (t === 0 ? -0.022 : 0.026) * L * side;
-      const b = f.at(to, x * 1.25, -fh * 0.62, s.toe);
-      f.cone(f.at(to, x, -fh * 0.55, 0), b, 0.031 * L * sc, 0.019 * L * sc, M.limb).k(0.012 * sc);
-      f.cone(b, f.at(to, x * 1.3, -fh * 1.1, s.toe + 0.045 * L), 0.012 * L * sc, 0.004 * sc, M.claw).k(0.004 * sc).min(0.5);
+      f.cone(f.at(to, x, -fh * 0.55, 0), f.at(to, x * 1.3, -fh * 1.1, s.toe + 0.045 * L), 0.031 * L * sc, 0.005 * sc, C.limb).mat2(M.claw, 0.74).k(0.012 * sc).min(0.5);
     }
-    // The sickle: raised inner toe + the big killing claw held up off the ground.
+    // The sickle: raised inner toe + the big killing claw held up off the ground, hooked forward.
     const x = 0.05 * side;
     const k1 = f.at(to, x * 1.3, 0.03, 0.05);
-    const c1 = f.at(to, x * 1.55, 0.12, 0.09);
-    f.cone(f.at(to, x, -fh * 0.3, 0.0), k1, 0.022 * sc, 0.022 * sc, M.limb).k(0.01 * sc);
-    f.cone(k1, c1, 0.025 * sc, 0.014 * sc, M.claw).k(0.006 * sc);
-    f.cone(c1, f.at(to, x * 1.6, 0.15, 0.14), 0.014 * sc, 0.004 * sc, M.claw).k(0.004 * sc).min(0.5);
+    f.cone(f.at(to, x, -fh * 0.3, 0.0), k1, 0.022 * sc, 0.022 * sc, C.limb).k(0.01 * sc);
+    f.cone(k1, f.at(to, x * 1.6, 0.15, 0.14), 0.025 * sc, 0.004 * sc, M.claw).k(0.006 * sc).min(0.5);
   }
 
   // ── Arms + scythe claws (three long hooked blades, a pale honed edge) ──
@@ -443,8 +530,8 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
     const mid = f.depth(f.at(arm.elbow, 0, 0, 0));
     f.layer(0.03 * sc, PART.LIMB, (mid > torsoDepth + 0.05 ? -0.1 : 0) + dark);
     // (The upper arm starts where it leaves the chest: the shoulder pivot is buried in the torso.)
-    f.coneE(f.at(arm.shoulder, 0, -a.upper * 0.25, 0), f.at(arm.shoulder, 0, -a.upper, 0), X(f, arm.shoulder), Z(f, arm.shoulder), a.r * 0.9 * sc, a.r * 1.0 * sc, a.r * 0.8 * sc, a.r * 0.9 * sc, M.hide).u(0.5);
-    f.coneE(f.at(arm.elbow, 0, 0, 0), f.at(arm.elbow, 0, -a.fore, 0), X(f, arm.elbow), Z(f, arm.elbow), a.r * 0.8 * sc, a.r * 0.85 * sc, a.r * 0.6 * sc, a.r * 0.6 * sc, M.limb).k(0.02 * sc);
+    f.coneE(f.at(arm.shoulder, 0, -a.upper * 0.25, 0), f.at(arm.shoulder, 0, -a.upper, 0), X(f, arm.shoulder), Z(f, arm.shoulder), a.r * 0.9 * sc, a.r * 1.0 * sc, a.r * 0.8 * sc, a.r * 0.9 * sc, C.hide).u(0.5);
+    f.coneE(f.at(arm.elbow, 0, 0, 0), f.at(arm.elbow, 0, -a.fore, 0), X(f, arm.elbow), Z(f, arm.elbow), a.r * 0.8 * sc, a.r * 0.85 * sc, a.r * 0.6 * sc, a.r * 0.6 * sc, C.limb).k(0.02 * sc);
     const spread = maw ? 1.6 : 1;
     for (let c = -1; c <= 1; c++) {
       const dx = c * 0.03;
@@ -461,7 +548,7 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
       }
       f.cone(b0, m1, 0.024 * sc, 0.017 * sc, XS.scythe).k(0.006 * sc).min(0.5);
       f.cone(m1, tip, 0.017 * sc, 0.004 * sc, XS.scythe).k(0.004 * sc).min(0.5);
-      if (c === 0) f.decal(m1, tip, 0.006 * sc, 0.003 * sc, XS.edge).flag(PF.FLAT).min(0.45);
+      if (!maw) f.decal(m1, tip, 0.006 * sc, 0.003 * sc, XS.edge).flag(PF.FLAT).min(0.45);
     }
   }
 
@@ -495,64 +582,93 @@ function bossDArc(f: PixelFigure, j: THREE.Object3D, sd: number, z: number, y0: 
 }
 
 /**
- * Specimen X head-on (pounce, bite): the snout points at the lens. A sprite
- * artist draws the MAW: glowing eyes in their halos at the skull's edges under
- * a V of brow, a dark gullet ringed by fanned tooth rows, a wet tongue.
+ * Specimen X head-on (pounce, bite): the snout points at the lens and the jaw
+ * hangs open toward us. A sprite artist draws the MAW on the head: an oval
+ * gape — wet red gums round a two-step dark gullet, the upper tooth row arching
+ * over it, the lower rows following the jaw's V but stopping well short of the
+ * chin, the tongue on the jaw floor — under angry glowing slit eyes and a V of
+ * brow, a lit ridge down the snout to the nostrils.
  */
-function bossDSpecimenMaw(f: PixelFigure, R: BossDSpecimenRig, M: DinoMats, XS: typeof XM, sc: number, snoutTip: THREE.Vector3, eyeM: number, rage: boolean, headTx: number, dark: number) {
+function bossDSpecimenMaw(f: PixelFigure, R: BossDSpecimenRig, C: BossDXSkin, M: DinoMats, XS: typeof XM, sc: number, snoutTip: THREE.Vector3, eyeM: number, rage: boolean, dark: number, jawA: number) {
   const r = R.r;
   const s = R.s;
   const h = r.head;
   const sk = s.skull;
   const sn = s.snout;
-  const J = s.jaw;
-  const hx = X(f, h);
-  // Brow V (shade decals) and the eyes in their halos (own layer just in front of the head).
+  // Brow V (shade decals) over the eyes.
   for (let sd = 1; sd >= -1; sd -= 2) {
-    f.decal(f.at(h, sd * sk.r[0] * 1.0, sk.r[1] * 0.85, sk.len * 0.3), f.at(h, sd * sk.r[0] * 0.1, sk.r[1] * 0.25, sk.len + sn.len * 0.25), 0.034 * sc, 0.016 * sc, M.hide)
+    f.decal(f.at(h, sd * sk.r[0] * 1.0, sk.r[1] * 0.85, sk.len * 0.3), f.at(h, sd * sk.r[0] * 0.1, sk.r[1] * 0.25, sk.len + sn.len * 0.25), 0.034 * sc, 0.016 * sc, C.hide)
       .part(PART.HEAD)
       .flag(PF.FLAT | PF.SHADE_ONLY)
       .tone(-0.55)
       .min(0.5);
   }
+  // The snout's ridge catching the light from the brow to the nose; nostrils above the lip.
+  f.decal(f.at(h, 0, sk.r[1] * 0.75, sk.len * 0.55), f.at(h, 0, -sk.r[1] * 0.12 - sn.drop + sn.r1[1] * 0.8, sk.len + sn.len * 0.8), 0.03 * sc, 0.016 * sc, C.hide).part(PART.HEAD).flag(PF.FLAT | PF.SHADE_ONLY).tone(0.2).min(0.5);
   for (let sd = 1; sd >= -1; sd -= 2) {
-    const no = f.add(snoutTip, hx, sd * sn.r1[0] * 0.5 * sc);
-    f.decal(no, no, 0.012 * sc, 0.012 * sc, M.throat).part(PART.HEAD).flag(PF.FLAT).min(0.45);
+    const no = f.at(h, sd * sn.r1[0] * 0.55, -sk.r[1] * 0.12 - sn.drop + sn.r1[1] * 0.55, sk.len + sn.len * 0.9);
+    f.decal(no, no, 0.012 * sc, 0.009 * sc, M.throat).part(PART.HEAD).flag(PF.FLAT).min(0.45);
   }
+  const jw = r.jaw;
+  if (jw) bossDSpecimenGape(f, R, M, XS, sc, jw, jawA, dark);
+  // Eyes: angry almonds slanting up to the outside, a slit pupil, the brow's shadow over the top.
   f.layer(0.004 * sc, PART.WEAK, 0, -0.06 * sc);
   for (let i = 0; i < R.eyes.length; i++) {
     const e = R.eyes[i];
     if (!e.visible) continue;
-    // An angry almond slanting up to the outside, a slit pupil, the brow's shadow over its top.
-    // (eye joint frame)
     const sd = i === 0 ? 1 : -1;
-    f.ellipsoid(R.halos[i], 0, 0, 0, 0.04, 0.035, 0.04, rage ? XS.spill2R : XS.spill2).flag(PF.FLAT).min(0.6);
-    f.decal(f.at(e, -sd * 0.035, -0.012, 0.0), f.at(e, sd * 0.035, 0.014, 0.0), 0.016 * sc, 0.012 * sc, eyeM).flag(PF.FLAT).min(0.7);
-    f.decal(f.at(e, 0, 0.018, 0), f.at(e, 0, -0.016, 0), 0.004 * sc, 0.004 * sc, M.pupil).flag(PF.FLAT).min(0.45);
-    f.decal(f.at(e, -sd * 0.05, 0.03, 0), f.at(e, sd * 0.05, 0.05, 0), 0.012 * sc, 0.012 * sc, M.hide).flag(PF.FLAT).tone(-0.6).min(0.5);
-    void headTx;
+    f.decal(f.at(e, -sd * 0.04, -0.016, 0.0), f.at(e, sd * 0.04, 0.016, 0.0), 0.022 * sc, 0.016 * sc, rage ? XS.rimR : XS.rim).flag(PF.FLAT).min(0.7);
+    f.cone(f.at(e, -sd * 0.032, -0.012, 0.0), f.at(e, sd * 0.034, 0.014, 0.0), 0.014 * sc, 0.009 * sc, eyeM).flag(PF.FLAT).z(-0.01).min(0.7);
+    f.decal(f.at(e, 0, 0.016, 0), f.at(e, 0, -0.014, 0), 0.004 * sc, 0.004 * sc, M.pupil).flag(PF.FLAT).min(0.45);
   }
-  // The maw, built on the real jaws: the lips' four corners (upper lip front, the
-  // hinges, the jaw tip) frame a dark gullet; tooth rows fanned along the rims
-  // point into it; the tongue lies on the jaw floor.
-  const jw = r.jaw;
-  if (!jw) return;
-  const top = f.at(h, 0, -sk.r[1] * 0.12 - sn.drop - sn.r1[1] * 0.4, sk.len + sn.len * 0.86);
-  const bot = f.at(jw, 0, J.r1[1] * 0.4, J.len * 0.9);
-  const cl = f.at(jw, J.r0[0] * 0.95, J.r0[1] * 0.6, 0.06);
-  const cr = f.at(jw, -J.r0[0] * 0.95, J.r0[1] * 0.6, 0.06);
-  f.layer(0.006 * sc, PART.HEAD, dark * 0.3, -0.12 * sc);
-  f.tri(top, cl, bot, XS.deep, 0.01 * sc);
-  f.tri(top, cr, bot, XS.deep, 0.01 * sc);
-  f.cone(f.at(jw, 0, J.r0[1] * 0.5, 0.1), f.at(jw, 0, J.r1[1] * 0.5, J.len * 0.5), J.r0[0] * 0.36 * sc, J.r1[0] * 0.42 * sc, XS.gum).z(-0.02);
-  f.ball(f.mix(f.at(h, 0, -sk.r[1] * 0.4, sk.len * 0.5), f.at(jw, 0, J.r0[1] * 0.5, 0.12), 0.5), sk.r[1] * 0.22 * sc, XS.throatGlow).flag(PF.FLAT).z(-0.01).min(0.6);
+}
+
+/** The maw's gape (head-on): see `bossDSpecimenMaw`. Drawn into the head's layer. */
+function bossDSpecimenGape(f: PixelFigure, R: BossDSpecimenRig, M: DinoMats, XS: typeof XM, sc: number, jw: THREE.Object3D, jawA: number, dark: number) {
+  const h = R.r.head;
+  const sk = R.s.skull;
+  const sn = R.s.snout;
+  const J = R.s.jaw;
+  void dark;
+  // The gape, drawn the way a sprite artist faces it at the player: an upright
+  // diamond hanging from the upper lip (top) down the screen as far as the jaws
+  // gape (at least as far as the real lower lip shows), its corners out to the
+  // skull's width — wet red gums round a two-step dark gullet.
+  const top = f.at(h, 0, -sk.r[1] * 0.12 - sn.drop - sn.r1[1] * 0.3, sk.len + sn.len * 0.8);
+  const op = Math.min(1, Math.max(0, (jawA - 0.15) / 0.6));
+  const lip = f.at(jw, 0, J.r1[1] * 0.3, J.len * (0.48 + 0.14 * op));
+  const vd = f.vec().subVectors(top, f.eye).normalize();
+  const down = f.vec().set(0, -1, 0).addScaledVector(vd, vd.y).normalize();
+  const right = f.vec().crossVectors(vd, down).normalize();
+  const dl = f.vec().subVectors(lip, top);
+  const shown = Math.max(0, dl.dot(down));
+  const gape = Math.max(shown, J.len * sc * (0.12 + 0.18 * op));
+  const bot = f.add(top, down, gape);
+  const midC = f.add(top, down, gape * 0.4);
+  const w = Math.min(sk.r[0] * 0.8 * sc, sk.r[0] * 0.42 * sc + gape * 0.3);
+  const cl = f.add(midC, right, -w);
+  const cr = f.add(midC, right, w);
+  // (Part of the head's own layer, in front of it: the lips are the head's edge, not a pasted badge.)
+  f.tri(top, cl, bot, XS.gum, w * 0.18).z(-0.12 * sc).k(0.004 * sc);
+  f.tri(top, cr, bot, XS.gum, w * 0.18).z(-0.12 * sc).k(0.004 * sc);
+  const ti = f.mix(top, midC, 0.3);
+  const bi = f.mix(bot, midC, 0.25);
+  f.tri(ti, f.mix(cl, midC, 0.28), bi, XS.deep, w * 0.12).z(-0.14 * sc).k(0.002 * sc);
+  f.tri(ti, f.mix(cr, midC, 0.28), bi, XS.deep, w * 0.12).z(-0.14 * sc).k(0.002 * sc);
+  // Tongue on the floor of the jaw, its tip short of the chin.
+  f.cone(f.mix(midC, bot, 0.3), f.mix(midC, bot, 0.78), w * 0.2, w * 0.15, XS.tongue).z(-0.16 * sc).k(0.002 * sc).min(0.5);
+  // Fangs, one by one: the upper ones hang from the lip over the gullet, the lower
+  // ones climb the jaw's rims from the corners and stop well short of the chin.
   for (let sd = 1; sd >= -1; sd -= 2) {
     const c = sd > 0 ? cl : cr;
-    f.cone(f.mix(top, c, 0.04), f.mix(top, c, 0.94), 0.024 * sc, 0.016 * sc, M.teeth).flag(PF.TEETH | PF.NO_OUTLINE).k(0.001).z(-0.01).seed(3 + sd);
-    f.cone(f.mix(c, bot, 0.08), f.mix(c, bot, 0.96), 0.02 * sc, 0.013 * sc, M.teeth).flag(PF.TEETH | PF.NO_OUTLINE).k(0.001).z(-0.01).seed(7 + sd);
+    for (let k = 0; k < 3; k++) {
+      const t = 0.3 + k * 0.25;
+      const p = f.mix(top, c, t);
+      f.tri(f.mix(top, c, t - 0.1), f.mix(top, c, t + 0.1), f.mix(p, midC, 0.4 - k * 0.07), M.teeth, 0.002 * sc).z(-0.17 * sc).k(0.001);
+    }
+    const p = f.mix(c, bot, 0.24);
+    f.tri(f.mix(c, bot, 0.12), f.mix(c, bot, 0.36), f.mix(p, top, 0.3), M.teeth, 0.002 * sc).z(-0.17 * sc).k(0.001);
   }
-  void hx;
-  void headTx;
 }
 
 /** Smear: the head and body streak back along their path for a redraw after a fast move. */
@@ -573,30 +689,30 @@ function bossDSmear(f: PixelFigure, mem: BossDMem, head: THREE.Vector3, body: TH
 }
 
 /**
- * A quill dart (Specimen X's volley): a bone quill flying tip-first with a
- * glowing bioluminescent tip in a ring of light. `g` = the dart's mesh group.
+ * A quill dart (Specimen X's volley): a bone quill flying tip-first — a dark-edged
+ * shaft tapering to a pale point with a glowing bead on it — inside a thin ring
+ * of light. `g` = the dart's mesh group. The soft halo round it stays a live glow
+ * (like every alpha halo) over the sprite.
  */
 export function bossDPaintDart(f: PixelFigure, g: THREE.Object3D): boolean {
   const XS = xm();
   f.maxTexels = 120;
   const s = scaleOf(g);
-  // Shaft (Kit cone 0.08 × 0.9 along +Z, tip at +Z), tip glow at z 0.42, halo round z 0.3.
+  // Shaft (Kit cone r 0.08 × 0.9 along +Z, tip at +Z): bone, paling toward the point.
   f.layer(0.01 * s, PART.TORSO);
-  f.cone(f.at(g, 0, 0, -0.45), f.at(g, 0, 0, 0.36), 0.03 * s, 0.075 * s, XS.dart).min(0.6);
-  f.layer(0.004 * s, PART.TORSO, 0, -0.05 * s);
-  f.ball(f.at(g, 0, 0, 0.3), 0.27 * s, XS.dartHalo).flag(PF.FLAT);
-  f.ball(f.at(g, 0, 0, 0.36), 0.18 * s, XS.dartHalo2).flag(PF.FLAT).z(-0.02);
-  f.ball(f.at(g, 0, 0, 0.42), 0.11 * s, XS.dartGlow).flag(PF.FLAT).z(-0.04);
-  f.ball(f.at(g, 0.02, 0.03, 0.46), 0.045 * s, XS.core).flag(PF.FLAT).z(-0.06).min(0.6);
+  f.cone(f.at(g, 0, 0, -0.45), f.at(g, 0, 0, 0.2), 0.075 * s, 0.04 * s, XS.dart).mat2(XS.dartTip, 0.6).min(0.6);
+  f.cone(f.at(g, 0, 0, 0.2), f.at(g, 0, 0, 0.47), 0.04 * s, 0.008 * s, XS.dartTip).min(0.5);
+  // The glowing bead near the tip (the 3D's glow ball) and a 1-texel ring of light (the halo's rim).
+  f.layer(0.004 * s, PART.TORSO, 0, -0.04 * s);
+  f.ball(f.at(g, 0, 0, 0.42), 0.115 * s, XS.dartRing).flag(PF.FLAT).min(0.6);
+  f.ball(f.at(g, 0, 0, 0.43), 0.08 * s, XS.dartGlow).flag(PF.FLAT).z(-0.01).min(0.6);
+  f.ball(f.at(g, 0.015, 0.022, 0.45), 0.035 * s, XS.core).flag(PF.FLAT).z(-0.02).min(0.6);
+  hoop(f, g, 2, 0.3, 0.2, 0.012 * s, XS.dartRing, false, 10, true, 0, PF.FLAT);
   return true;
 }
 
-/** The paint hook for one dart (one closure per dart, none per redraw); its halo is painted, not kept live. */
+/** The paint hook for one dart (one closure per dart, none per redraw). */
 export function bossDDart(root: THREE.Object3D): (f: PixelFigure) => boolean {
-  root.traverse((o) => {
-    const m = (o as THREE.Mesh).material as THREE.Material | undefined;
-    if (m?.transparent) o.userData.spriteKeep3D = false;
-  });
   return (f) => {
     const g = root.children[0];
     return !!g && root.visible && bossDPaintDart(f, g);
