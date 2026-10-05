@@ -49,6 +49,8 @@ interface Check {
   partAgree: number;
   conf: string;
   prims: number;
+  /** Sprite area / hitbox area (grid points). */
+  area: number;
   /** Grid points where a ray hits a weak point / of those, the sprite shows WEAK. */
   weakRays: number;
   weakShown: number;
@@ -132,6 +134,9 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: TH
   let agree = 0;
   let weakRays = 0;
   let weakShown = 0;
+  let spriteN = 0;
+  let rayN = 0;
+  const extra: Record<string, number> = {};
   const confusion: Record<string, number> = {};
   for (let y = 0.5; y < f.H; y += 2) {
     for (let x = 0.5; x < f.W; x += 2) {
@@ -147,6 +152,10 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: TH
         weakRays++;
         if (got === PART.WEAK) weakShown++;
       }
+      if (got) spriteN++;
+      if (want) rayN++;
+      if (got && !want && process.env.BOSSD_DEBUG) extra[`${PART_NAME[got]}#L${sample.layer}`] = (extra[`${PART_NAME[got]}#L${sample.layer}`] ?? 0) + 1;
+      if (want > 0 && !got && process.env.BOSSD_DEBUG) extra[`miss:${PART_NAME[want]}`] = (extra[`miss:${PART_NAME[want]}`] ?? 0) + 1;
       if (want || got) either++;
       if (want && got) {
         both++;
@@ -158,12 +167,13 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: TH
       }
     }
   }
+  if (process.env.BOSSD_DEBUG) console.log(`area sprite/hitbox ${(spriteN / Math.max(1, rayN)).toFixed(3)} (${spriteN}/${rayN}) ${JSON.stringify(extra)}`);
   const conf = Object.entries(confusion)
     .sort((a, b) => b[1] - a[1])
     .slice(0, process.env.BOSSD_DEBUG ? 10 : 4)
     .map(([k, v]) => `${k}:${v}`)
     .join(' ');
-  return { centres, centreHits, centreMiss, iou: both / Math.max(1, either), partAgree: agree / Math.max(1, both), conf, prims: f.count, weakRays, weakShown };
+  return { centres, centreHits, centreMiss, iou: both / Math.max(1, either), partAgree: agree / Math.max(1, both), conf, prims: f.count, weakRays, weakShown, area: spriteN / Math.max(1, rayN) };
 }
 
 function expectAligned(c: Check, label: string, o: { iou?: number; agree?: number } = {}) {
@@ -176,6 +186,9 @@ function expectAligned(c: Check, label: string, o: { iou?: number; agree?: numbe
   expect(c.partAgree, `${info}: part agreement`).toBeGreaterThan(o.agree ?? 0.85);
   // Bosses stay inside their primitive budget (docs: ≈ 80–130 for a boss, ≤ 160).
   expect(c.prims, info).toBeLessThanOrEqual(140);
+  // No bloat: the sprite covers about what the hitboxes cover.
+  expect(c.area, `${info}: sprite / hitbox area`).toBeGreaterThan(0.85);
+  expect(c.area, `${info}: sprite / hitbox area`).toBeLessThan(1.2);
 }
 
 function run(e: Entity, seconds: number, pin?: () => void) {

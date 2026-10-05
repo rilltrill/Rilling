@@ -250,10 +250,11 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
       f.at(n, 0, 0, -0.04),
       X(f, n),
       Y(f, n),
-      (r0[0] + (r1[0] - r0[0]) * t1) * sc,
-      (r0[1] + (r1[1] - r0[1]) * t1) * sc,
-      (r0[0] + (r1[0] - r0[0]) * t0) * sc,
-      (r0[1] + (r1[1] - r0[1]) * t0) * sc,
+      // (The 3D neck is a hexagonal tube: its silhouette is ~0.93 of the nominal radius.)
+      (r0[0] + (r1[0] - r0[0]) * t1) * 0.93 * sc,
+      (r0[1] + (r1[1] - r0[1]) * t1) * 0.93 * sc,
+      (r0[0] + (r1[0] - r0[0]) * t0) * 0.93 * sc,
+      (r0[1] + (r1[1] - r0[1]) * t0) * 0.93 * sc,
       M.hide,
     )
       .u(u)
@@ -265,16 +266,16 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
   // (Two slices: the 3D torso bulges ~10 % at mid-length.)
   const cx = X(f, r.chest);
   const cy = Y(f, r.chest);
-  const mx = (T.r0[0] + T.r1[0]) * 0.5 * 1.09;
-  const my = (T.r0[1] + T.r1[1]) * 0.5 * 1.09;
-  f.coneE(f.at(r.chest, 0, T.rise, T.len), f.at(r.chest, 0, T.rise * 0.25, T.len * 0.48), cx, cy, T.r1[0] * sc * br, T.r1[1] * 1.08 * sc * br, mx * sc * br, my * sc * br, M.hide)
+  const mx = (T.r0[0] + T.r1[0]) * 0.5 * 1.05;
+  const my = (T.r0[1] + T.r1[1]) * 0.5 * 1.05;
+  f.coneE(f.at(r.chest, 0, T.rise, T.len), f.at(r.chest, 0, T.rise * 0.25, T.len * 0.48), cx, cy, T.r1[0] * 0.96 * sc * br, T.r1[1] * 1.02 * sc * br, mx * sc * br, my * sc * br, M.hide)
     .u(u)
     .k(0.07 * sc);
   f.coneE(f.at(r.chest, 0, T.rise * 0.25, T.len * 0.48), f.at(r.chest, 0, 0, 0.0), cx, cy, mx * sc * br, my * sc * br, T.r0[0] * 0.96 * sc * br, T.r0[1] * 0.97 * sc * br, M.hide)
     .u(u + T.len * 0.5)
     .k(0.07 * sc);
   u += T.len;
-  f.ellipsoid(r.body, 0, 0.02, -0.08, s.hips[0] * 0.92, s.hips[1], s.hips[2], M.hide).u(u).k(0.08 * sc);
+  f.ellipsoid(r.body, 0, 0.02, -0.08, s.hips[0] * 0.9, s.hips[1] * 0.95, s.hips[2] * 0.95, M.hide).u(u).k(0.08 * sc);
   u += s.hips[2];
   let trx = s.tail.r0[0];
   let try_ = s.tail.r0[1];
@@ -284,7 +285,7 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
     const last = i === r.tail.length - 1;
     const r1x = last ? 0.012 : trx * s.tail.taper;
     const r1y = last ? 0.014 : try_ * s.tail.taper;
-    f.coneE(f.at(seg, 0, 0, 0.04), f.at(seg, 0, 0, -len), X(f, seg), Y(f, seg), trx * sc, try_ * sc, r1x * sc, r1y * sc, M.hide).part(PART.TAIL).u(u).k(0.05 * sc);
+    f.coneE(f.at(seg, 0, 0, 0.04), f.at(seg, 0, 0, -len), X(f, seg), Y(f, seg), trx * 0.93 * sc, try_ * 0.93 * sc, r1x * 0.93 * sc, r1y * 0.93 * sc, M.hide).part(PART.TAIL).u(u).k(0.05 * sc);
     u += len * (1.25 + i * 0.25);
     trx = r1x;
     try_ = r1y;
@@ -382,13 +383,13 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
       // Centre quill (tilted back), then the side quill on the camera's side (the chest row: both).
       const cl = l * 1.1;
       const base = f.at(pv, 0, y - 0.01, z - 0.01);
-      f.cone(base, f.at(pv, 0, y + 0.01 + cl * 0.4085, z - 0.02 - cl * 0.9128), 0.036 * sc, 0.004 * sc, qM).mat2(qT, 0.7).k(0.01 * sc).min(0.5);
+      f.cone(base, f.at(pv, 0, y + 0.01 + cl * 0.4085, z - 0.02 - cl * 0.9128), 0.03 * sc, 0.004 * sc, qM).mat2(qT, 0.7).k(0.01 * sc).min(0.5);
       // Thin side quills (no outline: pale needles between the big ones): both rows
       // on the chest and hips, where they stick up past the back from either side.
       for (let sd = 1; sd >= -1; sd -= 2) {
         if ((p === 0 || p === 3) && sd !== camSide) continue;
         const dx = -Math.sin(sd * 0.3);
-        f.cone(f.at(pv, sd * spread, y, z), f.at(pv, sd * spread + dx * l, y + l * 0.4754, z - l * 0.8286), 0.016 * sc, 0.003 * sc, qM)
+        f.cone(f.at(pv, sd * spread, y, z), f.at(pv, sd * spread + dx * l, y + l * 0.4754, z - l * 0.8286), 0.013 * sc, 0.003 * sc, qM)
           .mat2(qT, 0.75)
           .flag(PF.NO_OUTLINE)
           .tone(sd === camSide ? 0 : -0.1)
