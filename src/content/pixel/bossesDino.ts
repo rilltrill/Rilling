@@ -375,7 +375,14 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
   for (let p = 0; p < R.quills.length && p < SX_QUILLS.length; p++) {
     const pv = R.quills[p];
     if (!pv.visible) continue;
-    const [n, len, spread, z0, z1, y] = SX_QUILLS[p];
+    // (Index reads, not array destructuring: no iterator per redraw.)
+    const Q = SX_QUILLS[p];
+    const n = Q[0];
+    const len = Q[1];
+    const spread = Q[2];
+    const z0 = Q[3];
+    const z1 = Q[4];
+    const y = Q[5];
     for (let i = 0; i < n; i++) {
       const t = n > 1 ? i / (n - 1) : 0;
       const z = z0 + (z1 - z0) * t;
