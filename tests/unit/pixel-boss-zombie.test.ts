@@ -8,7 +8,8 @@ import { AudioSystem } from '../../src/audio/Audio';
 import { DEFAULT_SETTINGS, type HitPart } from '../../src/core/types';
 import type { Entity } from '../../src/gameplay/Entity';
 import type { Enemy } from '../../src/gameplay/Enemy';
-import { PixelFigure, PART, MAX_PRIMS, type FigureSample } from '../../src/gameplay/pixel/figure';
+import { PixelFigure, PART, PF, MAX_PRIMS, MAX_WIDE, PRIM_FLOATS, PRIM_LAYOUT, type FigureSample } from '../../src/gameplay/pixel/figure';
+import { Mat, material } from '../../src/gameplay/pixel/materials';
 import { nullHud } from './sim';
 
 /**
@@ -158,6 +159,37 @@ function run(e: Entity, seconds: number) {
   for (let t = 0; t < seconds; t += 1 / 60) e.update(1 / 60);
 }
 
+/** Paint `e` seen from `eye` looking at `look` (no layout yet). */
+function paintAt(world: World, camera: THREE.PerspectiveCamera, e: Entity, eye: THREE.Vector3, look: THREE.Vector3): PixelFigure {
+  world.scene.updateMatrixWorld(true);
+  camera.position.copy(eye);
+  camera.lookAt(look);
+  camera.updateMatrixWorld();
+  const f = new PixelFigure();
+  f.begin(camera, GW, GH);
+  f.time = world.time;
+  expect(e.paintPixels!(f)).toBe(true);
+  return f;
+}
+
+/** Sample the laid-out figure at world point `p`. */
+function sampleAt(f: PixelFigure, camera: THREE.PerspectiveCamera, p: THREE.Vector3): FigureSample {
+  const q = p.clone().project(camera);
+  f.sample(Math.floor(((q.x * 0.5 + 0.5) * GW - f.ox) / f.kpx) + 0.5, Math.floor(((q.y * 0.5 + 0.5) * GH - f.oy) / f.kpx) + 0.5, sample);
+  return sample;
+}
+
+/** Motion-smear streaks in a laid-out figure (flat, part-less solids): their lengths in texels. */
+function smears(f: PixelFigure): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < f.count; i++) {
+    const fl = f.get(i, 'flags');
+    if (f.get(i, 'part') !== PART.NONE || !(fl & PF.FLAT) || fl & PF.DECAL) continue;
+    out.push(Math.hypot(f.get(i, 'bx') - f.get(i, 'ax'), f.get(i, 'by') - f.get(i, 'ay')));
+  }
+  return out;
+}
+
 /** Private boss fields / methods the tests drive (JS has no privacy; TS needs the cast). */
 type Any = Record<string, unknown> & { [k: string]: any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -236,13 +268,74 @@ describe('PixelCast alignment: Patient Zero (z2 boss)', () => {
     run(e, 1.0);
     const worst = check(world, camera, e, EYE, LOOK);
     expectAligned(worst, 'pz frenzy slam armed');
-    expect(worst.prims).toBeLessThanOrEqual(MAX_PRIMS - 6);
+    // (Gameplay parts are emitted first: an overflow would drop cosmetics — and there is headroom.)
+    expect(worst.prims).toBeLessThanOrEqual(140);
     e.setState('idle');
     b.nextAttack = 99;
     run(e, 0.3);
     b.burstEye((b.eyes as unknown[])[0]);
     run(e, 0.1);
     expectAligned(check(world, camera, e, EYE, LOOK), 'pz burst eye');
+  });
+
+  it('the roar spreads the tentacles past the 256-texel cap: the wide paint class keeps 1 texel per pixel', () => {
+    const { world, camera, e, b } = pz();
+    e.hp = e.maxHp * 0.6;
+    b.phase = 1;
+    b.pendingPhase = 1;
+    e.setState('roar');
+    let widest = 0;
+    for (let i = 0; i < 6; i++) {
+      run(e, 0.4);
+      const f = paintAt(world, camera, e, EYE, LOOK);
+      expect(f.layout(1, 24, 256)).toBe(true);
+      expect(f.kpx, `texel size ${(i + 1) * 0.4} s into the roar`).toBe(1);
+      expect(f.W).toBeLessThanOrEqual(MAX_WIDE);
+      if (f.W > widest && f.W > 256) {
+        // (A figure that doesn't opt in grows its texels at the cap.)
+        const g = paintAt(world, camera, e, EYE, LOOK);
+        g.maxWide = 0;
+        g.layout(1, 24, 256);
+        expect(g.kpx).toBe(2);
+      }
+      widest = Math.max(widest, f.W);
+    }
+    expect(widest, 'the roar is wider than the 256 cap (the case the wide class is for)').toBeGreaterThan(256);
+  });
+
+  it('hit flashes are latched: a flash that began between redraws shows on the next redraw only (eye red, body brighter)', () => {
+    const { world, camera, e, b } = pz();
+    const fleshId = material('pz|flesh', () => {
+      throw new Error('painter material missing');
+    });
+    const fleshTone = (f: PixelFigure) => {
+      let m = -9;
+      for (let i = 0; i < f.count; i++) if (f.get(i, 'mat') === fleshId && !(f.get(i, 'flags') & PF.DECAL)) m = Math.max(m, f.data[i * PRIM_FLOATS + PRIM_LAYOUT.TONE]);
+      return m;
+    };
+    const base = fleshTone(paintAt(world, camera, e, EYE, LOOK));
+    // A critical hit on the big eye flashed after that redraw — and was over (0.06 s) before the next.
+    const eye = (b.eyes as { mesh: THREE.Mesh; hit: THREE.Mesh }[])[0];
+    run(e, 0.02);
+    b.lastHit = { object: eye.hit, part: 'weak' };
+    b.lastFlash = e.age;
+    run(e, 0.07);
+    let f = paintAt(world, camera, e, EYE, LOOK);
+    f.layout(1, 24, 256);
+    expect(sampleAt(f, camera, eye.mesh.getWorldPosition(new THREE.Vector3())).mat, 'latched red flash on the eye').toBe(Mat.glow(0xff3020));
+    run(e, 0.08);
+    f = paintAt(world, camera, e, EYE, LOOK);
+    f.layout(1, 24, 256);
+    expect(sampleAt(f, camera, eye.mesh.getWorldPosition(new THREE.Vector3())).mat, 'one redraw only').not.toBe(Mat.glow(0xff3020));
+    // A body hit (the belly): the flesh layers brighten for one redraw.
+    const belly = (b.fleshMeshes as THREE.Mesh[]).find((m) => m.parent === b.torso)!;
+    run(e, 0.01);
+    b.lastHit = { object: belly, part: 'torso' };
+    b.lastFlash = e.age;
+    run(e, 0.02);
+    expect(fleshTone(paintAt(world, camera, e, EYE, LOOK)) - base, 'body flash').toBeGreaterThanOrEqual(0.3);
+    run(e, 0.08);
+    expect(fleshTone(paintAt(world, camera, e, EYE, LOOK)) - base).toBeLessThan(0.05);
   });
 
   it('death: convulsing, heart ruptured, sinking into the pool (still painted)', () => {
@@ -340,6 +433,46 @@ describe('PixelCast alignment: the Behemoth (z3 boss)', () => {
     run(e, 0.8);
     place(e);
     expectAligned(check(world, camera, e, EYE, LOOK), 'behemoth staggered');
+  });
+
+  it('smears only on swings, measured against the body: a 6 m jump of the giant draws none, a wild swing is clamped', () => {
+    const { world, camera, e, b } = behemoth();
+    b.go('swipe');
+    run(e, 0.05);
+    place(e);
+    paintAt(world, camera, e, EYE, LOOK);
+    // The whole giant jumps 6 m sideways between redraws (a placement jump, the rig, a leap): no smear.
+    run(e, 0.02);
+    place(e);
+    e.root.position.x += 6;
+    let f = paintAt(world, camera, e, EYE, LOOK);
+    f.layout(1, 24, 256);
+    expect(smears(f), 'no smear for a body move').toEqual([]);
+    // A wild swing (the arm flung through 2 rad between redraws): smeared, at most 20 texels.
+    run(e, 0.02);
+    place(e);
+    e.root.position.x += 6;
+    paintAt(world, camera, e, EYE, LOOK);
+    run(e, 0.06);
+    place(e);
+    e.root.position.x += 6;
+    (b.shR as THREE.Object3D).rotation.x += 2;
+    f = paintAt(world, camera, e, EYE, LOOK);
+    f.layout(1, 24, 256);
+    const sm = smears(f);
+    expect(sm.length, 'a swing smears').toBeGreaterThan(0);
+    for (const l of sm) expect(l, 'smear length (texels)').toBeLessThanOrEqual(20.5);
+    // Running (not a swing): never smeared, however the hands move.
+    b.go('chase');
+    run(e, 0.02);
+    place(e);
+    paintAt(world, camera, e, EYE, LOOK);
+    run(e, 0.06);
+    place(e);
+    (b.shR as THREE.Object3D).rotation.x += 2;
+    f = paintAt(world, camera, e, EYE, LOOK);
+    f.layout(1, 24, 256);
+    expect(smears(f)).toEqual([]);
   });
 
   it('death: staggering, then toppling (still painted, no overflow)', () => {

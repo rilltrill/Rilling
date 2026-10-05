@@ -61,13 +61,20 @@ const P0 = { x: 0, y: 0, z: 0 };
 const P1 = { x: 0, y: 0, z: 0 };
 const D = PF.FLAT;
 
-/** Hit flash a mesh is showing (the bosses swap the hit part to a white / red glow): 0 none, 1 white, 2 red. */
+/** The critical-hit flash colour (`Kit.glow(0xff3020, 1.2)`), linear like the material's. */
+const FLASH_RED = new THREE.Color(0xff3020).multiplyScalar(1.2);
+
+/**
+ * Hit flash a mesh is showing (the bosses swap the hit part to a white / red glow): 0 none,
+ * 1 white, 2 red. Matched exactly: an over-bright glow of the part's own (the heart's red,
+ * the enraged core's white-hot) is not a flash.
+ */
 function flashOf(m: THREE.Mesh): number {
   const mat = m.material as THREE.MeshBasicMaterial;
   if (!mat || mat.isMeshBasicMaterial !== true || !mat.color) return 0;
   const c = mat.color;
-  if (c.b > 1.05 && c.g > 1.05) return 1;
-  if (c.r > 1.05 && c.g < 0.4 && c.b < 0.4) return 2;
+  if (c.r > 1.05 && c.r === c.g && c.g === c.b) return 1;
+  if (Math.abs(c.r - FLASH_RED.r) < 1e-3 && Math.abs(c.g - FLASH_RED.g) < 1e-3 && Math.abs(c.b - FLASH_RED.b) < 1e-3) return 2;
   return 0;
 }
 
@@ -241,30 +248,30 @@ function pzm() {
     // Muted dark meat (the 3D's FLESH 0x8a4038 / RAW 0x9a2a26), matte: rot blotches in a
     // darker brown-red, purple bruising, dark veins (ROT pattern).
     M.flesh = material('pz|flesh', () => ({
-      ramp: makeRamp(0x9a3a30, { light: 0.42, sat: 0.95 }),
+      ramp: makeRamp(0xa2382c, { light: 0.44, sat: 1.0 }),
       pattern: PAT.MEAT,
       scale: 0.32,
-      strength: 0.8,
-      secondary: Mat.flat(0x6a2a24, 'pzrot'),
-      tertiary: Mat.flat(0x4e2436, 'pzbruise'),
+      strength: 0.72,
+      secondary: Mat.flat(0x7a2a22, 'pzrot'),
+      tertiary: Mat.flat(0x5a2032, 'pzbruise'),
       glow: false,
       dither: 0.06,
       spec: 0.08,
     }));
     // Dying flesh: grey, desaturated, a sallow rot.
     M.fleshGrey = material('pz|fleshg', () => ({
-      ramp: makeRamp(0x6e524c, { light: 0.38, sat: 0.65 }),
+      ramp: makeRamp(0x8e5c54, { light: 0.42, sat: 0.7 }),
       pattern: PAT.MEAT,
       scale: 0.32,
       strength: 0.8,
-      secondary: Mat.flat(0x4e403a, 'pzrotg'),
-      tertiary: Mat.flat(0x3e3442, 'pzbruiseg'),
+      secondary: Mat.flat(0x6a4a44, 'pzrotg'),
+      tertiary: Mat.flat(0x4e3c48, 'pzbruiseg'),
       glow: false,
       dither: 0.06,
       spec: 0.03,
     }));
     // Tentacles: pebbled hide with soft seams (ringed, muscular), the 3D's flesh tone.
-    M.tent = material('pz|tent', () => ({ ramp: makeRamp(0x8e3a30, { light: 0.45, sat: 1.0 }), pattern: PAT.SCALES, scale: 0.36, strength: 0.7, secondary: 0, glow: false, dither: 0.12, spec: 0.1 }));
+    M.tent = material('pz|tent', () => ({ ramp: makeRamp(0x9a362c, { light: 0.45, sat: 1.0 }), pattern: PAT.SCALES, scale: 0.36, strength: 0.7, secondary: 0, glow: false, dither: 0.12, spec: 0.1 }));
     // Raw wet lumps (the only bright, wet pinks): darker raw patches, pale blister clusters.
     M.raw = material('pz|raw', () => ({
       ramp: makeRamp(0xa83a32, { light: 0.5, sat: 1.05 }),
@@ -281,7 +288,7 @@ function pzm() {
     M.skin = Mat.deadSkin(0xa8948a, 0.7);
     // The patient's face: a greyer dead-patient tone (the 3D's SKIN 0xa8948a).
     M.face = material('pz|face', () => ({
-      ramp: makeRamp(0xb09890, { light: 0.5, sat: 1.0 }),
+      ramp: makeRamp(0xb89488, { light: 0.5, sat: 1.1, shift: 0.6 }),
       pattern: PAT.MEAT,
       scale: 0.16,
       strength: 0.45,
@@ -291,12 +298,12 @@ function pzm() {
       dither: 0.06,
       spec: 0.05,
     }));
-    M.faceGrey = material('pz|faceg', () => ({ ramp: makeRamp(0x8a807c, { light: 0.42, sat: 0.7 }), pattern: PAT.MEAT, scale: 0.16, strength: 0.45, secondary: Mat.flat(0x5e5050, 'pzsoreg'), tertiary: 0, glow: false, dither: 0.12, spec: 0.03 }));
+    M.faceGrey = material('pz|faceg', () => ({ ramp: makeRamp(0xa08c84, { light: 0.45, sat: 0.75, shift: 0.6 }), pattern: PAT.MEAT, scale: 0.16, strength: 0.45, secondary: Mat.flat(0x5e5050, 'pzsoreg'), tertiary: 0, glow: false, dither: 0.12, spec: 0.03 }));
     // Lid rims / the fleshy brow mass the eyes sit in: pink inflamed flesh with a lit top edge.
     M.lidRim = material('pz|lidrim', () => ({ ramp: makeRamp(0xa45a50, { light: 0.55, sat: 1.0 }), pattern: PAT.NONE, scale: 0.1, strength: 0, secondary: 0, glow: false, dither: 0.1, spec: 0.22 }));
     M.drool = Mat.blood(0x8a2a24);
     M.nostril = Mat.mouth(0x2a0a0a);
-    M.bone = Mat.bone(0xdcc8a4);
+    M.bone = Mat.bone(0xe6d8b8);
     M.claw = Mat.bone(0xd8c6a2);
     M.cavity = Mat.mouth(0x240505);
     M.heart = Mat.glow(0xff2a2a);
@@ -401,8 +408,8 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
   const tor = R.torso;
   const ch = R.chest;
   const bd = R.body;
-  // Dying flesh darkens (−0.3 by 2 s) and greys out as it collapses.
-  const rot = dying ? -Math.min(0.3, st.stateTime * 0.15) : 0;
+  // Dying flesh darkens (a notch by 2 s) and greys out as it collapses.
+  const rot = dying ? -Math.min(0.24, st.stateTime * 0.12) : 0;
   const grey = dying && st.stateTime > 1.1;
   const fleshM = grey ? M.fleshGrey : M.flesh;
   const rawM = grey ? M.fleshGrey : M.raw;
@@ -796,7 +803,7 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
 //   (weak: a heavy forehead in the shadow of the brim, a brow ridge, cheekbones,
 //   ears, a dropped jaw with tooth rows, orange-red slit eyes in dark sockets,
 //   the split skull glowing under the brim) in a yellow hard hat (armour: a
-//   domed crown with a ridge over a disc brim); arms: deltoids, torn sleeve
+//   domed crown with a ridge over the brim's shadowed lip); arms: deltoids, torn sleeve
 //   hems, elbow knobs, forearms swelling to the wrist, a steel sheet strapped to
 //   the left forearm (armour), huge hands with jointed fingers that twitch;
 //   jeans with a ragged cuff over steel-toe work boots; from behind, shoulder
@@ -935,12 +942,12 @@ function bem() {
     M.eye = Mat.glow(0xff5a1a);
     M.eyeHot = Mat.glow(0xffa040);
     M.socket = Mat.mouth(0x140a06);
-    M.gash = Mat.glow(0xffe25a);
+    M.gash = Mat.glow(0xffa83a);
     M.crack = Mat.mouth(0x2a0604);
     M.mouth = Mat.mouth(0x3a0606);
     M.teeth = Mat.teeth(0xd8cca0);
     // Hard hat: hat-yellow all over the dome (a soft sheen, not a pale grey highlight).
-    M.hat = material('bz|hat', () => ({ ramp: makeRamp(0xe8b818, { light: 0.3, sat: 1.05 }), pattern: PAT.NONE, scale: 0.1, strength: 0, secondary: 0, glow: false, dither: 0.06, spec: 0.3 }));
+    M.hat = material('bz|hat', () => ({ ramp: makeRamp(0xe8b818, { light: 0.42, sat: 1.15 }), pattern: PAT.NONE, scale: 0.1, strength: 0, secondary: 0, glow: false, dither: 0.06, spec: 0.25 }));
     M.hatDark = material('bz|hatd', () => ({ ramp: makeRamp(0xc0900e, { light: 0.3, sat: 1.05 }), pattern: PAT.NONE, scale: 0.1, strength: 0, secondary: 0, glow: false, dither: 0.06, spec: 0.2 }));
     M.sticker = Mat.flat(0x2a2a2a, 'bzsticker');
     M.glint = Mat.glow(0xfff6d0);
@@ -1115,7 +1122,10 @@ export function paintBehemoth(f: PixelFigure, R: BehemothRig, st: BehemothPose):
     f.ellipsoid(w, 0, 0, 0.0, 0.74, 0.76, 0.06, flash ? M.white : M.char).flag(PF.FLAT | (flash ? PF.GLOW : 0)).rag(0.08 * ws, PF.SPIKY).seed(41);
     if (glow) f.decal(f.at(w, 0, 0, 0.06), f.at(w, 0, 0, 0.06), 0.62 * ws, 0.64 * ws, flash ? M.white : M.rim).flag(D | PF.GLOW).rag(0.05 * ws, PF.SPIKY).seed(42);
     const pulse = 1 + 0.1 * Math.sin(t * (hot ? 9 : 5));
-    f.ellipsoid(R.core, 0, 0, 0, 0.46, 0.46, 0.5, flash ? M.white : !coreOn ? M.coreDead : hot ? M.coreOrange : M.core).flag(glow ? PF.GLOW : 0).z(-0.04);
+    const coreM = flash ? M.white : !coreOn ? M.coreDead : hot ? M.coreOrange : M.core;
+    f.ellipsoid(R.core, 0, 0, 0, 0.46, 0.46, 0.5, coreM).flag(glow ? PF.GLOW : 0).z(-0.04);
+    // (The band decal above paints the whole layer: the core's own colour goes back on over it.)
+    if (glow) f.decal(f.at(R.core, 0, 0, 0.45), f.at(R.core, 0, 0, 0.45), 0.44 * cs, 0.42 * cs, coreM).flag(D | PF.GLOW);
     if (coreOn && !flash) {
       if (hot) {
         // Heat bands: yellow, then a white centre at most 40 % of the core's radius.
@@ -1190,21 +1200,22 @@ export function paintBehemoth(f: PixelFigure, R: BehemothRig, st: BehemothPose):
     const dl = 0.15 + 0.1 * Math.sin(t * 1.3);
     f.cone(f.at(jw, 0.18, -0.2, 0.5), f.at(jw, 0.19 + Math.sin(t * 2.1) * 0.03, -0.3 - dl, 0.52), 0.05 * hs, 0.03 * hs, M.blood).part(PART.NONE).z(-0.1).min(0.5);
   }
-  // The split skull under the brim: a dark crack with a glowing seam.
+  // The split skull under the brim: a jagged dark crack slanting down the forehead, a thin hot
+  // seam in it (orange, thin and diagonal: never a yellow band under the hat).
   {
-    const a = -0.3;
-    f.decal(alongZ(f, h, -0.18, 0.84, 0.52, a, -0.3), alongZ(f, h, -0.18, 0.84, 0.52, a, 0.3), 0.1 * hs, 0.08 * hs, M.crack).flag(D).rag(0.03 * hs, PF.SPIKY).seed(55);
-    f.decal(alongZ(f, h, -0.18, 0.84, 0.53, a, -0.25), alongZ(f, h, -0.18, 0.84, 0.53, a, 0.25), 0.055 * hs, 0.045 * hs, flashOf(R.weak[4] ?? R.core) ? M.white : dying ? M.crack : M.gash).flag(D | (dying ? 0 : PF.GLOW)).min(0.5);
+    const a = -0.45;
+    f.decal(alongZ(f, h, -0.16, 0.82, 0.52, a, -0.26), alongZ(f, h, -0.16, 0.82, 0.52, a, 0.26), 0.08 * hs, 0.06 * hs, M.crack).flag(D).rag(0.03 * hs, PF.SPIKY).seed(55);
+    f.decal(alongZ(f, h, -0.16, 0.82, 0.53, a, -0.2), alongZ(f, h, -0.16, 0.82, 0.53, a, 0.2), 0.03 * hs, 0.025 * hs, flashOf(R.weak[4] ?? R.core) ? M.white : dying ? M.crack : M.gash).flag(D | (dying ? 0 : PF.GLOW)).min(0.5);
   }
 
-  // ── Hard hat (armour): a yellow domed crown over a disc brim, the ridge, sticker, glint ──
+  // ── Hard hat (armour): a yellow domed crown over the brim, the ridge, sticker, glint ──
   // (The dome's lower half is inside the head: only the cap above the brim shows.)
   f.layer(0.02 * s, PART.ARMOR, 0, -0.24 * s);
-  f.ellipsoid(h, 0, 1.05, -0.02, 0.6, 0.35, 0.64, M.hat).k(0.02 * s);
-  // Brim: the lip overhanging the face (a flat pill across the front: from below it shows
-  // above the forehead, never over it) and the rim out past the temples (behind the face).
-  f.coneE(f.at(h, -0.5, 0.955, 0.64), f.at(h, 0.5, 0.955, 0.64), f.dir(h, 0, 1, 0), f.dir(h, 0, 0, 1), 0.035 * hs, 0.22 * hs, 0.035 * hs, 0.22 * hs, M.hat).tone(-0.05).k(0.015 * s);
-  f.cone(f.at(h, -0.8, 0.955, 0.02), f.at(h, 0.8, 0.955, 0.02), 0.05 * hs, 0.05 * hs, M.hat).tone(-0.1).k(0.015 * s);
+  // (The crown a touch taller than the 3D's, so the dome reads above the brim from the truck.)
+  f.ellipsoid(h, 0, 1.08, -0.02, 0.6, 0.42, 0.64, M.hat).k(0.02 * s).tone(0.04);
+  // Brim: the lip overhanging the face, its underside in shadow (a flat pill across the front:
+  // from below it shows above the forehead, never over it).
+  f.coneE(f.at(h, -0.52, 0.955, 0.62), f.at(h, 0.52, 0.955, 0.62), f.dir(h, 0, 1, 0), f.dir(h, 0, 0, 1), 0.035 * hs, 0.24 * hs, 0.035 * hs, 0.24 * hs, M.hat).tone(-0.24).k(0.015 * s);
   if (f.facing(f.at(h, 0, 1.1, 0.6), f.dir(h, 0, 0.2, 1)) > 0.05) {
     f.decal(f.at(h, -0.16, 1.12, 0.6), f.at(h, 0.16, 1.12, 0.6), 0.08 * hs, 0.08 * hs, M.sticker).flag(D);
     // The raised centre ridge, front to back.
