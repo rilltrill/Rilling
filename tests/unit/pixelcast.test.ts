@@ -247,6 +247,20 @@ describe('PixelCast alignment (sprite parts land on the hitboxes)', () => {
       run(e, e.windup * 0.3 + 0.2);
       expectAligned(check(world, camera, e), `${variant} pounce`);
     });
+
+    it(`raptor ${variant}: head-on pounce at the camera (the maw)`, () => {
+      const { world, camera } = makeWorld();
+      const e = spawn(world, 'raptor', 0.2, -6.5, { variant });
+      run(e, 0.1);
+      e.root.rotation.y = 0;
+      e.setState('windup');
+      run(e, e.windup * 0.9);
+      e.root.rotation.y = 0;
+      run(e, 0.02);
+      expectAligned(check(world, camera, e), `${variant} head-on windup`);
+      run(e, e.windup * 0.1 + 0.15);
+      expectAligned(check(world, camera, e), `${variant} head-on pounce`);
+    });
   }
 });
 

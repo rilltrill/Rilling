@@ -29,7 +29,7 @@ import {
   type TrikeRig,
 } from './dinoKit';
 import type { PixelFigure } from '../../gameplay/pixel/figure';
-import { paintTheropod, type TheroPose } from '../pixel/theropod';
+import { paintTheropod, theroMem, type TheroPose } from '../pixel/theropod';
 
 /**
  * PRIMAL ISLAND dinosaur roster:
@@ -139,7 +139,7 @@ abstract class Theropod extends Dino {
 
   /** Theropods whose pixel art is drawn (the rest use the 3D impostor bake). */
   protected pixelArt = false;
-  private readonly pose2d: TheroPose = { jaw: 0, squash: 0, time: 0, quills: 0, sickle: false, breath: 1 };
+  protected readonly pose2d: TheroPose = { jaw: 0, squash: 0, time: 0, quills: 0, sickle: false, breath: 1, mem: theroMem() };
 
   override paintPixels(f: PixelFigure): boolean {
     if (!this.pixelArt || !this.r || !this.model.visible) return false;
