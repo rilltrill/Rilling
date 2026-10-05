@@ -180,6 +180,8 @@ const XM = {
   teeth: 0,
   throat: 0,
   pupil: 0,
+  /** Teeth / claws / mouth / pupils as the painter's `M` (built once: no object per redraw). */
+  shared: { teeth: 0, claw: 0, throat: 0, pupil: 0 } as BossDXShared,
   dart: 0,
   dartTip: 0,
   dartGlow: 0,
@@ -213,6 +215,7 @@ function xm() {
     XM.teeth = Mat.teeth(0xeee2c2);
     XM.throat = Mat.mouth(0x5e1414);
     XM.pupil = Mat.flat(0x140c06);
+    XM.shared = { teeth: XM.teeth, claw: XM.scythe, throat: XM.throat, pupil: XM.pupil };
     XM.dart = Mat.bone(0xe8e2d4);
     XM.dartTip = XM.edge;
     XM.dartGlow = XM.stripe[2];
@@ -238,7 +241,7 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
   const C = R.skins[li];
   // Teeth, claws, mouth and pupils (shared entries).
   const XS = xm();
-  const M = { teeth: XS.teeth, claw: XS.scythe, throat: XS.throat, pupil: XS.pupil };
+  const M = XS.shared;
   // (The 3D's lit hide barely darkens at mid cloak, then sinks to near black.)
   const dark = -0.4 * ck * ck * ck;
   const sc = scaleOf(r.pelvis);
