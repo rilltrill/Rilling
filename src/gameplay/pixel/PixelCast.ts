@@ -108,6 +108,18 @@ const PAINT_FRAG = /* glsl */ `
     return d;
   }
 
+  // Signed distance to a triangle (iq).
+  float sdTri(vec2 p, vec2 p0, vec2 p1, vec2 p2) {
+    vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
+    vec2 v0 = p - p0, v1 = p - p1, v2 = p - p2;
+    vec2 pq0 = v0 - e0 * clamp(dot(v0, e0) / max(dot(e0, e0), 1e-6), 0.0, 1.0);
+    vec2 pq1 = v1 - e1 * clamp(dot(v1, e1) / max(dot(e1, e1), 1e-6), 0.0, 1.0);
+    vec2 pq2 = v2 - e2 * clamp(dot(v2, e2) / max(dot(e2, e2), 1e-6), 0.0, 1.0);
+    float s = e0.x * e2.y - e0.y * e2.x >= 0.0 ? 1.0 : -1.0;
+    vec2 d = min(min(vec2(dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)), vec2(dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x))), vec2(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)));
+    return -sqrt(d.x) * (d.y >= 0.0 ? 1.0 : -1.0);
+  }
+
   // Stamp cell code → material (slot), absolute tone (−1 = shade the layer), tone shift, flags.
   void stampCode(int c, vec4 T2, vec4 T4, out float m, out float ab, out float dt, out int sf) {
     m = 0.0;
@@ -199,6 +211,38 @@ const PAINT_FRAG = /* glsl */ `
             cSeed = 0.0;
             cT = 0.5;
             cAbs = sab;
+            cFore = 1.0;
+          }
+          continue;
+        }
+        if ((flags & 512) != 0) {
+          // ── Flat triangle (membranes, blades, plates): A, B in T0, C in T1.xy. ──
+          vec4 T4 = texelFetch(uPrims, ivec2(4, i), 0);
+          float d = sdTri(p, T0.xy, T0.zw, T1.xy) - T4.x;
+          float k = max(T2.w, 1e-3);
+          float wb = clamp(0.5 + 0.5 * (lD - d) / k, 0.0, 1.0);
+          float hh = max(k - abs(lD - d), 0.0) / k;
+          float z = 0.5 * (T1.z + T1.w);
+          if (lD > 1e8) {
+            lG = vec2(0.0, 1.0);
+            lR = 1.0;
+            lZ = z;
+            lQ = 1.0;
+          } else lZ = mix(lZ, z, wb);
+          lD = min(lD, d) - hh * hh * k * 0.25;
+          bool covers = d < 0.0;
+          if (covers ? (!cCov || z < cZ) : (!cCov && d < cD)) {
+            cCov = covers;
+            cZ = z;
+            cD = d;
+            cMat = T2.x;
+            cU = p.x * z / uTexS;
+            cV = p.y * z / uTexS;
+            cTone = T4.z;
+            cFlags = flags;
+            cSeed = T3.w;
+            cT = 0.5;
+            cAbs = -1.0;
             cFore = 1.0;
           }
           continue;

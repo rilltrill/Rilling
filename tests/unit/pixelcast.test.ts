@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS, type HitPart } from '../../src/core/types';
 import { Civilian } from '../../src/gameplay/Civilian';
 import type { Entity, ShotHit } from '../../src/gameplay/Entity';
 import type { Enemy } from '../../src/gameplay/Enemy';
-import { PixelFigure, PART, sdRoundCone, MAX_PRIMS, MAX_KPX, NEAR_CLIP, type FigureSample } from '../../src/gameplay/pixel/figure';
+import { PixelFigure, PART, sdRoundCone, sdTriangle, MAX_PRIMS, MAX_KPX, NEAR_CLIP, type FigureSample } from '../../src/gameplay/pixel/figure';
 import { makeRamp, Mat, STEPS, materialTable } from '../../src/gameplay/pixel/materials';
 import { nullHud } from './sim';
 
@@ -160,6 +160,13 @@ function expectAligned(c: Check, label: string) {
 }
 
 describe('PixelCast figures', () => {
+  it('triangle distance is exact on simple cases', () => {
+    // Right triangle (0,0) (4,0) (0,4).
+    expect(sdTriangle(1, 1, 0, 0, 4, 0, 0, 4)).toBeCloseTo(-1, 5);
+    expect(sdTriangle(-2, 1, 0, 0, 4, 0, 0, 4)).toBeCloseTo(2, 5);
+    expect(sdTriangle(1, -3, 0, 0, 4, 0, 0, 4)).toBeCloseTo(3, 5);
+  });
+
   it('round cone distance is exact on simple cases', () => {
     expect(sdRoundCone(0, 0, 0, 0, 10, 0, 2, 2)).toBeCloseTo(-2, 5);
     expect(sdRoundCone(5, 3, 0, 0, 10, 0, 2, 2)).toBeCloseTo(1, 5);
@@ -277,19 +284,22 @@ describe('PixelCast alignment (sprite parts land on the hitboxes)', () => {
 });
 
 describe('PixelCast alignment: the rest of the z1 / d1 rosters', () => {
-  const cases: [string, number, number, Record<string, unknown>][] = [
+  // [id, x, z, opts, yaw] — yaw 0.4 is a 3/4 front view; big quadrupeds are checked in a 3/4 side view.
+  const cases: [string, number, number, Record<string, unknown>, number?][] = [
     ['crawler', 0.2, -4, {}],
     ['bloater', 0.3, -5.5, {}],
     ['spitter', -0.3, -6, {}],
     ['brute', 0.2, -7, {}],
     ['compy', 0.2, -4, {}],
     ['dilo', 0.3, -7, {}],
+    ['ptero', 0.3, -6, {}],
+    ['trike', 0.5, -12, {}, 1.0],
   ];
-  for (const [id, x, z, opts] of cases) {
+  for (const [id, x, z, opts, yaw] of cases) {
     it(`${id}: advancing and winding up`, () => {
       const { world, camera } = makeWorld();
       const e = spawn(world, id, x, z, opts);
-      e.root.rotation.y = 0.4;
+      e.root.rotation.y = yaw ?? 0.4;
       run(e, 0.3);
       expectAligned(check(world, camera, e), `${id} advance`);
       e.setState('windup');

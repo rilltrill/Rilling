@@ -49,6 +49,8 @@ export const PF = {
   SHADE_ONLY: 128,
   /** A hand-pixelled bitmap (`stamps.ts`), drawn screen-aligned by whole texels. */
   STAMP: 256,
+  /** A flat TRIANGLE (A, B and C — C is stored in the radius slots): membranes, blades, plates. */
+  TRI: 512,
 } as const;
 
 /** Hit-part code of a primitive (alignment tests / gore). */
@@ -154,6 +156,29 @@ export function sdRoundCone(px: number, py: number, ax: number, ay: number, bx: 
   if (k < 0) return Math.sqrt(h * n) - ra;
   if (k > cx) return Math.sqrt(h * (n + 1 - 2 * qy)) - rb;
   return m - ra;
+}
+
+/** Signed distance from (px, py) to the triangle (ax, ay) (bx, by) (cx, cy) (iq). */
+export function sdTriangle(px: number, py: number, ax: number, ay: number, bx: number, by: number, cx: number, cy: number): number {
+  const e0x = bx - ax, e0y = by - ay;
+  const e1x = cx - bx, e1y = cy - by;
+  const e2x = ax - cx, e2y = ay - cy;
+  const v0x = px - ax, v0y = py - ay;
+  const v1x = px - bx, v1y = py - by;
+  const v2x = px - cx, v2y = py - cy;
+  const c0 = Math.min(1, Math.max(0, (v0x * e0x + v0y * e0y) / Math.max(e0x * e0x + e0y * e0y, 1e-9)));
+  const c1 = Math.min(1, Math.max(0, (v1x * e1x + v1y * e1y) / Math.max(e1x * e1x + e1y * e1y, 1e-9)));
+  const c2 = Math.min(1, Math.max(0, (v2x * e2x + v2y * e2y) / Math.max(e2x * e2x + e2y * e2y, 1e-9)));
+  const q0x = v0x - e0x * c0, q0y = v0y - e0y * c0;
+  const q1x = v1x - e1x * c1, q1y = v1y - e1y * c1;
+  const q2x = v2x - e2x * c2, q2y = v2y - e2y * c2;
+  const s = Math.sign(e0x * e2y - e0y * e2x) || 1;
+  const d0 = q0x * q0x + q0y * q0y, s0 = s * (v0x * e0y - v0y * e0x);
+  const d1 = q1x * q1x + q1y * q1y, s1 = s * (v1x * e1y - v1y * e1x);
+  const d2 = q2x * q2x + q2y * q2y, s2 = s * (v2x * e2y - v2y * e2x);
+  const dd = Math.min(d0, d1, d2);
+  const ss = Math.min(s0, s1, s2);
+  return -Math.sqrt(dd) * Math.sign(ss || -1);
 }
 
 /** Result of `PixelFigure.sample` (CPU reference of the GPU paint pass's coverage). */
@@ -507,6 +532,65 @@ export class PixelFigure {
     return this;
   }
 
+  /**
+   * A flat filled TRIANGLE between world points a, b, c (projected exactly — it
+   * shears with the view like the real surface): wing membranes, blades, frill
+   * fans, plates. Flat-shaded; corners rounded by `round` metres. In a layer it
+   * melts with its neighbours like any primitive (blend `k`), so a polygon made of
+   * a few triangles is one shape with one outline.
+   */
+  tri(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, mat: number, round = 0): this {
+    if (this.curLayer < 0) this.layer();
+    if (this.count >= MAX_PRIMS) {
+      this.overflow++;
+      this.last = -1;
+      return this;
+    }
+    if (this.depth(a) < NEAR_CLIP || this.depth(b) < NEAR_CLIP || this.depth(c) < NEAR_CLIP) {
+      this.clipped++;
+      this.last = -1;
+      return this;
+    }
+    const i = this.count++;
+    const d = this.data;
+    const off = i * PRIM_FLOATS;
+    const pa = this.project(a, PA);
+    const pb = this.project(b, PB);
+    const sa = this.S / pa.z;
+    const sb = this.S / pb.z;
+    const ld = this.layerDepth[this.curLayer];
+    d[off + AX] = pa.x;
+    d[off + AY] = pa.y;
+    d[off + BX] = pb.x;
+    d[off + BY] = pb.y;
+    const zc = this.depth(c);
+    const pc = this.project(c, PA);
+    d[off + RA] = pc.x;
+    d[off + RB] = pc.y;
+    d[off + ZA] = pa.z + ld;
+    d[off + ZB] = (pb.z + zc) * 0.5 + ld;
+    d[off + MA] = mat;
+    d[off + MB] = mat;
+    d[off + SPLIT] = 2;
+    d[off + K] = this.layerK[this.curLayer] * 0.5 * (sa + sb);
+    d[off + LAYER] = this.curLayer;
+    d[off + FLAGS] = PF.TRI | PF.FLAT;
+    d[off + RAG] = 0;
+    d[off + SEED] = (i * 7.31) % 97;
+    d[off + U0] = round * 0.5 * (sa + sb);
+    d[off + ULEN] = 0;
+    d[off + TONE] = this.layerTone[this.curLayer];
+    d[off + PARTI] = this.layerPart[this.curLayer];
+    this.minPx[i] = 0;
+    this.last = i;
+    this.lastS = 0.5 * (sa + sb);
+    this.minDepth = Math.min(this.minDepth, pa.z, pb.z, zc);
+    this.foot.expandByPoint(a);
+    this.foot.expandByPoint(b);
+    this.foot.expandByPoint(c);
+    return this;
+  }
+
   /** Texels one stamp cell of `cellM` metres at world point `p` would be (k = 1): pick stamp sizes. */
   px(p: THREE.Vector3, m: number): number {
     return m * this.pxPerM(p);
@@ -616,6 +700,15 @@ export class PixelFigure {
     const rs = Math.sqrt(sx * sy);
     for (let i = 0; i < this.count; i++) {
       const o = i * PRIM_FLOATS;
+      if (d[o + FLAGS] & PF.TRI) {
+        d[o + RA] = c.x + (d[o + RA] - c.x) * sx;
+        d[o + RB] = c.y + (d[o + RB] - c.y) * sy;
+        d[o + AX] = c.x + (d[o + AX] - c.x) * sx;
+        d[o + BX] = c.x + (d[o + BX] - c.x) * sx;
+        d[o + AY] = c.y + (d[o + AY] - c.y) * sy;
+        d[o + BY] = c.y + (d[o + BY] - c.y) * sy;
+        continue;
+      }
       d[o + AX] = c.x + (d[o + AX] - c.x) * sx;
       d[o + BX] = c.x + (d[o + BX] - c.x) * sx;
       d[o + AY] = c.y + (d[o + AY] - c.y) * sy;
@@ -725,6 +818,16 @@ export class PixelFigure {
     for (let i = 0; i < n; i++) {
       const o = i * PRIM_FLOATS;
       if (d[o + FLAGS] & PF.DECAL) continue;
+      if (d[o + FLAGS] & PF.TRI) {
+        const r = d[o + U0] + 1;
+        x0 = Math.min(x0, d[o + AX] - r, d[o + BX] - r, d[o + RA] - r);
+        x1 = Math.max(x1, d[o + AX] + r, d[o + BX] + r, d[o + RA] + r);
+        y0 = Math.min(y0, d[o + AY] - r, d[o + BY] - r, d[o + RB] - r);
+        y1 = Math.max(y1, d[o + AY] + r, d[o + BY] + r, d[o + RB] + r);
+        z0 = Math.min(z0, d[o + ZA], d[o + ZB]);
+        z1 = Math.max(z1, d[o + ZA], d[o + ZB]);
+        continue;
+      }
       const r = d[o + FLAGS] & PF.STAMP ? d[o + RA] * 8 : Math.max(d[o + RA], d[o + RB]) + d[o + RAG] + 1;
       x0 = Math.min(x0, d[o + AX] - r, d[o + BX] - r);
       x1 = Math.max(x1, d[o + AX] + r, d[o + BX] + r);
@@ -795,6 +898,31 @@ export class PixelFigure {
             tmp[t + BB1] = sy;
             tmp[t + BB2] = sx + st.w * cell;
             tmp[t + BB3] = sy + st.h * cell;
+            w++;
+            continue;
+          }
+          if (d[o + FLAGS] & PF.TRI) {
+            const ax = (d[o + AX] - this.ox) / k;
+            const ay = (d[o + AY] - this.oy) / k;
+            const bx = (d[o + BX] - this.ox) / k;
+            const by = (d[o + BY] - this.oy) / k;
+            const cx = (d[o + RA] - this.ox) / k;
+            const cy = (d[o + RB] - this.oy) / k;
+            const rr = d[o + U0] / k;
+            const kk = d[o + K] / k;
+            tmp[t + AX] = ax;
+            tmp[t + AY] = ay;
+            tmp[t + BX] = bx;
+            tmp[t + BY] = by;
+            tmp[t + RA] = cx;
+            tmp[t + RB] = cy;
+            tmp[t + U0] = rr;
+            tmp[t + K] = kk;
+            const reach = rr + kk + 1;
+            tmp[t + BB0] = Math.min(ax, bx, cx) - reach;
+            tmp[t + BB1] = Math.min(ay, by, cy) - reach;
+            tmp[t + BB2] = Math.max(ax, bx, cx) + reach;
+            tmp[t + BB3] = Math.max(ay, by, cy) + reach;
             w++;
             continue;
           }
@@ -920,6 +1048,23 @@ export class PixelFigure {
           cCov = true;
           cZ = z;
           cD = -0.5;
+          cI = i;
+        }
+        continue;
+      }
+      if (d[o + FLAGS] & PF.TRI) {
+        const di = sdTriangle(x, y, d[o + AX], d[o + AY], d[o + BX], d[o + BY], d[o + RA], d[o + RB]) - d[o + U0];
+        const k = Math.max(d[o + K], 1e-3);
+        const z = (d[o + ZA] + d[o + ZB]) * 0.5;
+        const wb = shareB(lD, di, k);
+        const hh = Math.max(k - Math.abs(lD - di), 0) / k;
+        lZ = lD > 1e8 ? z : lZ + (z - lZ) * wb;
+        lD = Math.min(lD, di) - hh * hh * k * 0.25;
+        const covers = di < 0;
+        if (covers ? !cCov || z < cZ : !cCov && di < cD) {
+          cCov = covers;
+          cZ = z;
+          cD = di;
           cI = i;
         }
         continue;

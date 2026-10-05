@@ -30,6 +30,7 @@ import {
 } from './dinoKit';
 import type { PixelFigure } from '../../gameplay/pixel/figure';
 import { paintFrill, paintTheropod, theroMem, type TheroPose } from '../pixel/theropod';
+import { paintPtero, paintTrike } from '../pixel/beasts';
 
 /**
  * PRIMAL ISLAND dinosaur roster:
@@ -1321,6 +1322,11 @@ export class Ptero extends Dino {
     this.landShake = 0.03;
   }
 
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.r || !this.model.visible) return false;
+    return paintPtero(f, this.r, PTERO_PAL);
+  }
+
   protected override build() {
     this.r = buildPtero(this.model, PTERO_PAL);
     this.model.scale.setScalar(0.88);
@@ -1769,6 +1775,11 @@ export class Trike extends Dino {
     this.toppleDelay = 0.6;
     this.toppleDur = 0.65;
     this.deathFriction = 2.2;
+  }
+
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.r || !this.model.visible) return false;
+    return paintTrike(f, this.r, TRIKE_PAL);
   }
 
   protected override build() {
