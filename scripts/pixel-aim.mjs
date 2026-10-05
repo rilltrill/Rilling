@@ -74,7 +74,7 @@ await page.evaluate(async (place) => {
   window.__aim = { list, THREE };
 }, place);
 // Let a few frames render (sprites are tracked and painted in the frame loop).
-await page.waitForTimeout(800);
+await page.waitForTimeout(Number(args.wait ?? 2500));
 const res = await page.evaluate(async () => {
   const g = window.__game;
   const w = g.world;
