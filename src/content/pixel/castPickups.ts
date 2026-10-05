@@ -43,6 +43,8 @@ interface Mats {
   bombBand: number;
   fuse: number;
   gem: number;
+  /** Self-lit facets (pale → deep), like the 3D's glowing gem. */
+  gemG: number[];
   shine: number;
   spark: number;
   ring: number;
@@ -76,7 +78,13 @@ function mats(color: number): Mats {
     bomb: Mat.gloss(0x3a4630),
     bombBand: Mat.plate(0x2a2e28),
     fuse: Mat.cloth(0xb08a50, { strength: 0.3 }),
-    gem: enamelMat(color, 0.55, 0.42),
+    gem: enamelMat(dark, 0.4, 0.5),
+    gemG: [
+      Mat.glow(pale),
+      Mat.glow(color),
+      Mat.glow(new THREE.Color().setHSL(hsl.h, Math.min(1, hsl.s), hsl.l * 0.72).getHex()),
+      Mat.glow(new THREE.Color().setHSL(hsl.h - 0.02, Math.min(1, hsl.s), hsl.l * 0.5).getHex()),
+    ],
     shine: Mat.glow(0xffffff),
     spark: Mat.glow(pale),
     ring: Mat.glow(color),
@@ -159,8 +167,8 @@ function medkit(f: PixelFigure, g: THREE.Object3D, M: Mats, s: number, sh: numbe
         // The shine: a pale diagonal streak sweeping left → right across the face.
         const x = -hx + (2 * hx + 0.1) * sh - 0.05;
         const dir = i === 4 ? 1 : -1;
-        paint(f, g, dir * (x - 0.08), -hy + 0.03, z, dir * (x + 0.08), hy - 0.03, z, 0.018, M.shine);
-        paint(f, g, dir * (x + 0.01), -hy + 0.05, z, dir * (x + 0.12), hy - 0.06, z, 0.007, M.shine);
+        paint(f, g, dir * (x - 0.05), -hy * 0.55, z, dir * (x + 0.05), hy * 0.55, z, 0.02, M.spark);
+        paint(f, g, dir * (x + 0.04), -hy * 0.35, z, dir * (x + 0.1), hy * 0.35, z, 0.008, M.spark);
       }
     } else if (i === 0 || i === 1) {
       const x = i === 0 ? hx : -hx;
@@ -219,8 +227,8 @@ function crate(f: PixelFigure, g: THREE.Object3D, M: Mats, s: number, kind: Pick
     }
     if (sh >= 0 && ax === 2) {
       const x = (-along + (2 * along + 0.1) * sh - 0.05) * sg;
-      paint(f, g, x - 0.09 * sg, -hy + 0.03, sg * hz, x + 0.09 * sg, hy - 0.03, sg * hz, 0.018, M.shine);
-      paint(f, g, x + 0.0 * sg, -hy + 0.05, sg * hz, x + 0.12 * sg, hy - 0.06, sg * hz, 0.007, M.shine);
+      paint(f, g, x - 0.06 * sg, -hy * 0.55, sg * hz, x + 0.06 * sg, hy * 0.55, sg * hz, 0.02, M.spark);
+      paint(f, g, x + 0.04 * sg, -hy * 0.35, sg * hz, x + 0.11 * sg, hy * 0.35, sg * hz, 0.008, M.spark);
     }
   }
   if (sh >= 0.3 && sh < 0.9) sparkle(f, f.at(g, 0.12, hy + 0.07, 0), 0.08 * (1 - Math.abs(sh - 0.6) * 3), M.spark, 0.6);
@@ -292,29 +300,34 @@ const GEM_V = [
 function gem(f: PixelFigure, g: THREE.Object3D, M: Mats, s: number, time: number, sh: number) {
   // The 3D: an octahedron r 0.25 stretched 1.4× in Y (apexes at ±0.35).
   const top = 0.35;
-  f.layer(0.004 * s, PART.TORSO);
   const n = f.vec();
-  for (let half = 0; half < 2; half++) {
-    const ay = half === 0 ? top : -top;
-    for (let i = 0; i < 4; i++) {
-      const v0 = GEM_V[i];
-      const v1 = GEM_V[(i + 1) % 4];
-      const A = f.at(g, 0, ay, 0);
-      const B = f.at(g, v0[0], 0, v0[2]);
-      const C = f.at(g, v1[0], 0, v1[2]);
-      // Facet normal (world) from its corners, outward.
-      n.subVectors(B, A).cross(f.vec().subVectors(C, A)).normalize();
-      if (half === 0) n.negate();
-      const mid = f.vec().copy(A).add(B).add(C).divideScalar(3);
-      if (f.facing(mid, n) < 0.0) continue;
-      // Upper facets catch the light; lower ones fall into the deep gold.
-      f.tri(A, B, C, M.gem, 0.004).tone(faceTone(n, 1.6) + (half === 0 ? 0.08 : -0.1));
-      // A pale edge line where the facet meets its neighbour (crystal edges).
-      f.decal(A, B, 0.006, 0.006, M.gem).flag(PF.FLAT | PF.SHADE_ONLY | PF.NO_OUTLINE).tone(0.3).min(0.5);
+  // Two passes: a dark-gold rim a hair bigger behind (the outline), then the
+  // self-lit facets in four glow steps by how each faces the light, crystal edges.
+  for (let pass = 0; pass < 2; pass++) {
+    f.layer(0.004 * s, PART.TORSO, 0, pass === 0 ? 0.03 : 0);
+    for (let half = 0; half < 2; half++) {
+      const ay = half === 0 ? top : -top;
+      for (let i = 0; i < 4; i++) {
+        const v0 = GEM_V[i];
+        const v1 = GEM_V[(i + 1) % 4];
+        const A = f.at(g, 0, ay, 0);
+        const B = f.at(g, v0[0], 0, v0[2]);
+        const C = f.at(g, v1[0], 0, v1[2]);
+        n.subVectors(B, A).cross(f.vec().subVectors(C, A)).normalize();
+        if (half === 0) n.negate();
+        const mid = f.vec().copy(A).add(B).add(C).divideScalar(3);
+        if (f.facing(mid, n) < 0.0) continue;
+        if (pass === 0) {
+          f.tri(A, B, C, M.gem, 0.02);
+          continue;
+        }
+        const t = faceTone(n, 1.6) + (half === 0 ? 0.08 : -0.12);
+        const m = t > 0.5 ? M.gemG[0] : t > -0.06 ? M.gemG[1] : t > -0.22 ? M.gemG[2] : M.gemG[3];
+        f.tri(A, B, C, m, 0.002).flag(PF.GLOW);
+        f.decal(A, B, 0.006, 0.006, M.gemG[0]).flag(PF.FLAT | PF.GLOW | PF.NO_OUTLINE).min(0.5);
+      }
     }
   }
-  // The girdle: a bright line round the widest point.
-  hoop(f, g, 1, 0, 0.25 * 0.72, 0.006, M.gem, true, 8, false, 0.25);
   // Twinkle: the apex star breathes; the shine passes a second star across.
   const tw = 0.5 + 0.5 * Math.sin(time * 4.2);
   sparkle(f, f.at(g, 0, top * 0.82, 0), 0.05 + 0.05 * tw, M.spark, 0.6);
