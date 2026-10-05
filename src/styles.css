@@ -2007,6 +2007,11 @@ button {
   min-width: min(440px, 86vw);
 }
 
+.pause-art {
+  justify-content: center;
+  gap: 2ch;
+}
+
 .btn.quit {
   color: #ff8a80;
 }

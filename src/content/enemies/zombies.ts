@@ -7,6 +7,11 @@ import { angleDelta, clamp, lerp, smoothstep } from '../../core/math';
 import { registerEnemy } from '../registry';
 import { Kit } from '../kit/ModelKit';
 import type { HumanoidRig, Limb } from '../kit/humanoid';
+import type { PixelFigure } from '../../gameplay/pixel/figure';
+import { humanMem, paintHuman, paintLooseArm, type HumanPose } from '../pixel/human';
+import { paintBloaterBelly, paintBruteArmour, paintBruteScars, paintCrawlerWaist, paintPustules, paintSac, paintSpitterVeins } from '../pixel/zombieParts';
+import { HAND } from '../../gameplay/pixel/stamps';
+import { Mat } from '../../gameplay/pixel/materials';
 import {
   ZBody,
   footWorld,
@@ -165,6 +170,47 @@ export abstract class Zombie extends Enemy {
   private hangT = 0;
   private hangVy = 0;
   private unframedT = 0;
+
+  /** Body parts this zombie has flung into the world (severed limbs): ART: SPRITES draws each as its own sprite. */
+  looseParts(): readonly { obj: THREE.Object3D }[] {
+    return this.flyers;
+  }
+
+  // ─── ART: SPRITES (PixelCast) ────────────────────────────────────────────
+
+  /** Zombie types whose pixel art is drawn (the rest use the 3D impostor bake). */
+  protected pixelArt = false;
+  protected readonly pose2d: HumanPose = { severed: this.severed, headless: false, jaw: 0, face: 'zombie', squash: 0, time: 0, speed: 0, smear: 1, mem: humanMem() };
+
+  /** Jaw for the painter: a slow groan, gaping through the windup, snapping shut on the bite. */
+  protected pixelJaw(): number {
+    const t = this.stateTime;
+    if (this.state === 'windup') return clamp(0.25 + (t / Math.max(0.1, this.windup)) * 0.9, 0, 1);
+    if (this.state === 'recover') return t < 0.12 ? 0 : 0.2;
+    if (this.state === 'dying') return 0.55;
+    if (this.state === 'stagger') return 0.7;
+    // A slow groan with a chattering jaw on top (each zombie its own rhythm).
+    return 0.12 + 0.2 * Math.max(0, Math.sin(this.age * 1.6 + this.seed)) + 0.06 * Math.max(0, Math.sin(this.age * 17 + this.seed * 3));
+  }
+
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.pixelArt || !this.r || !this.b) return false;
+    const p = this.pose2d;
+    p.headless = this.headless;
+    p.jaw = this.pixelJaw();
+    p.time = this.age;
+    p.speed = this.state === 'dying' ? 0 : this.groundSpeed;
+    // Squash on the hit reactions (they decay over ~0.3 s).
+    const k = Math.max(this.kHead, this.kTorso, this.kArmL, this.kArmR) * this.flinch;
+    p.squash = this.state === 'dying' ? 0 : k * k;
+    return paintHuman(f, this.r, this.b.look, p);
+  }
+
+  override paintPart(obj: THREE.Object3D, f: PixelFigure): boolean {
+    if (!this.pixelArt || !this.b) return false;
+    const whole = obj.userData.limb === 'arm';
+    return paintLooseArm(f, obj, whole, this.b.look);
+  }
 
   /** After configure()/build(), before the entry starts: adapt to the player being on foot or in a vehicle. */
   private adaptToRig() {
@@ -631,6 +677,7 @@ export abstract class Zombie extends Enemy {
     // Bloody stump left on the body.
     Kit.add(parent, Kit.box(0.11, 0.05, 0.12), STUMP_MAT(), pivot.position.x, pivot.position.y + (whole ? 0 : 0.01), pivot.position.z);
     this.severed[idx] = whole ? 2 : 1;
+    pivot.userData.limb = whole ? 'arm' : 'forearm';
     this.launchLimb(pivot, hit.dir, side);
     this.unrig(arm, whole);
     const fx = this.world.fx;
@@ -809,6 +856,8 @@ export abstract class Zombie extends Enemy {
     if (this.deathBaseY > -0.5) {
       this.pool = Kit.add(this.root, Kit.cyl(0.55, 0.55, 0.01, 10), POOL_MAT(), 0, 0.012, 0, 0, rng.next() * 3, 0, 0.01, 1, 0.01);
       this.pool.userData.noFlash = true;
+      // ART: SPRITES: the pool stays a real mesh on the ground under the sprite.
+      this.pool.userData.spriteKeep3D = true;
     }
   }
 
@@ -1047,6 +1096,7 @@ const UNFRAMED_MAX = 8;
 
 /** Bread-and-butter shambler. One headshot or three body shots. */
 export class Walker extends Zombie {
+  protected override pixelArt = true;
   protected variant = 'civilian';
   protected limp = 0;
   protected lean = 0.18;
@@ -1170,6 +1220,7 @@ const LUNGE_MAX_DROP = 1.5;
 
 /** Fresh infected: sprints in hunched, lunges, low hp. */
 export class Runner extends Zombie {
+  protected override pixelArt = true;
   private lunged = false;
   private lungeFrom = new THREE.Vector3();
   private lungeTo = new THREE.Vector3();
@@ -1559,6 +1610,7 @@ function solveArm(sy: number, sz: number, hy: number, hz: number, l1: number, l2
 
 /** Legless torso dragging itself on its arms. Pounces at your face from ~3 m. */
 export class Crawler extends Zombie {
+  protected override pixelArt = true;
   private legless = true;
   /** Pivot for everything below the waist (counter-rotated to drag flat). */
   private drag!: THREE.Group;
@@ -1640,6 +1692,12 @@ export class Crawler extends Zombie {
       b.part(drag, Kit.capsule(0.035, 0.18, 2, 5), GUTS, 0.0, -0.24, 0.05, 0.5, 0, 0.6, 1, 1, 1, 0, 'torso');
     }
     this.finishBody();
+    // ART: SPRITES — torn in half: no pelvis or legs, a gore stump and guts trailing along the drag pivot.
+    if (this.legless) {
+      this.pose2d.legless = true;
+      this.pose2d.pelvis = false;
+      this.pose2d.torso = (f) => paintCrawlerWaist(f, this.r, this.drag, this.b.bulk);
+    }
   }
 
   protected override riseDepth() {
@@ -2084,6 +2142,7 @@ export class Crawler extends Zombie {
 export const BRUTE_HEAD_STAGGER_COOLDOWN = 1.6;
 
 export class Brute extends Zombie {
+  protected override pixelArt = true;
   private stepIdx = 0;
   /** Age at the last headshot stagger (see onDamaged). */
   private headStaggerAt = -99;
@@ -2188,6 +2247,16 @@ export class Brute extends Zombie {
     for (let i = 0; i < 4; i++) b.box(r.spine, 0.06, 0.012, 0.014, 0x2a1a1a, 0.04 + 0.008 * i, 0.04 + i * 0.04, bz + 0.006, 0, 0, 0.2);
     b.box(r.spine, 0.1, 0.08, 0.012, BLOOD_DARK, -0.12, 0.12, bz + 0.004);
     this.finishBody();
+    // ART: SPRITES — shirtless, riot trousers; thick limbs, fists, armour plates, spikes.
+    Object.assign(b.look, { shirt: skin, sleeveColor: skin, sleeves: 'none', pants: 0x28324a, pantsPat: 'cloth', shoes: 0x1a1a1c, tie: null, jacket: null, vest: null, hat: null, inner: null, badge: null, belt: 0x1e1a18, rags: 0, ribs: 0, chestBlood: false });
+    const p = this.pose2d;
+    p.armW = ms > 0 ? [1.5 * 1.25, 1.5] : [1.5, 1.5 * 1.25];
+    p.legW = 1.55;
+    p.neckW = 2.1;
+    p.hand = HAND.FIST;
+    const parts = { r, bulk: b.bulk, chestW: w, bz, armLen: b.al, mutant: ms };
+    p.extra = (f) => paintBruteArmour(f, parts, this.severed);
+    p.torso = (f) => paintBruteScars(f, r, bz);
   }
 
   protected override riseDepth() {
@@ -2312,6 +2381,7 @@ export class Brute extends Zombie {
 
 /** Keeps its distance and spits shootable bile. Shoot the glowing throat sac. */
 export class Spitter extends Zombie {
+  protected override pixelArt = true;
   private sacPivot!: THREE.Group;
   private sac!: THREE.Mesh;
   private mouth!: THREE.Object3D;
@@ -2362,6 +2432,10 @@ export class Spitter extends Zombie {
     this.sac.scale.set(1.15, 0.95, 1);
     this.mouth = Kit.pivot(r.head, 0, 0.07 * hs, b.faceZ + 0.05);
     this.finishBody();
+    // ART: SPRITES — glowing chest veins and the throat sac (weak point).
+    const chestZ = b.chestZ;
+    this.pose2d.torso = (f) => paintSpitterVeins(f, this.r, chestZ);
+    this.pose2d.extra = (f) => paintSac(f, this.sacPivot);
   }
 
   protected override strike() {
@@ -2447,6 +2521,7 @@ export class Spitter extends Zombie {
 
 /** Waddling gas-bag. Pop its pustules; it explodes on death (hurts other zombies) or bursts on you. */
 export class Bloater extends Zombie {
+  protected override pixelArt = true;
   private belly!: THREE.Group;
   private pustules: THREE.Mesh[] = [];
 
@@ -2486,7 +2561,9 @@ export class Bloater extends Zombie {
     const r = this.r;
     const sb = Math.sqrt(b.bulk);
     const undershirt = rng.pick([0xc8c0a0, 0x9a9a8a, 0x8a6a5a]);
-    b.clothes({ shirt: undershirt, sleeves: 'none', pants: rng.pick([0x3a3a3a, 0x2e3d5c, 0x4a3a2a]), shoes: 0x1c1c1c });
+    const pants = rng.pick([0x3a3a3a, 0x2e3d5c, 0x4a3a2a]);
+    b.clothes({ shirt: undershirt, sleeves: 'none', pants, shoes: 0x1c1c1c });
+    Object.assign(b.look, { shirt: undershirt, sleeveColor: skin, sleeves: 'none', pants, pantsPat: 'cloth', shoes: 0x1c1c1c, tie: null, jacket: null, vest: null, inner: null, badge: null, rags: 0, ribs: 0 });
     // Puffy cheeks and neck rolls.
     b.box(r.head, 0.06, 0.08, 0.1, skin, 0.1 * b.hs, 0.08 * b.hs, 0.04, 0, 0, 0, 0.26);
     b.box(r.head, 0.06, 0.08, 0.1, skin, -0.1 * b.hs, 0.08 * b.hs, 0.04, 0, 0, 0, 0.26);
@@ -2522,6 +2599,11 @@ export class Bloater extends Zombie {
       this.pustules.push(m);
     }
     this.finishBody();
+    // ART: SPRITES — the swollen belly melts into the trunk; pustules (weak) glow on top; a thick neck.
+    const bellyMat = Mat.deadSkin(skin);
+    this.pose2d.neckW = 2.1;
+    this.pose2d.torso = (f) => paintBloaterBelly(f, this.belly, bellyMat);
+    this.pose2d.extra = (f) => paintPustules(f, this.pustules, this.belly, this.r.chest);
   }
 
   protected override onDamaged(hit: ShotHit, amount: number) {

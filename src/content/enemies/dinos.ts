@@ -28,6 +28,9 @@ import {
   type TheroSpec,
   type TrikeRig,
 } from './dinoKit';
+import type { PixelFigure } from '../../gameplay/pixel/figure';
+import { paintFrill, paintTheropod, theroMem, type TheroPose } from '../pixel/theropod';
+import { paintPtero, paintTrike } from '../pixel/beasts';
 
 /**
  * PRIMAL ISLAND dinosaur roster:
@@ -132,6 +135,24 @@ abstract class Theropod extends Dino {
   protected civSide = 0;
 
   protected abstract makeSpec(): TheroSpec;
+
+  // ─── ART: SPRITES (PixelCast) ────────────────────────────────────────────
+
+  /** Theropods whose pixel art is drawn (the rest use the 3D impostor bake). */
+  protected pixelArt = false;
+  protected readonly pose2d: TheroPose = { jaw: 0, squash: 0, time: 0, quills: 0, sickle: false, breath: 1, mem: theroMem() };
+
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.pixelArt || !this.r || !this.model.visible) return false;
+    const p = this.pose2d;
+    p.jaw = this.jawOpen;
+    p.time = this.age;
+    p.quills = this.spec.quills;
+    p.sickle = this.spec.sickle;
+    p.breath = this.r.torso.scale.y;
+    p.squash = this.state === 'dying' ? 0 : Math.min(1, this.flinch) ** 2 * 0.8;
+    return paintTheropod(f, this.r, this.spec, p);
+  }
 
   protected override build() {
     this.spec = this.makeSpec();
@@ -676,6 +697,7 @@ const COMPY_PAL: Palette = {
 };
 
 export class Compy extends Theropod {
+  protected override pixelArt = true;
   private hopT = 0;
   private hopDur = 0.26;
   private hopH = 0.18;
@@ -755,6 +777,12 @@ export class Compy extends Theropod {
       compact: true,
       texDensity: 3,
     };
+  }
+
+  protected override build() {
+    super.build();
+    // Too small for a quill row: a few bristles.
+    this.pose2d.dorsal = 0.35;
   }
 
   protected override speedFactor(): number {
@@ -869,6 +897,7 @@ const RAPTOR_PALS: Record<string, Palette> = {
 };
 
 export class Raptor extends Theropod {
+  protected override pixelArt = true;
   private variant = 'tan';
 
   protected override configure() {
@@ -981,8 +1010,11 @@ const FRILL_K = 0x1c1410;
 const VENOM = 0xa8f040;
 
 export class Dilo extends Theropod {
+  protected override pixelArt = true;
   private frill: THREE.Group[] = [];
   private frillOpen = 0;
+  /** ART: SPRITES — the neck frill fans (weak point) painted behind the head. */
+  private readonly paintFrill = (f: PixelFigure) => paintFrill(f, this.frill, this.spec);
 
   protected override configure() {
     const rng = this.world.rng;
@@ -1084,6 +1116,7 @@ export class Dilo extends Theropod {
     }
     this.refreshMeshes();
     this.applyFrill();
+    this.pose2d.extra = this.paintFrill;
   }
 
   private applyFrill() {
@@ -1287,6 +1320,11 @@ export class Ptero extends Dino {
     this.sinkDepth = 0.5;
     this.landDust = 0.8;
     this.landShake = 0.03;
+  }
+
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.r || !this.model.visible) return false;
+    return paintPtero(f, this.r, PTERO_PAL);
   }
 
   protected override build() {
@@ -1737,6 +1775,11 @@ export class Trike extends Dino {
     this.toppleDelay = 0.6;
     this.toppleDur = 0.65;
     this.deathFriction = 2.2;
+  }
+
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.r || !this.model.visible) return false;
+    return paintTrike(f, this.r, TRIKE_PAL);
   }
 
   protected override build() {

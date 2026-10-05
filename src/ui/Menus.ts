@@ -2,7 +2,7 @@ import type { CampaignDef, StageDef } from '../gameplay/StageTypes';
 import { INITIAL_CHARS, cleanInitials, type Save } from '../core/Save';
 import type { AudioSystem } from '../audio/Audio';
 import type { SfxName } from '../audio/names';
-import type { CampaignId, Grade, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
+import type { ArtStyle, CampaignId, Grade, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
 import { haptic } from '../core/Haptics';
 import { applyComfort, el, escapeHtml, onTap } from './dom';
 import { cityCardArt, jungleCardArt, LOCK_ICON, SKULL_ICON, TUTORIAL_ART } from './art';
@@ -24,6 +24,8 @@ export interface MenuActions {
   continueNo(): void;
   /** Attract mode: start a self-playing demo stage behind a DEMO PLAY banner. */
   startDemo(): void;
+  /** Switch the character art live (pause-screen chip). */
+  setArt(art: ArtStyle): void;
 }
 
 /** Context shown on the pause screen. */
@@ -31,6 +33,8 @@ export interface PauseInfo {
   stage: string;
   campaign?: string;
   score: number;
+  /** Character art in effect (the ART chip lights it). */
+  art?: ArtStyle;
 }
 
 /** Arcade name entry after a qualifying run. */
@@ -89,7 +93,7 @@ const SHAKE_OPTS: [number, string][] = [
   [1, 'FULL'],
 ];
 type ToggleKey = 'haptics' | 'aimAssist' | 'autoReload' | 'leftHanded' | 'showFps' | 'reduceFlashes';
-type SegKey = 'quality' | 'retro' | 'screenShake';
+type SegKey = 'quality' | 'retro' | 'screenShake' | 'art';
 
 /**
  * Show the DISPLAY (CRT / PIXEL / OFF) setting and apply Settings.retro to the
@@ -817,6 +821,10 @@ export class Menus {
         ['off', 'OFF'],
       ] as [RetroMode, string][], st, commit);
     }
+    this.segRow(colA, 'ART', 'art', [
+      ['3d', '3D'],
+      ['sprites', 'SPRITES'],
+    ] as [ArtStyle, string][], st, commit);
     this.segRow(colA, 'SCREEN SHAKE', 'screenShake', SHAKE_OPTS, st, commit, 'SHAKE');
     this.toggleRow(colA, 'SHOW FPS', 'showFps', st, commit);
     this.toggleRow(colB, 'AIM ASSIST', 'aimAssist', st, commit);
@@ -977,6 +985,26 @@ export class Menus {
     }
     const col = el('div', 'menu-col pause-col', s);
     this.button(col, 'RESUME', () => this.actions.resume(), 'primary big');
+    if (info?.art) {
+      // One-tap A/B of the character art (live, behind the pause veil).
+      const row = el('div', 'set-row seg-row pause-art', col);
+      el('span', 'set-label', row, 'ART');
+      const wrap = el('div', 'set-seg', row);
+      for (const [value, text] of [
+        ['3d', '3D'],
+        ['sprites', 'SPRITES'],
+      ] as [ArtStyle, string][]) {
+        const b = el('button', `seg ${value === info.art ? 'on' : ''}`, wrap, text);
+        b.setAttribute('aria-label', `ART ${text}`);
+        onTap(b, () => {
+          wrap.querySelectorAll('.seg').forEach((x) => x.classList.remove('on'));
+          b.classList.add('on');
+          info.art = value;
+          this.feedback('ui_click');
+          this.actions.setArt(value);
+        });
+      }
+    }
     const grid = el('div', 'menu-grid', col);
     this.button(grid, 'RESTART STAGE', () => this.actions.restart(), 'small');
     this.button(grid, 'SETTINGS', () => this.showSettings(() => this.showPause(info)), 'small');

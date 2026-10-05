@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Kit } from '../kit/ModelKit';
+import { Kit, RETRO_DETAIL } from '../kit/ModelKit';
 import { Textures, type TexName } from '../kit/Textures';
 import { Enemy, ndcInPlayArea, type EnemyState } from '../../gameplay/Enemy';
 import type { ShotHit } from '../../gameplay/Entity';
@@ -136,6 +136,7 @@ uniform vec4 uSkinDens;
 uniform vec4 uSkinGain;
 uniform float uSkinLit;
 uniform float uSkinRim;
+uniform float uRetroDetail;
 varying vec4 vSurf;
 varying vec3 vSkinPos;
 varying vec4 vStripe;
@@ -161,7 +162,7 @@ const SKIN_FRAG_MAIN = `#include <color_fragment>
   vec3 s3 = texture2D(uSkin3, suv * uSkinDens.w).rgb * uSkinGain.w;
   float id = vSurf.x;
   vec3 st = id < 0.5 ? s0 : (id < 1.5 ? s1 : (id < 2.5 ? s2 : s3));
-  diffuseColor.rgb *= mix(vec3(1.0), st, vSurf.z);
+  diffuseColor.rgb *= max(mix(vec3(1.0), st, vSurf.z * uRetroDetail), vec3(0.0));
 }`;
 // Albedo-proportional glow (uSkinLit) + a soft silhouette rim so creatures pop
 // off dark foliage / night skies through the arcade monitor pass.
@@ -188,6 +189,7 @@ function buildSkin(density: number, lit: number, rim: number): THREE.MeshLambert
     uSkinGain: { value: new THREE.Vector4(t[0].gain, t[1].gain, t[2].gain, t[3].gain) },
     uSkinLit: { value: lit },
     uSkinRim: { value: rim },
+    uRetroDetail: RETRO_DETAIL,
   };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);

@@ -9,6 +9,8 @@ import { createEnemy, registerEnemy } from '../../registry';
 import { z1Scene } from './env';
 import { bakeInto, texGlow } from './bake';
 import type { HitPart } from '../../../core/types';
+import type { PixelFigure } from '../../../gameplay/pixel/figure';
+import { paintButcher, type ButcherPose, type ButcherRig } from '../../pixel/bosses';
 import type { Projectile } from '../../../gameplay/Projectile';
 
 /** Chest pustules [x, y, z, radius, hp] in chest space; belly ones in spine space. */
@@ -422,6 +424,44 @@ export class Butcher extends Boss {
     this.root.add(this.lookPivot);
     this.strafeSeed = this.world.rng.next() * 10;
     this.spine.rotation.x = 0.28;
+    // ART: SPRITES — what the painter reads (live joints and the weak-point meshes).
+    this.pix = {
+      hips: this.hips,
+      spine: this.spine,
+      chest: this.chest,
+      head: this.head,
+      jaw: this.jaw,
+      shL: this.shL,
+      shR: this.shR,
+      elL: this.elL,
+      elR: this.elR,
+      hipL: this.hipL,
+      hipR: this.hipR,
+      knL: this.knL,
+      knR: this.knR,
+      heart: this.heart,
+      apron: this.apron,
+      handL: this.handL,
+      hook: this.hookInHand,
+      barrel: this.propBarrel,
+      door: this.propDoor,
+      mouthGlow: this.mouthGlow,
+      pustules: [
+        ...this.pustules.map((p, i) => ({ mesh: p.mesh, r: PUS_CHEST[i][3], belly: false })),
+        ...this.bellyPustules.map((p, i) => ({ mesh: p.mesh, r: PUS_BELLY[i][3], belly: true })),
+      ],
+      bellyGroup: this.spine.getObjectByName('bellyPustules') ?? null,
+    };
+  }
+
+  private pix: ButcherRig | null = null;
+  private readonly pose2d: ButcherPose = { apronOn: true, time: 0 };
+
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.pix || !this.model.visible) return false;
+    this.pose2d.apronOn = !this.apronOff;
+    this.pose2d.time = this.age;
+    return paintButcher(f, this.pix, this.pose2d);
   }
 
   /**

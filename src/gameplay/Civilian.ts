@@ -5,6 +5,8 @@ import type { World } from './World';
 import { buildHumanoid, type HumanoidRig } from '../content/kit/humanoid';
 import { Kit } from '../content/kit/ModelKit';
 import { bakeHumanoid, releaseGeos, ZT, type BakedHumanoid, type ZSurface } from '../content/enemies/zombieKit';
+import { humanLook, paintHuman, type HumanLook, type HumanPose } from '../content/pixel/human';
+import type { PixelFigure } from './pixel/figure';
 
 interface CivLook {
   shirt: number;
@@ -52,6 +54,9 @@ export class Civilian extends Entity {
   rescued = false;
   shot = false;
   private runDir = 1;
+  /** ART: SPRITES — what the PixelCast painter draws. */
+  private look: HumanLook;
+  private pose2d: HumanPose = { severed: [0, 0], headless: false, jaw: 0.8, face: 'scream', squash: 0, time: 0, speed: 0 };
 
   constructor(world: World, pos: THREE.Vector3, frame: Frame, variant = 'default') {
     super(world);
@@ -77,6 +82,7 @@ export class Civilian extends Entity {
     const neck = r.neck.children.find((c) => (c as THREE.Mesh).isMesh);
     if (neck) neck.userData.z = 'none';
     dressCivilian(r, variant, v);
+    this.look = civilianLook(variant, v);
     this.baked = bakeHumanoid(this.rig, { skin: v.skin });
     this.root.add(this.rig.root);
     this.runDir = world.rng.chance(0.5) ? 1 : -1;
@@ -137,6 +143,16 @@ export class Civilian extends Entity {
     r.head.rotation.y = Math.sin(t * 0.3) * 0.4;
   }
 
+  override paintPixels(f: PixelFigure): boolean {
+    const p = this.pose2d;
+    p.time = this.age;
+    // Screaming in panic; a gasp when hit; relieved once rescued.
+    p.face = this.rescued ? 'calm' : 'scream';
+    p.jaw = this.rescued ? 0.15 : this.shot ? 0.9 : 0.55 + 0.35 * Math.abs(Math.sin(this.age * 5.3));
+    p.speed = this.rescued ? 5 : 0;
+    return paintHuman(f, this.rig, this.look, p);
+  }
+
   override onShot(hit: ShotHit): ShotOutcome {
     if (this.shot || this.rescued) return { kind: 'civilian', counts: false };
     this.shot = true;
@@ -149,6 +165,41 @@ export class Civilian extends Entity {
 }
 
 // ─── Look ────────────────────────────────────────────────────────────────────
+
+/** The same outfit, described for the pixel-art painter (ART: SPRITES). */
+function civilianLook(variant: string, v: CivLook): HumanLook {
+  const base = humanLook({
+    dead: false,
+    skin: v.skin,
+    hair: v.hair,
+    shirt: v.shirt,
+    sleeveColor: v.shirt,
+    sleeves: v.short ? 'short' : 'long',
+    pants: v.pants,
+    pantsPat: 'denim',
+    shoes: 0x2a221c,
+    shirtPat: v.shirtTex === ZT.PLAID ? 'plaid' : 'cloth',
+    outfit: 'casual',
+    inner: 0xe8e4da,
+    mouthOpen: true,
+    rags: 0,
+    seed: (v.shirt ^ v.skin) & 0xffff,
+  });
+  switch (variant) {
+    case 'scientist':
+      return { ...base, outfit: 'scientist', jacket: v.shirt, inner: 0x2f66d0, tie: 0xd02428, pantsPat: 'cloth', badge: 0xf8f8f8 };
+    case 'ranger':
+      return { ...base, outfit: 'ranger', inner: null, hat: 0x6e5a32, belt: 0x3a2a18, pantsPat: 'cloth' };
+    case 'cop':
+      return { ...base, outfit: 'cop', inner: null, tie: 0x1c2440, badge: 0xe8c040, belt: 0x161414, pantsPat: 'cloth' };
+    case 'nurse':
+      return { ...base, outfit: 'nurse', inner: null, bun: true, hat: 0xf6f6f2, pantsPat: 'cloth' };
+    case 'worker':
+      return { ...base, outfit: 'flannel', inner: 0xeeeae0, belt: 0x6a4424 };
+    default:
+      return base;
+  }
+}
 
 /** Add a box to a joint before baking (surface `t`, self-lit `e`). */
 function part(parent: THREE.Object3D, w: number, h: number, d: number, color: number, x: number, y: number, z: number, t?: ZSurface, e?: number, rx = 0, rz = 0) {

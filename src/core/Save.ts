@@ -128,6 +128,13 @@ function cleanSettings(s: Settings): Settings {
   const shake = Number(s.screenShake);
   s.screenShake = Number.isFinite(shake) ? Math.min(1, Math.max(0, shake)) : DEFAULT_SETTINGS.screenShake;
   s.reduceFlashes = !!s.reduceFlashes;
+  if (s.art !== '3d' && s.art !== 'sprites') s.art = DEFAULT_SETTINGS.art;
+  // ART default generation 2 = SPRITES. A save from before (where '3d' was simply
+  // the stored default) moves to the new default once; choices made since stick.
+  if (s.artV !== DEFAULT_SETTINGS.artV) {
+    s.art = DEFAULT_SETTINGS.art;
+    s.artV = DEFAULT_SETTINGS.artV;
+  }
   return s;
 }
 
@@ -189,7 +196,8 @@ export class Save {
       return {
         ...base,
         ...parsed,
-        settings: cleanSettings({ ...DEFAULT_SETTINGS, ...comfortDefaults(this.reducedMotion), ...(parsed.settings ?? {}) }),
+        // (`artV` only from the stored data: its absence marks an older save.)
+        settings: cleanSettings({ ...DEFAULT_SETTINGS, ...comfortDefaults(this.reducedMotion), ...(parsed.settings ?? {}), artV: parsed.settings?.artV }),
         unlocked: Array.isArray(parsed.unlocked) ? parsed.unlocked : [],
         best: parsed.best ?? {},
         campaignBest: parsed.campaignBest ?? {},

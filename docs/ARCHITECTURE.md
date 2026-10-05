@@ -46,6 +46,9 @@ src/
     stages/index.ts        CAMPAIGNS
   fx/Fx.ts                 pooled particles, gibs, explosions
   audio/                   names.ts (sfx/music ids), Audio.ts, Sfx.ts, Music.ts
+  gameplay/SpriteArt.ts    ART: SPRITES — sprite scheduling, billboards, impostor bake
+  gameplay/pixel/          PixelCast: figure builder, GPU paint/resolve passes, materials
+  content/pixel/           PixelCast painters (humanoid, theropod)
   ui/                      Hud.ts, Overlay2D.ts, Menus.ts, dom.ts
   debug/AutoPlayer.ts      aimbot for ?autoplay=1 and the stage simulator
 tests/unit/                vitest — includes the headless stage simulator
@@ -176,6 +179,195 @@ id from the stage folder (e.g. `registerEnemy('butcher', …)`).
   in 'crt' mode, scanlines, curvature, convergence error, phosphor bloom and
   vignette. Settings → DISPLAY: CRT / PIXEL / OFF (`Settings.retro`).
 
+## Art style: SPRITES — PixelCast pixel art (`gameplay/pixel/`, `content/pixel/`)
+
+Settings → ART: **SPRITES | 3D** (`Settings.art`, default **SPRITES** on this branch; `artV`
+migrates saves that only stored the old '3d' default; URL `&art=sprites|3d` overrides it
+until the player changes ART; live mid-stage via the pause screen's ART chip). ART: 3D is
+the procedural-model look, unchanged.
+
+In SPRITES, characters that have a **painter** are drawn as hand-made pixel art by
+**PixelCast**; any other sprite entity (projectiles, pickups, the unpainted bosses) still
+uses the older live **impostor bake** (its 3D model re-rendered into pixels).
+Painted today — the whole z1 and d1 rosters and more:
+- humanoid painter (`content/pixel/human.ts`): **walker** (every outfit), **straggler**,
+  **runner** (+ z3 truck/pack/tail runners), **crawler** (torn waist + guts, or broken
+  legs), **brute** (+ z2 hospital / z3 riot brute with its glowing skull crack: thick limbs,
+  fists, riot plates as `PART.ARMOR`, back spikes, the mutant arm), **spitter** (glowing
+  throat sac = weak, chest veins), **bloater** (belly + glowing pustules = weak),
+  **riot walker** (z2 vest + belt as armour), **civilians** — special parts in
+  `content/pixel/zombieParts.ts`;
+- theropod painter (`content/pixel/theropod.ts`): **raptor** (all palettes, d1/d2/d3
+  subclasses), **compy**, **dilo** (crests, dapples, the frill = weak);
+- `content/pixel/beasts.ts`: **pteranodon** (triangle wing membranes), **triceratops**;
+- `content/pixel/bosses.ts`: **Butcher** (z1) and **Carnotaur** (d1).
+Not painted yet (impostor bake): Patient Zero (z2), Behemoth (z3), Specimen X (d2),
+Tyrant (d3).
+
+### How it works
+- The invisible 3D rig keeps animating and stays the hitbox (raycasts, aim assist,
+  AutoPlayer, simulator see exactly what they saw before; the model is only hidden for
+  the main camera's draw).
+- About **12×/s** per character (`SPRITE_FPS`, round-robin, ≤ 6 redraws per frame, first
+  frames first) SpriteArt calls `entity.paintPixels(figure)`. The painter reads the rig's
+  joint matrices and adds **2D primitives in world space** to a `PixelFigure`: tapered round
+  cones (`cone`), elliptical-section cones (`coneE`: the half-width across the screen is the
+  projected ellipse, so torsos/tails are wide from the front and slim from the side),
+  projected `ellipsoid`s (skulls, hips, hats), `ball`s and `decal`s. The figure projects
+  them through the main camera onto the retro pixel grid — radii in metres become texels
+  at their depth — so every shape lands exactly where the rig's joints (and hitboxes) are.
+- **Layers**: primitives in one layer melt together (polynomial smooth-min, blend radius
+  `k`), giving one continuous silhouette whose shading normal is the gradient of the
+  blended field (shoulders flow into arms, snout into neck into tail). Layers composite by
+  per-texel depth. Inside a layer the front-most covering primitive picks the material
+  (`zBias` nudges it: a hair cap wins over the forehead it sits on). **Decals** paint
+  material (or just shade, `PF.SHADE_ONLY`) onto their own layer where it is covered —
+  faces, ties, badges, wounds — and never change the silhouette.
+- Two GPU passes per redraw, no readbacks (`PixelCast.ts`): **paint** (G-buffer: walk the
+  primitives — a float data texture uploaded per redraw — union, shade, run the material's
+  pattern; writes material id, tone, packed depth, layer/flags) and **resolve** (the pixel-art
+  pass: ramps, dither, outline, contours, cast shadows, stage tint, night rim, fog; writes the
+  same display-space sprite + depth-in-alpha format as the impostor bake). Billboards,
+  per-texel depth occlusion, hit flashes and blob shadows are shared with the impostor path.
+- `PixelFigure.sample()` is a CPU reference of the paint pass's coverage (node-safe), used by
+  the alignment tests.
+- Primitives besides cones / ellipsoids: **`tri(a, b, c, mat, round)`** — a flat triangle
+  between projected world points (it shears with the view like the real surface: wing
+  membranes, frill fans, blades); **`stamp(p, cellM, id, m0..m3, mirror, solid)`** — a
+  hand-pixelled bitmap from `gameplay/pixel/stamps.ts` (eyes, mouths by jaw opening, hands
+  as claw / open / fist in 8 directions, theropod eyes), anchored on a rig point, scaled
+  by WHOLE texels, picked per size class (`stampSize`); decal stamps paint the layer
+  (faces), solid ones add coverage (hands). Stamp cell codes: `a–x` = slot 0–3 ramp step
+  0–5, `1 2 3` darken, `+` lighten, `A–D` glow.
+- **Near clip**: primitives reaching closer than `NEAR_CLIP` (0.3 m) are cut there (radius
+  interpolated) or dropped, and the texel size comes from the on-screen extent when the
+  figure reaches far past the screen, clamped to `MAX_KPX` (3) — a tail sweeping past the
+  lens never turns the sprite into giant blocks.
+- **Depth**: each layer bulges toward the viewer by its blended screen radius × a per-
+  primitive **depth ratio** (`coneE` / `ellipsoid` compute it from their cross-section;
+  `PF.FLAT` shapes don't bulge), so broad flat plates, discs and torsos composite right.
+- **Paint-pass cost**: per-layer texel bounding boxes (a texel outside a layer skips it
+  with one compare) and a per-primitive bounding box texel fetched first (a primitive out
+  of reach costs one fetch). SpriteArt also caps repaints per frame by texel area
+  (`TEXEL_BUDGET` ≈ 52 k texels) besides the ≤ 6 redraws.
+- **Pixel FX** (SPRITES): soft particles get solid cores with a wet highlight speck and
+  2×2-pixel ordered-dither cells only at their edges (a 1-px checker turns into a screen
+  door on the CRT). **Foliage** ('leaves' materials, Kit and the d1 / z1 texture-array
+  bakes): `RETRO_FOLIAGE` turns faceted blobs into leaf clumps — a ragged leafy outline
+  where a face turns away (never on flat ground), dark gaps between clumps, lit tips.
+
+### Adding pixel art for a character
+1. Expose what the painter needs (a look record + per-frame pose values) **without new
+   `world.rng` draws** — gameplay must be identical in both ART modes (see how `zombieKit`
+   records outfit/gore choices into `ZBody.look`).
+2. Implement `override paintPixels(f: PixelFigure): boolean` (and `paintPart` for flung
+   limbs) on the entity; call a painter from `content/pixel/` (`paintHuman`,
+   `paintTheropod`) or write a new one with the same building blocks. Return false to fall
+   back to the impostor bake. Subclasses that add meshes the painter doesn't know about
+   (armour, glowing weak spots) must paint them or set `pixelArt = false`.
+   Painter API (allocation-free — painters run ~12×/s per character):
+   ```ts
+   f.layer(0.04 * s, PART.LIMB, farSide ? -0.1 : 0);          // blend k (m), hit part, tone
+   f.cone(f.at(elbow, 0, 0, 0), f.at(elbow, 0, -0.25, 0), 0.05 * s, 0.036 * s, M.sleeve)
+     .mat2(M.skin, 0.93)                                      // bare wrist below the cuff
+     .k(0.02 * s).rag(0.008 * s, PF.SPIKY).z(-0.02).tone(-0.1).u(0.4).seed(3).min(0.5).part(PART.LIMB);
+   f.coneE(a, b, axisX, axisY, rxA, ryA, rxB, ryB, mat);       // elliptical section
+   f.ellipsoid(joint, cx, cy, cz, rx, ry, rz, mat);            // projected ellipsoid
+   f.decal(a, b, ra, rb, mat).flag(PF.FLAT | PF.SHADE_ONLY).tone(-0.4);
+   f.facing(point, normal) > 0.1                               // only paint what faces the camera
+   f.tri(a, b, c, mat, round);                                 // flat triangle (membranes, fans)
+   f.stamp(eye, cellM, STAMP.zeye[size], M.eyeGlow, 0, 0, 0, mirror);   // hand-pixelled bitmap
+   ```
+   Extras on a humanoid without a new painter: `HumanPose.torso` (shapes melted into the
+   trunk: bellies, vests), `HumanPose.extra` (own layers: armour, sacs, pustules),
+   `armW / legW / neckW` (match scaled 3D limbs), `pelvis: false`, `hand` (`HAND.*`),
+   `smear` + `mem` (motion smears). Theropods: `TheroPose.extra`, `dorsal`, `mem`.
+   `f.at / f.dir / f.vec / f.mix` return pooled vectors; resolve materials once per look
+   (`Mat.*` builds key strings — cache the ids, see `human.ts` `mats()`); use index loops,
+   not `for (… of [1, -1])`; never allocate option objects per redraw.
+3. Look-dev: `node scripts/pixel-look.mjs --place "walker@office:-1:3.5,raptor@red:1.5:7:-30:windup=0.8,civ@worker:0:5"`
+   (actions: `windup= stagger= sever=L|R|l|r pop die= pounce= walk= hit`; `--stage "zoo&zooEnv=night"`).
+   It writes `-3d.png`, `-sprites.png`, a 3D|SPRITES `-montage.png` of zoomed crops and
+   `-texels.png` (each sprite's raw texels ×4 — judge the pixels there).
+4. Add the type to `tests/unit/pixelcast.test.ts` (alignment: sprite parts vs real
+   raycasts), check `node scripts/pixel-aim.mjs --place "…"` (shoots the game's hitboxes
+   where the sprite draws each head / torso) and `node scripts/bench-art.mjs`.
+
+### Style guide (keep new characters consistent)
+- **Pixel density**: 1 texel = 1 retro pixel (≈ 288 lines) until the figure is
+  `maxTexels` tall (240 for every painter — a human at ≈ 1.9 m; a mid-range human is
+  ~90–130 texels); closer than that texels grow by whole pixels (arcade sprite scaling,
+  wide hysteresis, never more than `MAX_KPX` = 3). Never mix texel sizes inside a sprite
+  (stamps scale by whole texels and are picked per size class instead).
+- **Anatomy, not tubes** (the owner's brief: "not boxes or rounded geometric shapes
+  stacked together"): limbs swell and taper — deltoid cap, biceps tapering into a bony
+  elbow knob, forearm swelling below it and narrowing to a thin wrist; thigh → knee knob →
+  calf behind → ankle. Trunks are horizontal SLICES (hips, waist, ribs, chest) melted
+  together, never one vertical capsule (its round caps bulge past the hips). Clothes break
+  the silhouette: flared ragged sleeve hems and cuffs that hang over the wrist, untucked
+  hems over the waistband, trouser cuffs breaking over the shoe. Zombies hunch (each its
+  own amount), drop a shoulder and loll their heads. Classic chunkiness: heads, hands
+  and feet slightly big; radii ≈ the hitbox boxes' half-widths, a little inside.
+- **Faces and hands are stamps** (`stamps.ts`) whenever they are big enough (heads ≥ 9
+  texels, hands 3–11 texels): hand-pixelled eyes (zombie socket + glowing pin, living
+  white + pupil + brow, screaming), mouths by jaw opening, claw / open / fist hands in 8
+  directions. Theropod eyes too. Never a blob of ellipse decals.
+- **Palette**: every surface is a material (`Mat.*`, `materials.ts`) with a 6-step
+  hand-built ramp: base colour on step 3, shadows darker, richer and hue-shifted toward
+  violet, highlights paler and toward warm yellow; step 0 is the outline shade. Pick base
+  colours from the character's 3D palette so both ART modes match. No gradients, no
+  anti-aliasing, no per-texel noise: texture comes from designed patterns (cloth grime,
+  denim fade, buffalo check, rot patches + veins, hair strands, reptile scale seams,
+  stripes along `u`, gown print, camo, ribs) and drawn details (folds near joints, seams,
+  stains, wounds as decals).
+- **Light**: a fixed sprite-artist light from the upper left and front (screen space
+  (−0.55, 0.62, 0.56)), hard terminator, flattened profile (broad lit planes, not
+  pillow shading); far-side limbs one notch darker (`layer({ tone: -0.1 })`). Stages only
+  tint (night ≈ 0.68 brightness + a faint sky tint) and add a cool rim on the back-lit edge.
+- **Outlines**: 1 texel on the silhouette's own edge texels (no bloat — the sprite covers
+  what the hitboxes cover): a near-black INK (the local darkest shade × 0.42, pushed
+  violet) on the exterior, step 0 of the local ramp on a lit top/left edge (selective
+  outline); 1-texel runs (fingers, claws, quills) are never outlined. Inner contour (step 0) where a
+  nearer layer overlaps one > 7 cm behind; one step of cast shadow below/right of
+  overlaps and under hems, cuffs and collars. Dither (Bayer 4×4) only in the narrow band
+  between two steps (`dither` per material).
+- **Readability**: figures under ~45 texels collapse each ramp to three bold steps with
+  the base a notch lighter and a stronger night rim; painted sprites get half the fog the
+  scenery gets.
+- **Drawn detail**: 1-texel crease strokes (Z folds at the inner elbow scaled by the bend,
+  knee and crotch pulls, belly folds on a hunch, armpit pulls with a lit ridge, shoulder
+  blades from behind), seams and pocket slits, sole lines and toe caps — `SHADE_ONLY`
+  decals so they take the local cloth colour.
+- **Animation**: redraws at 12 fps of game time (positions stay smooth at 60). Secondary
+  motion is drawn by the painter from `time`/state: jaws (groan with chatter, gape in the
+  windup, snap on the bite), head loll / roll per character, claws twitching, rags/hair/
+  quills swaying, drips creeping down, squash & stretch on hits (`f.warp`, ≤ 7 %), motion
+  SMEARS (a flat streak behind a head / hand / raptor body that jumped > 5 px since the
+  last redraw: lunges, swipes, pounces), the sprite flashes white/red on hits.
+- **Gore**: `Mat.blood / gore / bone / ribs`; wounds and stains are decals only drawn while
+  that side faces the camera; stumps are a ragged gore ball + a bone knob; a popped head
+  leaves a neck stump; severed limbs are painted on their own (`paintPart`). In SPRITES the
+  FX go pixel too: chunks are gib sprites, and soft particles (blood spray, mist, dust,
+  smoke) get solid cores with a wet speck and 2×2-pixel dither cells only at the edges.
+- **Budgets**: ≤ 160 primitives per figure (humans ≈ 100–125, bosses ≈ 80–110), 2 draws +
+  one 15 KB upload per redraw, ≤ 6 redraws and ≈ 52 k repainted texels per frame; painters
+  allocate nothing per redraw. Measured
+  (`bench-art`, SwiftShader desktop): ~2 paints/frame in a 9-zombie horde, figure building
+  ≈ 0.1 ms/frame avg (≤ 0.6 ms), paints incl. GL submission ≈ 0.35 ms/frame; z1 horde 193 →
+  64 draw calls, d3 raptor pack 261 → 68. Memory: a 256² RGBA8 G-buffer + per-sprite RGBA8
+  targets pooled by power-of-two size (≈ 3.5 MB total with the impostor scratch).
+
+### Impostor bake (characters without a painter)
+`SpriteArt.bakeNow` re-renders the source's 3D model with the main camera's projection
+cropped to its on-screen bounds into a 512² HDR scratch target (2× supersampled, mirrored
+stage lights + a cool back light in dark stages, `RETRO_DETAIL` ×1.25), then `BAKE_FRAG`
+turns it into pixel art (median subsample, selective outline, inner contours, top light,
+dithered bands, hue-shifted shading, the campaign's 64-colour palette from
+`spritePalette.ts`). Alpha-blended / very thin parts (`keepLive`, `userData.spriteKeep3D`)
+stay live 3D meshes over the sprite (blood pools too). Tuning: `&spriteLook=pal:0,k:2,…`;
+captures: `scripts/snap-art.mjs`, `scripts/look-art.mjs`; numbers: `scripts/bench-art.mjs`
+(draw calls, redraws, paint ms, primitives, sprite vs model silhouette area, style pops).
+
 ## Audio
 
 `audio/`: `Audio.ts` (buses, voice pool, pre-render cache, ducking, iOS unlock,
@@ -259,7 +451,8 @@ or new material types mid-stage still compile then: add such lights at build tim
 
 ## Debug URL flags
 
-`?stage=z1` jump into a stage · `&beat=5` start at beat 5 · `&autoplay=1`
+`?stage=z1` jump into a stage · `&art=sprites|3d` character art (Settings ART, default SPRITES) ·
+`&spriteLook=pal:0,dirs:8` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
 overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor
 mode (`?stage`/`?autoplay` deep links render with retro OFF unless `retro` is

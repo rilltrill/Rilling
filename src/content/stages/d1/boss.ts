@@ -11,6 +11,8 @@ import { ndcInPlayArea } from '../../../gameplay/Enemy';
 import type { HitPart } from '../../../core/types';
 import { D, RIVER_WIDTH, riverLatAt } from './layout';
 import { JungleRaptor } from './pack';
+import type { PixelFigure } from '../../../gameplay/pixel/figure';
+import { paintCarnotaur, type CarnoPose, type CarnoRig } from '../../pixel/bosses';
 
 /**
  * HORNED DEVIL — a Carnotaurus-like ambush predator (~8 m) that bursts out of
@@ -507,6 +509,18 @@ export class Carnotaur extends Boss {
     this.anchor = this.chest;
     this.headAnchor = this.head;
     this.world.rig.space.add(this.focus);
+    // ART: SPRITES — what the painter reads.
+    this.pix = { hips: this.hips, chest: this.chest, neck: this.neck, head: this.head, jaw: this.jaw, mouth: this.mouth, tail: this.tail, legs: this.legs, arms: this.arms, eyes: this.eyes };
+  }
+
+  private pix: CarnoRig | null = null;
+  private readonly pose2d: CarnoPose = { frenzy: false, time: 0 };
+
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.pix || !this.model.visible) return false;
+    this.pose2d.frenzy = this.frenzy;
+    this.pose2d.time = this.age;
+    return paintCarnotaur(f, this.pix, this.pose2d);
   }
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────

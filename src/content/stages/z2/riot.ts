@@ -2,6 +2,7 @@ import type { World } from '../../../gameplay/World';
 import type { ShotHit } from '../../../gameplay/Entity';
 import { Walker } from '../../enemies/zombies';
 import { registerEnemy } from '../../registry';
+import { paintRiotVest } from '../../pixel/zombieParts';
 
 /** Worlds that have already shown the riot-gear hint (once per stage run). */
 const hinted = new WeakSet<World>();
@@ -21,6 +22,9 @@ const STRAP = 0x1e1a18;
  * sparks + clank on the first body shot (and a one-off hint) say "aim higher".
  */
 export class RiotWalker extends Walker {
+  /** ART: SPRITES — painted, with its riot vest and belt as armour plates. */
+  protected override pixelArt = true;
+
   protected override configure() {
     super.configure();
     this.name = 'riot';
@@ -74,6 +78,7 @@ export class RiotWalker extends Walker {
     b.box(r.hips, 0.4 * b.bulk + 0.04, 0.2, d + 0.06, PLATE, 0, -0.03, 0, 0, 0, 0, 0.04, 'armor');
     b.box(r.hips, 0.16 * b.bulk, 0.16, 0.025, EDGE, 0, -0.1, d / 2 + 0.035, 0, 0, 0, 0.06, 'armor');
     super.finishBody();
+    this.pose2d.torso = (f) => paintRiotVest(f, this.r, b.bulk, PLATE, EDGE, STRAP);
   }
 }
 

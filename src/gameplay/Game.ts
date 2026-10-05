@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Engine } from '../core/Engine';
 import { Input } from '../core/Input';
 import { Save } from '../core/Save';
-import type { CampaignId, Grade, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
+import type { ArtStyle, CampaignId, Grade, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
 import { AudioSystem } from '../audio/Audio';
 import type { MusicId } from '../audio/names';
 import { Hud } from '../ui/Hud';
@@ -12,7 +12,7 @@ import { World } from './World';
 import { StageRunner } from './StageRunner';
 import { Shooter } from './Shooting';
 import type { CampaignDef, StageDef } from './StageTypes';
-import { Kit } from '../content/kit/ModelKit';
+import { Kit, RETRO_FOLIAGE } from '../content/kit/ModelKit';
 import { AutoPlayer } from '../debug/AutoPlayer';
 import type { WeaponId } from '../core/types';
 import { zooStage } from '../content/stages/zoo';
@@ -22,6 +22,7 @@ import type { Entity } from './Entity';
 import { Projectile } from './Projectile';
 import { prewarmFxAtlases } from '../fx/Fx';
 import { buildWarmupSet } from './Warmup';
+import { SpriteArt, isSpriteEntity, parseLook } from './SpriteArt';
 
 export interface DebugFlags {
   stage?: string;
@@ -38,6 +39,8 @@ export interface DebugFlags {
    * tooling gets clean screenshots. Undefined = the player's DISPLAY setting.
    */
   retro?: RetroMode;
+  /** Forced character art (`&art=sprites|3d`); undefined = the player's ART setting. */
+  art?: ArtStyle;
 }
 
 /** Attract-mode demo length (wall-clock seconds of live action; cuts don't count). */
@@ -138,6 +141,10 @@ export class Game implements MenuActions {
   runner: StageRunner | null = null;
   shooter: Shooter | null = null;
   autoplay: AutoPlayer | null = null;
+  /** ART: SPRITES renderer for the current world (null in ART: 3D). */
+  sprites: SpriteArt | null = null;
+  /** ART setting last applied (a change clears the URL override). */
+  private appliedArt: ArtStyle | undefined;
   private run: Run | null = null;
   /** Stage being built across the next frames (see startStage). */
   private loading: Loading | null = null;
@@ -290,6 +297,53 @@ export class Game implements MenuActions {
       this.redrawUntil = performance.now() + 100;
     }
     this.gridW = -1; // re-derive the overlay's pixel grid (quality changes its line count)
+    // A player's own ART change wins over a `&art=` link override.
+    if (this.appliedArt !== undefined && s.art !== this.appliedArt) this.flags.art = undefined;
+    this.appliedArt = s.art;
+    if (this.world) this.syncSprites(this.world);
+  }
+
+  /** Character art in effect (URL flag over the ART setting). */
+  get artStyle(): ArtStyle {
+    return this.flags.art ?? this.save.settings.art ?? '3d';
+  }
+
+  /** ART chip on the pause screen: switch live (and drop a `&art=` URL override). */
+  setArt(art: ArtStyle) {
+    this.flags.art = undefined;
+    this.save.updateSettings({ art });
+    this.settingsChanged(this.save.settings);
+  }
+
+  /** Create / drop the sprite renderer for `w` to match the ART setting (also mid-stage). */
+  private syncSprites(w: World) {
+    const want = this.artStyle === 'sprites';
+    // Foliage goes leafy with the pixel-art cast (a shared uniform: no recompile).
+    RETRO_FOLIAGE.value = want ? 1 : 0;
+    if (want && !this.sprites) {
+      const r = this.engine.renderer;
+      const css = new THREE.Vector2();
+      const buf = new THREE.Vector2();
+      this.sprites = new SpriteArt(r, w, () => {
+        // Sprite texels are whole retro pixels; with the retro pass off the scene
+        // draws straight to the canvas, so snap to the retro grid scaled onto it.
+        r.getSize(css);
+        const grid = this.engine.retro.targetSize(css.x, css.y);
+        if (this.engine.retro.enabled) return { grid, target: grid };
+        r.getDrawingBufferSize(buf);
+        return { grid, target: { width: buf.x, height: buf.y } };
+      });
+      // Debug: `&spriteLook=bands:6,k:1` tunes the pixel-art pass.
+      if (typeof location !== 'undefined') this.sprites.look = parseLook(new URLSearchParams(location.search).get('spriteLook'));
+      // Switched on mid-stage: compile the bake variants of what is already on stage now (no hitch on the first bakes).
+      for (const e of w.entities) if (!e.removed && isSpriteEntity(e)) this.sprites.precompile(e.root);
+      // Paused: keep redrawing a moment so every character gets its first sprite frame.
+      this.redrawUntil = performance.now() + 400;
+    } else if (!want && this.sprites) {
+      this.sprites.dispose();
+      this.sprites = null;
+      this.redrawUntil = performance.now() + 100;
+    }
   }
 
   /** SFX / music volumes (SFX ducked under the attract demo, silent while it fast-forwards). */
@@ -391,6 +445,7 @@ export class Game implements MenuActions {
       this.run.banked = 0;
     }
     this.world = w;
+    this.syncSprites(w);
     this.shooter = new Shooter(w);
     this.runner = new StageRunner(w, stage);
     // HUD wiring first: the opening beat (usually a banner, or a boss when
@@ -466,6 +521,8 @@ export class Game implements MenuActions {
       w.scene.add(set.group);
       w.scene.updateMatrixWorld();
       this.engine.precompile(w.scene, w.scene);
+      // ART: SPRITES draws characters into an offscreen target: compile those variants too.
+      this.sprites?.precompile(set.group);
       set.dispose();
       if (this.flags.debug) console.info(`[game] warm-up: ${set.count} prototypes, programs ${before} → ${this.engine.renderer.info.programs?.length ?? 0}`);
     } catch (err) {
@@ -536,6 +593,10 @@ export class Game implements MenuActions {
     // Don't let a stage's roars/alarms carry into menus or restarts.
     this.audio.stopSfx();
     this.audio.setPaused(false);
+    if (this.sprites) {
+      this.sprites.dispose();
+      this.sprites = null;
+    }
     if (this.world) {
       this.world.dispose();
       this.world = null;
@@ -790,6 +851,7 @@ export class Game implements MenuActions {
       stage: note ?? this.runner?.stage.name ?? '',
       campaign: this.run?.campaign.name,
       score: this.world?.score.score ?? 0,
+      art: this.artStyle,
     };
   }
 
@@ -1042,7 +1104,17 @@ export class Game implements MenuActions {
     this.renderedW = width;
     this.renderedH = height;
     this.renderedDpr = this.engine.pixelRatio;
-    this.engine.render(w.scene);
+    const sp = this.sprites;
+    if (!sp || this.engine.contextLost) {
+      this.engine.render(w.scene);
+      return;
+    }
+    try {
+      sp.beginFrame();
+      this.engine.render(w.scene);
+    } finally {
+      sp.endFrame();
+    }
   }
 
   private renderBackdrop(dt: number) {

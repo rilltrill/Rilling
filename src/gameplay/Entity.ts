@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Frame, HitPart, WeaponId } from '../core/types';
 import type { World } from './World';
+import type { PixelFigure } from './pixel/figure';
 
 /** Data describing a bullet hitting a shootable mesh. */
 export interface ShotHit {
@@ -65,6 +66,18 @@ export abstract class Entity {
   age = 0;
 
   constructor(readonly world: World) {}
+
+  /**
+   * ART: SPRITES — paint this entity as hand-made pixel art (PixelCast, see
+   * `gameplay/pixel/` and docs/ARCHITECTURE.md "Art style"). Called ~12×/s while
+   * it is on screen, with its rig's joints already posed; add layers and
+   * primitives to `f` in world space. Return false (or leave it undefined) to be
+   * drawn by the older 3D impostor bake instead. Never touch gameplay state here.
+   */
+  paintPixels?(f: PixelFigure): boolean;
+
+  /** Same, for a part this entity flung into the world (see `looseParts`). */
+  paintPart?(obj: THREE.Object3D, f: PixelFigure): boolean;
 
   /** Called by World once when added. */
   onAdded(): void {}

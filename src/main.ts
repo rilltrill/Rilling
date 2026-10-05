@@ -4,7 +4,7 @@ import '@fontsource/rajdhani/latin-600.css';
 import '@fontsource/rajdhani/latin-700.css';
 import './styles.css';
 import { Game, type DebugFlags } from './gameplay/Game';
-import type { RetroMode } from './core/types';
+import type { ArtStyle, RetroMode } from './core/types';
 import { CAMPAIGNS } from './content';
 import { initPlatform } from './platform';
 
@@ -15,8 +15,11 @@ function parseFlags(q: URLSearchParams): DebugFlags {
   const r = q.get('retro');
   const retro: RetroMode | undefined =
     r === 'crt' || r === 'pixel' || r === 'off' ? r : q.has('stage') || bool('autoplay') ? 'off' : undefined;
+  const a = q.get('art');
+  const art: ArtStyle | undefined = a === 'sprites' || a === '3d' ? a : undefined;
   return {
     retro,
+    art,
     stage: q.get('stage') ?? undefined,
     beat: num('beat'),
     autoplay: bool('autoplay'),

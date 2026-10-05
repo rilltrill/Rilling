@@ -48,6 +48,12 @@ export type QualityLevel = 'low' | 'medium' | 'high';
 /** Screen look: 'crt' = low-res + dithering + scanlines/curvature, 'pixel' = low-res + dithering, 'off' = clean. */
 export type RetroMode = 'crt' | 'pixel' | 'off';
 
+/**
+ * Character art: '3d' = the procedural models, 'sprites' = 2D pixel art (PixelCast
+ * hand-painted figures; characters without a painter use live impostors).
+ */
+export type ArtStyle = '3d' | 'sprites';
+
 export interface Settings {
   sfxVolume: number; // 0..1
   musicVolume: number; // 0..1
@@ -59,6 +65,10 @@ export interface Settings {
   quality: QualityLevel;
   /** Arcade-monitor post effect. */
   retro: RetroMode;
+  /** Character art style (ART: 3D / SPRITES). */
+  art: ArtStyle;
+  /** Which ART default `art` was stored under (see Save: an older un-chosen default moves to the new one once). */
+  artV?: number;
   /** Photosensitivity: tone down full-screen flashes (lightning, explosions, damage, hit flashes). */
   reduceFlashes: boolean;
   /** Screen-shake intensity multiplier 0..1. */
@@ -75,6 +85,8 @@ export const DEFAULT_SETTINGS: Settings = {
   leftHanded: false,
   quality: 'medium',
   retro: 'crt',
+  art: 'sprites',
+  artV: 2,
   reduceFlashes: false,
   screenShake: 1,
   showFps: false,
