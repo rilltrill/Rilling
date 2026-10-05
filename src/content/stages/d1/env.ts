@@ -26,7 +26,7 @@ import { D, RIVER, RIVER_WIDTH } from './layout';
 import { flowMat, flowRibbon, tm, waterClock } from './retro';
 import { FloraField, floraArtToggle, floraAtlas, floraReach } from '../../pixel/floraField';
 import { D1_BIOME } from '../../pixel/floraBiomes';
-import { BUSH, BUSH_WIDE, CANOPY_TREE, CLIFF_TOP, CYCAD, FERN, FERN_WIDE, GRASS, JUNGLE_TREE, PALM, VINES } from '../../pixel/floraSpecies';
+import { BUSH, BUSH_WIDE, CANOPY_TREE, CLIFF_TOP, CYCAD, FERN, FERN_WIDE, GRASS, JUNGLE_TREE, PALM, ROOT_PLATE, VINES } from '../../pixel/floraSpecies';
 
 /**
  * JUNGLE RUN environment: a lush tropical park road by day — dirt road, giant
@@ -91,6 +91,19 @@ export class JungleEnv {
   private veg3D = new THREE.Group();
   private vegPx = new THREE.Group();
   private untoggle: (() => void) | null = null;
+  /**
+   * The fallen tree's crown in ART: SPRITES: leaf-mass billboards (own small atlas)
+   * at its leaf masses, following the crown half when the tree is blasted apart
+   * (translation only: they stay upright and face the camera). `crownRef` = the
+   * crown centre (local to the crown half) and where it was in the world at build.
+   */
+  private crownPx: THREE.Mesh | null = null;
+  private crownRef = new THREE.Vector3();
+  private crownAt0 = new THREE.Vector3();
+  /** The same for the root-ball half (its root plate billboard). */
+  private rootPx: THREE.Mesh | null = null;
+  private rootRef = new THREE.Vector3();
+  private rootAt0 = new THREE.Vector3();
   /** Vegetation chunk meshes, hidden when entirely inside the fog. */
   private chunks: THREE.Mesh[] = [];
   private instanced: THREE.InstancedMesh[] = [];
@@ -290,7 +303,9 @@ export class JungleEnv {
     this.buildCliffs();
     this.buildEnd();
     this.vegPx.add(this.flora2d.build());
-    this.untoggle = floraArtToggle(w.scene, [this.vegPx], [this.veg3D]);
+    if (this.crownPx) this.vegPx.add(this.crownPx);
+    if (this.rootPx) this.vegPx.add(this.rootPx);
+    this.untoggle = floraArtToggle(w.scene, [this.vegPx], [this.veg3D, this.tree.crown3D, this.tree.roots3D]);
   }
 
   /**
@@ -732,6 +747,36 @@ export class JungleEnv {
     const rng = new Rng(13);
     this.tree = buildFallenTree(this.flora, rng);
     this.place(this.tree.root, D.TREE, 0, 0, 0.12);
+    // ART: SPRITES crown: leaf masses where the 3D ones are (world space at rest; moved with the crown half).
+    const right = this.tree.right;
+    right.updateMatrixWorld(true);
+    // (The field's own distance cull is off: the mesh moves; fog hides it like the rest.)
+    const field = new FloraField(floraAtlas([BUSH, BUSH_WIDE], D1_BIOME, 'd1-crown'), { far: 1e4 });
+    const p = new THREE.Vector3();
+    this.crownRef.set(0, 0, 0);
+    for (const c of this.tree.crownSpots) {
+      p.set(c.x, c.y, c.z);
+      this.crownRef.add(p);
+      right.localToWorld(p);
+      field.fit('bush', p.x, p.y - c.h * 0.5, p.z, c.w, c.h, { perched: true });
+    }
+    this.crownRef.divideScalar(Math.max(1, this.tree.crownSpots.length));
+    this.crownAt0.copy(this.crownRef);
+    right.localToWorld(this.crownAt0);
+    this.crownPx = field.build();
+    this.crownPx.name = 'd1-crownPx';
+    const left = this.tree.left;
+    left.updateMatrixWorld(true);
+    const rs = this.tree.rootSpot;
+    const rootField = new FloraField(floraAtlas([ROOT_PLATE], D1_BIOME, 'd1-roots'), { far: 1e4 });
+    this.rootRef.set(rs.x, rs.y + rs.h * 0.5, rs.z);
+    p.set(rs.x, rs.y, rs.z);
+    left.localToWorld(p);
+    rootField.fit('rootPlate', p.x, p.y, p.z, rs.w, rs.h);
+    this.rootAt0.copy(this.rootRef);
+    left.localToWorld(this.rootAt0);
+    this.rootPx = rootField.build();
+    this.rootPx.name = 'd1-rootPx';
     // Ranger's abandoned supplies + a toppled signal pole by the trunk.
     const g = new THREE.Group();
     Kit.add(g, Kit.box(0.9, 0.6, 0.6), tm(0x5a6a3a, 'cloth', 1.6, 0.8), -3.2, 0.3, 1.6, 0, 0.3, 0);
@@ -739,6 +784,15 @@ export class JungleEnv {
     Kit.add(g, Kit.cyl(0.08, 0.08, 6, 6), tm(0x7a7a76, 'metal', 4, 0.6), 4.5, 0.2, 2.4, 0, 0.6, Math.PI / 2 - 0.05);
     merged(g);
     this.place(g, D.TREE, 0);
+  }
+
+  /** Move billboard mesh `m` by how far point `ref` (local to `half`) has moved from `at0` (world). */
+  private follow(m: THREE.Mesh, half: THREE.Object3D, ref: THREE.Vector3, at0: THREE.Vector3) {
+    half.updateMatrixWorld(true);
+    _v.copy(ref);
+    half.localToWorld(_v).sub(at0);
+    m.matrix.makeTranslation(_v.x, _v.y, _v.z);
+    m.matrixWorldNeedsUpdate = true;
   }
 
   private buildMeadow() {
@@ -1031,6 +1085,9 @@ export class JungleEnv {
       L.rotation.set(-0.3 * k, 0.5 * k, 0.55 * k);
       R.position.set(1.0 + 6 * k, arc * 3.2, -3 * k);
       R.rotation.set(0.2 * k, -0.7 * k, -0.6 * k);
+      // The crown / root-plate billboards ride along with their half (its centre's world offset).
+      if (this.crownPx) this.follow(this.crownPx, R, this.crownRef, this.crownAt0);
+      if (this.rootPx) this.follow(this.rootPx, L, this.rootRef, this.rootAt0);
     }
 
     // Toppled car flung by the trike.

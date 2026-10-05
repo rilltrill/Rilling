@@ -1375,5 +1375,80 @@ export const FLOWER: FloraSpecies = {
   },
 };
 
+/**
+ * Root plate of a fallen giant (d1's fallen tree, the root-ball half): a
+ * clotted earth disc torn out of the ground, moss on its crown, roots
+ * snapping out all round it (the back ones darker), rootlets and hanging
+ * root hairs, a dark contact strip where it still sits on the road.
+ */
+export const ROOT_PLATE: FloraSpecies = {
+  key: 'rootPlate',
+  w: 104,
+  h: 112,
+  heightM: 4.8,
+  variants: 2,
+  balance: true,
+  paint(c, m, rng, v) {
+    const W = this.w;
+    const cx = W / 2 + rng.spread(2);
+    const rx = 27;
+    const ry = 33;
+    // (Resting on the road: the plate's rim touches the ground.)
+    const cy = ry + 3;
+    const root = (back: boolean, k: number, n: number) => {
+      // Round the rim, never straight down (the lower roots run out along the ground).
+      let a = ((k + (back ? 0.5 : 0)) / n) * Math.PI * 2 + rng.spread(0.3);
+      const sa = Math.sin(a);
+      if (sa < -0.55) a += (Math.cos(a) >= 0 ? 1 : -1) * 0.7;
+      const len = rng.range(8, 19) * (back ? 0.85 : 1);
+      const sx = cx + Math.cos(a) * rx * 0.75;
+      const sy = cy + Math.sin(a) * ry * 0.75;
+      const mx = cx + Math.cos(a + rng.spread(0.35)) * (rx + len * 0.5);
+      const my = cy + Math.sin(a) * (ry + len * 0.45) + rng.spread(3);
+      const ex = cx + Math.cos(a + rng.spread(0.5)) * (rx + len);
+      const ey = Math.max(1.5, cy + Math.sin(a) * (ry + len) - len * 0.3);
+      const w0 = rng.range(2, 3.2) * (back ? 0.8 : 1);
+      const drawn = !(back && c.density < 0.45);
+      const mat = back ? m.barkDark : m.bark;
+      if (drawn) {
+        // A kinked root: thick where it tears out of the earth, tapering to a broken tip.
+        c.curve(sx, sy, (sx + mx) / 2, (sy + my) / 2 + 1, mx, my, w0, w0 * 0.6, mat, { z: back ? -8 : 6, bias: back ? -0.12 : 0.02 });
+        c.curve(mx, my, (mx + ex) / 2 + rng.spread(2), (my + ey) / 2, ex, ey, w0 * 0.6, 0.6, mat, { z: back ? -8 : 6, bias: back ? -0.14 : 0 });
+      } else {
+        rng.spread(2);
+      }
+      // Rootlets off the outer half.
+      for (let j = 0; j < 2; j++) {
+        const t = rng.range(0.3, 0.9);
+        const px = mx + (ex - mx) * t;
+        const py = my + (ey - my) * t;
+        const la = a + rng.spread(1);
+        const ll = rng.range(3, 6);
+        if (!drawn || (k * 0.618034 + j * 0.5 + (back ? 0.25 : 0)) % 1 >= c.density) continue;
+        c.line(px, py, px + Math.cos(la) * ll, py + Math.sin(la) * ll, mat, back ? 0.36 : 0.46, back ? -7 : 6.5);
+      }
+    };
+    const nb = 6;
+    for (let k = 0; k < nb; k++) root(true, k, nb);
+    // The torn earth: clods over a dark core, a darker band low on the shadow side, moss on the crown.
+    c.ellipse(cx, cy, rx, ry, m.coconut, { z: -2, bias: -0.3, amp: 0.5 });
+    c.mass(cx, cy, rx - 2, ry - 2, m.coconut, rng, { z: 0, puff: 4.2, glint: 1, droop: 0.15 });
+    c.mass(cx + rx * 0.3, cy - ry * 0.45, rx * 0.5, ry * 0.35, m.barkDark, rng, { z: 1, puff: 3.6, glint: 0, bias: -0.12 });
+    c.mass(cx - 4, cy + ry * 0.66, rx * 0.62, 7, m.moss, rng, { z: 4, puff: 3.6, droop: 0.4 });
+    const nf = 7 + v;
+    for (let k = 0; k < nf; k++) root(false, k, nf);
+    // Root hairs hanging from the lower rim.
+    for (let k = 0; k < 9; k++) {
+      const hx = cx + rng.spread(rx * 0.8);
+      const hl = rng.range(3, 7);
+      const hy = cy - ry * rng.range(0.55, 0.8);
+      const hd = rng.spread(2);
+      if ((k * 0.618034 + 0.4) % 1 >= c.density) continue;
+      c.line(hx, hy, hx + hd, Math.max(0.5, hy - hl), m.barkDark, 0.4, 5);
+    }
+    contact(c, cx, rx * 0.7, m.barkDark);
+  },
+};
+
 /** The bedding / dead-wood set (not in ALL_SPECIES: the d1 / d3 atlases don't paint it). */
-export const EXTRA_SPECIES = [DEAD_TREE, FLOWER];
+export const EXTRA_SPECIES = [DEAD_TREE, FLOWER, ROOT_PLATE];

@@ -316,6 +316,13 @@ export interface FallenTree {
   left: THREE.Group;
   /** Crown half (right of the road). */
   right: THREE.Group;
+  /** The crown's leaf masses (ART: 3D; a child of `right`, merged on its own so ART: SPRITES can hide it). */
+  crown3D: THREE.Group;
+  /** Leaf masses for the ART: SPRITES billboards: centre (local to `right`), width and height (m). */
+  crownSpots: { x: number; y: number; z: number; w: number; h: number }[];
+  /** The root ball + roots (ART: 3D; a child of `left`, merged on its own) and its billboard foot / size (local to `left`). */
+  roots3D: THREE.Group;
+  rootSpot: { x: number; y: number; z: number; w: number; h: number };
 }
 
 export function buildFallenTree(flora: Flora, rng: Rng): FallenTree {
@@ -334,17 +341,24 @@ export function buildFallenTree(flora: Flora, rng: Rng): FallenTree {
   Kit.add(left, Kit.cyl(0.95, 1.15, 10, 9), bark, -5, 1.0, 0, 0, 0, Math.PI / 2);
   Kit.add(left, Kit.cyl(0.98, 0.98, 2.2, 9), moss, -3.5, 1.08, 0, 0, 0, Math.PI / 2);
   Kit.add(left, Kit.cyl(0.95, 0.95, 0.3, 9), wood, -0.1, 1.0, 0, 0, 0, Math.PI / 2);
-  Kit.add(left, flora.blob(rng), roots, -10.2, 1.6, 0, 0, 0.4, 0, 1.4, 2.2, 2.2);
+  // (Root ball + roots in a group of their own, local to `left`: the same meshes.)
+  const roots3D = new THREE.Group();
+  Kit.add(roots3D, flora.blob(rng), roots, -10.2, 1.6, 0, 0, 0.4, 0, 1.4, 2.2, 2.2);
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
-    const r = Kit.add(left, Kit.cone(0.28, 2.6, 5), barkDark, -10.6, 1.6 + Math.sin(a) * 1.6, Math.cos(a) * 1.6);
+    const r = Kit.add(roots3D, Kit.cone(0.28, 2.6, 5), barkDark, -10.6, 1.6 + Math.sin(a) * 1.6, Math.cos(a) * 1.6);
     r.rotation.set(Math.cos(a) * 1.2, 0, -Math.PI / 2 + Math.sin(a) * 0.9);
   }
-  Kit.add(left, flora.blob(rng), roots, -10.4, 0.5, 0, 0, 0, 0, 1.8, 0.8, 2.2);
+  Kit.add(roots3D, flora.blob(rng), roots, -10.4, 0.5, 0, 0, 0, 0, 1.8, 0.8, 2.2);
   // Right half: trunk to a broken crown at x ≈ +9.
   Kit.add(right, Kit.cyl(0.8, 0.95, 9, 9), bark, 4.5, 0.95, 0, 0, 0, Math.PI / 2);
   Kit.add(right, Kit.cyl(0.95, 0.95, 0.3, 9), wood, 0.1, 0.98, 0, 0, 0, Math.PI / 2);
   Kit.add(right, Kit.cyl(0.84, 0.84, 1.6, 9), moss, 3.2, 1.0, 0, 0, 0, Math.PI / 2);
+  // (The leaf masses go in a group of their own, placed like their branch: the same meshes.)
+  const crown3D = new THREE.Group();
+  crown3D.position.copy(right.position);
+  const crownSpots: FallenTree['crownSpots'] = [];
+  const tip = new THREE.Vector3();
   for (let i = 0; i < 5; i++) {
     const b = new THREE.Group();
     b.position.set(7 + i * 0.9, 1.2, rng.spread(1));
@@ -352,11 +366,25 @@ export function buildFallenTree(flora: Flora, rng: Rng): FallenTree {
     right.add(b);
     Kit.add(b, Kit.cyl(0.14, 0.25, 3.2, 5), bark, 0, 1.6, 0);
     const s = rng.range(1.6, 2.4);
-    Kit.add(b, flora.blob(rng), tm(rng.chance(0.5) ? 0x5f7f2a : COL.canopyA, 'leaves', 0.8, 0.85), 0, 3.2, 0, 0, 0, 0, s, s * 0.7, s);
+    const bc = new THREE.Group();
+    bc.position.copy(b.position);
+    bc.rotation.copy(b.rotation);
+    crown3D.add(bc);
+    Kit.add(bc, flora.blob(rng), tm(rng.chance(0.5) ? 0x5f7f2a : COL.canopyA, 'leaves', 0.8, 0.85), 0, 3.2, 0, 0, 0, 0, s, s * 0.7, s);
+    bc.updateMatrix();
+    tip.set(0, 3.2, 0).applyMatrix4(bc.matrix);
+    crownSpots.push({ x: tip.x, y: tip.y, z: tip.z, w: 2 * s, h: 1.4 * s });
   }
   merged(left);
   merged(right);
-  return { root, left, right };
+  merged(crown3D);
+  merged(roots3D);
+  crown3D.position.set(0, 0, 0);
+  right.add(crown3D);
+  left.add(roots3D);
+  // The root plate as seen from the road: ≈ 4.4 m across (the ball + roots), standing on the ground.
+  const rootSpot = { x: -10.3, y: 0, z: 0, w: 4.4, h: 4.6 };
+  return { root, left, right, crown3D, crownSpots, roots3D, rootSpot };
 }
 
 // ─── Tour vehicle ────────────────────────────────────────────────────────────
