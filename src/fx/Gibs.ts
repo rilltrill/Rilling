@@ -87,9 +87,14 @@ function jitterGeo(base: THREE.BufferGeometry, amount: number, seed: number): TH
 }
 
 /**
- * ART: SPRITES look for gibs: each chunk is a camera-facing pixel blob snapped to
- * the retro pixel grid, top-lit with a 1-px dark edge (no tumbling cubes next to
- * pixel-art characters). Same instances, same physics — only the draw changes.
+ * ART: SPRITES look for gibs: each chunk is a camera-facing pixel-art chunk
+ * snapped to the retro pixel grid, drawn the way the PixelCast sprites are —
+ * a ragged lobed blob (meat) or an angular splinter (shards) whose outline
+ * turns as the chunk tumbles, three hard tone steps from the upper-left light,
+ * a 1-px dark edge, a wet highlight speck on meat and a pale bone fleck on
+ * some chunks, a bright facet edge on shards. No tumbling cubes next to
+ * pixel-art characters, no soft gradients. Same instances, same physics —
+ * only the draw changes.
  */
 const GIB_SPRITE_VERT = /* glsl */ `
   uniform vec2 uTarget;
@@ -97,6 +102,7 @@ const GIB_SPRITE_VERT = /* glsl */ `
   varying vec3 vCol;
   varying float vPx;
   varying float vSeed;
+  varying float vAng;
   void main() {
     vUv = uv;
     vCol = instanceColor;
@@ -107,6 +113,9 @@ const GIB_SPRITE_VERT = /* glsl */ `
     float ppm = projectionMatrix[1][1] * 0.5 * uTarget.y / max(cc.w, 1e-3);
     float px = clamp(floor(sz * 0.85 * ppm + 0.5), 1.0, 24.0);
     vPx = px;
+    // Spin of the tumbling chunk as seen on screen (its local X axis, view space).
+    vec3 ax = (modelViewMatrix * vec4(instanceMatrix[0].xyz, 0.0)).xyz;
+    vAng = atan(ax.y, ax.x);
     vec2 pc = (cc.xy / cc.w * 0.5 + 0.5) * uTarget;
     vec2 corner = floor(pc - 0.5 * px + 0.5);
     vec2 ndc = (corner + uv * px) / uTarget * 2.0 - 1.0;
@@ -117,24 +126,56 @@ const GIB_SPRITE_VERT = /* glsl */ `
 const GIB_SPRITE_FRAG = /* glsl */ `
   precision highp float;
   uniform vec3 uLight;
+  uniform float uShard;
   varying vec2 vUv;
   varying vec3 vCol;
   varying float vPx;
   varying float vSeed;
-  float inside(vec2 q, float h) {
+  varying float vAng;
+  float hash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
+  // Outline radius toward direction d (unit square coords): lobed meat or a splinter.
+  float radius(vec2 d) {
+    float a = atan(d.y, d.x) - vAng;
+    float h1 = hash(vSeed + 0.3) * 6.2832;
+    float h2 = hash(vSeed + 7.1) * 6.2832;
+    if (uShard > 0.5) {
+      // A long splinter: a stretched diamond with a chipped corner.
+      vec2 r = vec2(cos(a), sin(a));
+      float e = abs(r.x) / 1.0 + abs(r.y) / 0.5;
+      return (0.95 + 0.12 * sin(3.0 * a + h1)) / max(e, 1e-3);
+    }
+    return 0.86 + 0.15 * sin(3.0 * a + h1) + 0.08 * sin(5.0 * a + h2);
+  }
+  float inside(vec2 q) {
     vec2 d = (q / vPx) * 2.0 - 1.0;
-    return length(d * vec2(1.0 + 0.35 * h, 1.0 - 0.3 * h)) <= 1.05 ? 1.0 : 0.0;
+    return length(d) <= radius(d) ? 1.0 : 0.0;
   }
   void main() {
     vec2 q = floor(vUv * vPx) + 0.5;
-    float h = fract(sin(vSeed * 12.9898) * 43758.5453) * 2.0 - 1.0;
-    if (vPx > 2.5 && inside(q, h) < 0.5) discard;
+    if (vPx > 2.5 && inside(q) < 0.5) discard;
     vec2 d = (q / vPx) * 2.0 - 1.0;
-    vec3 col = vCol * uLight * (0.85 + 0.3 * (d.y - d.x) * 0.5);
-    // 1-px dark edge on chunks big enough to carry one.
+    // Three hard steps from the upper-left light (a lit cap, the base, a shadow side).
+    float l = dot(d, vec2(-0.6, 0.8));
+    float tone = l > 0.28 ? 1.22 : l < -0.3 ? 0.6 : 0.92;
+    if (uShard > 0.5) {
+      // Two facets split along the splinter, a bright edge between them.
+      vec2 ax = vec2(cos(vAng), sin(vAng));
+      float side = d.x * -ax.y + d.y * ax.x;
+      tone = side > 0.0 ? 1.18 : 0.72;
+      if (vPx > 4.5 && abs(side) < 1.0 / vPx) tone = 1.45;
+    }
+    vec3 col = vCol * uLight * tone;
     if (vPx > 3.5) {
-      float n = inside(q + vec2(1.0, 0.0), h) * inside(q - vec2(1.0, 0.0), h) * inside(q + vec2(0.0, 1.0), h) * inside(q - vec2(0.0, 1.0), h);
-      if (n < 0.5) col *= 0.38;
+      // 1-px dark edge on chunks big enough to carry one.
+      float n = inside(q + vec2(1.0, 0.0)) * inside(q - vec2(1.0, 0.0)) * inside(q + vec2(0.0, 1.0)) * inside(q - vec2(0.0, 1.0));
+      if (n < 0.5) col = vCol * uLight * 0.34;
+      else if (uShard < 0.5) {
+        // Wet speck up-left of the middle; a pale bone fleck on every third chunk.
+        vec2 sp = floor(vec2(0.36, 0.64) * vPx) + 0.5;
+        if (q == sp) col = mix(col, vec3(1.0, 0.92, 0.86), 0.7);
+        vec2 bp = floor(vec2(0.6 + 0.15 * sin(vAng), 0.4) * vPx) + 0.5;
+        if (hash(vSeed + 3.3) > 0.66 && vPx > 5.5 && (q == bp || q == bp + vec2(1.0, 0.0))) col = vec3(0.86, 0.8, 0.66) * uLight;
+      }
     }
     gl_FragColor = vec4(col, 1.0);
     #include <tonemapping_fragment>
@@ -162,7 +203,7 @@ export class GibMesh {
 
   constructor(
     readonly capacity: number,
-    shape: 'meat' | 'shard',
+    private readonly shape: 'meat' | 'shard',
   ) {
     this.rng = new FxRng(shape === 'meat' ? 0x5eed1 : 0x5eed2);
     this.d = new Float32Array(capacity * S);
@@ -400,7 +441,7 @@ export class GibMesh {
       this.spriteMat ??= new THREE.ShaderMaterial({
         vertexShader: GIB_SPRITE_VERT,
         fragmentShader: GIB_SPRITE_FRAG,
-        uniforms: { uLight: { value: light }, uTarget: target },
+        uniforms: { uLight: { value: light }, uTarget: target, uShard: { value: this.shape === 'shard' ? 1 : 0 } },
         fog: false,
       });
       this.spriteMat.uniforms.uTarget = target;

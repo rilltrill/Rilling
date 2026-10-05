@@ -328,7 +328,7 @@ function gooMats(color: number) {
     const hot = new THREE.Color().setHSL(hsl.h, Math.min(1, hsl.s * 0.8), Math.min(0.93, hsl.l * 0.4 + 0.58)).getHex();
     const skin = new THREE.Color().setHSL(hsl.h + 0.02, Math.min(1, hsl.s * 0.7), hsl.l * 0.28).getHex();
     g = {
-      body: castMat(color, PAT.WET, { light: 0.42, dark: 0.3, sat: 1.3, strength: 0.8, spec: 0.8, dither: 0.08 }),
+      body: castMat(color, PAT.WET, { light: 0.62, dark: 0.34, sat: 1.25, strength: 0.8, spec: 0.9, dither: 0.1 }),
       core: Mat.glow(color),
       hot: Mat.glow(hot),
       spec: Mat.glow(0xfafff0),
@@ -447,8 +447,9 @@ function glob(f: PixelFigure, st: ThrownState, s: number) {
   // Glowing core (the goo's own colour, a hot heart), offset toward the light, and a wet highlight speck.
   f.layer(R * 0.2, PART.TORSO, 0, -R * 1.35);
   const core = screenOff(f, c, -R * 0.08, R * 0.06);
-  f.ball(core, R * (bile ? 0.6 : 0.46), G.core).flag(PF.GLOW | PF.NO_OUTLINE);
-  f.ball(screenOff(f, core, -R * 0.06, R * 0.04), R * (bile ? 0.3 : 0.22), G.hot).flag(PF.GLOW | PF.NO_OUTLINE).min(0.6);
+  // (The bile glows through its membrane; acid and venom glow from a hot heart.)
+  if (bile) f.ball(core, R * 0.66, G.body).flag(PF.NO_OUTLINE);
+  f.ball(screenOff(f, core, -R * 0.08, R * 0.06), R * (bile ? 0.32 : 0.26), G.hot).flag(PF.GLOW | PF.NO_OUTLINE).min(0.6);
   f.ball(screenOff(f, c, -R * 0.42, R * 0.4), R * 0.11, G.spec).flag(PF.GLOW | PF.NO_OUTLINE).min(0.6);
   if (bile) {
     // Veins across the membrane (decals on the skin layer below would be hidden by the core: draw them dark on top).
