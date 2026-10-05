@@ -814,9 +814,14 @@ function paintHat(f: PixelFigure, h: THREE.Object3D, L: HumanLook, M: Mats, s: n
   const m = M.hat;
   switch (L.outfit) {
     case 'worker':
-      // Dome + brim.
+      // Dome with a raised centre ridge, a brim lip, a specular glint.
       f.ellipsoid(h, 0, 0.245 * hs, -0.005, 0.128 * hs, 0.075 * hs, 0.138 * hs, m).k(0.005 * s);
+      f.cone(f.at(h, 0, 0.3 * hs, -0.11 * hs), f.at(h, 0, 0.312 * hs, 0.09 * hs), 0.016 * hs * s, 0.016 * hs * s, m).k(0.008 * s).tone(0.08);
       brim(f, h, 0.205 * hs, -0.11 * hs, 0.2 * hs, 0.135 * hs, 0.018 * hs * s, m, 0.012 * s, -0.05);
+      {
+        const gl = f.at(h, -0.04 * hs, 0.29 * hs, 0.06 * hs);
+        f.decal(gl, gl, 0.012 * s, 0.012 * s, M.band).flag(D | PF.NO_OUTLINE).min(0.5);
+      }
       break;
     case 'cop':
       f.ellipsoid(h, 0, 0.255 * hs, -0.005, 0.124 * hs, 0.05 * hs, 0.13 * hs, m).k(0.01 * s);

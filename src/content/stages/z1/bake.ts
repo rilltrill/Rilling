@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Kit } from '../../kit/ModelKit';
+import { FOLIAGE_DECL, Kit, RETRO_FOLIAGE, foliageGlsl } from '../../kit/ModelKit';
 import { EnvKit } from '../../kit/EnvKit';
 import { TEX_NAMES, Textures, type TexName } from '../../kit/Textures';
 
@@ -118,7 +118,10 @@ function texParamsOf(m: THREE.Material): RetroParams | null {
  * per-instance for instanced meshes) into a material's shader.
  */
 export function applyRetroArray<T extends THREE.MeshLambertMaterial | THREE.MeshBasicMaterial | THREE.MeshStandardMaterial>(m: T): T {
-  const uniforms = { uRetroArr: { value: retroArray() } };
+  const uniforms = { uRetroArr: { value: retroArray() }, uFoliage: RETRO_FOLIAGE };
+  // Lit (Lambert) bakes: foliage turns into leaf clumps in ART: SPRITES.
+  const leafy = (m as THREE.MeshLambertMaterial).isMeshLambertMaterial === true;
+  const leaves = TEX_NAMES.indexOf('leaves');
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
@@ -152,7 +155,8 @@ export function applyRetroArray<T extends THREE.MeshLambertMaterial | THREE.Mesh
         uniform sampler2DArray uRetroArr;
         varying vec3 vRetroAPos;
         varying vec3 vRetroANrm;
-        flat varying vec4 vRetroA;`,
+        flat varying vec4 vRetroA;
+        ${leafy ? FOLIAGE_DECL : ''}`,
       )
       .replace(
         '#include <color_fragment>',
@@ -162,10 +166,11 @@ export function applyRetroArray<T extends THREE.MeshLambertMaterial | THREE.Mesh
           vec2 ruv = (an.x > an.y && an.x > an.z) ? vRetroAPos.zy : ((an.y > an.z) ? vRetroAPos.xz : vRetroAPos.xy);
           vec3 rtex = texture(uRetroArr, vec3(ruv * vRetroA.y, vRetroA.x)).rgb * vRetroA.w;
           diffuseColor.rgb *= mix(vec3(1.0), rtex, vRetroA.z);
-        }`,
+        }
+        ${leafy ? foliageGlsl('vRetroAPos', `abs(vRetroA.x - ${leaves}.0) < 0.5`) : ''}`,
       );
   };
-  m.customProgramCacheKey = () => 'z1RetroArr1';
+  m.customProgramCacheKey = () => (leafy ? 'z1RetroArr2|fol' : 'z1RetroArr2');
   m.needsUpdate = true;
   return m;
 }

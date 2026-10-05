@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Kit, type MatOptions } from '../../kit/ModelKit';
+import { FOLIAGE_DECL, Kit, RETRO_FOLIAGE, foliageGlsl, type MatOptions } from '../../kit/ModelKit';
 import { EnvKit } from '../../kit/EnvKit';
 import { Textures, TEX_NAMES, type TexName } from '../../kit/Textures';
 
@@ -133,6 +133,8 @@ const PROJECT = /* glsl */ `
 `;
 
 let baked: THREE.MeshLambertMaterial | null = null;
+/** Texture-array layer of the 'leaves' texture (foliage gets the SPRITES leaf-clump look). */
+const LEAVES = TEX_NAMES.indexOf('leaves');
 
 /** The one material every d1 baked mesh uses (vertex colours + per-vertex texture choice). */
 export function bakedMaterial(): THREE.MeshLambertMaterial {
@@ -141,6 +143,7 @@ export function bakedMaterial(): THREE.MeshLambertMaterial {
   const arr = textureArray();
   m.onBeforeCompile = (shader) => {
     shader.uniforms.uRetroArr = { value: arr };
+    shader.uniforms.uFoliage = RETRO_FOLIAGE;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -161,7 +164,8 @@ export function bakedMaterial(): THREE.MeshLambertMaterial {
         `#include <common>
         uniform highp sampler2DArray uRetroArr;
         varying vec3 vRetroPos;
-        varying vec4 vRetroA;`,
+        varying vec4 vRetroA;
+        ${FOLIAGE_DECL}`,
       )
       .replace(
         '#include <color_fragment>',
@@ -170,10 +174,11 @@ export function bakedMaterial(): THREE.MeshLambertMaterial {
           ${PROJECT}
           vec3 rtex = texture(uRetroArr, vec3(ruv * vRetroA.y, vRetroA.x)).rgb * vRetroA.w;
           diffuseColor.rgb *= mix(vec3(1.0), rtex, vRetroA.z);
-        }`,
+        }
+        ${foliageGlsl('vRetroPos', `abs(vRetroA.x - ${LEAVES}.0) < 0.5`)}`,
       );
   };
-  m.customProgramCacheKey = () => 'd1RetroArray2';
+  m.customProgramCacheKey = () => 'd1RetroArray3';
   Kit.track(m);
   m.addEventListener('dispose', () => {
     if (baked === m) baked = null;

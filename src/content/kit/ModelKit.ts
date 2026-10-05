@@ -7,6 +7,48 @@ import { Textures, type TexName } from './Textures';
  * only while baking sprites, so surface detail survives the bake.
  */
 export const RETRO_DETAIL = { value: 1 };
+/**
+ * ART: SPRITES — foliage ('leaves' materials) drawn as leaf clumps: dark gaps
+ * between clumps, lit leaf tips, and a ragged leafy outline where a face turns
+ * away (instead of a faceted blob). A shared uniform: flips live with the ART
+ * setting, no recompile. ART: 3D keeps the plain look (0).
+ */
+export const RETRO_FOLIAGE = { value: 0 };
+
+/** GLSL declarations for `foliageGlsl` (uniform `uFoliage` = RETRO_FOLIAGE, value noise). */
+export const FOLIAGE_DECL = /* glsl */ `
+  uniform float uFoliage;
+  float fHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+  float fNoise(vec3 x) {
+    vec3 i = floor(x);
+    vec3 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(fHash(i), fHash(i + vec3(1, 0, 0)), f.x), mix(fHash(i + vec3(0, 1, 0)), fHash(i + vec3(1, 1, 0)), f.x), f.y),
+               mix(mix(fHash(i + vec3(0, 0, 1)), fHash(i + vec3(1, 0, 1)), f.x), mix(fHash(i + vec3(0, 1, 1)), fHash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+  }
+`;
+
+/**
+ * GLSL (after `color_fragment`, Lambert — needs `vViewPosition`): when `cond`
+ * holds in SPRITES, foliage at object-space position `pos` becomes leaf clumps —
+ * a ragged leafy outline where a face turns away (never on flat ground patches),
+ * dark gaps between clumps, lit leaf tips.
+ */
+export function foliageGlsl(pos: string, cond = 'true'): string {
+  return /* glsl */ `
+  if (uFoliage > 0.5 && (${cond})) {
+    vec3 fn = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition)));
+    float facing = abs(dot(fn, normalize(vViewPosition)));
+    float up = abs(dot(fn, vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1])));
+    float fc = fNoise(${pos} * 3.2);
+    float fl = fNoise(${pos} * 8.0 + 11.0);
+    if (up < 0.88 && facing < 0.6 && fl < (0.6 - facing) * 1.9) discard;
+    // Clumps: a dark gap where two clumps meet, a lit rim on each clump's top, leaf tips.
+    float gap = smoothstep(0.42, 0.34, fc);
+    float top = fNoise(${pos} * 3.2 + vec3(0.0, -0.12, 0.0));
+    diffuseColor.rgb *= gap > 0.5 ? 0.5 : (top < fc - 0.06 ? 1.22 : (fl > 0.68 ? 1.12 : 1.0));
+  }`;
+}
 
 export type { TexName } from './Textures';
 
@@ -88,7 +130,9 @@ function applyRetroTexture(
     uRetroStrength: { value: strength },
     uRetroGain: { value: rt.gain },
     uRetroDetail: RETRO_DETAIL,
+    uFoliage: RETRO_FOLIAGE,
   };
+  const leafy = name === 'leaves';
   m.userData.retroTex = name;
   // Bakers that merge Kit materials into vertex-coloured batches read these.
   m.userData.retroScale = scale;
@@ -116,7 +160,8 @@ function applyRetroTexture(
         uniform float uRetroStrength;
         uniform float uRetroGain;
         uniform float uRetroDetail;
-        varying vec3 vRetroPos;`,
+        varying vec3 vRetroPos;
+        ${leafy ? FOLIAGE_DECL : ''}`,
       )
       .replace(
         '#include <color_fragment>',
@@ -127,10 +172,10 @@ function applyRetroTexture(
           vec2 ruv = (an.x > an.y && an.x > an.z) ? vRetroPos.zy : ((an.y > an.z) ? vRetroPos.xz : vRetroPos.xy);
           vec3 rtex = texture2D(uRetroMap, ruv * uRetroScale).rgb * uRetroGain;
           diffuseColor.rgb *= max(mix(vec3(1.0), rtex, uRetroStrength * uRetroDetail), vec3(0.0));
-        }`,
+        }${leafy ? foliageGlsl('vRetroPos') : ''}`,
       );
   };
-  m.customProgramCacheKey = () => `retroTex2|${prevKey ?? ''}`;
+  m.customProgramCacheKey = () => `retroTex2${leafy ? '|fol' : ''}|${prevKey ?? ''}`;
   m.needsUpdate = true;
 }
 

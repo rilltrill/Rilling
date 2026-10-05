@@ -290,6 +290,7 @@ describe('PixelCast alignment: the rest of the z1 / d1 rosters', () => {
     ['bloater', 0.3, -5.5, {}],
     ['spitter', -0.3, -6, {}],
     ['brute', 0.2, -7, {}],
+    ['riot_z2', -0.2, -5, {}],
     ['compy', 0.2, -4, {}],
     ['dilo', 0.3, -7, {}],
     ['ptero', 0.3, -6, {}],

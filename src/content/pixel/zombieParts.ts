@@ -251,3 +251,43 @@ export function paintCrawlerWaist(f: PixelFigure, r: HumanoidRig, drag: THREE.Ob
   f.cone(f.at(drag, 0.0, -0.14, 0.05), f.at(drag, 0.05, -0.34, 0.08), 0.036 * s, 0.028 * s, M.guts).k(0.02 * s);
   f.cone(f.at(drag, -0.06, -0.02, 0.0), f.at(drag, -0.11, -0.28, 0.0), 0.034 * s, 0.02 * s, M.blood).k(0.02 * s);
 }
+
+// ─── Riot walker (z2) ──────────────────────────────────────────────────────
+
+const RV = { ready: false, plate: 0, edge: 0, strap: 0 };
+
+/**
+ * Riot vest (torso layer, PART.ARMOR): a plate shell over the whole trunk with
+ * pale edge bands, a chest plate and straps; an armoured belt over the hips.
+ * Matches the armour boxes `RiotWalker` adds (shots there spark).
+ */
+export function paintRiotVest(f: PixelFigure, r: HumanoidRig, bulk: number, plateHex: number, edgeHex: number, strapHex: number) {
+  if (!RV.ready) {
+    RV.ready = true;
+    RV.plate = Mat.plate(plateHex);
+    RV.edge = Mat.plate(edgeHex);
+    RV.strap = Mat.leather(strapHex);
+  }
+  const s = scaleOf(r.spine);
+  const sb = Math.sqrt(bulk);
+  const sp = r.spine;
+  const up = f.dir(sp, 0, 1, 0);
+  const fw = f.dir(sp, 0, 0, 1);
+  const hw = 0.19 * bulk + 0.025;
+  const rd = 0.11 * sb + 0.03;
+  const pill = (j: THREE.Object3D, y: number, w: number, rv: number, mat: number) => {
+    const x = Math.max(0.001, w - rv);
+    return f.coneE(f.at(j, -x, y, 0), f.at(j, x, y, 0), up, fw, rv * s, rd * s, rv * s, rd * s, mat).part(PART.ARMOR).k(0.04 * s);
+  };
+  pill(sp, 0.16, hw, 0.1, RV.plate).z(-0.06);
+  pill(sp, 0.34, hw, 0.12, RV.plate).z(-0.06);
+  pill(sp, 0.455, hw + 0.01, 0.02, RV.edge).z(-0.08);
+  pill(sp, 0.085, hw + 0.01, 0.02, RV.edge).z(-0.08);
+  pill(r.hips, -0.03, 0.2 * bulk + 0.02, 0.1, RV.plate).z(-0.06);
+  if (f.facing(f.at(sp, 0, 0.3, rd), fw) > 0) {
+    const z = rd;
+    f.decal(f.at(sp, -hw * 0.5, 0.3, z), f.at(sp, hw * 0.5, 0.3, z), 0.1 * s, 0.1 * s, RV.edge).part(PART.ARMOR);
+    for (let sd = -1; sd <= 1; sd += 2) f.decal(f.at(sp, sd * hw * 0.72, 0.45, z), f.at(sp, sd * hw * 0.72, 0.1, z), 0.02 * s, 0.02 * s, RV.strap).part(PART.ARMOR).min(0.5);
+    f.decal(f.at(r.hips, -0.06, -0.1, z), f.at(r.hips, 0.06, -0.1, z), 0.06 * s, 0.06 * s, RV.edge).part(PART.ARMOR);
+  }
+}

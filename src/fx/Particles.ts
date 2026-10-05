@@ -241,6 +241,7 @@ const FRAG_SOFT = /* glsl */ `
   uniform sampler2D uMap;
   uniform vec3 uLight;
   uniform float uPixel;
+  uniform vec2 uAtlas;
   varying vec2 vUv;
   varying vec4 vColor;
   #include <fog_pars_fragment>
@@ -250,14 +251,21 @@ const FRAG_SOFT = /* glsl */ `
     if (a < 0.006) discard;
     vec3 rgb = vColor.rgb * t.rgb * uLight;
     if (uPixel > 0.5) {
-      // ART: SPRITES — pixel FX: screen-door (ordered dither) coverage on the
-      // pixel grid instead of soft alpha, two tones: crisp clusters, no blur.
-      ivec2 q = ivec2(gl_FragCoord.xy) & 3;
-      int i = q.x + q.y * 4;
-      int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
-      float th = (float(m[i]) + 0.5) / 16.0;
-      if (a * 1.15 < th) discard;
-      rgb *= a > 0.6 ? 1.0 : 0.72;
+      // ART: SPRITES — pixel FX: solid cores (blood drops, puffs) with a wet speck of
+      // light on the upper left, and only their thin edges broken up — in 2×2-pixel
+      // dither cells (a 1-pixel checker turns into a screen door on the CRT).
+      if (a < 0.14) discard;
+      if (a < 0.5) {
+        ivec2 q = (ivec2(gl_FragCoord.xy) >> 1) & 3;
+        int i = q.x + q.y * 4;
+        int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+        float th = (float(m[i]) + 0.5) / 16.0;
+        if ((a - 0.14) / 0.36 < th) discard;
+        rgb *= 0.74;
+      } else {
+        vec2 lu = fract(vUv * uAtlas);
+        if (a > 0.85 && lu.x < 0.45 && lu.y > 0.55) rgb = min(rgb * 1.45 + 0.04, vec3(1.0));
+      }
       a = 1.0;
     }
     gl_FragColor = vec4(rgb, a);

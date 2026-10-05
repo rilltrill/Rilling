@@ -52,6 +52,12 @@ const MAX_FIRST_BAKES = 18;
  * same frame as a crowd's bakes. Characters with no image yet get a bigger one.
  */
 const BAKE_CALL_BUDGET = 90;
+/**
+ * Texels repainted per frame (after the first redraw): the paint pass costs about
+ * texels × primitives, so a close boss and a horde never land in the same frame
+ * (the most overdue go first; the rest wait a frame or two). ≈ two big sprites.
+ */
+const TEXEL_BUDGET = 52000;
 const FIRST_BAKE_CALL_BUDGET = 170;
 /** Frames an on-screen character may stay hidden waiting for its first image before its 3D model shows. */
 const PENDING_FRAMES = 3;
@@ -1024,11 +1030,15 @@ export class SpriteArt {
       RETRO_DETAIL.value = this.look.detail;
       try {
         let spent = 0;
+        let texels = 0;
         for (let i = 0; i < due.length && bakes < cap; i++) {
           const s = due[i];
           const budget = s.ready ? BAKE_CALL_BUDGET : FIRST_BAKE_CALL_BUDGET;
           if (bakes > 0 && spent + s.cost > budget) continue; // a cheaper one may still fit
+          const area = s.ready ? s.tw * s.th : 0;
+          if (bakes > 0 && texels + area > TEXEL_BUDGET) continue;
           spent += s.cost;
+          texels += area;
           // Spread the next bakes over the interval (phase kept, never bunching up).
           s.next = Math.max(s.next + 1 / SPRITE_FPS, w.time + 0.5 / SPRITE_FPS);
           if (this.bake(s, cam)) bakes++;

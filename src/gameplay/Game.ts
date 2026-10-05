@@ -12,7 +12,7 @@ import { World } from './World';
 import { StageRunner } from './StageRunner';
 import { Shooter } from './Shooting';
 import type { CampaignDef, StageDef } from './StageTypes';
-import { Kit } from '../content/kit/ModelKit';
+import { Kit, RETRO_FOLIAGE } from '../content/kit/ModelKit';
 import { AutoPlayer } from '../debug/AutoPlayer';
 import type { WeaponId } from '../core/types';
 import { zooStage } from '../content/stages/zoo';
@@ -318,6 +318,8 @@ export class Game implements MenuActions {
   /** Create / drop the sprite renderer for `w` to match the ART setting (also mid-stage). */
   private syncSprites(w: World) {
     const want = this.artStyle === 'sprites';
+    // Foliage goes leafy with the pixel-art cast (a shared uniform: no recompile).
+    RETRO_FOLIAGE.value = want ? 1 : 0;
     if (want && !this.sprites) {
       const r = this.engine.renderer;
       const css = new THREE.Vector2();
