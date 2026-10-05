@@ -264,7 +264,8 @@ if (modes.includes('sprites')) {
     g.settingsChanged(g.save.settings);
     g.sprites?.invalidate();
   });
-  await page.waitForTimeout(1000);
+  // (Software GL is slow at dpr 2: give every sprite time to repaint.)
+  await page.waitForTimeout(1000 + 1500 * (dpr - 1));
   const url = await page.evaluate((bg) => {
     const g = window.__game;
     const sp = g.sprites;

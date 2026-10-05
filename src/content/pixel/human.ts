@@ -519,7 +519,9 @@ function paintHead(f: PixelFigure, r: HumanoidRig, L: HumanLook, M: Mats, st: Hu
   }
   // Hair cap: sits on the skull, its front edge is the hairline.
   if (L.hair !== null) {
-    const top = L.hat !== null ? 0.17 : 0.2;
+    // Under a hat that covers the crown the cap sits lower (a nurse cap or bandage doesn't).
+    const crownHat = L.hat !== null && L.outfit !== 'nurse' && L.outfit !== 'patient';
+    const top = crownHat ? 0.17 : 0.2;
     f.ellipsoid(h, 0, top * hs, -0.022 * hs, 0.124 * hs * s, 0.088 * hs * s, 0.132 * hs * s, M.hair)
       .rag(0.01 * s, PF.SPIKY)
       .seed(21)
