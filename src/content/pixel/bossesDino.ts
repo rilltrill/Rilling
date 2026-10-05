@@ -191,8 +191,8 @@ function xm() {
     // A dim glow rim hugging the eye; the light it throws on the skin round it.
     XM.rim = Mat.glow(0x2a8cb0);
     XM.rimR = Mat.glow(0x902038);
-    XM.spill = Mat.hide(0xb8dce4, { scale: 0.2 });
-    XM.spillR = Mat.hide(0xe4bcc4, { scale: 0.2 });
+    XM.spill = Mat.hide(0xaccad0, { scale: 0.2 });
+    XM.spillR = Mat.hide(0xd0b0b8, { scale: 0.2 });
     XM.scythe = Mat.gloss(0x24262c);
     XM.edge = Mat.flat(0xc8d0dc, 'sxedge');
     XM.gum = Mat.gore(0x9a2c3c);
@@ -313,7 +313,7 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
     const sd = i === 0 ? 1 : -1;
     if (!R.halos[i].visible || f.facing(f.at(R.eyes[i], 0, 0, 0), f.dir(h, sd, 0.2, maw ? 0.6 : 0.3)) < -0.1) continue;
     const hr = maw ? 0.072 : 0.06;
-    f.ellipsoid(R.halos[i], 0, 0, 0, hr, hr, 0.062, lvE > 0 ? (rage ? XS.spillR : XS.spill) : C.hide).part(PART.WEAK).flag(PF.FLAT).tone(lvE > 0 ? 0.1 : 0).k(0.01 * sc).z(-0.01 * sc);
+    f.ellipsoid(R.halos[i], 0, 0, 0, hr, hr, 0.062, lvE > 0 ? (rage ? XS.spillR : XS.spill) : C.hide).part(PART.WEAK).flag(PF.FLAT).k(0.01 * sc).z(-0.01 * sc);
   }
   if (maw) {
     bossDSpecimenMaw(f, R, C, M, XS, sc, snoutTip, eyeM, rage, dark, jawA);
@@ -415,12 +415,15 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
   // ── Bioluminescent stripes (weak): glowing arcs on the sides facing us ──
   f.layer(0.004 * sc, PART.WEAK, 0, -0.05 * sc);
   for (let sd = 1; sd >= -1; sd -= 2) {
-    if (f.facing(f.at(r.chest, sd * T.r0[0], 0, T.len * 0.5), f.dir(r.chest, sd, 0.15, 0)) > -0.02) {
+    const sideF = f.facing(f.at(r.chest, sd * T.r0[0], 0, T.len * 0.5), f.dir(r.chest, sd, 0.15, 0));
+    if (sideF > -0.02) {
       for (let k = 0; k < 4; k++) {
         const t = 0.18 + k * 0.215;
         const rx = (T.r0[0] + (T.r1[0] - T.r0[0]) * t) * 1.05 * 1.03;
         const ry = (T.r0[1] + (T.r1[1] - T.r0[1]) * t) * 1.05 * 1.03;
-        bossDArc(f, r.chest, sd, -0.02 + t * T.len, T.rise * t * t, rx, ry, -0.5, 0.9, 0.034 * sc, stripeM);
+        // (A flank seen at a graze: its arcs are slivers, one stroke each over the curve's crown.)
+        if (sideF > 0.3 || maw) bossDArc(f, r.chest, sd, -0.02 + t * T.len, T.rise * t * t, rx, ry, -0.5, 0.9, 0.034 * sc, stripeM);
+        else bossDArc1(f, r.chest, sd, -0.02 + t * T.len, T.rise * t * t, rx * 1.04, ry * 1.04, -0.2, 0.9, 0.034 * sc, stripeM);
       }
     }
     const n0 = r.neck[0];
@@ -430,7 +433,8 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
       for (let k = 0; k < 2; k++) bossDArc1(f, n0, sd, (k === 0 ? 0.1 : 0.45) * s.neck.lens[0], 0, rx, ry, -0.4, 1.0, 0.03 * sc, stripeM);
     }
     const t0 = r.tail[0];
-    if (f.facing(f.at(t0, sd * s.tail.r0[0], 0, -s.tail.lens[0] * 0.5), f.dir(t0, sd, 0.2, 0)) > -0.02) {
+    // (Head-on the tail base hides behind the body.)
+    if (!maw && f.facing(f.at(t0, sd * s.tail.r0[0], 0, -s.tail.lens[0] * 0.5), f.dir(t0, sd, 0.2, 0)) > -0.02) {
       for (let k = 0; k < 3; k++) {
         const t = 0.15 + k * 0.35;
         bossDArc1(f, t0, sd, -t * s.tail.lens[0], 0, s.tail.r0[0] * (1 - t * 0.3) * 1.03, s.tail.r0[1] * (1 - t * 0.3) * 1.03, -0.3, 1.1, 0.03 * sc, stripeM);
@@ -449,7 +453,7 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
       const c = f.at(e, 0, 0, 0);
       const sd = i === 0 ? 1 : -1;
       if (f.facing(c, f.dir(h, sd, 0.2, 0.4)) < -0.15) continue;
-      if (lvE > 0) f.ellipsoid(e, 0, 0, 0, 0.05, 0.038, 0.07, rage ? XS.rimR : XS.rim).flag(PF.FLAT).min(0.6);
+      if (lvE > 0) f.ellipsoid(e, 0, 0, 0, 0.042, 0.032, 0.06, rage ? XS.rimR : XS.rim).flag(PF.FLAT).min(0.6);
       f.ellipsoid(e, 0, 0, 0, 0.034, 0.026, 0.05, eyeM).flag(PF.FLAT).z(-0.01).min(0.6);
       if (headTx >= 9 && lvE > 0) {
         const size = stampSize(headTx * 1.5);
@@ -483,7 +487,9 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
       const base = f.at(pv, 0, y - 0.01, z - 0.01);
       f.cone(base, f.at(pv, 0, y + 0.01 + cl * 0.4085, z - 0.02 - cl * 0.9128), 0.03 * sc, 0.004 * sc, C.quill).mat2(C.quillTip, 0.7).k(0.01 * sc).min(0.5);
       for (let sd = 1; sd >= -1; sd -= 2) {
-        if ((p === 0 || p === 3) && sd !== camSide) continue;
+        // (The short neck and tail rows: the centre quills alone; the chest and hips
+        // rows get the thin side quills of both sides, sticking up past the back.)
+        if (p === 0 || p === 3) continue;
         const dx = -Math.sin(sd * 0.3);
         f.cone(f.at(pv, sd * spread, y, z), f.at(pv, sd * spread + dx * l, y + l * 0.4754, z - l * 0.8286), 0.014 * sc, 0.003 * sc, C.quill)
           .mat2(C.quillTip, 0.75)
@@ -501,12 +507,13 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
     const leg = r.legs[i];
     const side = i === 0 ? 1 : -1;
     const mid = f.depth(f.at(leg.knee, 0, 0, 0));
-    f.layer(0.05 * sc, PART.LIMB, (mid > torsoDepth + 0.1 ? -0.1 : 0) + dark);
+    const farLeg = mid > torsoDepth + 0.1;
+    f.layer(0.05 * sc, PART.LIMB, (farLeg ? -0.1 : 0) + dark);
     // (Starts below the hip joint: the 3D thigh's top is flat, the round cap must not rise over the hips.)
     f.coneE(f.at(leg.hip, 0, -0.1 * L, 0.01), f.at(leg.hip, 0, -s.thigh, 0), X(f, leg.hip), Z(f, leg.hip), 0.11 * L * sc, 0.165 * L * sc, 0.05 * L * sc, 0.064 * L * sc, C.hide).u(1.0 + i * 0.3);
     // The drumstick's swell (the 3D thigh bulges at mid-length), a lit crescent down its front.
     f.ellipsoid(leg.hip, 0, -s.thigh * 0.42, 0.012, 0.1 * L, s.thigh * 0.36, 0.17 * L, C.hide).u(1.2 + i * 0.3).k(0.04 * sc);
-    if (!maw) f.decal(f.at(leg.hip, 0, -0.02, 0.15 * L), f.at(leg.hip, 0, -s.thigh * 0.6, 0.11 * L), 0.012 * sc, 0.01 * sc, C.hide).flag(PF.FLAT | PF.SHADE_ONLY).tone(0.22).min(0.5);
+    if (!maw && !farLeg) f.decal(f.at(leg.hip, 0, -0.02, 0.15 * L), f.at(leg.hip, 0, -s.thigh * 0.6, 0.11 * L), 0.012 * sc, 0.01 * sc, C.hide).flag(PF.FLAT | PF.SHADE_ONLY).tone(0.22).min(0.5);
     f.ball(f.at(leg.knee, 0, -0.005, 0.012), 0.056 * L * sc, C.limb).k(0.02 * sc);
     f.coneE(f.at(leg.knee, 0, 0.0, -0.008), f.at(leg.knee, 0, -s.shin, 0), X(f, leg.knee), Z(f, leg.knee), 0.064 * L * sc, 0.088 * L * sc, 0.032 * L * sc, 0.038 * L * sc, C.limb).k(0.03 * sc);
     f.coneE(f.at(leg.ankle, 0, 0.03, 0), f.at(leg.ankle, 0, -s.meta, 0), X(f, leg.ankle), Z(f, leg.ankle), 0.042 * L * sc, 0.05 * L * sc, 0.032 * L * sc, 0.036 * L * sc, C.limb).k(0.03 * sc);
@@ -530,7 +537,8 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
   for (let i = 0; i < r.arms.length; i++) {
     const arm = r.arms[i];
     const mid = f.depth(f.at(arm.elbow, 0, 0, 0));
-    f.layer(0.03 * sc, PART.LIMB, (mid > torsoDepth + 0.05 ? -0.1 : 0) + dark);
+    const farArm = mid > torsoDepth + 0.05;
+    f.layer(0.03 * sc, PART.LIMB, (farArm ? -0.1 : 0) + dark);
     // (The upper arm starts where it leaves the chest: the shoulder pivot is buried in the torso.)
     f.coneE(f.at(arm.shoulder, 0, -a.upper * 0.25, 0), f.at(arm.shoulder, 0, -a.upper, 0), X(f, arm.shoulder), Z(f, arm.shoulder), a.r * 0.9 * sc, a.r * 1.0 * sc, a.r * 0.8 * sc, a.r * 0.9 * sc, C.hide).u(0.5);
     f.coneE(f.at(arm.elbow, 0, 0, 0), f.at(arm.elbow, 0, -a.fore, 0), X(f, arm.elbow), Z(f, arm.elbow), a.r * 0.8 * sc, a.r * 0.85 * sc, a.r * 0.6 * sc, a.r * 0.6 * sc, C.limb).k(0.02 * sc);
@@ -545,12 +553,13 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
       const m1 = f.at(arm.elbow, bx + sx * 0.16, by - 0.878 * 0.17, 0.03 + 0.479 * 0.17);
       const tip = f.at(arm.elbow, bx + sx * 0.3, by - 0.878 * 0.27, 0.03 + 0.479 * 0.27 + 0.09);
       if (c !== 0) {
-        f.cone(b0, tip, 0.022 * sc, 0.004 * sc, XS.scythe).k(0.006 * sc).min(0.5);
+        // (The far hand's outer blades hide behind its middle one.)
+        if (!farArm) f.cone(b0, tip, 0.022 * sc, 0.004 * sc, XS.scythe).k(0.006 * sc).min(0.5);
         continue;
       }
       f.cone(b0, m1, 0.024 * sc, 0.017 * sc, XS.scythe).k(0.006 * sc).min(0.5);
       f.cone(m1, tip, 0.017 * sc, 0.004 * sc, XS.scythe).k(0.004 * sc).min(0.5);
-      if (!maw) f.decal(m1, tip, 0.006 * sc, 0.003 * sc, XS.edge).flag(PF.FLAT).min(0.45);
+      if (!maw && !farArm) f.decal(m1, tip, 0.006 * sc, 0.003 * sc, XS.edge).flag(PF.FLAT).min(0.45);
     }
   }
 
@@ -621,7 +630,6 @@ function bossDSpecimenMaw(f: PixelFigure, R: BossDSpecimenRig, C: BossDXSkin, M:
     const sd = i === 0 ? 1 : -1;
     f.decal(f.at(e, -sd * 0.04, -0.016, 0.0), f.at(e, sd * 0.04, 0.016, 0.0), 0.022 * sc, 0.016 * sc, rage ? XS.rimR : XS.rim).flag(PF.FLAT).min(0.7);
     f.cone(f.at(e, -sd * 0.032, -0.012, 0.0), f.at(e, sd * 0.034, 0.014, 0.0), 0.014 * sc, 0.009 * sc, eyeM).flag(PF.FLAT).z(-0.01).min(0.7);
-    f.decal(f.at(e, 0, 0.016, 0), f.at(e, 0, -0.014, 0), 0.004 * sc, 0.004 * sc, M.pupil).flag(PF.FLAT).min(0.45);
   }
 }
 
