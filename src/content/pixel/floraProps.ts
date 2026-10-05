@@ -20,7 +20,7 @@ export const HYDRANT: FloraSpecies = {
   h: 48,
   heightM: 0.78,
   variants: 2,
-  paint(c, m, rng, v) {
+  paint(c, m, _rng, v) {
     const red = m.extra.hydrant;
     const cx = this.w / 2;
     // Foot flange, stout barrel, collar under the bonnet.
@@ -39,7 +39,6 @@ export const HYDRANT: FloraSpecies = {
     // Gloss: a lit streak down the barrel's light side, chain to the cap.
     c.line(cx - 3.5, 6, cx - 3.5, 27, red, 0.95, 4, FF.SOFT);
     if (v === 1) c.line(cx - 2, 26, cx + 2, 18, m.extra.canLid, 0.5, 7, FF.SOFT);
-    void rng;
   },
 };
 
@@ -50,7 +49,7 @@ export const TRASH_CAN: FloraSpecies = {
   h: 64,
   heightM: 1.02,
   variants: 2,
-  paint(c, m, rng, v) {
+  paint(c, m, _rng, v) {
     const can = m.extra.can;
     const lid = m.extra.canLid;
     const cx = this.w / 2;
@@ -76,7 +75,6 @@ export const TRASH_CAN: FloraSpecies = {
       c.ellipse(cx + 6, 22, 4, 6, can, { z: 1.5, bias: -0.18 });
       c.line(cx - 8, 46, cx - 9, 30, can, 0.22, 2, FF.SOFT);
     }
-    void rng;
   },
 };
 

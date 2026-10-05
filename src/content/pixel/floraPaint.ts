@@ -389,8 +389,8 @@ export class FloraCanvas {
           const sa = Math.max(-1, Math.min(1, across / hw));
           // Cylinder normal: across the stroke in the screen plane, bulging toward the viewer.
           const flat = o.flat ?? 0;
-          let nx = -ty * sa * (1 - flat);
-          let ny = tx * sa * (1 - flat);
+          const nx = -ty * sa * (1 - flat);
+          const ny = tx * sa * (1 - flat);
           const nz = Math.sqrt(Math.max(0, 1 - sa * sa * (1 - flat)));
           let tone = FloraCanvas.lit(nx, ny, nz, o);
           const al = (along0 + t * len) / s; // level-0 texels along the stroke
@@ -410,8 +410,6 @@ export class FloraCanvas {
               if (o.ringMat) m = o.ringMat;
             } else if (rr < 2.2 / o.rings + 0.08) tone += 0.06;
           }
-          nx = 0;
-          ny = 0;
           this.set(ix, iy, m, tone, z0 + Math.sqrt(Math.max(0, 1 - sa * sa)) * hw * 0.5, (o.flag ?? 0) | (hw < 1 ? FF.THIN : 0));
         }
       }
