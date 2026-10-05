@@ -445,7 +445,7 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
 
   // ── Eyes (weak): the head's five seated in one fleshy brow mass, the body's three in
   // lid rims; an amber ball (drawn a little inside the eye, so flesh always shows between
-  // neighbours), a slit pupil tracking you. (Hot centres and glints come with the cosmetics.) ──
+  // neighbours). (Hot centres, slit pupils and glints come with the cosmetics.) ──
   const h = R.head;
   const sh = scaleOf(h);
   f.layer(0.02 * s, PART.WEAK, rot, -0.1 * s);
@@ -473,8 +473,6 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
     const dead = !(e.mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial;
     const ball = fl === 1 ? M.white : fl === 2 ? M.red : dead ? M.deadEye : frenzy ? M.eyeF : M.eye;
     f.ball(c, r * 0.88 * es, ball).flag(dead ? 0 : PF.GLOW).z(-0.03).k(0.001);
-    if (fl || dead || r < 0.19) continue;
-    f.decal(f.at(e.pupil, 0, r * 0.5, r * 0.92), f.at(e.pupil, 0, -r * 0.5, r * 0.92), r * 0.13 * es, r * 0.13 * es, M.pupil).flag(D | PF.NO_OUTLINE).min(0.5);
   }
 
   // ── Heart (armour behind the ribs; weak once exposed): a glowing, beating bulb ──
@@ -687,20 +685,23 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
 
   // ═══ Cosmetics (emitted last) ═══
 
-  // Eyes: hot centres, the big eye's glint and a bloodshot stroke.
+  // Eyes: hot centres, then the slit pupils tracking you (over them), the big eye's glint and a
+  // bloodshot stroke.
   f.reopen(eyesL);
   for (let i = 0; i < R.eyes.length; i++) {
     const e = R.eyes[i];
     const hold = e.mesh.parent;
     const r = mem.eyeR[i] ?? 0.2;
-    if (!hold || r < 0.2 || e.lid.visible || !e.mesh.visible) continue;
+    if (!hold || r < 0.19 || e.lid.visible || !e.mesh.visible) continue;
     if (flashFor(e.mesh) || !(e.mesh.material as THREE.MeshBasicMaterial).isMeshBasicMaterial) continue;
     const es = scaleOf(hold);
     const c = f.at(hold, 0, 0, 0);
-    if (f.facing(c, f.dir(hold, 0, 0, 1)) < -0.2) continue;
-    const pc = f.at(e.pupil, 0, 0, r * 0.92);
-    const hc = f.mix(c, pc, 0.62);
-    f.decal(hc, hc, r * 0.5 * es, r * 0.5 * es, frenzy ? M.eyeHotF : M.eyeHot).flag(D | PF.GLOW);
+    if (f.facing(c, f.dir(hold, 0, 0, 1)) < -0.6) continue;
+    if (r >= 0.2) {
+      const hc = f.mix(c, f.at(e.pupil, 0, 0, r * 0.92), 0.62);
+      f.decal(hc, hc, r * 0.5 * es, r * 0.5 * es, frenzy ? M.eyeHotF : M.eyeHot).flag(D | PF.GLOW);
+    }
+    f.decal(f.at(e.pupil, 0, r * 0.5, r * 0.92), f.at(e.pupil, 0, -r * 0.5, r * 0.92), r * 0.13 * es, r * 0.13 * es, M.pupil).flag(D | PF.NO_OUTLINE).min(0.5);
     if (r > 0.3) {
       f.decal(f.at(hold, -r * 0.4, r * 0.42, r * 0.8), f.at(hold, -r * 0.4, r * 0.42, r * 0.8), r * 0.12 * es, r * 0.12 * es, M.white).flag(D | PF.GLOW | PF.NO_OUTLINE).min(0.5);
       f.decal(f.at(hold, r * 0.8, -r * 0.34, r * 0.5), f.at(hold, r * 0.36, -r * 0.12, r * 0.9), 0.035 * es, 0.02 * es, M.bloodshot).flag(D | PF.GLOW | PF.NO_OUTLINE).min(0.5);
