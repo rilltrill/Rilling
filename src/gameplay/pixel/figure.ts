@@ -51,6 +51,12 @@ export const PF = {
   STAMP: 256,
   /** A flat TRIANGLE (A, B and C — C is stored in the radius slots): membranes, blades, plates. */
   TRI: 512,
+  /**
+   * Pattern frame runs straight on through the round caps (u along the axis, v
+   * across it, both unclamped) instead of turning polar there — big round blobs
+   * (bellies, flesh mounds) get blotches, not bullseye rings round the centre.
+   */
+  PLANAR: 1024,
 } as const;
 
 /** Hit-part code of a primitive (alignment tests / gore). */
@@ -130,6 +136,8 @@ const _cb = new THREE.Vector3();
 export const NEAR_CLIP = 0.3;
 /** Largest texel size (retro px): closer than that the sprite clips, it never turns into a mosaic. */
 export const MAX_KPX = 3;
+/** Widest sprite (texels) of the opt-in wide paint class (`PixelFigure.maxWide`). */
+export const MAX_WIDE = 512;
 
 /** Polynomial smooth-min share of `b` (0..1) in a blend of radius k. */
 function shareB(a: number, b: number, k: number): number {
@@ -255,6 +263,13 @@ export class PixelFigure {
   night = 0;
   /** Texel size (retro px) this sprite had last redraw: painters pick stamp sizes in texels. */
   kHint = 1;
+  /**
+   * Painter opt-in (wide paint class): widest sprite in texels before texels grow
+   * (`PixelCast` then paints it through a 2:1 G-buffer). 0 = the caller's size cap.
+   * A boss whose tentacles spread past that cap keeps 1 texel per retro pixel
+   * instead of popping to chunkier texels mid-fight. Reset by `begin`.
+   */
+  maxWide = 0;
 
   private pool: THREE.Vector3[] = [];
   private poolN = 0;
@@ -286,6 +301,7 @@ export class PixelFigure {
     this.foot.makeEmpty();
     this.maxTexels = 140;
     this.kHint = 1;
+    this.maxWide = 0;
   }
 
   // ─── Painter API ──────────────────────────────────────────────────────────
@@ -359,13 +375,29 @@ export class PixelFigure {
    * layer (far-side limbs), `depth` pushes it back (mouth interiors).
    */
   layer(k = 0.04, part: PartCode = PART.NONE, tone = 0, depth = 0): this {
-    if (this.curLayer < MAX_LAYERS - 1) {
-      this.curLayer++;
+    // (Numbered after the last layer made — also after a `reopen`.)
+    if (this.layerK.length < MAX_LAYERS) {
+      this.curLayer = this.layerK.length;
       this.layerK.push(k);
       this.layerTone.push(tone);
       this.layerDepth.push(depth);
       this.layerPart.push(part);
     }
+    return this;
+  }
+
+  /** Index of the current layer (−1 before the first): keep it to `reopen` the layer later. */
+  get layerIndex(): number {
+    return this.curLayer;
+  }
+
+  /**
+   * Go back to an earlier layer (a `layerIndex`) and add more to it. Painters emit
+   * the gameplay parts first and the cosmetic details (veins, stitches) last, so a
+   * full primitive table drops cosmetics, never an eye or a weak point.
+   */
+  reopen(i: number): this {
+    if (i >= 0 && i < this.layerK.length) this.curLayer = i;
     return this;
   }
 
@@ -855,11 +887,13 @@ export class PixelFigure {
     if (prevK === k - 1 && size < this.maxTexels * prevK * 1.18) k = prevK;
     else if (prevK === k + 1 && size > this.maxTexels * k * 0.85) k = prevK;
     k = Math.min(k, MAX_KPX);
-    k = Math.max(k, Math.ceil((Math.max(cx1 - cx0, cy1 - cy0) + 4) / maxSize));
+    // (maxWide: an opted-in wide paint class — the width may run past maxSize.)
+    const maxW = this.maxWide > maxSize ? Math.min(this.maxWide, MAX_WIDE) : maxSize;
+    k = Math.max(k, Math.ceil((cx1 - cx0 + 4) / maxW), Math.ceil((cy1 - cy0 + 4) / maxSize));
     this.kpx = k;
     const gx0 = Math.floor(cx0 / k) - 1;
     const gy0 = Math.floor(cy0 / k) - 1;
-    this.W = Math.min(Math.ceil(cx1 / k) + 1 - gx0, maxSize);
+    this.W = Math.min(Math.ceil(cx1 / k) + 1 - gx0, maxW);
     this.H = Math.min(Math.ceil(cy1 / k) + 1 - gy0, maxSize);
     this.ox = gx0 * k;
     this.oy = gy0 * k;
@@ -869,7 +903,7 @@ export class PixelFigure {
     // To texel space, sorted per layer (solids, then decals) — stable.
     const tmp = SORT;
     let w = 0;
-    const layers = this.curLayer + 1;
+    const layers = this.layerK.length;
     for (let L = 0; L < layers; L++) {
       for (let pass = 0; pass < 2; pass++) {
         for (let i = 0; i < n; i++) {

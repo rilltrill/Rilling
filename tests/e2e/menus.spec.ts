@@ -76,6 +76,40 @@ test.describe('boot & menus', () => {
     expect(errors).toEqual([]);
   });
 
+  test('ART defaults to SPRITES; the pause ART chip swaps 3D / SPRITES live and sticks', async ({ page }, info) => {
+    const errors = trackErrors(page);
+    await seedSave(page);
+    await page.goto('/?stage=d2&god=1&mute=1');
+    await requireWebGL(page);
+    await waitForBoot(page);
+    await expect.poll(async () => (await snapshot(page))?.state).toBe('playing');
+    await page.waitForTimeout(1500);
+    const art = () =>
+      page.evaluate(() => {
+        const g = (window as any).__game;
+        return { style: g.artStyle as string, sprites: !!g.sprites, saved: g.save.settings.art as string };
+      });
+    // Default: pixel art (the sprite renderer is up), nothing forced by the link.
+    expect(await art()).toEqual({ style: 'sprites', sprites: true, saved: 'sprites' });
+
+    await press(page, '.hud-pause');
+    await expect(page.locator('#menus .screen.pause')).toBeVisible();
+    const chip = page.locator('.pause-art');
+    await expect(chip).toBeVisible();
+    await expect(chip.locator('.seg.on')).toHaveText('SPRITES');
+    await press(page, '.pause-art button[aria-label="ART 3D"]');
+    await expect(chip.locator('.seg.on')).toHaveText('3D');
+    await expect.poll(art).toEqual({ style: '3d', sprites: false, saved: '3d' });
+    await shot(page, info, 'paused-art-3d');
+    await press(page, '.pause-art button[aria-label="ART SPRITES"]');
+    await expect.poll(art).toEqual({ style: 'sprites', sprites: true, saved: 'sprites' });
+    await shot(page, info, 'paused-art-sprites');
+    await press(page, 'button:has-text("RESUME")');
+    await expect.poll(async () => (await snapshot(page))?.state).toBe('playing');
+    expect((await snapshot(page))!.frameErrors).toBe(0);
+    expect(errors).toEqual([]);
+  });
+
   test('settings persist across a reload', async ({ page }) => {
     const errors = trackErrors(page);
     await seedSave(page);

@@ -11,6 +11,8 @@ import { M, SURF, Sculpt, buildTheropod, dgeo, poseTheroLeg, ARM_REST, type Pale
 import { angleDelta, clamp, damp, lerp, TAU } from '../../../core/math';
 import { HALL } from './containment';
 import { labs } from './env';
+import type { PixelFigure } from '../../../gameplay/pixel/figure';
+import { bossDDart, bossDPaintSpecimen, bossDSpecimenRig, type BossDSpecimenRig } from '../../pixel/bossesDino';
 
 /**
  * SPECIMEN X — an escaped engineered hybrid: a huge albino raptor (~6 m) with
@@ -387,6 +389,13 @@ export class SpecimenX extends Boss {
     this.tailRing = Kit.pivot(r.tail[0], 0, 0, -SPEC.tail.lens[0] * 0.55);
     this.anchor = r.chest;
     this.headAnchor = r.headMesh;
+  }
+
+  // ART: SPRITES — the PixelCast painter (content/pixel/bossesDino.ts).
+  private pix: BossDSpecimenRig | null = null;
+  override paintPixels(f: PixelFigure): boolean {
+    this.pix ??= bossDSpecimenRig(this.r, SPEC, this.quillPivots, this.weakMeshes);
+    return this.model.visible && bossDPaintSpecimen(f, this.pix, this.cloak, this.stripeMat.color, this.eyeMat.color, this.enraged, this.quillRaise, this.flinch, this.age);
   }
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -1188,6 +1197,7 @@ export class SpecimenX extends Boss {
               sfxDestroy: 'hit_projectile',
               burst: 'debris',
             });
+            dart.paintPixels = bossDDart(dart.root);
             this.darts.push(dart);
             w.audio.play('whoosh', { volume: 0.7, pitch: 1.3 });
           }

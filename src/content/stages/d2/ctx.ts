@@ -39,7 +39,27 @@ export interface RoomOut {
   shell: THREE.Object3D[];
 }
 
+/**
+ * A plant recorded for the ART: SPRITES billboards (FLORA): species key, foot
+ * (world), the 3D plant's reach (`floraReach`) and height. `perched` = off the
+ * ground by design (a vine hanging from the roof, a palm in a pot).
+ */
+export interface FloraPlace {
+  key: string;
+  x: number;
+  y: number;
+  z: number;
+  w: number;
+  h: number;
+  variant?: number;
+  tint?: number;
+  perched?: boolean;
+}
+
 export interface Ctx {
+  /** Plants for the SPRITES billboards, and the rooms' 3D plant groups (ART: 3D) — see env.ts. */
+  flora: FloraPlace[];
+  veg3D: THREE.Object3D[];
   world: World;
   curve: THREE.CatmullRomCurve3;
   am: AnimMats;

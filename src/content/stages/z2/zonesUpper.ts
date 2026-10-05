@@ -177,10 +177,13 @@ export function buildBay(ctx: ZoneCtx): { near: THREE.Group; field: THREE.Group 
   }
   // Dead trees on the right.
   for (const [tx, tz] of [[21, 16], [27, -20], [29, 2]] as [number, number][]) {
-    cyl(f, 0.18, 0.28, 4, T(0x3a3028, TX.bark), tx, 2, tz, 6);
+    // (One group per tree: a pixel billboard stands in for it in ART: SPRITES, see env.ts.)
+    const t = grp(f, tx, 0, tz);
+    t.userData.flora = 'deadTree';
+    cyl(t, 0.18, 0.28, 4, T(0x3a3028, TX.bark), 0, 2, 0, 6);
     for (let i = 0; i < 4; i++) {
       const a = rng.next() * 6.28;
-      const b = box(f, 0.08, 1.8, 0.08, T(0x3a3028, TX.bark), tx + Math.cos(a) * 0.5, 4.2, tz + Math.sin(a) * 0.5);
+      const b = box(t, 0.08, 1.8, 0.08, T(0x3a3028, TX.bark), Math.cos(a) * 0.5, 4.2, Math.sin(a) * 0.5);
       b.rotation.set(Math.sin(a) * 0.7, 0, -Math.cos(a) * 0.7);
     }
   }

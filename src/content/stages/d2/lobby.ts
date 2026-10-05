@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import { bake, glow, mat } from './bake';
-import { beacon, bush, box, cyl, decal, floorQuad, frameZ, lightPanel, palm, pipe, railing, sign, slab, vent, wallX, wallZ } from './build';
+import { beacon, bush, box, cyl, decal, floorQuad, floraRecord, frameZ, lightPanel, palm, pipe, railing, sign, slab, sub, vent, wallX, wallZ } from './build';
 import type { Ctx, RoomOut } from './ctx';
 import { pixelText } from './font';
 import { ROOMS, railXAtZ } from './layout';
@@ -28,6 +28,9 @@ export function buildLobby(ctx: Ctx): LobbyOut {
   root.name = 'lobby';
   const stat = new THREE.Group();
   const shellG = new THREE.Group();
+  // Palms + bush: their own baked group (ART: 3D) and pixel billboards (ART: SPRITES); the pots stay in `stat`.
+  const veg = new THREE.Group();
+  veg.name = 'd2-veg3d-lobby';
   const am = ctx.am;
 
   // Visitor-centre palette: warm rendered walls, timber, sandstone pillars.
@@ -210,8 +213,12 @@ export function buildLobby(ctx: Ctx): LobbyOut {
     [-9, -50],
     [9, -51],
     [-3, -53],
-  ]) palm(stat, x, z, 2.6 + rnd() * 1.2, rnd);
-  bush(stat, 5.6, -52.5, 0.8, 4);
+  ]) floraRecord(ctx, palm(veg, x, z, 2.6 + rnd() * 1.2, rnd, true, stat), 'palm', x, 0.6, z, { perched: true });
+  {
+    const b = sub(veg);
+    bush(b, 5.6, -52.5, 0.8, 4);
+    floraRecord(ctx, b, 'bush', 5.6, 0, -52.5);
+  }
 
   // Lobby entrance doors behind the start (dark glass).
   slab(stat, glassMat(0x405870, 0.5), 0, 5, 0, 3.4, R.z0 - 0.05, R.z0 + 0.05);
@@ -250,7 +257,9 @@ export function buildLobby(ctx: Ctx): LobbyOut {
 
   bake(stat);
   bake(shellG);
-  root.add(stat, shellG);
+  bake(veg);
+  root.add(stat, shellG, veg);
+  ctx.veg3D.push(veg);
   return { root, shell: shellG.children.slice(), skeleton, banner, staffDoor };
 }
 

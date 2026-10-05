@@ -7,6 +7,12 @@ import { Kit } from '../../kit/ModelKit';
 import { clamp, smoothstep } from '../../../core/math';
 import { Rng } from '../../../core/Rng';
 import { M, bake } from './bake';
+import { FloraField, floraArtToggle, floraAtlas, floraReach } from '../../pixel/floraField';
+import { BUSH, BUSH_WIDE, DEAD_TREE } from '../../pixel/floraSpecies';
+import { Z3_BIOME } from '../../pixel/floraBiomes';
+
+/** Verge plants as pixel billboards (ART: SPRITES): dusk scrub and dead trees. */
+export const Z3_FLORA = [DEAD_TREE, BUSH, BUSH_WIDE];
 import { D } from './layout';
 import { PAL, S, car, tankerTank } from './props';
 import { DuskSky, SKY } from './sky';
@@ -582,14 +588,49 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
   root.add(lights);
   z.tunnelLights = lights;
   z.fixtures = tunnel.fixtures;
-  const all: THREE.Group[] = [...chunksOf(ctx).values(), ...ctx.landmarks];
+  // ART: SPRITES: the verge's scrub and dead trees (tagged `userData.flora`) become pixel billboards;
+  // their 3D meshes leave each chunk for a chunk group of their own under `veg3D` (ART: 3D, culled
+  // like the chunk), so either can be shown.
+  const veg3D = new THREE.Group();
+  veg3D.name = 'z3-veg3d';
+  const flora2d = new FloraField(floraAtlas(Z3_FLORA, Z3_BIOME, 'z3'), {
+    far: FOG_FAR,
+    rim: 0xd88a6a,
+    rimStrength: 0.08,
+    gain: 0.9,
+    localCap: 0.3,
+  });
+  const vegChunks: THREE.Group[] = [];
+  const fb = new THREE.Box3();
+  const foot = new THREE.Vector3();
+  for (const g of chunksOf(ctx).values()) {
+    g.updateMatrixWorld(true);
+    const found: THREE.Object3D[] = [];
+    for (const c of g.children) if (c.userData.flora) found.push(c);
+    if (!found.length) continue;
+    const vg = new THREE.Group();
+    vg.name = `${g.name}-veg`;
+    for (const o of found) {
+      fb.setFromObject(o);
+      o.getWorldPosition(foot);
+      flora2d.fit(o.userData.flora as string, foot.x, foot.y, foot.z, floraReach(o, foot), fb.max.y - foot.y, { sway: 0.04 });
+      vg.attach(o);
+    }
+    vegChunks.push(vg);
+  }
+  const all: THREE.Group[] = [...chunksOf(ctx).values(), ...ctx.landmarks, ...vegChunks];
   for (const g of all) {
     bake(g);
-    root.add(g);
+    (g.name.endsWith('-veg') ? veg3D : root).add(g);
     const box = new THREE.Box3().setFromObject(g);
     const sphere = box.getBoundingSphere(new THREE.Sphere());
     z.chunks.push({ group: g, centre: sphere.center, radius: sphere.radius });
   }
+  const vegPx = new THREE.Group();
+  vegPx.name = 'z3-vegPx';
+  vegPx.add(flora2d.build());
+  root.add(veg3D, vegPx);
+  const untoggle = floraArtToggle(scene, [vegPx], [veg3D]);
   void CHUNK;
   scene.add(root);
 
@@ -609,6 +650,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
       z.update(dt);
     },
     dispose() {
+      untoggle();
       SCENES.delete(world);
     },
   };

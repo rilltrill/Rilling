@@ -24,6 +24,9 @@ import {
 } from './props';
 import { D, RIVER, RIVER_WIDTH } from './layout';
 import { flowMat, flowRibbon, tm, waterClock } from './retro';
+import { FloraField, floraArtToggle, floraAtlas, floraReach } from '../../pixel/floraField';
+import { D1_BIOME } from '../../pixel/floraBiomes';
+import { BUSH, BUSH_WIDE, CANOPY_TREE, CLIFF_TOP, CYCAD, FERN, FERN_WIDE, GRASS, JUNGLE_TREE, PALM, ROOT_PLATE, VINES } from '../../pixel/floraSpecies';
 
 /**
  * JUNGLE RUN environment: a lush tropical park road by day — dirt road, giant
@@ -40,6 +43,11 @@ const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3();
 const _e = new THREE.Euler();
+const _box = new THREE.Box3();
+
+/** ART: SPRITES plants (pixel billboards): species painted for this stage, and their wind sway (m at the top). */
+const D1_FLORA = [JUNGLE_TREE, CANOPY_TREE, PALM, FERN, FERN_WIDE, BUSH, BUSH_WIDE, GRASS, CYCAD, CLIFF_TOP, VINES];
+const SWAY: Record<string, number> = { jungleTree: 0.16, canopyTree: 0.14, palm: 0.32, fern: 0.1, bush: 0.04, grass: 0.12, cycad: 0.05 };
 
 type Layer = 'verge' | 'near' | 'mid' | 'fill' | 'far' | 'patch' | 'rock';
 
@@ -73,6 +81,29 @@ export class JungleEnv {
   private riverX: Float32Array;
   private riverZ: Float32Array;
   private flora = new Flora();
+  /**
+   * ART: SPRITES vegetation: every plant of the stage as a hand-pixelled billboard
+   * (one instanced draw). `veg3D` holds the ART: 3D plant chunks, `vegPx` the
+   * billboards plus the rest of those chunks (rocks, ground patches, signs); the
+   * ART setting shows one or the other, live.
+   */
+  private flora2d = new FloraField(floraAtlas(D1_FLORA, D1_BIOME, 'd1'), { far: FOG_FAR + 10 });
+  private veg3D = new THREE.Group();
+  private vegPx = new THREE.Group();
+  private untoggle: (() => void) | null = null;
+  /**
+   * The fallen tree's crown in ART: SPRITES: leaf-mass billboards (own small atlas)
+   * at its leaf masses, following the crown half when the tree is blasted apart
+   * (translation only: they stay upright and face the camera). `crownRef` = the
+   * crown centre (local to the crown half) and where it was in the world at build.
+   */
+  private crownPx: THREE.Mesh | null = null;
+  private crownRef = new THREE.Vector3();
+  private crownAt0 = new THREE.Vector3();
+  /** The same for the root-ball half (its root plate billboard). */
+  private rootPx: THREE.Mesh | null = null;
+  private rootRef = new THREE.Vector3();
+  private rootAt0 = new THREE.Vector3();
   /** Vegetation chunk meshes, hidden when entirely inside the fog. */
   private chunks: THREE.Mesh[] = [];
   private instanced: THREE.InstancedMesh[] = [];
@@ -162,6 +193,7 @@ export class JungleEnv {
       update: (dt, w) => this.update(dt, w),
       dispose: () => {
         if (current === this) current = null;
+        this.untoggle?.();
         for (const m of this.instanced) m.dispose();
         this.herd.dispose();
       },
@@ -251,6 +283,9 @@ export class JungleEnv {
     w.scene.fog = new THREE.Fog(0xb3cfc2, 24, FOG_FAR);
     EnvKit.lights(root, { sky: 0xeaf6ff, ground: 0x5a7430, hemi: 1.35, sun: 0xfff0d2, sunIntensity: 2.3, sunDir: [0.45, 1, 0.3] });
 
+    this.veg3D.name = 'd1-veg3d';
+    this.vegPx.name = 'd1-vegPx';
+    root.add(this.veg3D, this.vegPx);
     this.buildBackdrop();
     // Subdivided (a 2-triangle 1.6 km plane loses depth precision and flickers
     // through the road) and sunk well below the road/verge ribbons.
@@ -267,6 +302,53 @@ export class JungleEnv {
     this.buildMeadow();
     this.buildCliffs();
     this.buildEnd();
+    this.vegPx.add(this.flora2d.build());
+    if (this.crownPx) this.vegPx.add(this.crownPx);
+    if (this.rootPx) this.vegPx.add(this.rootPx);
+    this.untoggle = floraArtToggle(w.scene, [this.vegPx], [this.veg3D, this.tree.crown3D, this.tree.roots3D]);
+  }
+
+  /**
+   * ART: SPRITES stand-ins for a scenery group: every child tagged
+   * `userData.flora` (a plant) is recorded as a pixel billboard of the same
+   * height at the same spot; everything else (rocks, ground patches, signs) is
+   * cloned into the returned group for the SPRITES scenery. `g` is untouched
+   * (ART: 3D still bakes it as before).
+   */
+  private floraSplit(g: THREE.Object3D): THREE.Group {
+    g.updateMatrixWorld(true);
+    const kept = new THREE.Group();
+    for (const c of g.children) {
+      const key = c.userData.flora as string | undefined;
+      if (!key) {
+        kept.add(c.clone());
+        continue;
+      }
+      _box.setFromObject(c);
+      c.getWorldPosition(_v);
+      // A sprite whose aspect suits the 3D plant (wide, low ferns / bushes get the wide variants), spanning
+      // most of its width (rotation-independent reach) but never more than 1.15× as tall as the plant.
+      const tree = key === 'jungleTree' || key === 'canopyTree';
+      this.flora2d.fit(key, _v.x, _v.y - 0.06, _v.z, floraReach(c, _v), _box.max.y - _v.y, {
+        tint: (c.userData.tint as number | undefined) ?? 1,
+        sway: SWAY[key] ?? 0,
+        aspectTol: tree ? 2.2 : undefined,
+      });
+    }
+    return kept;
+  }
+
+  /** Bake the SPRITES scenery split off a group (see floraSplit) and register it for fog culling. */
+  private keepPx(kept: THREE.Group, cull = true) {
+    if (!kept.children.length) return;
+    merged(kept);
+    this.vegPx.add(kept);
+    for (const c of kept.children) {
+      const m = c as THREE.Mesh;
+      if (!m.isMesh) continue;
+      m.geometry.computeBoundingSphere();
+      if (cull) this.chunks.push(m);
+    }
   }
 
   private buildBackdrop() {
@@ -397,8 +479,10 @@ export class JungleEnv {
       r.position.copy(this.P(dd, lat));
       rocks.add(r);
     }
+    const rocksPx = this.floraSplit(rocks);
     merged(rocks);
-    this.root.add(rocks);
+    this.veg3D.add(rocks);
+    this.keepPx(rocksPx, false);
 
     // Waterfall pouring off the cliff into the pool.
     const top = this.P(468, -37.5, 21);
@@ -443,6 +527,8 @@ export class JungleEnv {
     const CH = 60;
     const start = -40;
     const end = this.len + 70;
+    let keptPx = new THREE.Group();
+    let keptN = 0;
     for (let c0 = start; c0 < end; c0 += CH) {
       // Left and right halves are separate meshes so each can be frustum-culled.
       const gl = new THREE.Group();
@@ -532,15 +618,21 @@ export class JungleEnv {
         }
         this.root.add(shafts);
       }
+      // ART: SPRITES: the rocks / patches / signs of both halves of three chunks in one bake (the plants are billboards).
       for (const g of [gl, gr]) {
+        keptPx.add(...this.floraSplit(g).children);
         merged(g);
-        this.root.add(g);
+        this.veg3D.add(g);
         for (const c of g.children) {
           const m = c as THREE.Mesh;
           if (!m.isMesh) continue;
           m.geometry.computeBoundingSphere();
           this.chunks.push(m);
         }
+      }
+      if (++keptN % 3 === 0 || c0 + CH >= end) {
+        this.keepPx(keptPx);
+        keptPx = new THREE.Group();
       }
     }
     // Bushes the dilos burst out of at the fallen tree (beside/behind their spots, never
@@ -562,8 +654,10 @@ export class JungleEnv {
     const rk2 = f.rock(rng, 1.5);
     rk2.position.copy(this.P(D.FORD_HOLD + 11, -3.5));
     extra.add(rk2);
+    const extraPx = this.floraSplit(extra);
     merged(extra);
-    this.root.add(extra);
+    this.veg3D.add(extra);
+    this.keepPx(extraPx, false);
   }
 
   private place(obj: THREE.Object3D, d: number, lat: number, y = 0, yawOff = 0) {
@@ -653,6 +747,36 @@ export class JungleEnv {
     const rng = new Rng(13);
     this.tree = buildFallenTree(this.flora, rng);
     this.place(this.tree.root, D.TREE, 0, 0, 0.12);
+    // ART: SPRITES crown: leaf masses where the 3D ones are (world space at rest; moved with the crown half).
+    const right = this.tree.right;
+    right.updateMatrixWorld(true);
+    // (The field's own distance cull is off: the mesh moves; fog hides it like the rest.)
+    const field = new FloraField(floraAtlas([BUSH, BUSH_WIDE], D1_BIOME, 'd1-crown'), { far: 1e4 });
+    const p = new THREE.Vector3();
+    this.crownRef.set(0, 0, 0);
+    for (const c of this.tree.crownSpots) {
+      p.set(c.x, c.y, c.z);
+      this.crownRef.add(p);
+      right.localToWorld(p);
+      field.fit('bush', p.x, p.y - c.h * 0.5, p.z, c.w, c.h, { perched: true });
+    }
+    this.crownRef.divideScalar(Math.max(1, this.tree.crownSpots.length));
+    this.crownAt0.copy(this.crownRef);
+    right.localToWorld(this.crownAt0);
+    this.crownPx = field.build();
+    this.crownPx.name = 'd1-crownPx';
+    const left = this.tree.left;
+    left.updateMatrixWorld(true);
+    const rs = this.tree.rootSpot;
+    const rootField = new FloraField(floraAtlas([ROOT_PLATE], D1_BIOME, 'd1-roots'), { far: 1e4 });
+    this.rootRef.set(rs.x, rs.y + rs.h * 0.5, rs.z);
+    p.set(rs.x, rs.y, rs.z);
+    left.localToWorld(p);
+    rootField.fit('rootPlate', p.x, p.y, p.z, rs.w, rs.h);
+    this.rootAt0.copy(this.rootRef);
+    left.localToWorld(this.rootAt0);
+    this.rootPx = rootField.build();
+    this.rootPx.name = 'd1-rootPx';
     // Ranger's abandoned supplies + a toppled signal pole by the trunk.
     const g = new THREE.Group();
     Kit.add(g, Kit.box(0.9, 0.6, 0.6), tm(0x5a6a3a, 'cloth', 1.6, 0.8), -3.2, 0.3, 1.6, 0, 0.3, 0);
@@ -660,6 +784,15 @@ export class JungleEnv {
     Kit.add(g, Kit.cyl(0.08, 0.08, 6, 6), tm(0x7a7a76, 'metal', 4, 0.6), 4.5, 0.2, 2.4, 0, 0.6, Math.PI / 2 - 0.05);
     merged(g);
     this.place(g, D.TREE, 0);
+  }
+
+  /** Move billboard mesh `m` by how far point `ref` (local to `half`) has moved from `at0` (world). */
+  private follow(m: THREE.Mesh, half: THREE.Object3D, ref: THREE.Vector3, at0: THREE.Vector3) {
+    half.updateMatrixWorld(true);
+    _v.copy(ref);
+    half.localToWorld(_v).sub(at0);
+    m.matrix.makeTranslation(_v.x, _v.y, _v.z);
+    m.matrixWorldNeedsUpdate = true;
   }
 
   private buildMeadow() {
@@ -689,8 +822,10 @@ export class JungleEnv {
     Kit.add(tw, Kit.box(2.6, 0.9, 0.08), wood, 0, 7.05, 1.3);
     tw.position.copy(this.P(D.STAMPEDE_WAIT - 6, 22));
     g.add(tw);
+    const gPx = this.floraSplit(g);
     merged(g);
-    this.root.add(g);
+    this.veg3D.add(g);
+    this.keepPx(gPx, false);
 
     // Herd.
     const hadros: { from: THREE.Vector3; to: THREE.Vector3; delay: number; speed: number; scale: number }[] = [];
@@ -718,6 +853,7 @@ export class JungleEnv {
 
   private buildCliffs() {
     const g = new THREE.Group();
+    const px = new THREE.Group();
     const rng = new Rng(19);
     // Huge stones: big rock texels so the faces read as strata, not noise.
     const rockCols = [0x8a8274, 0x77705f, 0x9a9282].map((c) => tm(c, 'rock', 0.32));
@@ -733,12 +869,12 @@ export class JungleEnv {
         if (this.distRiver(p.x, p.z) < RIVER_WIDTH / 2 + 2.5) continue;
         const h = rng.range(9, 15) + k * 4 + Math.max(0, 6 - Math.abs(d - 466) * 0.2);
         const s = rng.range(5, 8);
-        Kit.add(g, this.flora.rockGeo(rng), rng.pick(rockCols), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, s, h * 0.55, s * 0.9);
+        px.add(Kit.add(g, this.flora.rockGeo(rng), rng.pick(rockCols), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, s, h * 0.55, s * 0.9).clone());
         // Jungle on top + vines hanging down the face.
-        Kit.add(g, this.flora.blob(rng), rng.chance(0.5) ? topA : topDark, p.x, h * 0.98, p.z, 0, rng.next() * 6, 0, s * 0.9, 1.6, s * 0.8);
+        this.cliffFlora('cliffTop', Kit.add(g, this.flora.blob(rng), rng.chance(0.5) ? topA : topDark, p.x, h * 0.98, p.z, 0, rng.next() * 6, 0, s * 0.9, 1.6, s * 0.8));
         if (rng.chance(0.6)) {
           const vl = rng.range(3, 7);
-          Kit.add(g, Kit.box(0.5, vl, 0.2), vine, p.x + 2, h * 0.9 - vl / 2, p.z, 0, rng.next() * 6, 0);
+          this.cliffFlora('vines', Kit.add(g, Kit.box(0.5, vl, 0.2), vine, p.x + 2, h * 0.9 - vl / 2, p.z, 0, rng.next() * 6, 0));
         }
       }
     }
@@ -746,11 +882,28 @@ export class JungleEnv {
     for (let k = 0; k < 8; k++) {
       const p = this.P(457 + k * 3.4, -42 - rng.range(0, 4) - Math.abs(k - 3.5) * 1.2);
       const h = rng.range(22, 27) - Math.abs(k - 3.5) * 1.5;
-      Kit.add(g, this.flora.rockGeo(rng), rng.pick(rockCols), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, 5, h * 0.55, 4.5);
-      Kit.add(g, this.flora.blob(rng), topA, p.x, h * 0.96, p.z, 0, 0, 0, 5, 1.8, 4.5);
+      px.add(Kit.add(g, this.flora.rockGeo(rng), rng.pick(rockCols), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, 5, h * 0.55, 4.5).clone());
+      this.cliffFlora('cliffTop', Kit.add(g, this.flora.blob(rng), topA, p.x, h * 0.96, p.z, 0, 0, 0, 5, 1.8, 4.5));
     }
+    // ART: 3D shows the cliffs as built; ART: SPRITES the rocks alone with the plants as billboards.
     merged(g);
-    this.root.add(g);
+    this.veg3D.add(g);
+    this.keepPx(px, false);
+  }
+
+  /**
+   * A cliff plant (the jungle on a pillar's top, a vine on its face) as an ART:
+   * SPRITES billboard: footed at the 3D mesh's lowest point, as tall as it, its
+   * width from the mesh's reach. Perched (off the ground) by design.
+   */
+  private cliffFlora(key: string, m: THREE.Object3D) {
+    m.updateMatrixWorld(true);
+    _box.setFromObject(m);
+    _v.set((_box.min.x + _box.max.x) / 2, _box.min.y, (_box.min.z + _box.max.z) / 2);
+    this.flora2d.fit(key, _v.x, _v.y + (key === 'cliffTop' ? 0.6 : 0), _v.z, floraReach(m, _v), _box.max.y - _box.min.y - (key === 'cliffTop' ? 0.6 : 0), {
+      sway: key === 'cliffTop' ? 0.08 : 0.03,
+      perched: true,
+    });
   }
 
   private buildEnd() {
@@ -858,6 +1011,7 @@ export class JungleEnv {
     this.time += dt;
     const t = this.time;
     waterClock.value = t;
+    this.flora2d.time.value = t;
     const d = w.rig.d;
     this.backdrop.position.set(w.camera.position.x, 0, w.camera.position.z);
     if (this.heatTip && (w.weapons.heat > 0.5 || w.weapons.overheated)) {
@@ -931,6 +1085,9 @@ export class JungleEnv {
       L.rotation.set(-0.3 * k, 0.5 * k, 0.55 * k);
       R.position.set(1.0 + 6 * k, arc * 3.2, -3 * k);
       R.rotation.set(0.2 * k, -0.7 * k, -0.6 * k);
+      // The crown / root-plate billboards ride along with their half (its centre's world offset).
+      if (this.crownPx) this.follow(this.crownPx, R, this.crownRef, this.crownAt0);
+      if (this.rootPx) this.follow(this.rootPx, L, this.rootRef, this.rootAt0);
     }
 
     // Toppled car flung by the trike.

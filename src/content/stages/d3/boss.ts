@@ -15,6 +15,8 @@ import { bakedLambert, clean, tx, type TexSpec } from './retro';
 import { D } from './layout';
 import { park } from './env';
 import { PackRaptor, ventGun } from './alpha';
+import type { PixelFigure } from '../../../gameplay/pixel/figure';
+import { bossDCarcass, bossDPaintTyrant, bossDTyrantRig, type BossDTyrantRig } from '../../pixel/bossesDino';
 
 /**
  * THE TYRANT — a 12 m, 5–6 m tall Tyrannosaurus and the signature chase.
@@ -541,6 +543,13 @@ export class Tyrant extends Boss {
 
     this.anchor = this.chest;
     this.headAnchor = this.head;
+  }
+
+  // ART: SPRITES — the PixelCast painter (content/pixel/bossesDino.ts).
+  private pix: BossDTyrantRig | null = null;
+  override paintPixels(f: PixelFigure): boolean {
+    this.pix ??= bossDTyrantRig({ hips: this.hips, torso: this.torsoMesh, chest: this.chest, neck: this.neck, head: this.head, jaw: this.jaw, maw: this.maw, mouth: this.mouth, throat: this.throat, tongue: this.tongue, eyes: this.eyes, halos: this.halos, tail: this.tail, legs: this.legs, arms: this.arms });
+    return this.model.visible && bossDPaintTyrant(f, this.pix, this.age, this.eyes[0]?.material === this.eyeDead);
   }
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -1816,7 +1825,8 @@ export class Tyrant extends Boss {
       // Leave the carcass in the world for the escape shot.
       if (!this.corpseKept) {
         this.corpseKept = true;
-        this.world.scene.attach(this.model);
+        // (Held by a carcass entity so ART: SPRITES keeps painting it; same model in 3D.)
+        this.world.add(bossDCarcass(this.world, this.model, (f) => this.paintPixels(f)));
       }
       return true;
     }

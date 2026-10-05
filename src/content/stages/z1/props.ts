@@ -397,6 +397,7 @@ export function streetLamp(): THREE.Group {
 
 export function hydrant(): THREE.Group {
   const g = new THREE.Group();
+  g.userData.flora = 'hydrant'; // a pixel billboard in ART: SPRITES (see town.ts)
   const red = Kit.tex('metal', 0xa82218, 2, 0.6);
   cyl(g, 0.14, 0.16, 0.6, 8, red, 0, 0.3, 0);
   Kit.add(g, Kit.sphere(0.15, 8, 5), red, 0, 0.62, 0);
@@ -406,6 +407,7 @@ export function hydrant(): THREE.Group {
 
 export function trashCan(): THREE.Group {
   const g = new THREE.Group();
+  g.userData.flora = 'trashCan'; // a pixel billboard in ART: SPRITES (see town.ts)
   cyl(g, 0.3, 0.26, 0.95, 8, Kit.tex('corrugated', 0x3c4c42, 2), 0, 0.48, 0);
   cyl(g, 0.33, 0.33, 0.06, 8, M.metal, 0, 0.98, 0);
   return g;
@@ -439,6 +441,7 @@ export function mailbox(): THREE.Group {
 
 export function trafficCone(): THREE.Group {
   const g = new THREE.Group();
+  g.userData.flora = 'cone'; // a pixel billboard in ART: SPRITES (see town.ts)
   box(g, 0.4, 0.04, 0.4, M.orange, 0, 0.02, 0);
   Kit.add(g, Kit.cone(0.15, 0.6, 8), M.orange, 0, 0.32, 0);
   cyl(g, 0.095, 0.115, 0.12, 8, M.white, 0, 0.3, 0);
@@ -458,15 +461,22 @@ export function sawhorse(): THREE.Group {
   return g;
 }
 
-/** Street tree in a sidewalk planter. */
+/**
+ * Street tree in a sidewalk planter. The trunk + crown sit in a child group
+ * tagged `userData.flora` (the pixel species standing in for them in ART:
+ * SPRITES, see town.ts); the planter stays 3D in both modes.
+ */
 export function streetTree(rng: Rng): THREE.Group {
   const g = new THREE.Group();
   box(g, 1.2, 0.12, 1.2, M.curb, 0, 0.06, 0);
+  const t = new THREE.Group();
+  t.userData.flora = 'streetTree';
+  g.add(t);
   const h = rng.range(2.6, 3.4);
-  cyl(g, 0.09, 0.13, h, 6, M.bark, 0, h / 2, 0);
+  cyl(t, 0.09, 0.13, h, 6, M.bark, 0, h / 2, 0);
   const s = rng.range(0.9, 1.25);
-  Kit.add(g, Kit.ico(1.3, 0), M.foliage, 0, h + 0.6, 0, rng.next(), rng.next(), 0, s, s * 0.85, s);
-  Kit.add(g, Kit.ico(0.9, 0), M.foliage, 0.6, h + 1.3, 0.2, rng.next(), 0, 0, s);
+  Kit.add(t, Kit.ico(1.3, 0), M.foliage, 0, h + 0.6, 0, rng.next(), rng.next(), 0, s, s * 0.85, s);
+  Kit.add(t, Kit.ico(0.9, 0), M.foliage, 0.6, h + 1.3, 0.2, rng.next(), 0, 0, s);
   return g;
 }
 

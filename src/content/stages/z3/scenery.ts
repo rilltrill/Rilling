@@ -347,7 +347,10 @@ export function scatterVerge(ctx: Ctx, d0: number, d1: number) {
   for (let d = d0; d < d1; d += rng.range(4, 9)) {
     const side = rng.chance(0.5) ? 1 : -1;
     const x = side > 0 ? rng.range(9.5, 40) : rng.range(-48, -23);
-    const o = rng.chance(0.3) ? deadTree(rng) : bush(rng);
+    const dead = rng.chance(0.3);
+    const o = dead ? deadTree(rng) : bush(rng);
+    // ART: SPRITES: a pixel billboard of this species stands in for it (env.ts).
+    o.userData.flora = dead ? 'deadTree' : 'bush';
     ctx.put(o, d, x, 0, rng.next() * 6);
   }
 }

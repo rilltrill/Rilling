@@ -68,6 +68,7 @@ export function lightningTree(w: World, at: V3, count = 2, active: () => boolean
           burst: 'debris',
           source: 'FALLING BRANCH',
           sfxDestroy: 'wood_break',
+          pixel: 'branch',
         }),
       );
       w.audio.play('whoosh', { volume: 0.8, vary: 0.2 });

@@ -14,6 +14,12 @@ import { buildPump, buildTunnel } from './tunnels';
 import { buildHall, buildWing } from './containment';
 import type { BurstDoor, GlassWall, SkeletonDisplay } from './setpieces';
 import type { Enemy } from '../../../gameplay/Enemy';
+import { FloraField, floraArtToggle, floraAtlas } from '../../pixel/floraField';
+import { CANOPY_TREE, EAR, FERN, FERN_WIDE, BUSH, BUSH_WIDE, FLOWER, PALM, VINES } from '../../pixel/floraSpecies';
+import { D2_BIOME } from '../../pixel/floraBiomes';
+
+/** The labs' plants as pixel billboards (ART: SPRITES): greenhouse beds, the lobby palms, the jungle beyond the glass. */
+export const D2_FLORA = [CANOPY_TREE, PALM, FERN, FERN_WIDE, BUSH, BUSH_WIDE, EAR, VINES, FLOWER];
 
 interface Zone {
   id: string;
@@ -73,6 +79,8 @@ export class LabScene {
   readonly animators: Animator[] = [];
   readonly occluders: THREE.Object3D[] = [];
   readonly cullables: { obj: THREE.Object3D; d: number }[] = [];
+  /** Undoes the ART: SPRITES / 3D plant switch hook (dispose). */
+  untoggle: (() => void) | null = null;
   readonly doors: Record<string, BurstDoor> = {};
   private doorList: BurstDoor[] = [];
   cells: GlassWall[] = [];
@@ -147,7 +155,7 @@ export class LabScene {
   }
 
   build() {
-    const ctx: Ctx = { world: this.world, curve: this.curve, am: this.am, animators: this.animators, rng: new Rng(2024) };
+    const ctx: Ctx = { world: this.world, curve: this.curve, am: this.am, animators: this.animators, rng: new Rng(2024), flora: [], veg3D: [] };
     const zone = (id: string, from: number, to: number, out: { root: THREE.Group; shell: THREE.Object3D[] }) => {
       this.zones.push({ id, from, to, root: out.root, shell: out.shell });
       this.root.add(out.root);
@@ -222,6 +230,29 @@ export class LabScene {
     // Intact glass stops bullets (nothing gets shot through a closed enclosure).
     for (const g of [...this.cells, ...this.panes]) g.onBreak = () => (this.occKey = -1);
     this.doorList = Object.values(this.doors);
+    // ART: SPRITES plants: one instanced draw for the whole stage (culled past the fog); the 3D
+    // plant groups stay in their rooms (zone-culled) and the ART setting shows one or the other.
+    const flora2d = new FloraField(floraAtlas(D2_FLORA, D2_BIOME, 'd2'), {
+      far: 62,
+      rim: 0x8ab4d0,
+      rimStrength: 0.1,
+      // The grow lamp over the beds is a local light: allowed to lift the plants (like the 3D beds), never to bleach them.
+      gain: 0.9,
+      localCap: 0.55,
+    });
+    for (const f of ctx.flora) {
+      flora2d.fit(f.key, f.x, f.y, f.z, f.w, f.h, {
+        variants: f.variant === undefined ? undefined : [f.variant],
+        tint: f.tint,
+        perched: f.perched,
+        aspectTol: f.key === 'canopyTree' || f.key === 'palm' ? 1.8 : undefined,
+      });
+    }
+    const vegPx = new THREE.Group();
+    vegPx.name = 'd2-vegPx';
+    vegPx.add(flora2d.build());
+    this.root.add(vegPx);
+    this.untoggle = floraArtToggle(this.world.scene, [vegPx], ctx.veg3D);
     this.world.scene.add(this.root);
     this.update(0);
   }
@@ -433,6 +464,7 @@ export function buildLabs(world: World, curve: THREE.CatmullRomCurve3): Environm
       scene.root.traverse((o) => {
         if ((o as THREE.InstancedMesh).isInstancedMesh) (o as THREE.InstancedMesh).dispose();
       });
+      scene.untoggle?.();
       SCENES.delete(world);
     },
   };

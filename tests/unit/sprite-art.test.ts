@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { autoTexelScale, DEFAULT_LOOK, keepLive, parseLook } from '../../src/gameplay/SpriteArt';
+import { autoTexelScale, DEFAULT_LOOK, keepLive, parseLook, SPRITE_FPS, spriteSchedule } from '../../src/gameplay/SpriteArt';
 import { buildPalette, linearToOklab, oklchToLinear, PALETTE_MAX } from '../../src/gameplay/spritePalette';
 import { DEFAULT_SETTINGS } from '../../src/core/types';
 import { Save } from '../../src/core/Save';
@@ -40,6 +40,17 @@ describe('ART: SPRITES', () => {
     // …while a 3D choice made since sticks.
     const chosen = new Save(memStorage({ 'overrun.save.v1': JSON.stringify({ version: 1, settings: { art: '3d', artV: 2 } }) }), false);
     expect(chosen.settings.art).toBe('3d');
+  });
+
+  it('GRAPHICS LOW redraws less (quality fallback): fewer fps, redraws and texels per frame', () => {
+    const med = spriteSchedule('medium');
+    const low = spriteSchedule('low');
+    expect(spriteSchedule('high')).toEqual(med);
+    expect(med).toEqual({ fps: SPRITE_FPS, maxBakes: 6, texelBudget: 52000 });
+    expect(low.fps).toBeLessThan(med.fps);
+    expect(low.fps).toBeGreaterThanOrEqual(10);
+    expect(low.maxBakes).toBeLessThan(med.maxBakes);
+    expect(low.texelBudget).toBeLessThanOrEqual(med.texelBudget * 0.75);
   });
 
   it('picks whole pixel scales by size, with hysteresis', () => {

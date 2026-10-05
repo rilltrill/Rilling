@@ -7,6 +7,10 @@ import { GAS_Z0, GAS_Z1, ROOF_PADS, SECOND_W, SQ_Z0 } from './layout';
 import { buildTown, type Town, type ZoneId } from './town';
 import { bakeMerge, retroParams, type RetroParams } from './bake';
 import { FirePlume, Rain, nightSky } from './vfx';
+import { FloraField, floraArtToggle, floraAtlas } from '../../pixel/floraField';
+import { Z1_BIOME } from '../../pixel/floraBiomes';
+import { STREET_TREE } from '../../pixel/floraSpecies';
+import { STREET_PROPS } from '../../pixel/floraProps';
 
 /** Per-world handles the stage script needs (set pieces, lights). */
 export interface Z1Scene {
@@ -104,6 +108,30 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     zoneBoxes.push({ id, groups: [g, d], box });
   }
   root.add(town.dynamic);
+  // Street trees + round street props: 3D (ART: 3D) or hand-pixelled billboards (ART: SPRITES), switched live.
+  const veg3D = new THREE.Group();
+  veg3D.name = 'z1-veg3d';
+  bakeMerge(town.trees3D);
+  veg3D.add(town.trees3D);
+  const flora2d = new FloraField(floraAtlas([STREET_TREE, ...STREET_PROPS], Z1_BIOME, 'z1'), {
+    far: FOG_FAR + 6,
+    rim: 0x8aa0e0,
+    rimStrength: 0.08,
+    // Matched to the 3D street trees (dark silhouettes under the neon); the flashlight / neon tint, never bleach.
+    gain: 0.52,
+    localCap: 0.2,
+  });
+  for (const f of town.flora) {
+    // Trees span their crown (never more than 1.15× as tall as the 3D tree); props keep the 3D one's height.
+    if (f.key === 'streetTree') flora2d.fit(f.key, f.x, f.y, f.z, f.w, f.h, { sway: 0.07 });
+    // (Painted props are lit like the 3D props' glossy paint: the trees' gain undone, ~ the 3D props' brightness.)
+    else flora2d.add(f.key, f.x, f.y, f.z, f.h, { tint: 2 });
+  }
+  const vegPx = new THREE.Group();
+  vegPx.name = 'z1-vegPx';
+  vegPx.add(flora2d.build());
+  root.add(veg3D, vegPx);
+  const untoggle = floraArtToggle(scene, [vegPx], [veg3D]);
   const pools = town.pools.build(poolSurface);
   const beams = town.beams.build();
   root.add(pools, beams);
@@ -140,6 +168,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
 
   const update = (dt: number, w: World) => {
     z.t += dt;
+    flora2d.time.value = z.t;
     const t = z.t;
     // Settings → REDUCE FLASHING: strobes become slow fades, buzzing/failing lights hold steady.
     const rf = w.settings.reduceFlashes;
@@ -272,6 +301,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     update,
     dispose() {
       SCENES.delete(world);
+      untoggle();
     },
   };
 }

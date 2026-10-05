@@ -319,11 +319,14 @@ export function trashBin(g: O, x: number, y: number, z: number, tipped = false):
 export function plant(g: O, x: number, y: number, z: number, rng: Rng): THREE.Group {
   const s = grp(g, x, y, z, 0);
   cyl(s, 0.25, 0.2, 0.45, M(0x6a4a3a), 0, 0.22, 0, 8);
+  // The blades: a group on the pot's rim (a pixel billboard in ART: SPRITES, see env.ts; the pot stays 3D).
+  const blades = grp(s, 0, 0.45, 0);
+  blades.userData.flora = 'grass';
   const leaf = M(0x4a5a2a);
   const dead = M(0x7a6a3a);
   for (let i = 0; i < 7; i++) {
     const a = (i / 7) * Math.PI * 2 + rng.spread(0.3);
-    const m = box(s, 0.12, 0.7, 0.03, rng.chance(0.5) ? leaf : dead, Math.cos(a) * 0.12, 0.75, Math.sin(a) * 0.12, -a, 0, 0);
+    const m = box(blades, 0.12, 0.7, 0.03, rng.chance(0.5) ? leaf : dead, Math.cos(a) * 0.12, 0.3, Math.sin(a) * 0.12, -a, 0, 0);
     m.rotation.set(Math.sin(a) * 0.6, -a, -Math.cos(a) * 0.6);
   }
   return s;

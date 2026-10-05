@@ -15,6 +15,9 @@ import * as P from './props';
 import { ditherPool, radialGeometry, retroHook, tx, type TexSpec } from './retro';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { D, GORGE_DEPTH, ROAD_HALF, railHeading, railLength, railPoint } from './layout';
+import { FloraField, floraArtToggle, floraAtlas, floraReach } from '../../pixel/floraField';
+import { D3_BIOME } from '../../pixel/floraBiomes';
+import { BUSH, BUSH_WIDE, EAR, FERN, FERN_WIDE, JUNGLE_TREE, PALM } from '../../pixel/floraSpecies';
 
 /**
  * TYRANT CHASE environment — the park at night in a violent thunderstorm.
@@ -40,6 +43,20 @@ const _s = new THREE.Vector3();
 const FOG_NEAR = 7;
 const FOG_FAR = 80;
 const CHUNK = 60;
+
+/** ART: SPRITES plants (pixel billboards) painted for this stage. */
+const D3_FLORA = [JUNGLE_TREE, PALM, FERN, FERN_WIDE, BUSH, BUSH_WIDE, EAR];
+/** What a vegetation prefab is in ART: SPRITES: species, size of the 3D plant (m: height, rotation-independent width), sway (m at the top), forced variants. */
+interface FloraTag {
+  key: string;
+  h: number;
+  w: number;
+  sway: number;
+  variants?: number[];
+}
+const floraTags = new WeakMap<Prefab, FloraTag>();
+const _box = new THREE.Box3();
+const _origin = new THREE.Vector3();
 
 let current: ParkEnv | null = null;
 
@@ -177,6 +194,17 @@ export class ParkEnv {
   private padBarrels: Destructible[] = [];
   private groups = new Map<string, THREE.Group>();
   private sinks = new Map<string, Sink>();
+  /**
+   * ART: SPRITES vegetation: every plant as a hand-pixelled billboard (one
+   * instanced draw, swaying with the storm's wind). The 3D vegetation sinks go
+   * under `veg3D`; `vegPx` holds the billboards and the roadside rocks (baked
+   * from `pxSinks`); the ART setting shows one or the other, live.
+   */
+  private flora2d: FloraField;
+  private veg3D = new THREE.Group();
+  private vegPx = new THREE.Group();
+  private pxSinks = new Map<string, Sink>();
+  private untoggle: (() => void) | null = null;
   private plazaPalms: Prefab[] = [];
   /** Optional per-frame hook for the jeep view model (set by the stage). */
   onUpdate: ((dt: number) => void) | null = null;
@@ -206,6 +234,19 @@ export class ParkEnv {
     this.storm = new Storm(this.hemi, this.moon, this.fog, q);
     this.storm.groundAt = (x, z) => this.groundAt(x, z);
     this.root.add(this.storm.group);
+    this.flora2d = new FloraField(floraAtlas(D3_FLORA, D3_BIOME, 'd3'), {
+      far: FOG_FAR + 8,
+      rim: 0x8aa4d8,
+      rimStrength: 0.22,
+      // Matched to the 3D storm vegetation's brightness; headlights / beacons tint, never bleach.
+      gain: 0.74,
+      localCap: 0.3,
+      time: this.baker.uniforms.uTime,
+      wind: this.baker.uniforms.uWind,
+    });
+    this.veg3D.name = 'd3-veg3d';
+    this.vegPx.name = 'd3-vegPx';
+    this.root.add(this.veg3D, this.vegPx);
 
     // Rain-rippled water: the ripple texture modulates the sky-sheen emissive
     // too (it flashes with the lightning), so puddles never read as flat decals.
@@ -245,10 +286,18 @@ export class ParkEnv {
     for (const g of this.groups.values()) this.commit(g);
     for (const sink of this.sinks.values()) {
       for (const m of sink.build(this.baker)) {
-        this.root.add(m);
+        this.veg3D.add(m);
         this.culled.push(m);
       }
     }
+    for (const sink of this.pxSinks.values()) {
+      for (const m of sink.build(this.baker)) {
+        this.vegPx.add(m);
+        this.culled.push(m);
+      }
+    }
+    this.vegPx.add(this.flora2d.build());
+    this.untoggle = floraArtToggle(scene, [this.vegPx], [this.veg3D]);
 
     scene.add(this.root);
     // Per-occluder bullet-impact surfaces.
@@ -267,6 +316,8 @@ export class ParkEnv {
 
   disposeSelf() {
     if (current === this) current = null;
+    this.untoggle?.();
+    this.untoggle = null;
     this.onTankBlast = null;
     this.onUpdate = null;
   }
@@ -370,6 +421,28 @@ export class ParkEnv {
       this.sinks.set(key, s);
     }
     return s;
+  }
+
+  /**
+   * ART: SPRITES stand-in for a vegetation prefab placed at `pos` (foot) with
+   * uniform `scale`: a pixel billboard for a plant, or — for a rock — the same
+   * prefab again in the SPRITES-only rock sink.
+   */
+  private floraPut(p: Prefab, d: number, pos: THREE.Vector3, scale: number) {
+    const tag = floraTags.get(p);
+    if (!tag) {
+      const key = `r${Math.floor(d / CHUNK)}`;
+      let sk = this.pxSinks.get(key);
+      if (!sk) this.pxSinks.set(key, (sk = new Sink()));
+      sk.add(p, _m);
+      return;
+    }
+    // A sprite whose aspect suits the 3D plant, never more than 1.15× as tall as it (see FloraField.fit).
+    this.flora2d.fit(tag.key, pos.x, pos.y - 0.06, pos.z, tag.w * scale, tag.h * scale, {
+      sway: tag.sway * scale,
+      variants: tag.variants,
+      aspectTol: tag.key === 'jungleTree' ? 2.2 : undefined,
+    });
   }
 
   private chunkGroup(key: string): THREE.Group {
@@ -644,24 +717,34 @@ export class ParkEnv {
     const end = this.len + 40;
     // Pre-baked variants, stamped by matrix (fast: no per-plant Object3Ds).
     const vr = new Rng(4321);
-    const V = (n: number, make: () => THREE.Object3D): Prefab[] =>
+    // `flora` = the pixel species standing in for the plant in ART: SPRITES (its size measured on the 3D plant).
+    const V = (n: number, make: () => THREE.Object3D, flora?: { key: string; sway: number; variants?: number[] }): Prefab[] =>
       Array.from({ length: n }, () => {
         const holder = new THREE.Group();
         holder.add(make());
-        return this.baker.prefab(holder);
+        let tag: FloraTag | null = null;
+        if (flora) {
+          holder.updateMatrixWorld(true);
+          _box.setFromObject(holder);
+          // Width: rotation-independent reach from the foot (the prefab is placed turned).
+          tag = { ...flora, h: _box.max.y, w: floraReach(holder, _origin) };
+        }
+        const p = this.baker.prefab(holder);
+        if (tag) floraTags.set(p, tag);
+        return p;
       });
-    const palms = V(10, () => f.palm(vr));
-    const tallPalms = V(6, () => f.palm(vr, vr.range(9, 13.5)));
-    const leaningPalms = V(3, () => f.palm(vr, vr.range(7, 11), 0.35));
-    const trees = V(6, () => f.jungleTree(vr));
-    const farTrees = V(6, () => f.jungleTree(vr, vr.range(12, 18), 0));
-    const ferns = V(6, () => f.fern(vr));
-    const bigFerns = V(3, () => f.fern(vr, vr.range(1.3, 1.8)));
-    const ears = V(4, () => f.earPlant(vr));
-    const bigEars = V(2, () => f.earPlant(vr, vr.range(1.3, 1.9)));
-    const bushes = V(4, () => f.bush(vr, vr.range(0.6, 1.1)));
-    const bigBushes = V(4, () => f.bush(vr));
-    const hugeBushes = V(3, () => f.bush(vr, vr.range(1.4, 2.2)));
+    const palms = V(10, () => f.palm(vr), { key: 'palm', sway: 0.75, variants: [0, 1, 2] });
+    const tallPalms = V(6, () => f.palm(vr, vr.range(9, 13.5)), { key: 'palm', sway: 0.9, variants: [0, 1, 2] });
+    const leaningPalms = V(3, () => f.palm(vr, vr.range(7, 11), 0.35), { key: 'palm', sway: 0.8, variants: [3] });
+    const trees = V(6, () => f.jungleTree(vr), { key: 'jungleTree', sway: 0.3 });
+    const farTrees = V(6, () => f.jungleTree(vr, vr.range(12, 18), 0), { key: 'jungleTree', sway: 0.3 });
+    const ferns = V(6, () => f.fern(vr), { key: 'fern', sway: 0.2 });
+    const bigFerns = V(3, () => f.fern(vr, vr.range(1.3, 1.8)), { key: 'fern', sway: 0.3 });
+    const ears = V(4, () => f.earPlant(vr), { key: 'ear', sway: 0.18 });
+    const bigEars = V(2, () => f.earPlant(vr, vr.range(1.3, 1.9)), { key: 'ear', sway: 0.26 });
+    const bushes = V(4, () => f.bush(vr, vr.range(0.6, 1.1)), { key: 'bush', sway: 0.05 });
+    const bigBushes = V(4, () => f.bush(vr), { key: 'bush', sway: 0.07 });
+    const hugeBushes = V(3, () => f.bush(vr, vr.range(1.4, 2.2)), { key: 'bush', sway: 0.1 });
     const rocks = V(4, () => {
       const g = new THREE.Group();
       g.add(f.rock(vr, vr.range(0.3, 0.8)));
@@ -672,7 +755,9 @@ export class ParkEnv {
       _q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rng.range(0, Math.PI * 2));
       _s.setScalar(rng.range(0.85, 1.15));
       _m.compose(_v, _q, _s);
-      this.vegSink(d, side).add(list[rng.int(0, list.length - 1)], _m);
+      const p = list[rng.int(0, list.length - 1)];
+      this.vegSink(d, side).add(p, _m);
+      this.floraPut(p, d, _v, _s.x);
     };
     for (let c0 = -70; c0 < end; c0 += CHUNK) {
       for (const side of [-1, 1] as const) {
@@ -889,7 +974,11 @@ export class ParkEnv {
       _v.set(sx, 0.8, 20);
       v.root.localToWorld(_v);
       _m.compose(_v, _q.identity(), _s.setScalar(1));
-      if (this.plazaPalms.length) this.vegSink(D.VISITOR, -1).add(this.plazaPalms[i % this.plazaPalms.length], _m);
+      if (this.plazaPalms.length) {
+        const p = this.plazaPalms[i % this.plazaPalms.length];
+        this.vegSink(D.VISITOR, -1).add(p, _m);
+        this.floraPut(p, D.VISITOR, _v, 1);
+      }
     }
   }
 

@@ -7,7 +7,7 @@
  *
  *   node scripts/pixel-look.mjs --base http://localhost:5701 --out /tmp/pixel/look/a \
  *     --place "walker@office:-1:3.5,walker@worker:1:4:30:windup=0.9,civ@worker:0:6,raptor@red:2:7::pounce=0.3" \
- *     [--stage "zoo&zooEnv=night"] [--settle 600] [--retro pixel] [--zoom 3] [--dpr 1] [--modes 3d,sprites]
+ *     [--stage "zoo&zooEnv=night"] [--settle 600] [--pre 0] [--nohud] [--retro pixel] [--zoom 3] [--dpr 1] [--modes 3d,sprites]
  *
  * A placement is  id[@variant]:right:forward[:yawDeg][:action=arg;action=arg]  (metres from the camera,
  * yaw relative to facing the camera). Actions: windup=progress, stagger=t, sever=L|R|l|r (L/R whole arm,
@@ -64,6 +64,10 @@ while (Date.now() - t0 < 25000) {
   await page.waitForTimeout(250);
   if (await page.evaluate(() => window.__game?.state === 'playing' && !!window.__game.world)) break;
 }
+// --pre ms: let the stage's opening banner clear before placing (line-ups).
+if (args.pre) await page.waitForTimeout(Number(args.pre));
+// --nohud: hide the HUD and the 2D overlay (telegraph rings, crosshair) for clean line-ups.
+if (args.nohud) await page.addStyleTag({ content: '#hud, #overlay2d { visibility: hidden !important; }' });
 const info = await page.evaluate(
   async ([place, settle]) => {
     const g = window.__game;

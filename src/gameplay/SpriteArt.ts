@@ -59,6 +59,25 @@ const BAKE_CALL_BUDGET = 90;
  */
 const TEXEL_BUDGET = 52000;
 const FIRST_BAKE_CALL_BUDGET = 170;
+
+/** Redraw schedule of one quality level: animation rate, redraws and texels per frame. */
+export interface SpriteSchedule {
+  fps: number;
+  maxBakes: number;
+  texelBudget: number;
+}
+const SCHEDULE: SpriteSchedule = { fps: SPRITE_FPS, maxBakes: MAX_BAKES_PER_FRAME, texelBudget: TEXEL_BUDGET };
+/**
+ * GRAPHICS LOW (older iPhones, Low Power Mode): characters redraw at 10 fps of
+ * game time, at most 4 redraws and ≈ 36 k texels a frame — ~30 % less paint-pass
+ * work, still smooth secondary motion (positions stay smooth at 60).
+ */
+const SCHEDULE_LOW: SpriteSchedule = { fps: 10, maxBakes: 4, texelBudget: 36000 };
+
+/** The redraw schedule for a GRAPHICS quality level. */
+export function spriteSchedule(quality: string): SpriteSchedule {
+  return quality === 'low' ? SCHEDULE_LOW : SCHEDULE;
+}
 /** Frames an on-screen character may stay hidden waiting for its first image before its 3D model shows. */
 const PENDING_FRAMES = 3;
 /** Sprite size caps in texels (beyond them texels grow). */
@@ -641,6 +660,11 @@ export interface SpriteStats {
   /** Primitives in the last painted figure (and table overflows since creation). */
   prims: number;
   primOverflow: number;
+  /** Texels redrawn this frame (paints + impostor bakes; budget ≈ TEXEL_BUDGET). */
+  texels: number;
+  /** Impostor bakes this frame (a sprite without a painter, or one that declined) and since creation. */
+  impostors: number;
+  impostorsTotal: number;
 }
 
 /** Scene-linear colour → the sRGB display colour the retro pass shows (ACES × exposure). */
@@ -775,6 +799,9 @@ export class SpriteArt {
     figureMsFrame: 0,
     prims: 0,
     primOverflow: 0,
+    texels: 0,
+    impostors: 0,
+    impostorsTotal: 0,
   };
   /** PixelCast: characters with a painter (`Entity.paintPixels`) are drawn as pixel art. */
   private cast: PixelCast;
@@ -789,6 +816,8 @@ export class SpriteArt {
   /** Stage darkness 0..1 (from the fog / background), light tint (display). */
   private night = 0;
   private framePaints = 0;
+  private frameTexels = 0;
+  private frameImpostors = 0;
   private framePaintMs = 0;
   private frameFigureMs = 0;
 
@@ -1015,11 +1044,14 @@ export class SpriteArt {
     }
     let bakes = 0;
     this.framePaints = 0;
+    this.frameTexels = 0;
+    this.frameImpostors = 0;
     this.framePaintMs = 0;
     this.frameFigureMs = 0;
     if (due.length) {
       due.sort((a, b) => (a.ready === b.ready ? a.next - b.next : a.ready ? 1 : -1));
-      const cap = Math.max(MAX_BAKES_PER_FRAME, Math.min(firsts, MAX_FIRST_BAKES));
+      const sch = spriteSchedule(w.settings.quality);
+      const cap = Math.max(sch.maxBakes, Math.min(firsts, MAX_FIRST_BAKES));
       this.syncLights();
       this.syncRimLight();
       const r = this.renderer;
@@ -1036,11 +1068,11 @@ export class SpriteArt {
           const budget = s.ready ? BAKE_CALL_BUDGET : FIRST_BAKE_CALL_BUDGET;
           if (bakes > 0 && spent + s.cost > budget) continue; // a cheaper one may still fit
           const area = s.ready ? s.tw * s.th : 0;
-          if (bakes > 0 && texels + area > TEXEL_BUDGET) continue;
+          if (bakes > 0 && texels + area > sch.texelBudget) continue;
           spent += s.cost;
           texels += area;
           // Spread the next bakes over the interval (phase kept, never bunching up).
-          s.next = Math.max(s.next + 1 / SPRITE_FPS, w.time + 0.5 / SPRITE_FPS);
+          s.next = Math.max(s.next + 1 / sch.fps, w.time + 0.5 / sch.fps);
           if (this.bake(s, cam)) bakes++;
         }
       } finally {
@@ -1122,6 +1154,9 @@ export class SpriteArt {
     st.fallbacksTotal += fallbacks;
     st.live3d = live;
     st.paints = this.framePaints;
+    st.texels = this.frameTexels;
+    st.impostors = this.frameImpostors;
+    st.impostorsTotal += this.frameImpostors;
     st.paintMsFrame = this.framePaintMs;
     st.figureMsFrame = this.frameFigureMs;
     st.paintMs = st.paintMs * 0.9 + this.framePaintMs * 0.1;
@@ -1599,6 +1634,8 @@ export class SpriteArt {
     (u.uRt.value as THREE.Vector2).set(cw, ch);
     // Depth bias: half a depth step plus 1.5 cm, so live parts on the surface draw over the sprite.
     (u.uDepth.value as THREE.Vector4).set(d0, d1, D, ((d1 - d0) / 254) * 0.5 + 0.015);
+    this.frameImpostors++;
+    this.frameTexels += W * H;
     s.tw = W;
     s.th = H;
     s.gw = gw;
@@ -1706,6 +1743,7 @@ export class SpriteArt {
     s.ready = true;
     s.away = false;
     this.framePaints++;
+    this.frameTexels += W * H;
     this.framePaintMs += performance.now() - t0;
     return true;
   }

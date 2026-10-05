@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { MAX_LAYERS, MAX_PRIMS, PRIM_FLOATS, type PixelFigure } from './figure';
+import { MAX_LAYERS, MAX_PRIMS, MAX_WIDE, PRIM_FLOATS, type PixelFigure } from './figure';
 import { MAT_COLS, STEPS, materialTable } from './materials';
 import { STAMP_ATLAS, stampAtlas } from './stamps';
 
@@ -308,6 +308,15 @@ const PAINT_FRAG = /* glsl */ `
           cMat = mat;
           cU = T4.x + t * T4.y;
           cV = sgn * l * z / uTexS;
+          if ((flags & 1024) != 0) {
+            // PF.PLANAR: a straight (u, v) frame through the caps too (no rings on round blobs).
+            vec2 ad = T0.zw - T0.xy;
+            float al = length(ad);
+            vec2 dr = al > 0.5 ? ad / al : vec2(1.0, 0.0);
+            vec2 rp = p - T0.xy;
+            cU = T4.x + dot(rp, dr) * z / uTexS;
+            cV = (dr.x * rp.y - dr.y * rp.x) * z / uTexS;
+          }
           cTone = T4.z;
           cFlags = flags;
           cSeed = T3.w;
@@ -469,6 +478,17 @@ const PAINT_FRAG = /* glsl */ `
       float sc = hash12(vec2(floor(bU * 40.0 + bV * 25.0), floor(bV * 60.0) + sd));
       if (sc > 0.93) tone += 0.16 * str;
       if (abs(bV) > 0.0 && fract(bU / scale) < 0.08 && hash12(vec2(floor(bU / scale), sd)) > 0.4 && abs(abs(bV) - 0.04) < 0.012) tone += 0.25;
+    } else if (pat == 17) {
+      // MEAT: ROT at the material's own scale (big creatures): blotches, bruises, creases, veins.
+      vec2 q = uv / scale;
+      float n = vnoise(q + sd);
+      float n2 = vnoise(q * 1.4 + sd + 9.0);
+      float ter = floor(m2.a * 255.0 + 0.5);
+      if (sec > 0.5 && n > 1.06 - 0.5 * str) mat = sec;
+      else if (ter > 0.5 && n2 > 1.2 - 0.5 * str) mat = ter;
+      else if (n2 > 0.64) tone -= 0.1 * str;
+      float v = abs(vnoise(q * 0.55 + sd + 3.0) - 0.5);
+      if (v < 0.022) tone -= 0.2 * str;
     }
     // Cloth folds: short drawn creases bunching toward the joints (elbows, knees, waist).
     if (pat == 1 || pat == 2 || pat == 3 || pat == 12 || pat == 13) {
@@ -624,6 +644,8 @@ const SCRATCH = 256;
 export class PixelCast {
   readonly look: CastLook = { ...DEFAULT_CAST, light: [...DEFAULT_CAST.light] };
   private gbuf: THREE.WebGLRenderTarget;
+  /** Wide paint class (`PixelFigure.maxWide`): a 2:1 G-buffer, made the first time a figure needs it. */
+  private gbufWide: THREE.WebGLRenderTarget | null = null;
   private primTex: THREE.DataTexture;
   private matTex: THREE.DataTexture;
   private stampTex: THREE.DataTexture;
@@ -750,13 +772,16 @@ export class PixelCast {
     (pu.uShade.value as THREE.Vector4).set(L.ambient, L.diffuse, L.wrap, L.spec);
     const W = f.W;
     const H = f.H;
-    this.gbuf.viewport.set(0, 0, W, H);
-    this.gbuf.scissor.set(0, 0, W, H);
-    r.setRenderTarget(this.gbuf);
+    // (A figure wider than the scratch — an opted-in wide paint class — paints through the 2:1 one.)
+    const g = W > SCRATCH ? this.wideGbuf() : this.gbuf;
+    g.viewport.set(0, 0, W, H);
+    g.scissor.set(0, 0, W, H);
+    r.setRenderTarget(g);
     this.quad.material = this.paintMat;
     r.render(this.scene, this.cam);
 
     const ru = this.resolveMat.uniforms;
+    ru.uG.value = g.texture;
     (ru.uSize.value as THREE.Vector2).set(W, H);
     (ru.uTint.value as THREE.Color).copy(env.tint);
     (ru.uRim.value as THREE.Vector4).set(env.rim.r, env.rim.g, env.rim.b, env.rimAmount);
@@ -772,13 +797,30 @@ export class PixelCast {
     r.render(this.scene, this.cam);
   }
 
-  /** GPU bytes held (scratch G-buffer + tables). */
+  /** The wide paint class's 2:1 G-buffer (made once, on first use). */
+  private wideGbuf(): THREE.WebGLRenderTarget {
+    if (!this.gbufWide) {
+      this.gbufWide = new THREE.WebGLRenderTarget(MAX_WIDE, SCRATCH, {
+        type: THREE.UnsignedByteType,
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter,
+        depthBuffer: false,
+        stencilBuffer: false,
+        generateMipmaps: false,
+      });
+      this.gbufWide.scissorTest = true;
+    }
+    return this.gbufWide;
+  }
+
+  /** GPU bytes held (scratch G-buffer(s) + tables). */
   bytes(): number {
-    return SCRATCH * SCRATCH * 4 + MAX_PRIMS * PRIM_FLOATS * 4 + MAT_COLS * 256 * 4 + STAMP_ATLAS * STAMP_ATLAS;
+    return SCRATCH * SCRATCH * 4 + (this.gbufWide ? MAX_WIDE * SCRATCH * 4 : 0) + MAX_PRIMS * PRIM_FLOATS * 4 + MAT_COLS * 256 * 4 + STAMP_ATLAS * STAMP_ATLAS;
   }
 
   dispose() {
     this.gbuf.dispose();
+    this.gbufWide?.dispose();
     this.primTex.dispose();
     this.matTex.dispose();
     this.stampTex.dispose();

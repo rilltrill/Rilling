@@ -52,6 +52,11 @@ function piv(parent: THREE.Object3D, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0
   return g;
 }
 
+/**
+ * Plant builders tag their group with `userData.flora` = the pixel species
+ * (content/pixel/floraSpecies.ts) that stands in for it in ART: SPRITES (see
+ * JungleEnv.floraSplit); the 3D geometry is the same in both modes.
+ */
 export class Flora {
   /** Jittered unit blobs (canopy, bushes). */
   private blobs: THREE.BufferGeometry[] = [];
@@ -86,6 +91,7 @@ export class Flora {
   /** Giant arching fern (1.2–2.6 m). */
   fern(rng: Rng, scale = 1): THREE.Group {
     const g = new THREE.Group();
+    g.userData.flora = 'fern';
     const n = rng.int(5, 7);
     const s = scale * rng.range(0.8, 1.25);
     const a0 = rng.next() * Math.PI * 2;
@@ -107,6 +113,7 @@ export class Flora {
   /** Coconut palm with a gently curved, ringed trunk (7–11 m). */
   palm(rng: Rng): THREE.Group {
     const g = new THREE.Group();
+    g.userData.flora = 'palm';
     const segs = 5;
     const segH = rng.range(1.5, 2.1);
     const lean = rng.range(0.03, 0.09);
@@ -139,6 +146,7 @@ export class Flora {
   /** Huge rainforest tree: buttress roots, tall trunk, layered canopy, hanging vines (14–19 m). */
   bigTree(rng: Rng, vines = true): THREE.Group {
     const g = new THREE.Group();
+    g.userData.flora = 'jungleTree';
     const H = rng.range(10, 14);
     const bark = tm(COL.trunk, 'bark', 0.7);
     Kit.add(g, Kit.cyl(0.55, 0.85, H, 7), bark, 0, H / 2, 0);
@@ -184,6 +192,7 @@ export class Flora {
   /** Background treeline filler: trunk + big dark canopy blobs. */
   canopy(rng: Rng): THREE.Group {
     const g = new THREE.Group();
+    g.userData.flora = 'canopyTree';
     const H = rng.range(7, 12);
     Kit.add(g, Kit.cyl(0.4, 0.6, H, 5), tm(COL.trunk, 'bark', 0.6, 0.85), 0, H / 2, 0);
     const n = rng.int(2, 3);
@@ -210,6 +219,7 @@ export class Flora {
   /** Cycad: stubby scaly trunk with a stiff crown of fronds. */
   cycad(rng: Rng): THREE.Group {
     const g = new THREE.Group();
+    g.userData.flora = 'cycad';
     const h = rng.range(0.6, 1.6);
     Kit.add(g, Kit.cyl(0.26, 0.34, h, 6), tm(COL.cycadTrunk, 'scales', 0.9), 0, h / 2, 0);
     const n = rng.int(9, 12);
@@ -226,6 +236,7 @@ export class Flora {
   /** Leafy bush with the odd tropical flower. */
   bush(rng: Rng, scale = 1, flowers = true): THREE.Group {
     const g = new THREE.Group();
+    g.userData.flora = 'bush';
     const n = rng.int(2, 3);
     for (let i = 0; i < n; i++) {
       const s = rng.range(0.8, 1.3) * scale;
@@ -272,6 +283,7 @@ export class Flora {
   /** Tall grass tuft. */
   grass(rng: Rng): THREE.Group {
     const g = new THREE.Group();
+    g.userData.flora = 'grass';
     const m = tm(rng.chance(0.5) ? COL.verge : COL.fernB, 'grass', 1.2, 0.6);
     const n = rng.int(4, 6);
     for (let i = 0; i < n; i++) {
