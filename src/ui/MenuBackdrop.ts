@@ -1,5 +1,19 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { DEFAULT_SETTINGS, type ArtStyle } from '../core/types';
+import {
+  MenuCast,
+  menuPtero,
+  menuRaptor,
+  menuZombie,
+  paintMenuPtero,
+  paintMenuRaptor,
+  paintMenuZombie,
+  poseMenuPtero,
+  poseMenuRaptor,
+  poseMenuZombie,
+  type MenuPtero,
+} from '../content/pixel/castMenu';
 
 /**
  * Animated 3D attract scene rendered behind the menus whenever no stage is loaded.
@@ -12,8 +26,14 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
  *             screeches, a volcano smokes on the horizon, pterosaurs circle,
  *             fireflies drift; distant lightning.
  *
+ * ART: SPRITES (the default) swaps the characters for the game's own pixel art:
+ * the horde, the raptor and the pterosaurs are joint-only rigs posed like the 3D
+ * ones and painted by the PixelCast painters (content/pixel/castMenu), shown as
+ * pixel-snapped billboards with per-texel depth.
+ *
  * Self-contained on purpose: it never touches the Kit cache (Kit.disposeAll()
- * runs whenever a stage tears down). Everything is created here and released in
+ * runs whenever a stage tears down; the menu raptor / pterosaur rigs are built
+ * with the dino kit but never drawn — only their joints are read). Everything is created here and released in
  * dispose(). Budget: ≈ 20–25 draw calls per shot, ≤ 4 lights, merged statics,
  * instanced crowds, zero per-frame allocations.
  */
@@ -237,6 +257,8 @@ interface Vignette {
   /** New bolt shape/position for the next strike. */
   strike(rng: Lcg): void;
   pointMats: THREE.ShaderMaterial[];
+  /** ART: SPRITES (true) or the 3D characters. */
+  setArt(sprites: boolean): void;
 }
 
 interface Shared {
@@ -670,6 +692,14 @@ function buildCity(sh: Shared): Vignette {
     zLegs.setColorAt(i * 2 + 1, tint);
   });
 
+  // ART: SPRITES — the same horde as PixelCast pixel art (rigs posed from the zeds below).
+  const cast = own(new MenuCast({ tint: new THREE.Color(0.5, 0.48, 0.56), rim: new THREE.Color(0.5, 0.62, 0.95), rimAmount: 0.16 }));
+  const pixelZeds = zeds.map((_, i) => menuZombie(i));
+  for (const pz of pixelZeds) cast.add((f) => paintMenuZombie(f, pz));
+  cast.attach(scene);
+  cast.group.visible = false;
+  let sprites = false;
+
   // ── fire on the wreck + rain ──
   const flameMat = own(pointsMaterial(sh.puffTex, true));
   const flames = own(new PointPool(36, flameMat));
@@ -723,6 +753,7 @@ function buildCity(sh: Shared): Vignette {
         z.x += Math.sin(z.yaw) * z.speed * dt;
       }
       const ph = z.phase;
+      if (sprites) poseMenuZombie(pixelZeds[i], z.x, z.z, z.yaw, z.scale, ph, walking, z.reach, z.lean);
       const roll = walking ? Math.sin(ph) * 0.09 : Math.sin(ph * 0.7) * 0.07;
       const bob = walking ? Math.abs(Math.cos(ph)) * 0.04 : 0;
       _e.set(z.lean + (walking ? 0.05 : Math.sin(ph * 0.5) * 0.04), z.yaw + Math.sin(ph * 0.5) * 0.08, roll);
@@ -811,8 +842,16 @@ function buildCity(sh: Shared): Vignette {
         z.x = z.x0;
         z.z = z.z0;
       }
+      cast.invalidate();
+    },
+    setArt(on) {
+      sprites = on;
+      for (const im of [zBody, zLegs, zArms, zEyes]) im.visible = !on;
+      cast.group.visible = on;
+      cast.invalidate();
     },
     update(t, dt, len, cam) {
+      cast.time += dt;
       const p = t / len;
       const ease = p * p * (3 - 2 * p);
       cam.position.set(0.9 - ease * 1.4 + Math.sin(t * 0.37) * 0.12, 1.68 + Math.sin(t * 1.9) * 0.015, 10 - ease * 7);
@@ -832,6 +871,7 @@ function buildCity(sh: Shared): Vignette {
       updateRain(dt, cam);
     },
     flash(k) {
+      cast.flash = k;
       hemi.intensity = baseHemi + k * 4;
       skyMat.color.setScalar(1 + k * 3.5);
       (scene.fog as THREE.FogExp2).color.copy(fogCol).lerp(fogFlash, k);
@@ -848,6 +888,9 @@ function buildCity(sh: Shared): Vignette {
 }
 
 // ─── JUNGLE ──────────────────────────────────────────────────────────────────
+
+/** Pixel-art pterosaurs' scale (the 3D silhouettes' ~15 m wingspan at the volcano). */
+const PTERO_SCALE = 3.4;
 
 /** The raptor's crag (right of the track, ahead of the camera). */
 const CRAG_X = 10.5;
@@ -1090,6 +1133,20 @@ function buildJungle(sh: Shared): Vignette {
   pteros.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   scene.add(pteros);
 
+  // ART: SPRITES — the raptor and the pterosaurs as PixelCast pixel art (posed like the 3D ones).
+  const cast = own(new MenuCast({ tint: new THREE.Color(0.56, 0.46, 0.46), rim: new THREE.Color(1, 0.66, 0.4), rimAmount: 0.4 }));
+  const pRaptor = menuRaptor();
+  cast.add((f) => paintMenuRaptor(f, pRaptor));
+  const pPteros: MenuPtero[] = [];
+  for (let i = 0; i < PN; i++) {
+    const pp = menuPtero();
+    pPteros.push(pp);
+    cast.add((f) => paintMenuPtero(f, pp));
+  }
+  cast.attach(scene);
+  cast.group.visible = false;
+  let sprites = false;
+
   // ── volcano smoke + fireflies ──
   const smokeMat = own(pointsMaterial(sh.puffTex, false));
   const smoke = own(new PointPool(26, smokeMat));
@@ -1118,8 +1175,18 @@ function buildJungle(sh: Shared): Vignette {
   return {
     scene,
     pointMats: [smokeMat, flyMat],
-    reset() {},
+    reset() {
+      cast.invalidate();
+    },
+    setArt(on) {
+      sprites = on;
+      raptor.visible = !on;
+      pteros.visible = !on;
+      cast.group.visible = on;
+      cast.invalidate();
+    },
     update(t, dt, len, cam) {
+      cast.time += dt;
       const p = t / len;
       const ease = p * p * (3 - 2 * p);
       // bumpy jeep ride along the track
@@ -1144,6 +1211,7 @@ function buildJungle(sh: Shared): Vignette {
       tail1.rotation.y = Math.sin(t * 1.4) * 0.25;
       tail2.rotation.y = Math.sin(t * 1.4 - 0.8) * 0.35;
       tail1.rotation.x = 0.12 + Math.sin(t * 0.9) * 0.05;
+      if (sprites) poseMenuRaptor(pRaptor, CRAG_X - 0.3, CRAG_TOP - 0.2, CRAG_Z, 2.9, t, sc);
 
       // Pterosaurs circle the crater.
       for (let i = 0; i < PN; i++) {
@@ -1153,6 +1221,7 @@ function buildJungle(sh: Shared): Vignette {
         _e.set(0, -a, Math.sin(a) * 0.25);
         _q.setFromEuler(_e);
         const flap = Math.sin(t * (4 + i * 0.6) + i);
+        if (sprites) poseMenuPtero(pPteros[i], _p, -a, Math.sin(a) * 0.25, PTERO_SCALE, t * (4 + i * 0.6) + i);
         _m.compose(_p, _q, _s.set(2.2, 2.2 * flap, 2.2));
         pteros.setMatrixAt(i, _m);
       }
@@ -1195,6 +1264,7 @@ function buildJungle(sh: Shared): Vignette {
       flies.commit();
     },
     flash(k) {
+      cast.flash = k;
       hemi.intensity = baseHemi + k * 3;
       skyMat.color.setScalar(1 + k * 1.6);
       (scene.fog as THREE.FogExp2).color.copy(fogCol).lerp(fogFlash, k);
@@ -1211,6 +1281,28 @@ function buildJungle(sh: Shared): Vignette {
 }
 
 // ─── the backdrop ────────────────────────────────────────────────────────────
+
+/**
+ * ART style for the backdrop's characters: a `&art=` link override, else the
+ * saved setting (an old save that only stored the earlier '3d' default reads as
+ * the current default, as Save migrates it), else the default.
+ */
+function menuArt(): ArtStyle {
+  try {
+    const u = new URLSearchParams(globalThis.location?.search ?? '').get('art');
+    if (u === 'sprites' || u === '3d') return u;
+  } catch {
+    /* no location */
+  }
+  try {
+    const raw = globalThis.localStorage?.getItem('overrun.save.v1');
+    const st = raw ? (JSON.parse(raw) as { settings?: { art?: unknown; artV?: unknown } }).settings : null;
+    if (st && st.artV === DEFAULT_SETTINGS.artV && (st.art === 'sprites' || st.art === '3d')) return st.art;
+  } catch {
+    /* storage unavailable */
+  }
+  return DEFAULT_SETTINGS.art;
+}
 
 const SHOT = 10;
 const FADE = 0.9;
@@ -1236,6 +1328,8 @@ export class MenuBackdrop {
   private disposed = false;
   /** Seconds since the backdrop was created (for strike scheduling). */
   private clock = 0;
+  /** Character art (re-read from the settings at every cut). */
+  private art: ArtStyle = menuArt();
 
   constructor() {
     const own = <T extends Disposable>(x: T): T => {
@@ -1305,6 +1399,7 @@ export class MenuBackdrop {
     let v = this.shots[theme];
     if (!v) {
       v = theme === 'city' ? buildCity(this.shared) : buildJungle(this.shared);
+      v.setArt(this.art === 'sprites');
       this.shots[theme] = v;
     }
     return v;
@@ -1312,6 +1407,13 @@ export class MenuBackdrop {
 
   get theme(): BackdropTheme {
     return this.current;
+  }
+
+  /** Characters as ART: SPRITES pixel art or the 3D models (re-read from the settings at every cut). */
+  setArt(art: ArtStyle) {
+    if (art === this.art) return;
+    this.art = art;
+    for (const v of Object.values(this.shots)) v?.setArt(art === 'sprites');
   }
 
   /** Lock the backdrop to one theme (null = alternate). */
@@ -1333,6 +1435,7 @@ export class MenuBackdrop {
     if (this.t >= SHOT) {
       this.t = 0;
       this.current = this.locked ?? (this.current === 'city' ? 'jungle' : 'city');
+      this.setArt(menuArt());
       this.shot(this.current).reset();
       this.strikeT = -1;
     }
