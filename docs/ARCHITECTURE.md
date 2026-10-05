@@ -188,10 +188,13 @@ the procedural-model look, unchanged.
 
 In SPRITES, characters that have a **painter** are drawn as hand-made pixel art by
 **PixelCast**; so are every pickup, everything thrown at the camera, the gibs and the
-title-screen cast (see *Props, pickups, gibs and the title screen* below). A sprite entity
-without a painter falls back to the older live **impostor bake** (its 3D model re-rendered
-into pixels).
-Painted today — the whole z1 and d1 rosters and more:
+title-screen cast (see *Props, pickups, gibs and the title screen* below), and every stage's
+plants are pixel billboards (**FLORA**, below). A sprite entity without a painter falls back
+to the older live **impostor bake** (its 3D model re-rendered into pixels) — today that is
+only a safety net: every character, boss, pickup and thrown thing of all six stages paints
+(a headless audit of every stage finds no on-screen sprite entity that declines; in game the
+SpriteArt stats count `impostors` per frame, and `bench-art` reports them).
+Painted — every roster of both campaigns:
 - humanoid painter (`content/pixel/human.ts`): **walker** (every outfit), **straggler**,
   **runner** (+ z3 truck/pack/tail runners), **crawler** (torn waist + guts, or broken
   legs), **brute** (+ z2 hospital / z3 riot brute with its glowing skull crack: thick limbs,
@@ -202,9 +205,21 @@ Painted today — the whole z1 and d1 rosters and more:
 - theropod painter (`content/pixel/theropod.ts`): **raptor** (all palettes, d1/d2/d3
   subclasses), **compy**, **dilo** (crests, dapples, the frill = weak);
 - `content/pixel/beasts.ts`: **pteranodon** (triangle wing membranes), **triceratops**;
-- `content/pixel/bosses.ts`: **Butcher** (z1) and **Carnotaur** (d1).
-Not painted yet (impostor bake): Patient Zero (z2), Behemoth (z3), Specimen X (d2),
-Tyrant (d3).
+- `content/pixel/bosses.ts`: **Butcher** (z1) and **Carnotaur** (d1);
+- `content/pixel/bossesZombie.ts`: **Patient Zero** (z2: matte meat with `PAT.MEAT`
+  blotches, `PF.PLANAR` frames, eyes seated in flesh, tapering ribs, latched hit flashes, the
+  wide paint class through its roars; its pool, bubbles, pool veins and IV bags stay live 3D)
+  and **the Behemoth** (z3: hard hat, slit eyes, heat-banded enraged core, smears only on
+  swings);
+- `content/pixel/bossesDino.ts`: **Specimen X** (d2: cloak as a palette fade in five steps,
+  head-on fanged maw, quill darts) and **the Tyrant** (d3: head-on rex face, eye halos painted
+  as glow-lit skin; its carcass is held by a non-hostile, unshootable entity so SPRITES keeps
+  painting it after the death);
+- stage-local subclasses (z2 riot walker / hospital brute, z3 finale / truck / pack / tail
+  runners, deck spitter, riot brute, d1 / d2 / d3 raptor packs and hybrids, d3 perched
+  civilians) use the painters above.
+Boss figures run 110–145 primitives (cap 160); Patient Zero emits gameplay parts first and
+cosmetics last (`layerIndex` / `reopen`), so an overflow would drop a vein, never an eye.
 
 ### How it works
 - The invisible 3D rig keeps animating and stays the hitbox (raycasts, aim assist,
@@ -233,6 +248,12 @@ Tyrant (d3).
   per-texel depth occlusion, hit flashes and blob shadows are shared with the impostor path.
 - `PixelFigure.sample()` is a CPU reference of the paint pass's coverage (node-safe), used by
   the alignment tests.
+- Core additions for big creatures (opt-in, additive): **`PF.PLANAR`** keeps a pattern's
+  frame planar through round caps (no bullseye rings on a 6 m blob); **`PAT.MEAT`** = ROT's
+  blotches, bruises, creases and veins at the material's own scale; **`PixelFigure.maxWide`**
+  opts a figure into the wide paint class (up to `MAX_WIDE` = 512 × 256 texels, a lazily made
+  wide G-buffer: a boss whose tentacles spread keeps 1 texel per pixel); **`layerIndex` /
+  `reopen(i)`** return to an earlier layer to add cosmetics after the gameplay parts.
 - Primitives besides cones / ellipsoids: **`tri(a, b, c, mat, round)`** — a flat triangle
   between projected world points (it shears with the view like the real surface: wing
   membranes, frill fans, blades); **`stamp(p, cellM, id, m0..m3, mirror, solid)`** — a
@@ -351,13 +372,18 @@ Tyrant (d3).
   leaves a neck stump; severed limbs are painted on their own (`paintPart`). In SPRITES the
   FX go pixel too: chunks are gib sprites, and soft particles (blood spray, mist, dust,
   smoke) get solid cores with a wet speck and 2×2-pixel dither cells only at the edges.
-- **Budgets**: ≤ 160 primitives per figure (humans ≈ 100–125, bosses ≈ 80–110), 2 draws +
+- **Budgets**: ≤ 160 primitives per figure (humans ≈ 100–125, bosses ≈ 110–145), 2 draws +
   one 15 KB upload per redraw, ≤ 6 redraws and ≈ 52 k repainted texels per frame; painters
   allocate nothing per redraw. Measured
   (`bench-art`, SwiftShader desktop): ~2 paints/frame in a 9-zombie horde, figure building
   ≈ 0.1 ms/frame avg (≤ 0.6 ms), paints incl. GL submission ≈ 0.35 ms/frame; z1 horde 193 →
   64 draw calls, d3 raptor pack 261 → 68. Memory: a 256² RGBA8 G-buffer + per-sprite RGBA8
-  targets pooled by power-of-two size (≈ 3.5 MB total with the impostor scratch).
+  targets pooled by power-of-two size (≈ 3.5 MB total with the impostor scratch; +0.75 MB from
+  Patient Zero's first roar: the wide class's 512 × 256 G-buffer + its own target).
+- **GRAPHICS LOW** (`spriteSchedule`): characters redraw at 10 fps of game time instead of 12,
+  at most 4 redraws and ≈ 36 k texels a frame (≈ 30 % less paint-pass work) — the quality
+  fallback for older iPhones / Low Power Mode. SpriteArt stats: `paints`, `texels` (repainted
+  this frame), `impostors`, `prims`, `rtBytes`.
 
 ### Props, pickups, gibs and the title screen (`content/pixel/cast*.ts`)
 - **Prop kit** (`castKit.ts`): hard objects drawn the way sprite artists draw them, from the
@@ -422,6 +448,40 @@ Tyrant (d3).
   ≥ 72 % the palm's comb fronds; the pickups' halo tube is left out of the grid — drawn 1–2 px
   by design, its hitbox stays shootable), sprite area ≤ 1.6× the hitbox's (≤ 2.4× where goo,
   flames, smoke or the hook's chain stream past it); and the real-thrower → kind table).
+
+### FLORA — pixel plants (`content/pixel/flora*.ts`)
+In ART: SPRITES every stage's vegetation is hand-pixelled billboards instead of the faceted 3D
+plants (ART: 3D keeps the 3D plants, the same meshes and materials, moved into groups of their
+own). `floraField.ts`: each stage paints its species once at load (CPU, node-safe, cached for
+restarts) into a PALETTISED atlas (R8 indices + a 256-colour palette) with four HAND-PAINTED
+mip levels, and draws all its plants as ONE instanced draw of upright, camera-facing (yaw-only)
+billboards: `texelFetch` of whole texels, alpha-tested and depth-writing, Lambert-lit with the
+plant rules (sky light on the top, local lamps / headlights / flashlight on a view-facing card,
+half desaturated and capped by `localCap`, a per-stage `gain` matching the stage's 3D plants),
+a cool rim on the back-lit edge at night, wind as whole-texel row shifts. The mip level is
+never minified (bias 1.0) and strand plants (`balance`) are repainted thinner at the coarser
+levels so nothing crawls or pops as the rail camera moves.
+- Species (`floraSpecies.ts`, `floraProps.ts`): jungle giants (6 silhouettes), canopy crowns,
+  palms, ferns (+ wide), bushes (+ wide), grass, cycads, elephant ears, street trees, cliff-top
+  tangles, hanging vines, the z1 street props (hydrant, trash can, cone), dead trees, bedding
+  flowers, a fallen giant's root plate. Biomes (`floraBiomes.ts`) give each stage its colours,
+  taken from its own 3D plants (night biomes cap their ramps: never pale or mint).
+- Wiring: a builder tags a plant group `userData.flora = '<species>'` (or records it), the
+  stage measures its reach (`floraReach`) and height and calls `FloraField.fit` (picks a variant
+  by aspect, never taller than 1.15× the 3D plant), and `floraArtToggle(scene, [billboards],
+  [3D groups])` shows one or the other, live with the ART setting (checked once per render).
+  d1 (jungle, cliff tops, vines; the fallen tree's crown and root plate ride along with its
+  halves when it is blasted), d2 (greenhouse beds, lobby palms, the jungle beyond the glass),
+  d3 (storm jungle), z1 (street trees + props), z2 (car-park dead trees, potted plants — the
+  pots stay 3D), z3 (dusk verge scrub and dead trees).
+- Plants are scenery only: never raycast, never occluders; gameplay is identical in both modes.
+- Cost: one draw per stage (d1: + 2 small ones for the fallen tree), ≈ 1.4 MB (d1, + 0.13 MB) / 0.7 MB (d2, d3) / ≤ 0.17 MB (z1–z3) of R8 atlas with
+  mips, 0.02–0.35 s of CPU painting at load (behind the loading card). Tests:
+  `tests/unit/pixel-flora.test.ts` (atlas levels / palette / rim / caps / crawl; per stage:
+  a billboard where every plant stands, heights, live ART swap, no occluders).
+- Still 3D in both modes (environment, not cast): terrain, rocks and cliffs, buildings, the
+  d1 fallen tree's trunk log, the volcano / skyline backdrops, street furniture and cars,
+  shootable props (barrels, drums, gas cylinders, the d3 fuel tank, glass panes).
 
 ### Impostor bake (characters without a painter)
 `SpriteArt.bakeNow` re-renders the source's 3D model with the main camera's projection
