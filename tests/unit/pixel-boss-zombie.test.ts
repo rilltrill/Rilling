@@ -270,6 +270,12 @@ describe('PixelCast alignment: Patient Zero (z2 boss)', () => {
     expectAligned(worst, 'pz frenzy slam armed');
     // (Gameplay parts are emitted first: an overflow would drop cosmetics — and there is headroom.)
     expect(worst.prims).toBeLessThanOrEqual(140);
+    // Late in the fight with half the eyes sewn shut (lids, seams, stitches) and a slam armed.
+    for (let i = 1; i < 5; i++) b.burstEye((b.eyes as unknown[])[i]);
+    run(e, 0.05);
+    const lids = check(world, camera, e, EYE, LOOK);
+    expectAligned(lids, 'pz frenzy slam armed, 4 eyes shut');
+    expect(lids.prims).toBeLessThanOrEqual(140);
     e.setState('idle');
     b.nextAttack = 99;
     run(e, 0.3);

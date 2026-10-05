@@ -714,7 +714,8 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
     const r = mem.eyeR[i] ?? 0.2;
     const es = scaleOf(hold);
     f.decal(f.at(hold, -r * 0.85, 0.02 * r, r * 0.6), f.at(hold, r * 0.85, -0.02 * r, r * 0.6), r * 0.1 * es, r * 0.1 * es, M.seam).flag(D).min(0.5);
-    for (let k = -1; k <= 1; k += 2) f.decal(f.at(hold, k * r * 0.4, r * 0.24, r * 0.58), f.at(hold, k * r * 0.4 + r * 0.05, -r * 0.24, r * 0.58), 0.025 * es, 0.025 * es, M.stitch).flag(D | PF.NO_OUTLINE).min(0.5);
+    // (Stitch ticks across the seam: one tooth-row decal, the scar's trick.)
+    f.decal(f.at(hold, -r * 0.7, 0.02 * r, r * 0.62), f.at(hold, r * 0.7, -0.02 * r, r * 0.62), r * 0.07 * es, r * 0.07 * es, M.stitch).flag(D | PF.TEETH | PF.NO_OUTLINE).min(0.5).seed(5);
   }
 
   // Head: the shadowed brow under the eye cluster, sunken cheeks, nostrils, drool / bile.
@@ -1022,8 +1023,9 @@ export function paintBehemoth(f: PixelFigure, R: BehemothRig, st: BehemothPose):
   const ch = R.chest;
   const sp = R.spine;
   const hp = R.hips;
-  // Dying: the core stutters, then gutters out.
-  const coreOn = !dying || (st.stateTime < 2.4 && Math.sin(st.stateTime * 31) > -0.3 + st.stateTime * 0.35);
+  // Dying: the core keeps burning (as the 3D's does all through the topple), guttering —
+  // it stutters down to a dull ember now and then.
+  const coreOn = !dying || Math.sin(st.stateTime * 31) > -0.55;
   const torsoDepth = f.depth(f.at(sp, 0, 0.6, 0));
 
   // ── Smears behind fast hands (throws, the club, the swipe, the slam) — measured against the
@@ -1193,10 +1195,10 @@ export function paintBehemoth(f: PixelFigure, R: BehemothRig, st: BehemothPose):
     // The brim's shadow across the forehead (a dark band, then the skin of the brow).
     f.decal(f.at(h, -0.5, 0.905, 0.48), f.at(h, 0.5, 0.905, 0.48), 0.04 * hs, 0.04 * hs, M.face).flag(D | PF.SHADE_ONLY).tone(-0.5).min(0.5);
     // Orange-red slit eyes in dark sockets under the brow.
-    const em = flashOf(R.weak[2] ?? R.core) ? M.white : hot ? M.eyeHot : dying ? M.socket : M.eye;
+    const em = flashOf(R.weak[2] ?? R.core) ? M.white : hot ? M.eyeHot : M.eye;
     for (let sd = 1; sd >= -1; sd -= 2) {
       f.decal(f.at(h, sd * 0.13, 0.6, 0.56), f.at(h, sd * 0.35, 0.6, 0.56), 0.075 * hs, 0.07 * hs, M.socket).flag(D);
-      f.decal(f.at(h, sd * 0.15, 0.605, 0.57), f.at(h, sd * 0.33, 0.6, 0.57), 0.032 * hs, 0.028 * hs, em).flag(D | (dying ? 0 : PF.GLOW)).min(0.5);
+      f.decal(f.at(h, sd * 0.15, 0.605, 0.57), f.at(h, sd * 0.33, 0.6, 0.57), 0.032 * hs, 0.028 * hs, em).flag(D | PF.GLOW).min(0.5);
     }
     // Blood drooling from the jaw.
     const dl = 0.15 + 0.1 * Math.sin(t * 1.3);
@@ -1207,7 +1209,7 @@ export function paintBehemoth(f: PixelFigure, R: BehemothRig, st: BehemothPose):
   {
     const a = -0.45;
     f.decal(alongZ(f, h, -0.16, 0.82, 0.52, a, -0.26), alongZ(f, h, -0.16, 0.82, 0.52, a, 0.26), 0.08 * hs, 0.06 * hs, M.crack).flag(D).rag(0.03 * hs, PF.SPIKY).seed(55);
-    f.decal(alongZ(f, h, -0.16, 0.82, 0.53, a, -0.2), alongZ(f, h, -0.16, 0.82, 0.53, a, 0.2), 0.03 * hs, 0.025 * hs, flashOf(R.weak[4] ?? R.core) ? M.white : dying ? M.crack : M.gash).flag(D | (dying ? 0 : PF.GLOW)).min(0.5);
+    f.decal(alongZ(f, h, -0.16, 0.82, 0.53, a, -0.2), alongZ(f, h, -0.16, 0.82, 0.53, a, 0.2), 0.03 * hs, 0.025 * hs, flashOf(R.weak[4] ?? R.core) ? M.white : M.gash).flag(D | PF.GLOW).min(0.5);
   }
 
   // ── Hard hat (armour): a yellow domed crown over the brim, the ridge, sticker, glint ──
