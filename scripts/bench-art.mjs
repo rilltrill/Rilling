@@ -5,7 +5,7 @@
  * and then renders N frames per art style while advancing only `world.time`, so
  * ART: SPRITES runs its normal 12 fps round-robin schedule. Reports per-frame draw
  * calls / triangles (bakes included), JS time of Game.renderWorld, bakes per
- * frame and render-target memory.
+ * frame, repainted texels per frame, impostor bakes and render-target memory.
  *
  *   node scripts/bench-art.mjs --shots "d3:16,z2:31" [--frames 120] [--spawn walker:8] [--noauto]
  *
@@ -102,7 +102,7 @@ for (const [stage, beat] of shots) {
           const b = performance.now();
           gl.finish();
           const st = g.sprites?.stats;
-          if (i >= 30) rows.push({ ms: b - a, calls: r.info.render.calls, tris: r.info.render.triangles, bakes: st?.bakes ?? 0, spriteMs: st?.lastMs ?? 0, paints: st?.paints ?? 0, paintMs: st?.paintMsFrame ?? 0, figureMs: st?.figureMsFrame ?? 0, prims: st?.prims ?? 0 });
+          if (i >= 30) rows.push({ ms: b - a, calls: r.info.render.calls, tris: r.info.render.triangles, bakes: st?.bakes ?? 0, spriteMs: st?.lastMs ?? 0, paints: st?.paints ?? 0, paintMs: st?.paintMsFrame ?? 0, figureMs: st?.figureMsFrame ?? 0, prims: st?.prims ?? 0, texels: st?.texels ?? 0, impostors: st?.impostors ?? 0 });
           // Style pops: characters drawn as 3D models while SPRITES is on (whole pass, warm-up frames included).
           if (g.sprites) {
             fallbacks += g.sprites.stats.fallbacks;
@@ -134,6 +134,10 @@ for (const [stage, beat] of shots) {
           figureMsAvg: avg('figureMs'),
           figureMsMax: max('figureMs'),
           primsMax: max('prims'),
+          // Repainted texels per frame (budget ≈ 52 k) and impostor bakes (sprites with no painter: should be 0).
+          texelsAvg: Math.round(avg('texels')),
+          texelsMax: max('texels'),
+          impostors: rows.reduce((s, x) => s + x.impostors, 0),
           characters: w.entities.filter((e) => e.constructor && (e.hostile || e.isBoss || e.constructor.name.includes('Civilian'))).length,
           sprites: g.sprites ? g.sprites.stats.drawn : 0,
           rtMB: g.sprites ? +(g.sprites.stats.rtBytes / 1048576).toFixed(2) : 0,
