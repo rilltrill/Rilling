@@ -255,7 +255,8 @@ export class MenuCast {
     const H = f.H;
     const cw = sizeClass(W);
     const ch = sizeClass(H);
-    if (!a.rt || a.rt.width !== cw || a.rt.height !== ch) {
+    // Reuse the target while it holds the sprite and isn't 4× too big (no thrash at a size-class edge).
+    if (!a.rt || a.rt.width < cw || a.rt.height < ch || a.rt.width * a.rt.height > cw * ch * 4) {
       if (a.rt) {
         this.targets.splice(this.targets.indexOf(a.rt), 1);
         a.rt.dispose();
@@ -298,7 +299,7 @@ export class MenuCast {
     const u = a.mat.uniforms;
     u.map.value = a.rt.texture;
     (u.uSize.value as THREE.Vector2).set(W, H);
-    (u.uRt.value as THREE.Vector2).set(cw, ch);
+    (u.uRt.value as THREE.Vector2).set(a.rt.width, a.rt.height);
     (u.uDepth.value as THREE.Vector4).set(f.d0, f.d1, D, ((f.d1 - f.d0) / 254) * 0.5 + 0.015);
     a.tw = W;
     a.th = H;
