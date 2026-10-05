@@ -189,7 +189,8 @@ export abstract class Zombie extends Enemy {
     if (this.state === 'recover') return t < 0.12 ? 0 : 0.2;
     if (this.state === 'dying') return 0.55;
     if (this.state === 'stagger') return 0.7;
-    return 0.12 + 0.2 * Math.max(0, Math.sin(this.age * 1.6 + this.seed));
+    // A slow groan with a chattering jaw on top (each zombie its own rhythm).
+    return 0.12 + 0.2 * Math.max(0, Math.sin(this.age * 1.6 + this.seed)) + 0.06 * Math.max(0, Math.sin(this.age * 17 + this.seed * 3));
   }
 
   override paintPixels(f: PixelFigure): boolean {

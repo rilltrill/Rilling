@@ -621,6 +621,13 @@ function torsoDetails(f: PixelFigure, r: HumanoidRig, L: HumanLook, M: Mats, fro
       f.decal(f.at(sp, 0.08, 0.22, fz + 0.03), f.at(sp, 0.08, 0.16, fz + 0.03), 0.035 * s, 0.035 * s, M.vest).flag(D).tone(0.1);
     }
   }
+  // Trouser front: pocket slits and the fly seam (drawn lines, the cloth's own shade).
+  if (seenFront && !L.bareLegs && o !== 'patient') {
+    for (let sd = 1; sd >= -1; sd -= 2) {
+      f.decal(f.at(r.hips, sd * 0.1 * b, 0.03, 0.1 * Math.sqrt(b)), f.at(r.hips, sd * 0.15 * b, -0.06, 0.09 * Math.sqrt(b)), 0.006 * s, 0.006 * s, M.pants).flag(D | PF.SHADE_ONLY).tone(-0.32).min(0.5);
+    }
+    f.decal(f.at(r.hips, 0.008, 0.02, 0.105 * Math.sqrt(b)), f.at(r.hips, 0.012, -0.08, 0.1 * Math.sqrt(b)), 0.006 * s, 0.006 * s, M.pants).flag(D | PF.SHADE_ONLY).tone(-0.26).min(0.5);
+  }
   // Belt across the hips.
   if (M.belt) {
     f.decal(f.at(r.hips, -0.18 * b, 0.05, 0.06), f.at(r.hips, 0.18 * b, 0.05, 0.06), 0.024 * s, 0.024 * s, M.belt).flag(D);
@@ -642,6 +649,9 @@ function torsoDetails(f: PixelFigure, r: HumanoidRig, L: HumanLook, M: Mats, fro
         .rag(0.016 * s, PF.SPIKY | PF.RAG_END)
         .seed(4);
       f.decal(f.at(sp, 0.03, 0.34, fz), f.at(sp, 0.035, 0.24, fz), 0.012 * s, 0.008 * s, M.blood).flag(D).min(0.5);
+      // A fresh drip creeping down, frame by frame, then starting again.
+      const run = (f.time * 0.06 + L.seed * 0.37) % 0.16;
+      f.decal(f.at(sp, 0.035, 0.24, fz), f.at(sp, 0.037, 0.24 - run, fz), 0.007 * s, 0.006 * s, M.blood).flag(D).min(0.5);
       f.decal(f.at(sp, -0.02, 0.4, fz), f.at(sp, -0.025, 0.3, fz), 0.009 * s, 0.006 * s, M.blood).flag(D).min(0.5);
     }
     if (L.bellyWound !== 0) {

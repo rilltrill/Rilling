@@ -187,17 +187,22 @@ until the player changes ART; live mid-stage via the pause screen's ART chip). A
 the procedural-model look, unchanged.
 
 In SPRITES, characters that have a **painter** are drawn as hand-made pixel art by
-**PixelCast**; every other sprite entity (bosses, runners, crawlers, brutes, spitters,
-bloaters, compys, dilos, pteros, trikes, projectiles, pickups) still uses the older live
-**impostor bake** (its 3D model re-rendered into pixels) until someone paints it.
-Pilots painted today: **walker** (every outfit; office / worker / nurse are the reference),
-**runner** (same humanoid painter), **civilian** (all variants; the z1 worker is the
-reference) and **raptor** (all palettes incl. the red alpha; d1/d2/d3 subclasses inherit
-it). `RiotWalker` opts out (its armour plates aren't painted yet). Next up for the
-humanoid painter: crawler (legless halves: `HumanPose.legless` + a waist stump), brute
-(riot plates as `PART.ARMOR` prims), spitter (glowing throat sac as a `PF.GLOW` weak part),
-bloater (belly ellipsoid + pustule glows), the bosses; for the theropod painter: compy
-(compact spec), dilo (frill fans as their own layer).
+**PixelCast**; any other sprite entity (projectiles, pickups, the unpainted bosses) still
+uses the older live **impostor bake** (its 3D model re-rendered into pixels).
+Painted today — the whole z1 and d1 rosters and more:
+- humanoid painter (`content/pixel/human.ts`): **walker** (every outfit), **straggler**,
+  **runner** (+ z3 truck/pack/tail runners), **crawler** (torn waist + guts, or broken
+  legs), **brute** (+ z2 hospital / z3 riot brute with its glowing skull crack: thick limbs,
+  fists, riot plates as `PART.ARMOR`, back spikes, the mutant arm), **spitter** (glowing
+  throat sac = weak, chest veins), **bloater** (belly + glowing pustules = weak),
+  **riot walker** (z2 vest + belt as armour), **civilians** — special parts in
+  `content/pixel/zombieParts.ts`;
+- theropod painter (`content/pixel/theropod.ts`): **raptor** (all palettes, d1/d2/d3
+  subclasses), **compy**, **dilo** (crests, dapples, the frill = weak);
+- `content/pixel/beasts.ts`: **pteranodon** (triangle wing membranes), **triceratops**;
+- `content/pixel/bosses.ts`: **Butcher** (z1) and **Carnotaur** (d1).
+Not painted yet (impostor bake): Patient Zero (z2), Behemoth (z3), Specimen X (d2),
+Tyrant (d3).
 
 ### How it works
 - The invisible 3D rig keeps animating and stays the hitbox (raycasts, aim assist,
@@ -226,6 +231,30 @@ bloater (belly ellipsoid + pustule glows), the bosses; for the theropod painter:
   per-texel depth occlusion, hit flashes and blob shadows are shared with the impostor path.
 - `PixelFigure.sample()` is a CPU reference of the paint pass's coverage (node-safe), used by
   the alignment tests.
+- Primitives besides cones / ellipsoids: **`tri(a, b, c, mat, round)`** — a flat triangle
+  between projected world points (it shears with the view like the real surface: wing
+  membranes, frill fans, blades); **`stamp(p, cellM, id, m0..m3, mirror, solid)`** — a
+  hand-pixelled bitmap from `gameplay/pixel/stamps.ts` (eyes, mouths by jaw opening, hands
+  as claw / open / fist in 8 directions, theropod eyes), anchored on a rig point, scaled
+  by WHOLE texels, picked per size class (`stampSize`); decal stamps paint the layer
+  (faces), solid ones add coverage (hands). Stamp cell codes: `a–x` = slot 0–3 ramp step
+  0–5, `1 2 3` darken, `+` lighten, `A–D` glow.
+- **Near clip**: primitives reaching closer than `NEAR_CLIP` (0.3 m) are cut there (radius
+  interpolated) or dropped, and the texel size comes from the on-screen extent when the
+  figure reaches far past the screen, clamped to `MAX_KPX` (3) — a tail sweeping past the
+  lens never turns the sprite into giant blocks.
+- **Depth**: each layer bulges toward the viewer by its blended screen radius × a per-
+  primitive **depth ratio** (`coneE` / `ellipsoid` compute it from their cross-section;
+  `PF.FLAT` shapes don't bulge), so broad flat plates, discs and torsos composite right.
+- **Paint-pass cost**: per-layer texel bounding boxes (a texel outside a layer skips it
+  with one compare) and a per-primitive bounding box texel fetched first (a primitive out
+  of reach costs one fetch). SpriteArt also caps repaints per frame by texel area
+  (`TEXEL_BUDGET` ≈ 52 k texels) besides the ≤ 6 redraws.
+- **Pixel FX** (SPRITES): soft particles get solid cores with a wet highlight speck and
+  2×2-pixel ordered-dither cells only at their edges (a 1-px checker turns into a screen
+  door on the CRT). **Foliage** ('leaves' materials, Kit and the d1 / z1 texture-array
+  bakes): `RETRO_FOLIAGE` turns faceted blobs into leaf clumps — a ragged leafy outline
+  where a face turns away (never on flat ground), dark gaps between clumps, lit tips.
 
 ### Adding pixel art for a character
 1. Expose what the painter needs (a look record + per-frame pose values) **without new
@@ -246,7 +275,13 @@ bloater (belly ellipsoid + pustule glows), the bosses; for the theropod painter:
    f.ellipsoid(joint, cx, cy, cz, rx, ry, rz, mat);            // projected ellipsoid
    f.decal(a, b, ra, rb, mat).flag(PF.FLAT | PF.SHADE_ONLY).tone(-0.4);
    f.facing(point, normal) > 0.1                               // only paint what faces the camera
+   f.tri(a, b, c, mat, round);                                 // flat triangle (membranes, fans)
+   f.stamp(eye, cellM, STAMP.zeye[size], M.eyeGlow, 0, 0, 0, mirror);   // hand-pixelled bitmap
    ```
+   Extras on a humanoid without a new painter: `HumanPose.torso` (shapes melted into the
+   trunk: bellies, vests), `HumanPose.extra` (own layers: armour, sacs, pustules),
+   `armW / legW / neckW` (match scaled 3D limbs), `pelvis: false`, `hand` (`HAND.*`),
+   `smear` + `mem` (motion smears). Theropods: `TheroPose.extra`, `dorsal`, `mem`.
    `f.at / f.dir / f.vec / f.mix` return pooled vectors; resolve materials once per look
    (`Mat.*` builds key strings — cache the ids, see `human.ts` `mats()`); use index loops,
    not `for (… of [1, -1])`; never allocate option objects per redraw.
@@ -260,12 +295,23 @@ bloater (belly ellipsoid + pustule glows), the bosses; for the theropod painter:
 
 ### Style guide (keep new characters consistent)
 - **Pixel density**: 1 texel = 1 retro pixel (≈ 288 lines) until the figure is
-  `maxTexels` tall (humans 190, theropods 200 — a mid-range human is ~90–130 texels);
-  closer than that texels grow by whole pixels (arcade sprite scaling). Never mix texel
-  sizes inside a sprite.
-- **Proportions**: classic sprite chunkiness — heads, hands and feet slightly big, limbs
-  about as thick as their hitbox boxes (radii ≈ the boxes' half-widths, a little inside),
-  hands fanned out on screen (spread axis ⟂ arm and view) so they read as hands.
+  `maxTexels` tall (240 for every painter — a human at ≈ 1.9 m; a mid-range human is
+  ~90–130 texels); closer than that texels grow by whole pixels (arcade sprite scaling,
+  wide hysteresis, never more than `MAX_KPX` = 3). Never mix texel sizes inside a sprite
+  (stamps scale by whole texels and are picked per size class instead).
+- **Anatomy, not tubes** (the owner's brief: "not boxes or rounded geometric shapes
+  stacked together"): limbs swell and taper — deltoid cap, biceps tapering into a bony
+  elbow knob, forearm swelling below it and narrowing to a thin wrist; thigh → knee knob →
+  calf behind → ankle. Trunks are horizontal SLICES (hips, waist, ribs, chest) melted
+  together, never one vertical capsule (its round caps bulge past the hips). Clothes break
+  the silhouette: flared ragged sleeve hems and cuffs that hang over the wrist, untucked
+  hems over the waistband, trouser cuffs breaking over the shoe. Zombies hunch (each its
+  own amount), drop a shoulder and loll their heads. Classic chunkiness: heads, hands
+  and feet slightly big; radii ≈ the hitbox boxes' half-widths, a little inside.
+- **Faces and hands are stamps** (`stamps.ts`) whenever they are big enough (heads ≥ 9
+  texels, hands 3–11 texels): hand-pixelled eyes (zombie socket + glowing pin, living
+  white + pupil + brow, screaming), mouths by jaw opening, claw / open / fist hands in 8
+  directions. Theropod eyes too. Never a blob of ellipse decals.
 - **Palette**: every surface is a material (`Mat.*`, `materials.ts`) with a 6-step
   hand-built ramp: base colour on step 3, shadows darker, richer and hue-shifted toward
   violet, highlights paler and toward warm yellow; step 0 is the outline shade. Pick base
@@ -279,22 +325,33 @@ bloater (belly ellipsoid + pustule glows), the bosses; for the theropod painter:
   pillow shading); far-side limbs one notch darker (`layer({ tone: -0.1 })`). Stages only
   tint (night ≈ 0.68 brightness + a faint sky tint) and add a cool rim on the back-lit edge.
 - **Outlines**: 1 texel on the silhouette's own edge texels (no bloat — the sprite covers
-  what the hitboxes cover): step 0 of the local ramp, step 1 on a lit top/left edge;
-  1-texel runs (fingers, claws, quills) are never outlined. Inner contour (step 0) where a
+  what the hitboxes cover): a near-black INK (the local darkest shade × 0.42, pushed
+  violet) on the exterior, step 0 of the local ramp on a lit top/left edge (selective
+  outline); 1-texel runs (fingers, claws, quills) are never outlined. Inner contour (step 0) where a
   nearer layer overlaps one > 7 cm behind; one step of cast shadow below/right of
   overlaps and under hems, cuffs and collars. Dither (Bayer 4×4) only in the narrow band
   between two steps (`dither` per material).
+- **Readability**: figures under ~45 texels collapse each ramp to three bold steps with
+  the base a notch lighter and a stronger night rim; painted sprites get half the fog the
+  scenery gets.
+- **Drawn detail**: 1-texel crease strokes (Z folds at the inner elbow scaled by the bend,
+  knee and crotch pulls, belly folds on a hunch, armpit pulls with a lit ridge, shoulder
+  blades from behind), seams and pocket slits, sole lines and toe caps — `SHADE_ONLY`
+  decals so they take the local cloth colour.
 - **Animation**: redraws at 12 fps of game time (positions stay smooth at 60). Secondary
-  motion is drawn by the painter from `time`/state: jaws (groan, gape in the windup, snap
-  on the bite), claws twitching, rags/hair/quills swaying, squash & stretch on hits
-  (`f.warp`, ≤ 7 %), the impostor/painted sprite flashes white/red on hits.
+  motion is drawn by the painter from `time`/state: jaws (groan with chatter, gape in the
+  windup, snap on the bite), head loll / roll per character, claws twitching, rags/hair/
+  quills swaying, drips creeping down, squash & stretch on hits (`f.warp`, ≤ 7 %), motion
+  SMEARS (a flat streak behind a head / hand / raptor body that jumped > 5 px since the
+  last redraw: lunges, swipes, pounces), the sprite flashes white/red on hits.
 - **Gore**: `Mat.blood / gore / bone / ribs`; wounds and stains are decals only drawn while
   that side faces the camera; stumps are a ragged gore ball + a bone knob; a popped head
   leaves a neck stump; severed limbs are painted on their own (`paintPart`). In SPRITES the
   FX go pixel too: chunks are gib sprites, and soft particles (blood spray, mist, dust,
-  smoke) use ordered-dither coverage on the pixel grid instead of soft alpha.
-- **Budgets**: ≤ 160 primitives per figure (pilots use 60–90), 2 draws + one 12 KB upload
-  per redraw, ≤ 6 redraws per frame; painters allocate nothing per redraw. Measured
+  smoke) get solid cores with a wet speck and 2×2-pixel dither cells only at the edges.
+- **Budgets**: ≤ 160 primitives per figure (humans ≈ 100–125, bosses ≈ 80–110), 2 draws +
+  one 15 KB upload per redraw, ≤ 6 redraws and ≈ 52 k repainted texels per frame; painters
+  allocate nothing per redraw. Measured
   (`bench-art`, SwiftShader desktop): ~2 paints/frame in a 9-zombie horde, figure building
   ≈ 0.1 ms/frame avg (≤ 0.6 ms), paints incl. GL submission ≈ 0.35 ms/frame; z1 horde 193 →
   64 draw calls, d3 raptor pack 261 → 68. Memory: a 256² RGBA8 G-buffer + per-sprite RGBA8
