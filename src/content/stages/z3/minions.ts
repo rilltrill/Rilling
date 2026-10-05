@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Brute, Crawler, Runner, Spitter, Walker } from '../../enemies/zombies';
+import { Bloater, Brute, Crawler, Runner, Spitter, Walker } from '../../enemies/zombies';
 import type { EnemyState } from '../../../gameplay/Enemy';
 import type { EntryKind, V3 } from '../../../core/types';
 import { RailRig } from '../../../gameplay/RailRig';
@@ -34,13 +34,61 @@ function gunLocked(w: World): boolean {
 }
 
 /**
+ * Emergency vent (as World.checkBossWindup does for a boss ring): an attack that
+ * can't hold still once it is under way — a crawler in mid-leap, the giant's
+ * thrown car — vents an overheated or nearly overheated twin gun as it sets off,
+ * so the gun fires through the whole flight (from the 35 % vent level it takes
+ * ~1.5–2.2 s of flat-out fire to lock again). No-op for a cool barrel.
+ */
+export function ventGun(w: World) {
+  if (w.weapons.active !== 'turret') return;
+  const locked = w.weapons.overheated;
+  if (w.weapons.vent()) {
+    w.audio.play('reload_done', { volume: 0.5, pitch: 0.8 });
+    if (locked) w.hud.prompt(null);
+  }
+}
+
+/**
+ * The finale's walkers, bloaters and spitters: the roster ones, with the same
+ * guarantee as every other attacker out here — the ring holds while the twin
+ * gun is locked out (gunLocked). A spitter's glob, which can't hold still in
+ * mid-air, vents a hot gun as it is spat (ventGun) instead.
+ */
+export class FinaleWalker extends Walker {
+  protected override windupUpdate(dt: number) {
+    if (gunLocked(this.world)) this.stateTime = Math.max(0, this.stateTime - dt);
+    super.windupUpdate(dt);
+  }
+}
+
+export class FinaleBloater extends Bloater {
+  protected override windupUpdate(dt: number) {
+    if (gunLocked(this.world)) this.stateTime = Math.max(0, this.stateTime - dt);
+    super.windupUpdate(dt);
+  }
+}
+
+export class FinaleSpitter extends Spitter {
+  protected override windupUpdate(dt: number) {
+    if (gunLocked(this.world)) this.stateTime = Math.max(0, this.stateTime - dt);
+    super.windupUpdate(dt);
+  }
+
+  protected override strike() {
+    super.strike();
+    ventGun(this.world);
+  }
+}
+
+/**
  * A spitter perched on the overpass deck. Same model, hit zones and bile
  * attack as the roster spitter, but it never walks off its ledge: it holds
  * position, turns to face the truck and spits whenever it is on screen.
  * Its "ground" is the deck, so a killed spitter collapses up there instead of
  * dropping through the concrete to the road.
  */
-export class DeckSpitter extends Spitter {
+export class DeckSpitter extends FinaleSpitter {
   protected override configure() {
     super.configure();
     this.attackRange = 40;
@@ -537,23 +585,49 @@ export class RiotBrute extends Brute {
  * strike would land seconds later with the truck long gone — but they attack
  * normally once it stops.
  */
-export class RoadsideWalker extends Walker {
+export class RoadsideWalker extends FinaleWalker {
   override setState(s: EnemyState) {
     if (s === 'windup' && this.world.rig.moving) s = 'advance';
     super.setState(s);
   }
 }
 
-export class RoadsideCrawler extends Crawler {
+/** Crawler.COIL (private in the roster): the crouch before the leap. */
+const CRAWLER_COIL = 0.8;
+
+/**
+ * The finale's crawler. Same pounce (0.8 s coil + leap, ring on the head), but
+ * the coil holds while the twin gun is locked out (gunLocked), and the leap
+ * itself — which can't freeze in mid-air — vents a hot gun as it springs
+ * (ventGun): the whole ring is answerable, never eaten by an overheat.
+ */
+export class FinaleCrawler extends Crawler {
+  protected override customUpdate(dt: number) {
+    if (this.state === 'pounce') {
+      const before = this.stateTime - dt;
+      if (before < CRAWLER_COIL) {
+        if (gunLocked(this.world)) this.stateTime = Math.max(0, before);
+        else if (this.stateTime >= CRAWLER_COIL) ventGun(this.world);
+      }
+    }
+    super.customUpdate(dt);
+  }
+}
+
+export class RoadsideCrawler extends FinaleCrawler {
   override setState(s: EnemyState) {
     if ((s === 'windup' || s === 'pounce') && this.world.rig.moving) s = 'advance';
     super.setState(s);
   }
 }
 
+registerEnemy('finale_walker', (w, s) => new FinaleWalker(w, s));
+registerEnemy('finale_bloater', (w, s) => new FinaleBloater(w, s));
+registerEnemy('finale_spitter', (w, s) => new FinaleSpitter(w, s));
 registerEnemy('deck_spitter', (w, s) => new DeckSpitter(w, s));
 registerEnemy('roadside_walker', (w, s) => new RoadsideWalker(w, s));
 registerEnemy('roadside_crawler', (w, s) => new RoadsideCrawler(w, s));
+registerEnemy('finale_crawler', (w, s) => new FinaleCrawler(w, s));
 registerEnemy('truck_runner', (w, s) => new TruckRunner(w, s));
 registerEnemy('tail_runner', (w, s) => new TailRunner(w, s));
 registerEnemy('riot_brute', (w, s) => new RiotBrute(w, s));

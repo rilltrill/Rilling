@@ -440,13 +440,14 @@ const beats: Beat[] = [
       // A long fight (a struggling player) gets more first aid.
       { kind: 'health', pos: [4, 1.3, 6.5], t: 85 },
       { kind: 'health', pos: [-4.2, 1.3, 6], t: 112 },
-      { kind: 'health', pos: [4.2, 1.3, 6], t: 135 },
-      { kind: 'health', pos: [-4, 1.3, 6.5], t: 152 },
+      { kind: 'health', pos: [4.2, 1.9, 6.2], t: 124 },
+      { kind: 'health', pos: [-4, 1.9, 6.5], t: 135 },
+      { kind: 'health', pos: [4, 1.3, 6.5], t: 152 },
     ],
     waves: [
       { start: { after: 26 }, spawns: [{ type: 'crawler', pos: [-4.5, 0, 9], entry: 'rise' }, { type: 'crawler', pos: [4.5, 0, 10], t: 0.6, entry: 'rise' }] },
-      // Runner + walker together: a second threat while he's winding up.
-      { start: { after: 42 }, spawns: [{ type: 'walker', pos: [-4.6, 0, 10.5], entry: 'rise', opts: { variant: 'office' } }, { type: 'runner', pos: [5.5, 0, 15], t: 0.6 }] },
+      // Crawler + walker together: a second threat while he's winding up.
+      { start: { after: 42 }, spawns: [{ type: 'walker', pos: [-4.6, 0, 10.5], entry: 'rise', opts: { variant: 'office' } }, { type: 'crawler', pos: [4.4, 0, 9.5], t: 0.6, entry: 'rise' }] },
       { start: { after: 58 }, spawns: [{ type: 'walker', pos: [-5, 0, 11], entry: 'rise', opts: { variant: 'worker' } }, { type: 'runner', pos: [5, 0, 14], t: 0.8 }] },
     ],
   },

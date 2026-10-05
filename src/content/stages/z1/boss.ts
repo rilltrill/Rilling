@@ -90,8 +90,8 @@ export const BUTCHER_TUNE = {
   /**
    * Health fractions at which he bellows for help (a roar, then minions rise),
    * on top of the phase-change summons — tied to his health, not the clock, so
-   * a long fight doesn't bring more of them. (A third call at 20% made the
-   * frenzy too busy for good players.)
+   * a long fight doesn't bring more of them. (A third call in the frenzy, at 20%,
+   * was tried and dropped: it piled too much on good players.)
    */
   callAt: [0.83, 0.5],
   callMinions: [
@@ -649,7 +649,6 @@ export class Butcher extends Boss {
     return BUTCHER_TUNE.interruptNeed[Math.min(this.phase, BUTCHER_TUNE.interruptNeed.length - 1)];
   }
 
-  /** Charges are stopped by one heart hit early on (it teaches the move), two in the frenzy. */
   /** Weak-point hits count toward stopping a slam / charge only after its grace (see BUTCHER_TUNE). */
   private countsTowardInterrupt(): boolean {
     const p = Math.min(this.phase, 2);
@@ -658,6 +657,7 @@ export class Butcher extends Boss {
     return true;
   }
 
+  /** Charges are stopped by one heart hit early on (it teaches the move), two in the frenzy. */
   private get chargeNeed() {
     return BUTCHER_TUNE.chargeNeed[Math.min(this.phase, BUTCHER_TUNE.chargeNeed.length - 1)];
   }
@@ -1076,7 +1076,8 @@ export class Butcher extends Boss {
     this.hookInHand.visible = false;
     const from = this.launchFrom(this.hookInHand, 0.45);
     if (this.phase > 0) {
-      // Volleys fan out (left, right, centre) so a hook never flies hidden behind the one before it.
+      // Volleys fan out (left, right, centre); with the lane check in hookWind no hook
+      // flies hidden behind the one before it.
       const h = this.world.rig.space.rotation.y;
       from.addScaledVector(_r.set(Math.cos(h), 0, -Math.sin(h)), ((this.volley % 3) - 1) * BUTCHER_TUNE.hookFan);
     }

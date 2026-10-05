@@ -31,6 +31,9 @@ export interface WeaponDef {
   color: string;
 }
 
+/** Longest frame (s) of cooldown overshoot carried into the next held auto shot. */
+const COOLDOWN_CARRY = 0.05;
+
 export const WEAPONS: Record<WeaponId, WeaponDef> = {
   pistol: {
     id: 'pistol', name: 'PISTOL', mag: 8, interval: 0.11, auto: false, holdInterval: 0.26,
@@ -43,7 +46,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     sfx: 'shotgun', shake: 0.3, color: '#ffb347',
   },
   smg: {
-    id: 'smg', name: 'SMG', mag: 32, interval: 0.075, auto: true,
+    id: 'smg', name: 'SMG', mag: 32, interval: 1 / 12, auto: true,
     pellets: 1, spread: 0.018, damage: 0.55, reloadTime: 1.1, pickupAmmo: 128,
     sfx: 'smg', shake: 0.06, color: '#7fd3ff',
   },
@@ -53,7 +56,7 @@ export const WEAPONS: Record<WeaponId, WeaponDef> = {
     sfx: 'magnum', shake: 0.35, color: '#ff6b6b',
   },
   turret: {
-    id: 'turret', name: 'MOUNTED GUN', mag: Infinity, interval: 0.07, auto: true,
+    id: 'turret', name: 'MOUNTED GUN', mag: Infinity, interval: 1 / 12, auto: true,
     pellets: 1, spread: 0.014, damage: 0.8, reloadTime: 0, heatPerShot: 0.03, pickupAmmo: 0,
     sfx: 'turret', shake: 0.07, color: '#b6ff6b',
   },
@@ -177,7 +180,13 @@ export class WeaponSystem {
     if (st.inMag <= 0) return { ok: false, reason: 'empty' };
     if (st.inMag !== Infinity) st.inMag--;
     this.sinceShot = 0;
-    this.cooldown = held && !def.auto ? def.holdInterval ?? def.interval : def.interval;
+    if (def.auto && held && this.cooldown < 0) {
+      // Sustained auto fire keeps the part of the last frame already waited past
+      // the ready point, so the rate is the weapon's, not the screen's (30/60/120 Hz).
+      this.cooldown += def.interval;
+    } else {
+      this.cooldown = held && !def.auto ? def.holdInterval ?? def.interval : def.interval;
+    }
     if (def.heatPerShot) {
       this.heat = Math.min(1, this.heat + def.heatPerShot);
       if (this.heat >= 1) this.overheated = true;
@@ -223,7 +232,8 @@ export class WeaponSystem {
   }
 
   update(dt: number) {
-    this.cooldown = Math.max(0, this.cooldown - dt);
+    // May dip below 0 by up to one frame (see tryFire's carry-over for held auto fire).
+    this.cooldown = Math.max(-COOLDOWN_CARRY, this.cooldown - dt);
     if (this.reloading > 0) {
       this.reloading -= dt;
       if (this.reloading <= 0) {

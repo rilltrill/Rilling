@@ -36,3 +36,25 @@ describe('turret heat (sustained fire really overheats)', () => {
     }
   });
 });
+
+describe('auto fire rate does not depend on the frame rate', () => {
+  it.each([30, 60, 120])('held mounted gun / SMG fire 12 rounds per second at %i fps', async (fps) => {
+    const { WeaponSystem } = await import('../../src/gameplay/Weapons');
+    for (const id of ['turret', 'smg'] as const) {
+      const w = new WeaponSystem();
+      if (id === 'smg') {
+        w.give('smg', 999);
+        w.update(0.2); // the weapon-switch delay
+      } else w.setOverride('turret');
+      const dt = 1 / fps;
+      let shots = 0;
+      for (let f = 0; f < fps * 2; f++) {
+        if (w.tryFire(f > 0).ok) shots++;
+        w.update(dt);
+        if (id === 'turret') w.heat = 0; // ignore overheating here
+      }
+      expect(shots, `${id} @ ${fps} fps`).toBeGreaterThanOrEqual(23);
+      expect(shots, `${id} @ ${fps} fps`).toBeLessThanOrEqual(25);
+    }
+  });
+});
