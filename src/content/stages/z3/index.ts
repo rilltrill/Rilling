@@ -20,13 +20,14 @@ import './minions';
  *
  * As the campaign finale it is the hardest DEAD ZONE stage, tuned with the
  * human-like bot at the phone frame rate (tests/unit/humanbot.test.ts, ZG_FPS=60,
- * seeds 1–24): ≈ 3.9 hearts lost at σ 0.03 and ≈ 7.3 at σ 0.05 (the challenge
+ * seeds 1–36): ≈ 3.6 hearts lost at σ 0.03 and ≈ 7.0 at σ 0.05 (the challenge
  * of the build the owner played, without its unfair hits). A clean aim pays for
  * each riot brute it doesn't break in time (≈ 1 a stop, 2 at the army
  * barricade, never 3+): the brute vaults straight onto its smash spot (landAt)
  * and raises its fists as it lands, so its ring has to be answered with
- * sustained head fire, not worn down on a long walk-in. A loose aim also pays
- * the giant's wind-ups, which only a weak-point burst stops (BEHEMOTH_TUNE).
+ * sustained head fire, not worn down on a long walk-in. A loose aim pays about
+ * every stop and then the giant's wind-ups, which only a weak-point burst stops
+ * — and the giant swings often (BEHEMOTH_TUNE.recover).
  */
 
 /** World position at rail distance d, x metres right, y up (for `world: true` spawns/looks). */
@@ -69,7 +70,7 @@ const TOUGH: Record<string, number> = {
   pack_runner: 2,
   finale_crawler: 1.4,
   roadside_crawler: 1.4,
-  riot_brute: 2.66,
+  riot_brute: 2.66, // the stops' dial: ±0.03 ≈ ±0.2 hearts for a clean aim (a loose one fails ~every stop anyway)
   finale_bloater: 1.4,
   finale_spitter: 1.4,
   deck_spitter: 1.4,

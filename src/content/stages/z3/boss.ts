@@ -83,11 +83,15 @@ const THROW_MAX_Y = 5.6;
  *   interruptNeed  weak-point damage that staggers a wind-up, per phase (Behemoth.interruptNeed)
  *   grace          seconds into a wind-up before weak-point fire starts to count
  *   pincerLag      seconds from a runner's ring opening to the pincer slam (Behemoth.pincerCue)
+ *   recover        the breather between attacks (a busier giant at < 1)
  *   throwChain     the one-two: a slam while the thrown car is still in the air
- *   mercy          lighter wind-ups on the last two hearts
+ *   mercy          lighter wind-ups on the last heart
  * A clean aim breaks every lone wind-up (the overlaps catch it now and then);
- * the giant mostly costs a loose aim (≈ 2–2.5 hearts at σ 0.05), and the fight
- * runs ≈ 50 s / 75–80 s.
+ * the giant mostly costs a loose aim (≈ 2–2.5 hearts at σ 0.05, where the
+ * attack rate is the dial: `recover`), and the fight runs ≈ 48 s / 73 s.
+ * The wind-ups only get through on accuracy: a loose aim's error drifts in
+ * ~0.25 s spells, so one more round on the meter (interruptNeed) or a few
+ * hundredths more grace barely moves it — how often the giant swings does.
  */
 export const BEHEMOTH_TUNE = {
   interruptNeed: [6, 6, 7],
@@ -104,8 +108,13 @@ export const BEHEMOTH_TUNE = {
    */
   grace: [0.3, 0.35, 0.35],
   pincerLag: 0.25,
-  /** Scales the giant's breather between attacks (every backToChase pause): lower = a busier giant. */
-  recover: 0.6,
+  /**
+   * Scales the giant's breather between attacks (every backToChase pause): lower =
+   * a busier giant. At 0.65 it chases for ~1.4–2.0 s after a slam's follow-through
+   * (2.2–3.0 s at 1) and ~1.0–1.6 s after the reel from a stagger — still one ring
+   * at a time, each with its full 1.0–1.5 s and the gun vented as it opens.
+   */
+  recover: 0.65,
   /**
    * Chance, by phase, that a throw chains straight into a slam while the car / slab
    * is still in the air. The slam ring opens ~0.16 s after the release and lands
@@ -118,9 +127,10 @@ export const BEHEMOTH_TUNE = {
    */
   throwChain: [0, 0.6, 0.85],
   /**
-   * Arcade mercy, by hearts left: on the last hearts a wind-up breaks sooner
-   * (shorter grace, lighter meter), so one bad patch doesn't snowball into a
-   * continue. [hearts ≤, grace, meter ×]
+   * Arcade mercy, by hearts left: on the last heart a wind-up breaks sooner
+   * (0.2 s grace, 3 rounds), so one bad patch doesn't snowball into a continue.
+   * [hearts ≤, grace, meter ×] (a second row for two hearts made the giant too
+   * soft on the loose aims that reach it with 2–3 hearts after the brutes).
    */
   mercy: [[1, 0.2, 0.6]] as [number, number, number][],
 };
@@ -275,7 +285,7 @@ export class Behemoth extends Boss {
 
   protected override configure(): void {
     this.name = 'behemoth';
-    // ≈ 50 s for a clean aim at 60 fps (12 rounds/s on the glow), ≈ 75 s for a loose one.
+    // ≈ 48 s for a clean aim at 60 fps (12 rounds/s on the glow), ≈ 73 s for a loose one.
     this.maxHp = 450;
     this.speed = 0;
     this.points = 30000;
