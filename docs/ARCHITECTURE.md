@@ -187,8 +187,10 @@ until the player changes ART; live mid-stage via the pause screen's ART chip). A
 the procedural-model look, unchanged.
 
 In SPRITES, characters that have a **painter** are drawn as hand-made pixel art by
-**PixelCast**; any other sprite entity (projectiles, pickups, the unpainted bosses) still
-uses the older live **impostor bake** (its 3D model re-rendered into pixels).
+**PixelCast**; so are every pickup, everything thrown at the camera, the gibs and the
+title-screen cast (see *Props, pickups, gibs and the title screen* below). A sprite entity
+without a painter falls back to the older live **impostor bake** (its 3D model re-rendered
+into pixels).
 Painted today — the whole z1 and d1 rosters and more:
 - humanoid painter (`content/pixel/human.ts`): **walker** (every outfit), **straggler**,
   **runner** (+ z3 truck/pack/tail runners), **crawler** (torn waist + guts, or broken
@@ -356,6 +358,39 @@ Tyrant (d3).
   ≈ 0.1 ms/frame avg (≤ 0.6 ms), paints incl. GL submission ≈ 0.35 ms/frame; z1 horde 193 →
   64 draw calls, d3 raptor pack 261 → 68. Memory: a 256² RGBA8 G-buffer + per-sprite RGBA8
   targets pooled by power-of-two size (≈ 3.5 MB total with the impostor scratch).
+
+### Props, pickups, gibs and the title screen (`content/pixel/cast*.ts`)
+- **Prop kit** (`castKit.ts`): hard objects drawn the way sprite artists draw them, from the
+  prop's own (tumbling) mesh frame: `box` = the visible faces as flat triangles, each a ramp
+  step by how it faces the sprite light (`faceTone`), one outline round the lot; `cylinder` =
+  the exact silhouette (side quad + the two end ellipses) with a highlight band down the lit
+  side and a shadow band; `hoop` = the visible half of a ring (rims, bands, bark, halos);
+  `sparkle` = a screen-space four-point glint; `line` / `paint` = SHADE_ONLY / material decals
+  (seams, cracks, stripes, labels). Prop materials come from `castMat` (keys `cast-…`).
+- **Pickups** (`castPickups.ts`, hooked in `Pickup.paintPixels`): first-aid kit (lid seam,
+  latches, handle, glowing cross), plank crates with the weapon's colour stencilled on and the
+  gun itself on the lid (pump shotgun / SMG / revolver), a bomb with a fizzing fuse star, a
+  self-lit faceted gem; all with a crisp glowing halo ring that breathes with the 3D torus, a
+  shine sweeping across every ~1.7 s and a sparkle. Blinking hides the sprite with the model.
+- **Thrown things** (`castThrown.ts`, `Projectile.paintPixels`): goo globs (spitter acid, dilo
+  venom, Patient Zero's bile — wobbling wet body, hot core, teardrop tail, trailing droplets,
+  drips), the Butcher's meat hook / oil drum / police door, the Behemoth's car (sedan / hatch /
+  SUV and its paint read off the mesh) and concrete slab, boulders and the Tyrant's palm trunk /
+  rock / wrecked panel, the storm's burning branch, a lumpy fallback chunk. The kind comes from
+  `ProjectileOptions.pixel` when a thrower sets it, else it is recognised once from the
+  options + mesh (`thrownKind`). Trails follow the flight path's tangent. A thrower may still
+  assign its own `paintPixels` (Specimen X's darts).
+- **Gibs** (`fx/Gibs.ts`, SPRITES only): lobed meat chunks / angular splinters whose outline
+  turns with the tumble, three hard tone steps, a dark edge, wet specks and bone flecks.
+- **Title screen** (`castMenu.ts` + `ui/MenuBackdrop.ts`): the attract horde, the crag raptor
+  and the pterosaurs are joint-only rigs posed like the 3D ones and painted by the same
+  painters through a stand-alone `MenuCast` (PixelCast + pixel-snapped billboards writing
+  per-texel depth, run from the shot scene's `onBeforeRender`). It follows ART (link override,
+  saved setting, default), re-read at every cut.
+- Tests: `tests/unit/pixel-cast.test.ts` (every pickup and thrown kind: painted, every hitbox
+  centre on a painted texel, ≥ 85 % of the hitbox silhouette covered (≥ 75–80 % for the
+  palm fronds, hook and branch), sprite area ≤ 1.6× the hitbox's (≤ 2.4× where goo trails,
+  flames, smoke or the hook's chain stream past it).
 
 ### Impostor bake (characters without a painter)
 `SpriteArt.bakeNow` re-renders the source's 3D model with the main camera's projection
