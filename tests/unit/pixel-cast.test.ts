@@ -177,7 +177,7 @@ const THROWN: Record<string, { make: Maker; cover?: number; ratio?: number }> = 
   'Butcher barrel': { make: (w) => ({ mesh: boss<{ thrownBarrel: THREE.Mesh }>(w, 'butcher').thrownBarrel.clone(), size: 0.5, spin: 5, source: 'THE BUTCHER', burst: 'explode', color: 0xc22a20 }) },
   'Butcher door': { make: (w) => ({ mesh: boss<{ thrownDoor: THREE.Mesh }>(w, 'butcher').thrownDoor.clone(), size: 0.6, spin: 6, source: 'THE BUTCHER', burst: 'debris', color: 0xe8e8e0 }) },
   'Carnotaur boulder': { make: (w) => ({ mesh: boss<{ thrownRock(): THREE.Object3D }>(w, 'carnotaur').thrownRock(), size: 0.5, color: 0x8a7d6a, spin: 5, burst: 'debris', source: 'HORNED DEVIL' }), ratio: 1.9 },
-  'Tyrant palm': { make: (w) => ({ mesh: boss<{ debrisMesh(k: number): THREE.Object3D }>(w, 'tyrant').debrisMesh(0), size: 0.55, color: 0x6e5d4a, spin: 4, burst: 'debris', source: 'THE TYRANT', sfxDestroy: 'wood_break' }), ratio: 2.2, cover: 0.75 },
+  'Tyrant palm': { make: (w) => ({ mesh: boss<{ debrisMesh(k: number): THREE.Object3D }>(w, 'tyrant').debrisMesh(0), size: 0.55, color: 0x6e5d4a, spin: 4, burst: 'debris', source: 'THE TYRANT', sfxDestroy: 'wood_break' }) },
   'Tyrant rock': { make: (w) => ({ mesh: boss<{ debrisMesh(k: number): THREE.Object3D }>(w, 'tyrant').debrisMesh(1), size: 0.55, color: 0x8a7d6a, spin: 4, burst: 'debris', source: 'THE TYRANT' }), ratio: 1.9 },
   'Tyrant panel': { make: (w) => ({ mesh: boss<{ debrisMesh(k: number): THREE.Object3D }>(w, 'tyrant').debrisMesh(2), size: 0.55, color: 0x8a7d6a, spin: 4, burst: 'debris', source: 'THE TYRANT' }) },
   'falling branch': {

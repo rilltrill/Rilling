@@ -388,8 +388,8 @@ Tyrant (d3).
   per-texel depth, run from the shot scene's `onBeforeRender`). It follows ART (link override,
   saved setting, default), re-read at every cut.
 - Tests: `tests/unit/pixel-cast.test.ts` (every pickup and thrown kind: painted, every hitbox
-  centre on a painted texel, ≥ 85 % of the hitbox silhouette covered (≥ 75–80 % for the
-  palm fronds, hook and branch), sprite area ≤ 1.6× the hitbox's (≤ 2.4× where goo trails,
+  centre on a painted texel, ≥ 85 % of the hitbox silhouette covered (≥ 80 % for the hook and
+  the branch), sprite area ≤ 1.6× the hitbox's (≤ 2.4× where goo trails,
   flames, smoke or the hook's chain stream past it).
 
 ### Impostor bake (characters without a painter)

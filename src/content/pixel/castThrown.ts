@@ -304,13 +304,13 @@ function tm(): TM {
   M.grassDark = Mat.flat(0x3a5a20, 'grassdk');
   M.bark = castMat(0x7a6650, PAT.HAIR, { light: 0.45, dark: 0.4, strength: 0.7 });
   M.splinter = woodMat(0xc8a878);
-  M.frond = Mat.hide(0x4a7b42, { scale: 0.1 });
-  M.frondDark = Mat.flat(0x2e5228, 'frond');
+  M.frond = castMat(0x3f8030, PAT.HAIR, { light: 0.45, dark: 0.38, sat: 1.2, strength: 0.35, dither: 0.08 });
+  M.frondDark = castMat(0x2c5e26, PAT.HAIR, { light: 0.42, dark: 0.4, sat: 1.15, strength: 0.35, dither: 0.08 });
   M.panel = castMat(0xcfc8b4, PAT.PLATE, { light: 0.6, strength: 0.6, spec: 0.5 });
   M.panelRed = castMat(0xb8302a, PAT.GLOSS, { strength: 0.3, spec: 0.4 });
-  M.ember = Mat.glow(0xff8a30);
-  M.flame = Mat.glow(0xffb040);
-  M.flameHot = Mat.glow(0xfff0a0);
+  M.ember = Mat.glow(0xff6420);
+  M.flame = Mat.glow(0xffd040);
+  M.flameHot = Mat.glow(0xfff6c8);
   M.smoke = castMat(0x5a5650, PAT.NONE, { light: 0.4, dark: 0.6, dither: 0.3 });
   M.shine = Mat.glow(0xffffff);
   return M;
@@ -819,32 +819,67 @@ function rock(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownSta
 
 // ── Palm trunk (the Tyrant's debris) ──
 
-/** The Tyrant's palm fronds: the 3D's four 1.4 m boards round the crown (directions in the debris frame). */
-const FRONDS: readonly (readonly [number, number, number])[] = [
-  [0, -0.479, 0.878],
-  [1, 0, 0],
-  [0, 0.479, -0.878],
-  [-1, 0, 0],
-];
+/**
+ * The Tyrant's palm fronds: the 3D's four 1.4 × 0.5 m boards through the crown
+ * (z 1.2), Euler (0.5, i·π/2, 0.6): their long (Z) and wide (Y) axes in the debris frame.
+ */
+const FROND_Z: number[] = [];
+const FROND_Y: number[] = [];
+{
+  const m = new THREE.Matrix4();
+  const e = new THREE.Euler();
+  const v = new THREE.Vector3();
+  for (let i = 0; i < 4; i++) {
+    m.makeRotationFromEuler(e.set(0.5, (i / 4) * Math.PI * 2, 0.6));
+    v.set(0, 0, 1).applyMatrix4(m);
+    FROND_Z.push(v.x, v.y, v.z);
+    v.set(0, 1, 0).applyMatrix4(m);
+    FROND_Y.push(v.x, v.y, v.z);
+  }
+}
 
 function palm(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownState) {
-  // Fronds round the crown (z 1.2): along the 3D boards, each a serrated blade with a
-  // pale midrib, arching and swaying; two short young fronds between them.
-  f.layer(0.03 * s, PART.TORSO);
-  for (let i = 0; i < 6; i++) {
-    const d = FRONDS[i % 4];
-    const len = i < 4 ? 0.72 : 0.42;
-    const sw = Math.sin(st.time * 5 + i * 1.7) * 0.05;
-    const dx = i < 4 ? d[0] : i === 4 ? 0.7 : -0.7;
-    const dy = i < 4 ? d[1] : i === 4 ? 0.34 : -0.34;
-    const dz = i < 4 ? d[2] : 0.62;
-    const base = f.at(g, 0, 0, 1.2);
-    const mid = f.at(g, dx * len * 0.55, dy * len * 0.55 + sw, 1.2 + dz * len * 0.55);
-    const tip = f.at(g, dx * len, dy * len - 0.12 + sw, 1.2 + dz * len);
-    const m = i & 1 ? M.frondDark : M.frond;
-    f.cone(base, mid, 0.13 * s, 0.2 * s, m).rag(0.06, PF.SPIKY).seed(i * 3);
-    f.cone(mid, tip, 0.2 * s, 0.03 * s, m).rag(0.06, PF.SPIKY).seed(i * 3 + 1);
-    f.decal(base, tip, 0.012 * s, 0.006 * s, M.frond).flag(PF.FLAT | PF.SHADE_ONLY | PF.NO_OUTLINE).tone(0.3).min(0.5);
+  // Eight half-fronds radiating from the crown, each a leaf blade in its board's plane
+  // (flat triangles: they cover the board hitbox and shear with it), serrated with spiky
+  // leaflets inside the blade, a pale midrib.
+  f.layer(0.02 * s, PART.TORSO);
+  for (let i = 0; i < 8; i++) {
+    const j = (i >> 1) * 3;
+    const sg = i & 1 ? -1 : 1;
+    const zx = FROND_Z[j] * sg;
+    const zy = FROND_Z[j + 1] * sg;
+    const zz = FROND_Z[j + 2] * sg;
+    const yx = FROND_Y[j];
+    const yy = FROND_Y[j + 1];
+    const yz = FROND_Y[j + 2];
+    const sw = Math.sin(st.time * 5 + i * 1.7) * 0.03;
+    const m = i & 2 ? M.frondDark : M.frond;
+    // Blade outline (inside its board): a little narrower at the crown, full width two-thirds out, a blunt tip.
+    const c0 = f.at(g, yx * 0.17, yy * 0.17, 1.2 + yz * 0.17);
+    const c1 = f.at(g, -yx * 0.17, -yy * 0.17, 1.2 - yz * 0.17);
+    const w0 = f.at(g, zx * 0.42 + yx * 0.25, zy * 0.42 + yy * 0.25 + sw, 1.2 + zz * 0.42 + yz * 0.25);
+    const w1 = f.at(g, zx * 0.42 - yx * 0.25, zy * 0.42 - yy * 0.25 + sw, 1.2 + zz * 0.42 - yz * 0.25);
+    const t0 = f.at(g, zx * 0.7 + yx * 0.14, zy * 0.7 + yy * 0.14 + sw * 2, 1.2 + zz * 0.7 + yz * 0.14);
+    const t1 = f.at(g, zx * 0.7 - yx * 0.14, zy * 0.7 - yy * 0.14 + sw * 2, 1.2 + zz * 0.7 - yz * 0.14);
+    const tip = f.at(g, zx * 0.72, zy * 0.72 + sw * 2, 1.2 + zz * 0.72);
+    f.tri(c0, c1, w1, m, 0.015);
+    f.tri(c0, w1, w0, m, 0.015);
+    f.tri(w0, w1, t1, m, 0.015);
+    f.tri(w0, t1, t0, m, 0.015);
+    // Leaflets: spiky strokes from the midrib out to the blade's edge.
+    const mid = f.at(g, zx * 0.32, zy * 0.32 + sw, 1.2 + zz * 0.32);
+    f.cone(mid, f.at(g, zx * 0.5 + yx * 0.2, zy * 0.5 + yy * 0.2 + sw, 1.2 + zz * 0.5 + yz * 0.2), 0.05 * s, 0.015 * s, m).rag(0.03, PF.SPIKY).seed(i * 3);
+    f.cone(mid, f.at(g, zx * 0.5 - yx * 0.2, zy * 0.5 - yy * 0.2 + sw, 1.2 + zz * 0.5 - yz * 0.2), 0.05 * s, 0.015 * s, m).rag(0.03, PF.SPIKY).seed(i * 3 + 1);
+    f.decal(f.at(g, 0, 0, 1.2), tip, 0.012 * s, 0.006 * s, M.frond).flag(PF.FLAT | PF.SHADE_ONLY | PF.NO_OUTLINE).tone(0.3).min(0.5);
+    // Leaflet divisions: dark strokes slanting from the midrib toward the tip, both sides.
+    for (let q = 0; q < 2; q++) {
+      const a = 0.22 + q * 0.2;
+      for (let side = -1; side <= 1; side += 2) {
+        const p0 = f.at(g, zx * a, zy * a + sw, 1.2 + zz * a);
+        const p1 = f.at(g, zx * (a + 0.14) + side * yx * 0.22, zy * (a + 0.14) + side * yy * 0.22 + sw, 1.2 + zz * (a + 0.14) + side * yz * 0.22);
+        f.decal(p0, p1, 0.008 * s, 0.008 * s, M.frond).flag(PF.FLAT | PF.SHADE_ONLY | PF.NO_OUTLINE).tone(-0.4).min(0.5);
+      }
+    }
   }
   // Trunk: ringed bark, wider at the snapped foot.
   f.layer(0.02 * s, PART.TORSO);
@@ -905,16 +940,21 @@ function branch(f: PixelFigure, g: THREE.Object3D, M: TM, s: number, st: ThrownS
   for (let i = 0; i < 5; i++) hoop(f, tr, 1, -0.6 + i * 0.3, 0.17 - i * 0.008, 0.012, M.bark, true, 8, false, -0.3);
   // Charred end.
   f.ball(f.at(g, 0, 0, -0.85), 0.19 * s, M.steelDark).k(0.05 * s);
-  // Fire: an ember core and flame tongues licking back along the fall, sparks.
-  f.layer(0.04 * s, PART.TORSO, 0, -0.05);
+  // Fire: an ember core and flickering tongues rising (and streaming back along the fall):
+  // red-orange outside, yellow inside, a white-hot heart.
+  f.layer(0.04 * s, PART.TORSO, 0, -0.3);
   const fire = f.at(g, 0, 0, -0.85);
-  f.ball(fire, 0.2 * s, M.ember).flag(PF.GLOW | PF.NO_OUTLINE);
-  for (let i = 0; i < 3; i++) {
-    const fl = 0.7 + 0.3 * Math.sin(t * (13 + i * 3) + i * 2);
-    const tipP = behind(f, fire, st, (0.2 + 0.1 * i) * fl, Math.sin(t * 9 + i * 2) * 0.07 + (i - 1) * 0.11, (0.3 + 0.12 * (1 - Math.abs(i - 1))) * fl);
-    f.cone(fire, tipP, (0.15 - i * 0.03) * s, 0.01 * s, i === 1 ? M.flame : M.ember).flag(PF.GLOW | PF.NO_OUTLINE).min(0.5);
+  // (Flat, with depth nudges: the hotter colours always show in front of the cooler.)
+  f.ball(fire, 0.2 * s, M.ember).flag(PF.GLOW | PF.NO_OUTLINE | PF.FLAT);
+  for (let i = 0; i < 5; i++) {
+    const inner = i >= 3;
+    const fl = 0.75 + 0.25 * Math.sin(t * (13 + i * 3.1) + i * 2) + 0.12 * Math.sin(t * 29 + i);
+    const len = (inner ? 0.32 : 0.5 + 0.12 * (i & 1)) * fl;
+    const sx = inner ? (i - 3.5) * 0.08 : (i - 1) * 0.12;
+    const tipP = behind(f, fire, st, len * 0.35, sx + Math.sin(t * 9 + i * 2) * 0.05, len);
+    f.cone(screenOff(f, fire, sx * 0.5, 0.02), tipP, (inner ? 0.1 : 0.14) * s, 0.008 * s, inner ? M.flame : M.ember).flag(PF.GLOW | PF.NO_OUTLINE | PF.FLAT).z(inner ? -0.03 : 0).min(0.5);
   }
-  f.ball(screenOff(f, fire, -0.03, 0.03), 0.09 * s, M.flameHot).flag(PF.GLOW | PF.NO_OUTLINE).min(0.6);
+  f.ball(screenOff(f, fire, -0.02, 0.05), 0.09 * s, M.flameHot).flag(PF.GLOW | PF.NO_OUTLINE | PF.FLAT).z(-0.06).min(0.6);
   // Smoke puffs and sparks trailing.
   f.layer(0.004 * s, PART.TORSO, 0, 0.05);
   for (let i = 0; i < 3; i++) {
