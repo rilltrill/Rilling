@@ -14,7 +14,7 @@ import { Sculpt, M, type Paint } from './sculpt';
 import { bakedLambert, clean, tx, type TexSpec } from './retro';
 import { D } from './layout';
 import { park } from './env';
-import { ventGun } from './alpha';
+import { PackRaptor, ventGun } from './alpha';
 
 /**
  * THE TYRANT — a 12 m, 5–6 m tall Tyrannosaurus and the signature chase.
@@ -28,13 +28,18 @@ import { ventGun } from './alpha';
  *                 the head is posed so the open maw faces the camera)
  *   body        : 'torso' ×0.3, legs/tail even less; brow ridges + back scutes
  *                 are armour (spark)
- *   interrupts  : weak hits during a windup count in full, body hits at 0.3×
- *                 the raw shot damage (see TYRANT_TUNE: about 0.8–1 s of steady
- *                 mounted-gun fire on the eyes / throat stops an attack — a
- *                 spray at the body won't)
+ *   interrupts  : after a short grace (fire already resting on the glow can't
+ *                 cancel a ring the instant it shows), weak hits during a
+ *                 windup count in full, body hits at 0.3× the raw shot damage
+ *                 (see TYRANT_TUNE: about 0.8–1 s of steady mounted-gun fire on
+ *                 the eyes / throat after the grace stops an attack — a spray at
+ *                 the body won't). A stopped attack is often answered by another
+ *                 straight away (a chain), and its raptor pack-mates (PackRaptor)
+ *                 pounce alongside its windups: two or three rings at once.
  *   PHASE 1 (behind)  : bursts out of the trees behind the jeep and chases it
  *                       — lunging BITE (ring, interruptible), TAIL SMASH (flings
- *                       palm trunks / rocks: shootable projectiles)
+ *                       palm trunks / rocks: shootable projectiles — often
+ *                       followed straight in by a bite: the DEBRIS RUSH)
  *   PHASE 2 (ahead)   : roars, veers into the jungle, cuts ahead and ambushes
  *                       the jeep from the front — CHARGE (ring, interruptible),
  *                       bite, HEADBUTT DEBRIS; calls two raptor pairs out of
@@ -44,6 +49,8 @@ import { ventGun } from './alpha';
  *                       beside the fuel tank and makes FINAL LUNGES (often two
  *                       back to back) — shoot the tank while it's close for a
  *                       giant blast.
+ *   mercy       : on the player's last two hearts no grace, no chains, no
+ *                 rushes, no pack calls, and its rings break sooner.
  *   fairness    : an attack only starts with the head inside the playable view
  *                 (Enemy.inPlayArea: clear of the HUD corners and the boss bar),
  *                 so its ring is readable and shootable from the first frame;
@@ -88,13 +95,16 @@ const P3_Z = 15.5;
  * Fight tuning (the finale: the hardest boss of the campaign, but every hit is
  * telegraphed and stoppable). Windups in seconds, interrupt thresholds in
  * "interrupt damage": a mounted-gun weak-point hit adds 1.6, a body hit 0.24
- * (0.3 × the raw 0.8), so 15–17 ≈ 10 eye / throat hits ≈ 0.7–0.9 s of steady
- * fire — ~13 rounds, which never overheats a gun the ring's vent left at 35 %.
- * Tuned together with the stage's pre-boss pressure (the alpha pack, alpha.ts)
- * against the human-like bot (σ 0.03, ~0.3 s reactions): ≈ 1–2 hearts per
- * fight for an average player (who arrives a couple of hearts down from the
- * pack) and rarely 3+; the low-heart mercy keeps weaker players from dying to
- * a late streak.
+ * (0.3 × the raw 0.8), so 15–17.5 ≈ 10–11 eye / throat hits ≈ 0.8–0.9 s of
+ * steady fire after the grace (12 rounds/s) — which never overheats a gun the
+ * ring's vent left at 35 %. Perfect aim with a 0.4 s reaction breaks a bite
+ * ≈ 1.3 s into its 1.45–1.5 s ring, a lunge / charge ≈ 1.2–1.3 s into 1.65–1.9 s;
+ * with pack-mates called alongside, break the king first (its ring closes
+ * first), then the raptors (three head hits each).
+ * Tuned together with the stage's pre-boss pressure (the pack, alpha.ts) against
+ * the human-like bot at 60 fps (24 seeds): ≈ 1 heart per fight at σ 0.03 and
+ * ≈ 2.5–3 at σ 0.05; the low-heart mercy keeps weaker players from dying to a
+ * late streak.
  */
 export const TYRANT_TUNE = {
   /** Phase 1 bites are slower but need more fire (the head is right behind the jeep). */
@@ -103,19 +113,52 @@ export const TYRANT_TUNE = {
   lungeWind: 1.8,
   /** Phase 3: a stopped lunge is answered by another straight away (shorter run-up). */
   lungeChainWind: 1.65,
-  lungeChainChance: 0.4,
+  /**
+   * Chance, by phase, that a stopped attack is answered by another straight away
+   * (a bite behind the jeep, a charge / bite on the road ahead, a lunge on the pad)
+   * — once per chain; never on the player's last hearts.
+   */
+  chain: [0.4, 0.45, 0.5],
+  /**
+   * DEBRIS RUSH: chance, by phase, that a debris volley ends with the king
+   * coming in behind it — a bite (a lunge on the pad) whose ring starts
+   * `rushDelay` s after the last piece flies: shoot the debris down during the
+   * bite's grace, then the glow. Never on the player's last hearts.
+   */
+  rush: [0.5, 0.5, 0.5],
+  rushDelay: 0.3,
   biteInterrupt: [17.5, 16.5, 15],
   chargeInterrupt: 16.5,
   lungeInterrupt: 15.5,
+  /**
+   * Seconds into a windup before hits start to count toward the interrupt: fire
+   * already resting on the eyes can't cancel a ring the instant it shows — the
+   * player has to keep the gun on the glow for the rest of it. (The grace
+   * overlaps a 0.25–0.4 s reaction, so a player who reacts to the ring loses
+   * little; one who was already on target loses the head start.)
+   */
+  grace: 0.35,
   /** Body (non-weak) hits add this × the raw shot damage to the interrupt meter. */
   bodyInterrupt: 0.3,
   /** Seconds between attacks, per phase. */
-  cooldown: [2.2, 1.9, 1.5],
+  cooldown: [1.7, 1.5, 1.2],
+  /**
+   * Pack-mates at striking range called into a pounce alongside each bite /
+   * charge / lunge, by phase: a second (third) ring somewhere else on screen
+   * while the king's closes. The call opens `rallyDelay` s into the windup and
+   * stays open `rallyWindow` s, so a raptor's ring (1.68 s) closes ≥ 0.4 s after
+   * the king's: break the king, then the raptor. (The minions have plain pack
+   * health — three head hits.)
+   */
+  rally: [1, 2, 2],
+  rallyDelay: 0.3,
+  rallyWindow: 0.5,
   /** Interrupt-threshold factor for the attack after a landed one. */
   mercy: 0.75,
   /**
    * The player on their last hearts (≤ lowHp): interrupt-threshold factor, the
-   * breather between attacks and one debris piece fewer per fling.
+   * breather between attacks and one debris piece fewer per fling; no grace and
+   * no pack calls.
    */
   lowHp: 2,
   lowHpMercy: 0.65,
@@ -278,8 +321,10 @@ export class Tyrant extends Boss {
   private sfxT = 3;
   private debrisT = 0;
   private veerTarget: number = D.HELI_APPROACH;
-  /** The current lunge is the quick follow-up of a chain (phase 3). */
+  /** The current attack is the quick follow-up of a chain or a debris rush (no further chain). */
   private chained = false;
+  /** This debris volley ends in a DEBRIS RUSH (see TYRANT_TUNE.rush). */
+  private rushing = false;
   /** The last attack connected (→ a longer breather and an easier next attack). */
   private justLanded = false;
   /** The current attack follows a landed one: its interrupt threshold is lowered. */
@@ -288,6 +333,8 @@ export class Tyrant extends Boss {
   private queued: TState | null = null;
   /** Seconds the phase-1 chase has been parked at the end of its road. */
   private parkedT = 0;
+  /** Pack-mates that answered the current windup's call (see rallyPack). */
+  private rallied = 0;
   private healthDropped = false;
 
   // Death.
@@ -298,7 +345,7 @@ export class Tyrant extends Boss {
 
   protected override configure(): void {
     this.name = 'tyrant';
-    this.maxHp = 350;
+    this.maxHp = 400;
     this.speed = 8;
     this.points = 10000;
     this.sfxHit = 'hit_flesh';
@@ -596,7 +643,7 @@ export class Tyrant extends Boss {
     this.flinchSide = d >= 0 ? 1 : -1;
     this.flinch = Math.min(1.2, this.flinch + (weak ? 0.22 : 0.06) + amount * 0.05);
     if (weak) this.world.fx.sparks(hit.point, hit.normal, 3);
-    if (this.winding) {
+    if (this.winding && this.stateTime >= (this.lastHearts() ? 0 : TYRANT_TUNE.grace)) {
       // Weak-point hits count in full; body hits still add a little pressure
       // (TYRANT_TUNE.bodyInterrupt × the raw shot damage) — aim for the glow.
       this.interruptDmg += weak ? amount : hit.damage * TYRANT_TUNE.bodyInterrupt;
@@ -683,7 +730,8 @@ export class Tyrant extends Boss {
     this.telegraph = null;
     this.winding = false;
     this.interruptDmg = 0;
-    // A chain (phase-3 double lunge) lasts until it's back in its neutral state.
+    this.rallied = 0;
+    // A chain (or debris rush) lasts until it's back in its neutral state.
     if (s === 'retreat' || s === 'stalk' || s === 'chase') this.chained = false;
     this.entering = true;
     this.setState(s);
@@ -724,7 +772,25 @@ export class Tyrant extends Boss {
     if (alive >= 4) return;
     const e = createEnemy(type, this.world, { pos: new THREE.Vector3(x, y, z), frame: 'rig', entry, hpMul: 1, speedMul: 1, opts });
     this.world.add(e);
-    if (type === 'raptor') this.world.fx.debris(e.worldPos(_v), 0x3d6a2c);
+    if (type.startsWith('raptor')) this.world.fx.debris(e.worldPos(_v), 0x3d6a2c);
+  }
+
+  /**
+   * Pack-mates that could strike right now pounce alongside the windup (`t` =
+   * seconds into it): the call opens at TYRANT_TUNE.rallyDelay and stays open for
+   * rallyWindow; each joiner's own ring still starts framed in the play area
+   * (PackRaptor.rally) and runs its full length. Not on the player's last hearts.
+   */
+  private rallyPack(t: number) {
+    if (t < TYRANT_TUNE.rallyDelay || t > TYRANT_TUNE.rallyDelay + TYRANT_TUNE.rallyWindow || this.lastHearts()) return;
+    let n = (TYRANT_TUNE.rally[this.phase] ?? 1) - this.rallied;
+    for (const e of this.world.enemies()) {
+      if (n <= 0) break;
+      if (e instanceof PackRaptor && e.frame === 'rig' && e.rally()) {
+        n--;
+        this.rallied++;
+      }
+    }
   }
 
   /** True the first time `key` is claimed (minion waves fire once; no per-frame closures). */
@@ -1035,8 +1101,8 @@ export class Tyrant extends Boss {
           // from behind its body, where their rings couldn't be shot.)
           if (this.afterRoar === 'stalk' && this.once('p1')) {
             // From the jungle either side of it, landing ~11 m ahead near the middle of the view.
-            this.spawnMinion('raptor', -5, 0, -18, 'leap', { variant: 'green' });
-            this.spawnMinion('raptor', 5.5, 0, -19.5, 'leap', { variant: 'tan' });
+            this.spawnMinion('raptor_pack', -5, 0, -18, 'leap', { variant: 'green' });
+            this.spawnMinion('raptor_pack', 5.5, 0, -19.5, 'leap', { variant: 'tan' });
           }
           // First attack after the entrance roar comes later (the gun is usually hot by now).
           this.cooldown = this.afterRoar === 'chase' && this.lastAttack === '' ? 2.6 : 1.4;
@@ -1070,8 +1136,8 @@ export class Tyrant extends Boss {
         if (this.hp < this.maxHp * 0.86 && this.once('p0')) {
           // Out of the trees either side of it, landing ~8–9 m back, mid-frame
           // (never right under the jeep's tailgate / the HUD corners).
-          this.spawnMinion('raptor', -4.2, 0, 15.5, 'leap', { variant: 'green' });
-          this.spawnMinion('raptor', 4.6, 0, 17, 'leap', { variant: 'tan' });
+          this.spawnMinion('raptor_pack', -4.2, 0, 15.5, 'leap', { variant: 'green' });
+          this.spawnMinion('raptor_pack', 4.6, 0, 17, 'leap', { variant: 'tan' });
         }
         break;
       }
@@ -1094,6 +1160,7 @@ export class Tyrant extends Boss {
         this.gape(smoothstep(0.08, 0.4, k), true);
         this.headYawT = Math.sin(t * 13) * 0.05 * k;
         if (first) w.audio.play('dino_roar', { volume: 0.85, pitch: 0.85 });
+        this.rallyPack(t);
         const done = this.telegraphAttack(
           dur,
           () => {
@@ -1126,6 +1193,7 @@ export class Tyrant extends Boss {
         if (first) {
           this.flingSide = p.x >= 0 ? 1 : -1;
           this.flingThrown = 0;
+          this.rushing = !this.chained && !this.lastHearts() && w.rng.chance(TYRANT_TUNE.rush[this.phase] ?? 0);
           w.audio.play('dino_roar', { volume: 0.7, pitch: 1.1 });
         }
         const side = this.flingSide;
@@ -1181,6 +1249,16 @@ export class Tyrant extends Boss {
             }
             if (ok) this.fling(_v, i);
           }
+        }
+        // DEBRIS RUSH: it comes in behind its volley (only with its head framed in
+        // the play area, so the ring is readable from its first frame).
+        if (this.rushing && t > smashAt + (throws - 1) * 0.32 + TYRANT_TUNE.rushDelay && this.inPlayArea(this.head, 0.85)) {
+          const next: TState = this.phase === 2 ? 'lungeWind' : 'biteWind';
+          this.lastAttack = next;
+          this.go(next);
+          this.chained = true;
+          w.audio.play('dino_roar', { volume: 0.9, pitch: 0.8 });
+          break;
         }
         if (t > smashAt + throws * 0.32 + 0.6) this.afterAttack();
         break;
@@ -1256,8 +1334,8 @@ export class Tyrant extends Boss {
           // raptors stand tall enough to stay in the (tilted-up) view and land
           // mid-frame. (No compys — small and low, their rings sat at the bottom
           // edge behind the hood; no fliers — they dove out from behind its body.)
-          this.spawnMinion('raptor', -6.5, 0, -20, 'leap', { variant: 'blue' });
-          this.spawnMinion('raptor', 6, 0, -21, 'leap', { variant: 'green' });
+          this.spawnMinion('raptor_pack', -6.5, 0, -20, 'leap', { variant: 'blue' });
+          this.spawnMinion('raptor_pack', 6, 0, -21, 'leap', { variant: 'green' });
         }
         break;
       }
@@ -1293,6 +1371,7 @@ export class Tyrant extends Boss {
           this.tailLiftT = 0.4;
           this.gape(1, true);
         }
+        this.rallyPack(t);
         const done = this.telegraphAttack(
           dur,
           () => {
@@ -1328,11 +1407,14 @@ export class Tyrant extends Boss {
         this.shakeHead = 1;
         this.faceYaw(this.yawToJeep() + Math.sin(t * 4) * 0.3, dt, 4);
         if (first) w.fx.dust(this.worldPos(_v), 1.4, 0x4a4436);
-        // Phase 3: a stopped lunge is often answered by another straight away
-        // (shorter run-up from where it reeled) — the final stand never lets up.
-        if (this.phase === 2 && !this.chained && t > 1.1 && t - dt <= 1.1) {
-          if (w.rng.chance(TYRANT_TUNE.lungeChainChance) && this.inPlayArea(this.head, 0.85)) {
-            this.go('lungeWind');
+        // A stopped attack is often answered by another straight away (in the final
+        // stand a lunge with a shorter run-up from where it reeled) — the king never
+        // lets up. Not on the player's last hearts.
+        if (!this.chained && t > 1.1 && t - dt <= 1.1 && !this.lastHearts()) {
+          if (w.rng.chance(TYRANT_TUNE.chain[this.phase] ?? 0) && this.inPlayArea(this.head, 0.85)) {
+            const next: TState = this.phase === 2 ? 'lungeWind' : this.phase === 1 && w.rng.chance(0.5) ? 'chargeWind' : 'biteWind';
+            this.lastAttack = next;
+            this.go(next);
             this.chained = true;
             this.mercyNext = false;
             w.audio.play('dino_roar', { volume: 0.85, pitch: 0.95 });
@@ -1438,6 +1520,7 @@ export class Tyrant extends Boss {
         this.jawT = 0.3;
         this.gape(smoothstep(0.06, 0.32, k), true);
         this.tailLiftT = 0.3;
+        this.rallyPack(t);
         const done = this.telegraphAttack(
           dur,
           () => {
@@ -1470,8 +1553,8 @@ export class Tyrant extends Boss {
         this.neckT = -0.1 + Math.sin(this.age * 1.3) * 0.06;
         if (p.z > P3_Z - 2) this.tryAttack(dt);
         if (this.hp < this.maxHp * 0.18 && this.once('p2b')) {
-          this.spawnMinion('raptor', -4.5, 0, 18, 'leap', { variant: 'blue' });
-          this.spawnMinion('raptor', 5, 0, 19, 'leap', { variant: 'tan' });
+          this.spawnMinion('raptor_pack', -4.5, 0, 18, 'leap', { variant: 'blue' });
+          this.spawnMinion('raptor_pack', 5, 0, 19, 'leap', { variant: 'tan' });
         }
         break;
       }

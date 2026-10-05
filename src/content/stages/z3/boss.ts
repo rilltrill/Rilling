@@ -97,21 +97,32 @@ export const BEHEMOTH_TUNE = {
    * ring the instant it shows — the player has to keep it there. (The ring is up
    * from its first frame and the grace overlaps a 0.25–0.4 s reaction, so it
    * costs a reacting player little; it's the overlapping threats — a runner's
-   * ring, a car in the air — that make it bite.)
+   * ring, a car in the air — that make it bite.) The grace is only fair because
+   * the glow a ring is drawn on stays in the line of fire for the WHOLE ring —
+   * every wind-up pose, the club swing included, keeps the rebar and arm guard
+   * off the wound (and the eyes are clear too).
    */
   grace: [0.3, 0.35, 0.35],
   pincerLag: 0.25,
-  /** Chance, by phase, that a throw chains straight into a slam while the car / slab is still in the air. */
+  /** Scales the giant's breather between attacks (every backToChase pause): lower = a busier giant. */
+  recover: 0.6,
+  /**
+   * Chance, by phase, that a throw chains straight into a slam while the car / slab
+   * is still in the air. The slam ring opens ~0.16 s after the release and lands
+   * 1.41 s (enraged) / 1.66 s after it; a chained throw takes the slow flight (car
+   * 1.95 s, slab 1.6 s), so the two never come down together and the slam comes
+   * first. Glow first: the slam breaks ≈ 0.85–0.95 s after the release (grace, then
+   * 4–5 rounds), and the car (4 rounds) or slab (3) is down by ≈ 1.45–1.55 s even
+   * after a 0.25 s re-aim. Throw first works too (down ≈ 0.5–0.6 s, slam broken
+   * ≈ 1.3 s, before the enraged 1.41 s).
+   */
   throwChain: [0, 0.6, 0.85],
   /**
    * Arcade mercy, by hearts left: on the last hearts a wind-up breaks sooner
    * (shorter grace, lighter meter), so one bad patch doesn't snowball into a
    * continue. [hearts ≤, grace, meter ×]
    */
-  mercy: [
-    [1, 0.2, 0.6],
-    [2, 0.3, 0.8],
-  ] as [number, number, number][],
+  mercy: [[1, 0.2, 0.6]] as [number, number, number][],
 };
 
 /**
@@ -265,7 +276,7 @@ export class Behemoth extends Boss {
   protected override configure(): void {
     this.name = 'behemoth';
     // ≈ 50 s for a clean aim at 60 fps (12 rounds/s on the glow), ≈ 75 s for a loose one.
-    this.maxHp = 420;
+    this.maxHp = 450;
     this.speed = 0;
     this.points = 30000;
     this.phases = [0.66, 0.33];
@@ -383,10 +394,13 @@ export class Behemoth extends Boss {
       Kit.add(g, Kit.box(1.6, 0.24, 0.14), soak, 0, -0.22, 1.0);
       Kit.add(g, Kit.box(1.4, 0.2, 0.14), soak, 0, 1.3, 1.0);
     });
-    // Rebar speared through the torso (armour — sparks) with a lump of concrete.
+    // Rebar speared through the torso (armour — sparks) with a lump of concrete. The
+    // front ends splay AWAY from the wound: with the chest leant back and twisted for
+    // the club swing, an inward-angled stub crossed the glow from the truck's eye line
+    // just as the club ring (drawn on the wound) needed it.
     this.skin(this.chest, 'armor', (g) => {
       const bars: [number, number, number, number, number][] = [
-        [0.85, 0.9, 0.35, 0.25, 4.2],
+        [0.85, 0.9, 0.35, -0.25, 4.2],
         [-0.9, 0.3, -0.3, -0.2, 3.8],
         [0.3, 0.05, 0.15, -0.4, 3.6],
       ];
@@ -618,10 +632,12 @@ export class Behemoth extends Boss {
     return Math.min(g[Math.min(this.phase, g.length - 1)], this.mercy()?.[1] ?? Infinity);
   }
 
-  /** The mercy row for the player's hearts left (BEHEMOTH_TUNE.mercy), if any. */
+  /** The mercy row for the player's hearts left (BEHEMOTH_TUNE.mercy), if any. (Per weak hit: no closure.) */
   private mercy(): [number, number, number] | undefined {
     const hp = this.world.player.hp;
-    return BEHEMOTH_TUNE.mercy.find((m) => hp <= m[0]);
+    const rows = BEHEMOTH_TUNE.mercy;
+    for (let i = 0; i < rows.length; i++) if (hp <= rows[i][0]) return rows[i];
+    return undefined;
   }
 
   protected override onPhase(phase: number): void {
@@ -744,7 +760,8 @@ export class Behemoth extends Boss {
     }
   }
 
-  private release(kind: 'car' | 'slab') {
+  /** Let go of the held car / slab (`slow`: the unhurried flight even when enraged — see 'throw'). */
+  private release(kind: 'car' | 'slab', slow = false) {
     const w = this.world;
     const src = kind === 'car' ? this.heldCar : this.heldSlab;
     src.getWorldPosition(_v);
@@ -760,7 +777,7 @@ export class Behemoth extends Boss {
       Kit.add(mesh, Kit.cyl(0.05, 0.05, 1.2, 5), M.lam(RUST, 'metal', 1.4, 1), 0.8, 0.3, 0.5, 0.6, 0, 0.3);
     }
     bake(mesh);
-    const fast = this.phase >= 2;
+    const fast = this.phase >= 2 && !slow;
     const p = new Throwable(
       w,
       {
@@ -943,13 +960,15 @@ export class Behemoth extends Boss {
       case 'throw': {
         this.faceTruck(dt);
         if (t >= 0.14 && this.holding) {
-          this.release(this.holding);
           const chain = BEHEMOTH_TUNE.throwChain;
           this.chained = w.rng.chance(chain[Math.min(this.phase, chain.length - 1)]);
+          // A chained throw always takes the slow flight (car 1.95 s, slab 1.6 s), so it
+          // never comes down together with the slam that follows it.
+          this.release(this.holding, this.chained);
         }
         if (this.chained && t > 0.3) {
-          // THE ONE-TWO: the fists come down while the car is still in the air — shoot it
-          // down and pump the wound (two rings, two places on screen).
+          // THE ONE-TWO: the fists come down while the car / slab is still in the air — shoot
+          // it down and pump the wound (two rings, two places on screen).
           this.chained = false;
           this.lastAttack = 'slamWind';
           this.go('slamWind');
@@ -1076,7 +1095,7 @@ export class Behemoth extends Boss {
   }
 
   private backToChase(pause: number) {
-    this.chaseFor = pause + this.world.rng.range(0.4, 1.2);
+    this.chaseFor = (pause + this.world.rng.range(0.4, 1.2)) * BEHEMOTH_TUNE.recover;
     this.pincer = false;
     this.go('chase');
   }

@@ -27,11 +27,15 @@ import './boss';
  *
  * Pressure curve: the finale's regular fights carry real threat through the
  * alpha pack (see alpha.ts: red = alpha, it takes sustained fire to break its
- * pounce and its pack pounces with it) and the storm (lightning drops burning
- * branches while the road ambushes' rings close), so the Tyrant isn't the only
- * thing that can hurt you; the Tyrant itself is tuned in boss.ts (TYRANT_TUNE).
- * Calibrated against the human-like bot (tests/unit/humanbot.test.ts, seeds
- * 1–18): ≈ 3.5–4 hearts lost at σ 0.03, ≈ 6.5–7.5 at σ 0.05.
+ * pounce and its pack pounces with it; the pack-mates take aimed fire on the
+ * heads to drop, so three rings closing together are a real test) and the storm
+ * (lightning drops burning branches while the road ambushes' rings close), so
+ * the Tyrant isn't the only thing that can hurt you; the Tyrant itself is tuned
+ * in boss.ts (TYRANT_TUNE: a grace before its rings can break, chained attacks,
+ * debris rushes and pack-mates pouncing alongside it).
+ * Calibrated against the human-like bot at phone rate (tests/unit/humanbot.test.ts,
+ * ZG_FPS=60, seeds 1–24): ≈ 3–3.5 hearts lost at σ 0.03 (≈ 1 of them to the
+ * Tyrant), ≈ 6 at σ 0.05 — the hardest of the dino stages.
  */
 
 let viewModel: JeepViewModel | null = null;
@@ -157,12 +161,13 @@ const beats: Beat[] = [
         // AMBUSH: the alpha and its pack spring out of the ferns ahead and pounce as
         // they land (the leaps carry them to ~8–9 m, in the middle of the view).
         // Early enough to be over before the visitor-centre hold (whose scientist
-        // stands at the right edge of the frame).
+        // stands at the right edge of the frame) — so these two keep the pack's base
+        // health: a tougher straggler would follow the jeep onto the plaza.
         start: { atD: 128 },
         spawns: [
           { type: 'raptor_alpha', pos: [-6, 0, 14.5], entry: 'leap', opts: { ambush: true } },
-          { type: 'raptor_pack', pos: [4, 0, 15], entry: 'leap', t: 0.15, hp: 1.3, opts: { variant: 'tan', ambush: true } },
-          { type: 'raptor_pack', pos: [0.5, 0, 16.5], entry: 'leap', t: 0.3, hp: 1.3, opts: { variant: 'blue', ambush: true } },
+          { type: 'raptor_pack', pos: [4, 0, 15], entry: 'leap', t: 0.15, opts: { variant: 'tan', ambush: true } },
+          { type: 'raptor_pack', pos: [0.5, 0, 16.5], entry: 'leap', t: 0.3, opts: { variant: 'blue', ambush: true } },
         ],
       },
     ],
@@ -245,7 +250,7 @@ const beats: Beat[] = [
       // The storm splits a palm ahead just as the pack lands from its ambush
       // (atD 218): its burning branches come down while the pack's rings close.
       const onRoad = () => w.rig.d < D.HOLD_ROADBLOCK - 6;
-      atDistance(w, 222, () => lightningTree(w, [-5, 4.5, 22], 2, onRoad), onRoad);
+      atDistance(w, 222, () => lightningTree(w, [-5, 4.5, 22], 3, onRoad), onRoad);
     },
     waves: [
       {
@@ -336,7 +341,7 @@ const beats: Beat[] = [
       // Lightning splits a palm ahead on the right just as the pack lands from
       // its ambush (atD 284): branches come down while the pack's rings close.
       const onRoad = () => w.rig.d < D.HOLD_MUD - 8;
-      atDistance(w, 288, () => lightningTree(w, [5.5, 4.5, 22], 2, onRoad), onRoad);
+      atDistance(w, 288, () => lightningTree(w, [5.5, 4.5, 22], 3, onRoad), onRoad);
     },
     pickups: [{ kind: 'points', pos: [3, 2.3, 40] }],
     waves: [

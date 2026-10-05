@@ -14,16 +14,26 @@ export const ALPHA_TUNE = {
   hp: 12,
   /**
    * Interrupt damage that breaks the alpha's crouch + pounce (its red ring):
-   * ten body hits or four head hits (~0.7 s of mounted-gun fire on target),
-   * where a stock raptor drops out of its attack at the first round.
+   * fifteen body hits or six head hits (~0.5 s of mounted-gun fire on its head,
+   * ~1.25 s on the body), where a stock raptor drops out of its attack at the
+   * first round. (Usually it's dead first: it has as much health, and it takes
+   * fire on the way in.)
    */
-  guard: 8,
+  guard: 12,
   /** A single hit this big (magnum, point-blank shotgun) staggers the alpha even while it's closing in. */
   heavy: 3,
-  /** Pack-mate base hp before the spawn's hp multiplier (a stock raptor has 3). */
-  packHp: 5,
-  /** Interrupt damage that breaks a pack-mate's rallied / ambush pounce: eight body hits or three head hits. */
-  rallyGuard: 6,
+  /**
+   * Pack-mate base hp before the spawn's hp multiplier (a stock raptor has 3):
+   * the road ambushes' pack-mates (×1.3) take about four head hits or ten body
+   * hits to drop, so three rings closing together ask for aimed fire on the
+   * heads — a stream hosed at the bodies runs out of time on the third.
+   */
+  packHp: 6,
+  /**
+   * Interrupt damage that breaks a pack-mate's rallied / ambush pounce: ten body
+   * hits or four head hits (≈ its health: break the ring or kill it).
+   */
+  rallyGuard: 7.5,
   /** A pack-mate joins the alpha's pounce only if its own attack cooldown is about done. */
   rallyCooldown: 0.5,
   /** Ambush ('opts.ambush'): seconds after landing from the entry leap in which it may spring straight into its pounce… */

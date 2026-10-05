@@ -60,7 +60,8 @@ let viewModel: TruckViewModel | null = null;
  * (gunLocked), and what can't hold still once it's under way — a crawler's leap,
  * a spitter's glob, the giant's thrown car — vents a hot gun as it sets off
  * (ventGun). Runner and brute rings also start framed in the middle band of the
- * screen with a clear line of fire.
+ * screen with a clear line of fire, and a runner's ring that loses it (a brute
+ * landing in front) holds, then breaks off and sidesteps (TruckRunner).
  */
 const TOUGH: Record<string, number> = {
   finale_walker: 1.6,
@@ -68,7 +69,7 @@ const TOUGH: Record<string, number> = {
   pack_runner: 2,
   finale_crawler: 1.4,
   roadside_crawler: 1.4,
-  riot_brute: 2.7,
+  riot_brute: 2.66,
   finale_bloater: 1.4,
   finale_spitter: 1.4,
   deck_spitter: 1.4,

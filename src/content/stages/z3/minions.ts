@@ -17,6 +17,8 @@ const _n = new THREE.Vector3();
 const _f = new THREE.Vector3();
 const _t = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+/** Seconds a runner's open ring may sit out of the line of fire before it breaks off (TruckRunner.windupUpdate). */
+const BLOCK_BREAK_OFF = 0.2;
 const _o = new THREE.Vector3();
 const _a = new THREE.Vector3();
 const _ray = new THREE.Raycaster();
@@ -159,13 +161,40 @@ export class TruckRunner extends Runner {
   override setState(s: EnemyState) {
     // Never start an attack the player can't see (covers advance → windup and recover → windup)
     // or can't shoot: a brute or another runner standing in the line of fire sends it sidestepping.
-    if (s === 'windup' && this.state !== 'dying' && (!this.framed() || !this.clearShot())) s = 'advance';
+    // (A fresh line-of-fire test, not the 10 Hz cached one: the ring must open shootable.)
+    if (s === 'windup' && this.state !== 'dying') {
+      this.clearAge = -1;
+      if (!this.framed() || !this.clearShot()) s = 'advance';
+    }
     super.setState(s);
   }
 
-  /** The ring holds (crouched, ready) while the twin gun is locked out — see gunLocked(). */
+  /** Seconds this ring has been out of the line of fire (see windupUpdate). */
+  private blockedT = 0;
+
+  protected override onWindup(): void {
+    super.onWindup();
+    this.blockedT = 0;
+  }
+
+  /**
+   * The ring holds (crouched, ready) while the twin gun is locked out — see
+   * gunLocked() — and while something steps into the line of fire after it has
+   * opened (a riot brute landing in front, a packmate cutting across): it only
+   * counts down while the player can shoot it. Blocked for more than
+   * BLOCK_BREAK_OFF in all, it breaks off and sidesteps (clearShot picked the
+   * side), re-ringing once it is clear — so a ring is shootable for ≥ ~75 % of
+   * its life even if the blocker stays put.
+   */
   protected override windupUpdate(dt: number) {
-    if (gunLocked(this.world)) this.stateTime = Math.max(0, this.stateTime - dt);
+    if (this.state === 'windup' && !this.clearShot()) {
+      this.blockedT += dt;
+      if (this.blockedT > BLOCK_BREAK_OFF) {
+        this.setState('advance');
+        return;
+      }
+      this.stateTime = Math.max(0, this.stateTime - dt);
+    } else if (gunLocked(this.world)) this.stateTime = Math.max(0, this.stateTime - dt);
     super.windupUpdate(dt);
   }
 
