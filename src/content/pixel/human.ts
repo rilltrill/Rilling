@@ -470,6 +470,22 @@ function torsoDetails(f: PixelFigure, r: HumanoidRig, L: HumanLook, M: Mats, fro
       f.decal(f.at(sp, L.bite * 0.11 * b, 0.07, fz), f.at(sp, L.bite * 0.09 * b, 0.05, fz), 0.045 * s, 0.035 * s, M.skin).flag(D).rag(0.012 * s, PF.SPIKY).seed(7);
       f.decal(f.at(sp, L.bite * 0.1 * b, 0.065, fz), f.at(sp, L.bite * 0.1 * b, 0.06, fz), 0.02 * s, 0.02 * s, M.blood).flag(D);
     }
+    // Torn holes showing rotten skin, and a spatter of blood across the cloth.
+    for (let i = 0; i < 2; i++) {
+      const hx = (hash(L.seed * 1.7 + i * 5.3) * 2 - 1) * 0.12 * b;
+      const hy = 0.12 + hash(L.seed * 2.3 + i * 3.1) * 0.24;
+      const hr = (0.022 + hash(L.seed + i * 9.1) * 0.02) * s;
+      f.decal(f.at(sp, hx, hy, fz), f.at(sp, hx + 0.01, hy - 0.03, fz), hr, hr * 0.8, M.skin).flag(D).rag(0.01 * s, PF.SPIKY).seed(40 + i);
+      // Dark wound inside, a short drip below it.
+      f.decal(f.at(sp, hx + 0.004, hy - 0.01, fz), f.at(sp, hx + 0.006, hy - 0.018, fz), hr * 0.45, hr * 0.35, M.skin).flag(D | PF.SHADE_ONLY).tone(-0.45);
+      f.decal(f.at(sp, hx + 0.008, hy - 0.03, fz), f.at(sp, hx + 0.01, hy - 0.07, fz), 0.006 * s, 0.005 * s, M.blood).flag(D);
+    }
+    const bx = (hash(L.seed * 3.9) * 2 - 1) * 0.1 * b;
+    f.decal(f.at(sp, bx, 0.3, fz), f.at(sp, bx + 0.05, 0.16, fz), 0.03 * s, 0.012 * s, M.blood).flag(D).rag(0.018 * s, PF.SPIKY).seed(51);
+  }
+  // Back view: a long bloody smear down the back.
+  if (L.dead && front < -0.2) {
+    f.decal(f.at(sp, 0.03, 0.4, -fz), f.at(sp, 0.06, 0.1, -fz), 0.04 * s, 0.02 * s, M.blood).flag(D).rag(0.015 * s, PF.SPIKY).seed(52);
   }
 }
 
@@ -557,6 +573,15 @@ function paintHead(f: PixelFigure, r: HumanoidRig, L: HumanLook, M: Mats, st: Hu
     if (open > 0.2) {
       const ty = my + (0.006 + open * 0.016) * hs;
       f.decal(f.at(h, mw * 0.8, ty, 0.115 * hs), f.at(h, -mw * 0.8, ty, 0.115 * hs), 0.007 * hs * s, 0.007 * hs * s, M.teeth).flag(D | PF.NO_OUTLINE);
+    }
+    if (L.dead && open > 0.45) {
+      const by = my - (0.004 + open * 0.016) * hs;
+      f.decal(f.at(h, -mw * 0.7, by, 0.113 * hs), f.at(h, mw * 0.7, by, 0.113 * hs), 0.006 * hs * s, 0.006 * hs * s, M.teeth).flag(D | PF.NO_OUTLINE);
+    }
+    if (L.dead && hash(L.seed * 5.1) < 0.35) {
+      // Rotted-away nose: a dark hole.
+      const nh = f.at(h, 0, 0.112 * hs, 0.13 * hs);
+      f.decal(nh, nh, 0.011 * hs * s, 0.011 * hs * s, M.mouth).flag(D).min(0.5);
     }
     if (L.dead && (L.drool || jaw > 0.4)) {
       const dy = Math.min(0.03, (st.time * 0.07 + L.seed) % 0.04);
@@ -721,6 +746,15 @@ function paintLeg(f: PixelFigure, hip: THREE.Object3D, knee: THREE.Object3D, sid
   if (torn) f.mat2(M.skin, 0.35);
   f.cone(f.at(knee, 0, -0.07, -0.022), f.at(knee, 0, -0.22, -0.014), 0.064 * s, 0.054 * s, M.pants).k(0.05 * s);
   if (torn) f.decal(f.at(knee, 0, -0.18, 0.06), f.at(knee, 0, -0.24, 0.06), 0.03 * s, 0.025 * s, M.blood).flag(D).rag(0.008 * s);
+  if (L.dead && !L.bareLegs) {
+    // Grimy, blood-soaked cuff; a rip on one thigh; spatter.
+    f.decal(f.at(knee, -0.07, -0.33, 0), f.at(knee, 0.07, -0.33, 0), 0.03 * s, 0.03 * s, M.pants).flag(D | PF.SHADE_ONLY).tone(-0.14);
+    if (hash(L.seed * 4.3 + side) < 0.5) {
+      f.decal(f.at(hip, 0.01, -0.2, 0.08), f.at(hip, 0.0, -0.26, 0.085), 0.026 * s, 0.02 * s, M.skin).flag(D).rag(0.01 * s, PF.SPIKY).seed(60 + side);
+    } else {
+      f.decal(f.at(hip, 0, -0.12, 0.08), f.at(hip, 0.02, -0.3, 0.08), 0.022 * s, 0.01 * s, M.blood).flag(D).rag(0.012 * s, PF.SPIKY).seed(62 + side);
+    }
+  }
   // Shoe: heel to toe.
   f.cone(f.at(knee, 0, -0.395, -0.05), f.at(knee, 0, -0.425, 0.165), 0.05 * s, 0.042 * s, M.shoes).k(0.025 * s);
 }

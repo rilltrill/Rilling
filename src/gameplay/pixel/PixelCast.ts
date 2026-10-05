@@ -269,13 +269,15 @@ const PAINT_FRAG = /* glsl */ `
       if (a * b2 > 0.5 && sec > 0.5) mat = sec;
       else tone -= (a + b2) * 0.2 * str;
     } else if (pat == 4) {
-      // ROT: rot patches (secondary), bruising, the odd dark vein.
-      float n = vnoise(uv * 7.0 + sd);
-      if (sec > 0.5 && n > 0.68) mat = sec;
-      float n2 = vnoise(uv * 11.0 + sd + 9.0);
-      if (n2 > 0.7) tone -= 0.12 * str;
+      // ROT: rot patches (secondary), purple bruising (tertiary), dark veins.
+      float n = vnoise(uv * 8.0 + sd);
+      float n2 = vnoise(uv * 10.0 + sd + 9.0);
+      float ter = floor(m2.a * 255.0 + 0.5);
+      if (sec > 0.5 && n > 0.64) mat = sec;
+      else if (ter > 0.5 && n2 > 0.79) mat = ter;
+      else if (n2 > 0.66) tone -= 0.1 * str;
       float v = abs(vnoise(uv * 5.0 + sd + 3.0) - 0.5);
-      if (v < 0.018) tone -= 0.14 * str;
+      if (v < 0.02) tone -= 0.16 * str;
     } else if (pat == 5) {
       // FLESH: smooth, a touch of warmth in the light.
       tone += 0.02 * str;

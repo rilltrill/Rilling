@@ -250,8 +250,10 @@ export const Mat = {
   deadSkin(hex: number): number {
     return material(`dead|${h6(hex)}`, () => {
       const [L, C, h] = hexToOklch(hex);
-      const rot = Mat.flat(oklchToHex(L * 0.82, Math.max(C, 0.05) * 1.3, hueToward(h, 125, 0.6)), 'rot');
-      return base(makeRamp(hex, { light: 0.62, sat: 1.15 }), PAT.ROT, { strength: 0.75, scale: 0.07, secondary: rot, dither: 0.12 });
+      // Rot patches: a sicker, darker green; bruises a purple shade (tertiary).
+      const rot = Mat.flat(oklchToHex(L * 0.74, Math.max(C, 0.06) * 1.5, hueToward(h, 130, 0.7)), 'rot');
+      const bruise = Mat.flat(oklchToHex(L * 0.62, Math.max(C, 0.05) * 1.2, hueToward(h, 330, 0.75)), 'bruise');
+      return base(makeRamp(hex, { light: 0.62, sat: 1.15 }), PAT.ROT, { strength: 0.85, scale: 0.07, secondary: rot, tertiary: bruise, dither: 0.12 });
     });
   },
   /** Living skin (civilians): warm, smooth. */
