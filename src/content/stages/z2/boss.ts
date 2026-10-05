@@ -11,6 +11,8 @@ import { Projectile, type ProjectileOptions } from '../../../gameplay/Projectile
 import { M, T, TX } from './mats';
 import { bakeInto } from './bake';
 import { z2Scene } from './scene';
+import type { PixelFigure } from '../../../gameplay/pixel/figure';
+import { paintPatientZero, pzPose, type PZRig } from '../../pixel/bossesZombie';
 
 /**
  * PATIENT ZERO — boss of ST. MERCY HOSPITAL.
@@ -1604,6 +1606,25 @@ export class PatientZero extends Boss {
       const pulse = 1 + Math.sin(this.age * 18) * 0.15;
       tn.pustule.scale.setScalar(1.25 * pulse);
     } else tn.pustule.scale.setScalar(1);
+  }
+
+  // ─── ART: SPRITES (PixelCast painter: content/pixel/bossesZombie.ts) ─────
+  private pzRig: PZRig | null = null;
+  private readonly pzPose = pzPose();
+
+  override paintPixels(f: PixelFigure): boolean {
+    if (!this.model.visible) return false;
+    this.pzRig ??= { body: this.body, torso: this.torso, chest: this.chest, head: this.head, jaw: this.jaw, mouthGlow: this.mouthGlow, heart: this.heart, ribs: this.ribs, eyes: this.eyes, tents: this.tents, flesh: this.fleshMeshes, live: [this.poolGlow[0]?.parent ?? this.body, ...this.iv.map((l) => l.bag)] };
+    const p = this.pzPose;
+    p.time = this.age;
+    p.state = this.state;
+    p.stateTime = this.stateTime;
+    p.phase = this.phase;
+    p.heartExposed = this.heartExposed;
+    p.armed = this.state === ST.slam && !this.fired && this.slamTent ? this.tents.indexOf(this.slamTent) : -1;
+    p.spit = this.state === ST.spit && this.telegraph ? this.telegraph.progress : 0;
+    p.flinch = this.flinchK;
+    return paintPatientZero(f, this.pzRig, p);
   }
 
   // ─── Death ────────────────────────────────────────────────────────────────
