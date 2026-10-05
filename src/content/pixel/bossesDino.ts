@@ -1,9 +1,8 @@
 import * as THREE from 'three';
 import type { TheroRig, TheroSpec } from '../enemies/dinoKit';
 import { PART, PF, type PixelFigure } from '../../gameplay/pixel/figure';
-import { Mat } from '../../gameplay/pixel/materials';
+import { Mat, material } from '../../gameplay/pixel/materials';
 import { STAMP, stampSize } from '../../gameplay/pixel/stamps';
-import { dinoMats, type DinoMats } from './theropod';
 import { hoop } from './castKit';
 import { Enemy } from '../../gameplay/Enemy';
 import type { World } from '../../gameplay/World';
@@ -69,6 +68,14 @@ function bossDLevel(c: THREE.Color): number {
 // ═══════════════════════════════════════════════════════════════════════════
 // SPECIMEN X (d2)
 // ═══════════════════════════════════════════════════════════════════════════
+
+/** Teeth, claws, mouth and pupils (entries shared with the Tyrant and the raptors). */
+interface BossDXShared {
+  teeth: number;
+  claw: number;
+  throat: number;
+  pupil: number;
+}
 
 /** Hide materials of one cloak level. */
 interface BossDXSkin {
@@ -139,15 +146,14 @@ export function bossDSpecimenRig(r: TheroRig, s: TheroSpec, quills: readonly THR
   const skins: BossDXSkin[] = [];
   for (let i = 0; i < SX_CK.length; i++) {
     const ck = SX_CK[i];
+    // (Four materials a level — the shared table is small: limbs and brows wear the
+    // hide, the quills' dark tips are the hide's own band colour.)
     const belly = Mat.hide(bossDCloakHex(p.belly, ck), { scale: 0.2 });
-    skins.push({
-      hide: Mat.hide(bossDCloakHex(p.base, ck), { stripes: 0.9, belly, stripe: bossDCloakHex(SX_STRIPE, ck), scale: SX_BAND }),
-      back: Mat.hide(bossDCloakHex(p.back, ck), { scale: 0.2 }),
-      limb: Mat.hide(bossDCloakHex(p.base, ck), { scale: 0.18 }),
-      belly,
-      quill: Mat.bone(bossDCloakHex(p.accent, ck)),
-      quillTip: Mat.bone(bossDCloakHex(p.accent2, ck)),
-    });
+    const band = bossDCloakHex(SX_STRIPE, ck);
+    const hide = Mat.hide(bossDCloakHex(p.base, ck), { stripes: 0.9, belly, stripe: band, scale: SX_BAND });
+    // (Mat.hide made this entry; the fallback only runs if the table was already full.)
+    const tip = material(`stripe|${band.toString(16).padStart(6, '0')}`, () => ({ ramp: [band, band, band, band, band, band], pattern: 0, scale: 0.1, strength: 0, secondary: 0, glow: false, dither: 0, spec: 0 }));
+    skins.push({ hide, back: hide, limb: hide, belly, quill: Mat.bone(bossDCloakHex(p.accent, ck)), quillTip: tip });
   }
   weak[1].userData.spriteKeep3D = false;
   weak[3].userData.spriteKeep3D = false;
@@ -171,6 +177,9 @@ const XM = {
   gum: 0,
   deep: 0,
   tongue: 0,
+  teeth: 0,
+  throat: 0,
+  pupil: 0,
   dart: 0,
   dartTip: 0,
   dartGlow: 0,
@@ -184,24 +193,30 @@ function xm() {
     // over-bright glow (purple when enraged).
     XM.stripe = [Mat.flat(0x5a6670, 'sxdead'), Mat.glow(0x3ab8d8), Mat.glow(0x7aeaff), Mat.glow(0xc8faff)];
     XM.stripeR = [XM.stripe[0], Mat.glow(0x8a44c0), Mat.glow(0xc880ff), Mat.glow(0xecd6ff)];
-    XM.eye = [Mat.flat(0x3a4048, 'sxeye'), Mat.glow(0x4ac0dc), Mat.glow(0x9af2ff), Mat.glow(0xdcfcff)];
-    XM.eyeR = [XM.eye[0], Mat.glow(0xb02840), Mat.glow(0xff4a68), Mat.glow(0xffb8c0)];
-    XM.core = Mat.glow(0xf2ffff);
-    XM.coreR = Mat.glow(0xfff0f4);
+    // (The eyes burn in the stripes' own glow ramp; every entry of the shared
+    // material table counts — a long session fills it.)
+    XM.eye = XM.stripe;
+    XM.eyeR = XM.stripeR;
+    XM.core = XM.stripe[3];
+    XM.coreR = XM.stripeR[3];
     // A dim glow rim hugging the eye; the light it throws on the skin round it.
-    XM.rim = Mat.glow(0x2a8cb0);
-    XM.rimR = Mat.glow(0x902038);
+    XM.rim = XM.stripe[1];
+    XM.rimR = XM.stripeR[1];
     XM.spill = Mat.hide(0xaccad0, { scale: 0.2 });
     XM.spillR = Mat.hide(0xd0b0b8, { scale: 0.2 });
     XM.scythe = Mat.gloss(0x24262c);
     XM.edge = Mat.flat(0xc8d0dc, 'sxedge');
-    XM.gum = Mat.gore(0x9a2c3c);
-    XM.deep = Mat.mouth(0x2a0810);
-    XM.tongue = Mat.gore(0xb04a5c);
-    XM.dart = Mat.bone(0xe0dac8);
-    XM.dartTip = Mat.bone(0xf6f2e6);
-    XM.dartGlow = Mat.glow(0x8af0ff);
-    XM.dartRing = Mat.glow(0x4ac8ec);
+    // Mouth, teeth and pupils share the Tyrant's (and the raptors') entries.
+    XM.gum = Mat.gore(0x8a2a2a);
+    XM.deep = Mat.mouth(0x1e0404);
+    XM.tongue = Mat.gore(0xa03848);
+    XM.teeth = Mat.teeth(0xeee2c2);
+    XM.throat = Mat.mouth(0x5e1414);
+    XM.pupil = Mat.flat(0x140c06);
+    XM.dart = Mat.bone(0xe8e2d4);
+    XM.dartTip = XM.edge;
+    XM.dartGlow = XM.stripe[2];
+    XM.dartRing = XM.stripe[1];
   }
   return XM;
 }
@@ -221,10 +236,11 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
   let li = 0;
   for (let i = 1; i < SX_CK.length; i++) if (Math.abs(ck - SX_CK[i]) < Math.abs(ck - SX_CK[li])) li = i;
   const C = R.skins[li];
-  const M = dinoMats(s);
+  // Teeth, claws, mouth and pupils (shared entries).
+  const XS = xm();
+  const M = { teeth: XS.teeth, claw: XS.scythe, throat: XS.throat, pupil: XS.pupil };
   // (The 3D's lit hide barely darkens at mid cloak, then sinks to near black.)
   const dark = -0.4 * ck * ck * ck;
-  const XS = xm();
   const sc = scaleOf(r.pelvis);
   const T = s.torso;
   const sk = s.skull;
@@ -274,7 +290,7 @@ export function bossDPaintSpecimen(f: PixelFigure, R: BossDSpecimenRig, cloak: n
   f.cone(f.at(h, 0, sk.r[1] * 0.62, sk.len * 0.15), f.at(h, 0, sk.r[1] * 0.42, sk.len * 1.3), sk.r[0] * 0.42 * sc, sk.r[0] * 0.3 * sc, C.hide).part(PART.HEAD).k(0.03 * sc);
   // Heavy brow ridges (a V of bone from the front: the scowl).
   for (let sd = 1; sd >= -1; sd -= 2) {
-    f.cone(f.at(h, sd * sk.r[0] * 0.66, sk.r[1] * 0.82, sk.len * 0.8), f.at(h, sd * sk.r[0] * 0.48, sk.r[1] * 0.92, sk.len * 0.1), 0.026 * sc, 0.034 * sc, C.back).part(PART.HEAD).k(0.02 * sc);
+    f.cone(f.at(h, sd * sk.r[0] * 0.66, sk.r[1] * 0.82, sk.len * 0.8), f.at(h, sd * sk.r[0] * 0.48, sk.r[1] * 0.92, sk.len * 0.1), 0.026 * sc, 0.034 * sc, C.back).part(PART.HEAD).k(0.02 * sc).tone(-0.18);
   }
   // Jaw: its own primitive on the jaw joint, a small blend so the gape stays open;
   // a wedge (deep at the hinge, a sharp chin), tooth rows along both rims.
@@ -600,7 +616,7 @@ function bossDArc(f: PixelFigure, j: THREE.Object3D, sd: number, z: number, y0: 
  * chin, the tongue on the jaw floor — under angry glowing slit eyes and a V of
  * brow, a lit ridge down the snout to the nostrils.
  */
-function bossDSpecimenMaw(f: PixelFigure, R: BossDSpecimenRig, C: BossDXSkin, M: DinoMats, XS: typeof XM, sc: number, snoutTip: THREE.Vector3, eyeM: number, rage: boolean, dark: number, jawA: number) {
+function bossDSpecimenMaw(f: PixelFigure, R: BossDSpecimenRig, C: BossDXSkin, M: BossDXShared, XS: typeof XM, sc: number, snoutTip: THREE.Vector3, eyeM: number, rage: boolean, dark: number, jawA: number) {
   const r = R.r;
   const s = R.s;
   const h = r.head;
@@ -634,7 +650,7 @@ function bossDSpecimenMaw(f: PixelFigure, R: BossDSpecimenRig, C: BossDXSkin, M:
 }
 
 /** The maw's gape (head-on): see `bossDSpecimenMaw`. Drawn into the head's layer. */
-function bossDSpecimenGape(f: PixelFigure, R: BossDSpecimenRig, M: DinoMats, XS: typeof XM, sc: number, jw: THREE.Object3D, jawA: number, dark: number) {
+function bossDSpecimenGape(f: PixelFigure, R: BossDSpecimenRig, M: BossDXShared, XS: typeof XM, sc: number, jw: THREE.Object3D, jawA: number, dark: number) {
   const h = R.r.head;
   const sk = R.s.skull;
   const sn = R.s.snout;
@@ -801,14 +817,16 @@ function tm() {
     // The 3D's browns, a touch warmer: tan belly and throat, dark slanting bands and saddle.
     TM.belly = Mat.hide(0xcdb084, { scale: 0.3 });
     TM.hide = Mat.hide(0x8a6a46, { stripes: 0.95, stripe: 0x3a2818, belly: TM.belly, scale: 0.5 });
-    TM.head = Mat.hide(0x8a6a46, { stripes: 0.7, stripe: 0x3a2818, belly: TM.belly, scale: 0.34 });
+    // (Head, legs and thighs wear the hide; scutes and the scar the dark back —
+    // the shared material table is small.)
+    TM.head = TM.hide;
     TM.back = Mat.hide(0x4e3a26, { scale: 0.3 });
-    TM.limb = Mat.hide(0x7c6040, { scale: 0.22 });
-    TM.thigh = Mat.hide(0x80623f, { stripes: 0.6, stripe: 0x3a2818, belly: TM.belly, scale: 0.42 });
-    TM.scute = Mat.hide(0x3e2c1e, { scale: 0.12 });
+    TM.limb = TM.hide;
+    TM.thigh = TM.hide;
+    TM.scute = TM.back;
     TM.horn = Mat.bone(0x8a7a62);
     TM.teeth = Mat.teeth(0xeee2c2);
-    TM.claw = Mat.gloss(0x2a2420);
+    TM.claw = Mat.gloss(0x24262c);
     TM.gum = Mat.gore(0x8a2a2a);
     // Gum lit by the burning throat (the heat on the palate).
     TM.heat = Mat.flat(0xd0502a, 'trexheat');
@@ -819,13 +837,13 @@ function tm() {
     TM.throatCore = Mat.glow(0xffe08a);
     TM.tongue = Mat.gore(0xa03848);
     TM.eye = Mat.glow(0xffb020);
-    TM.eyeDead = Mat.flat(0x2a2014, 'trexeye');
-    TM.pupil = Mat.flat(0x120806, 'trexpupil');
+    TM.eyeDead = TM.deep;
+    TM.pupil = Mat.flat(0x140c06);
     TM.spill = Mat.hide(0xc89a58, { scale: 0.2 });
-    TM.rim = Mat.glow(0xb85a14);
-    TM.nostril = Mat.mouth(0x1a0e0a);
+    TM.rim = TM.throat;
+    TM.nostril = TM.deep;
     TM.saliva = Mat.flat(0xd8d4c4, 'drool');
-    TM.scar = Mat.flat(0x5a3a2a, 'trexscar');
+    TM.scar = TM.back;
   }
   return TM;
 }
