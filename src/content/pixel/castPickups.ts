@@ -89,7 +89,7 @@ function mats(color: number): Mats {
     spark: Mat.glow(pale),
     ring: Mat.glow(color),
     ringCore: Mat.glow(pale),
-    band: Mat.glow(color),
+    band: enamelMat(color, 0.6, 0.45),
     bandDark: enamelMat(dark, 0.4, 0.4),
   };
   cache.set(color, m);
@@ -158,11 +158,6 @@ function medkit(f: PixelFigure, g: THREE.Object3D, M: Mats, s: number, sh: numbe
       line(f, g, -hx, 0.118, z, hx, 0.118, z, 0.006, -0.32, M.white);
       line(f, g, -hx, 0.128, z, hx, 0.128, z, 0.004, 0.18, M.white);
       for (let k = -1; k <= 1; k += 2) paint(f, g, k * 0.19, 0.1, z, k * 0.19, 0.14, z, 0.018, M.latch);
-      // Red cross: a dark rim, then the glowing cross.
-      paint(f, g, -0.095, -0.02, z, 0.095, -0.02, z, 0.05, M.crossRim);
-      paint(f, g, 0, -0.115, z, 0, 0.075, z, 0.05, M.crossRim);
-      paint(f, g, -0.09, -0.02, z, 0.09, -0.02, z, 0.034, M.cross);
-      paint(f, g, 0, -0.11, z, 0, 0.07, z, 0.034, M.cross);
       if (sh >= 0) {
         // The shine: a pale diagonal streak sweeping left → right across the face.
         const x = -hx + (2 * hx + 0.1) * sh - 0.05;
@@ -178,7 +173,38 @@ function medkit(f: PixelFigure, g: THREE.Object3D, M: Mats, s: number, sh: numbe
       line(f, g, -hx + 0.02, hy, hz - 0.02, hx - 0.02, hy, hz - 0.02, 0.006, 0.15, M.white);
     }
   }
+  // The red cross (the 3D's glowing bars on both big faces): square-cut bars made of thin
+  // parallel strokes (decals: no depth fight with the face) — a dark red rim, the glow inside.
+  for (let k = 0; k < 2; k++) {
+    if (!(mask & (1 << (4 + k)))) continue;
+    const z = k === 0 ? hz : -hz;
+    bar(f, g, -0.115, -0.065, 0.115, 0.025, z, M.crossRim);
+    bar(f, g, -0.045, -0.135, 0.045, 0.095, z, M.crossRim);
+    bar(f, g, -0.1, -0.05, 0.1, 0.01, z, M.cross);
+    bar(f, g, -0.03, -0.12, 0.03, 0.08, z, M.cross);
+  }
   if (sh >= 0.35 && sh < 0.85) sparkle(f, f.at(g, hx - 0.03, hy - 0.02, hz), 0.07 * (1 - Math.abs(sh - 0.6) * 3), M.spark, 0.6);
+}
+
+/**
+ * A square-cut bar (x0, y0)–(x1, y1) on `g`'s plane z = `z`, painted as thin parallel
+ * decal strokes along its long side (round caps ~1 texel: crisp corners, any angle).
+ */
+function bar(f: PixelFigure, g: THREE.Object3D, x0: number, y0: number, x1: number, y1: number, z: number, mat: number) {
+  const along = x1 - x0 >= y1 - y0;
+  const w = along ? y1 - y0 : x1 - x0;
+  const n = Math.max(2, Math.round(w / 0.016));
+  const r = w / (2 * n);
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    if (along) {
+      const y = y0 + w * t;
+      f.decal(f.at(g, x0 + r, y, z), f.at(g, x1 - r, y, z), r, r, mat).flag(PF.FLAT).min(0.5);
+    } else {
+      const x = x0 + w * t;
+      f.decal(f.at(g, x, y0 + r, z), f.at(g, x, y1 - r, z), r, r, mat).flag(PF.FLAT).min(0.5);
+    }
+  }
 }
 
 // ─── Weapon crates ───────────────────────────────────────────────────────────
@@ -216,8 +242,8 @@ function crate(f: PixelFigure, g: THREE.Object3D, M: Mats, s: number, kind: Pick
     // Planks (seams below and above the stencilled top plank), the band in the weapon's colour on it.
     line(f, g, x0, -0.06, z0, x1, -0.06, z1, 0.006, -0.3, M.wood);
     line(f, g, x0, 0.075, z0, x1, 0.075, z1, 0.006, -0.3, M.wood);
-    paint(f, g, x0, 0.135, z0, x1, 0.135, z1, 0.042, M.bandDark);
-    paint(f, g, x0, 0.135, z0, x1, 0.135, z1, 0.028, M.band);
+    paint(f, g, x0, 0.14, z0, x1, 0.14, z1, 0.032, M.bandDark);
+    paint(f, g, x0, 0.14, z0, x1, 0.14, z1, 0.021, M.band);
     for (let k = -1; k <= 1; k += 2) {
       const t = 0.5 + k * (0.5 - 0.025 / along);
       const bx = x0 + (x1 - x0) * t;
