@@ -434,11 +434,13 @@ export class FloraCanvas {
   }
 
   /**
-   * Pointed leaf (lens) from (x, y) along angle `ang` (radians, 0 = right,
-   * π/2 = up): `len` long, `wid` half-width at its middle; the half on the lit
-   * side of the midrib is a step brighter (a folded leaf), with a pale midrib.
+   * Pointed leaf from (x, y) along angle `ang` (radians, 0 = right, π/2 = up):
+   * `len` long, `wid` half-width. `shape` 0 = lens (small leaves), 1 = arrow /
+   * heart (elephant ears: broad near the stalk, pointed tip). The half on the
+   * lit side of the midrib is a step brighter (a folded leaf); `rib` adds a pale
+   * midrib and side veins slanting toward the tip.
    */
-  leaf(x: number, y: number, ang: number, len: number, wid: number, mat: number, o: ShadeOpts & { rib?: boolean } = {}) {
+  leaf(x: number, y: number, ang: number, len: number, wid: number, mat: number, o: ShadeOpts & { rib?: boolean; shape?: number } = {}) {
     const s = this.s;
     const X = x * s;
     const Y = y * s;
@@ -447,8 +449,13 @@ export class FloraCanvas {
     const ca = Math.cos(ang);
     const sa = Math.sin(ang);
     const z0 = (o.z ?? 0) * s;
+    const shape = o.shape ?? 0;
     // Which side of the midrib faces the light (screen-space light from the upper left).
     const litSide = -sa * LX + ca * LY > 0 ? 1 : -1;
+    const bias = o.bias ?? 0;
+    const amp = o.amp ?? 1;
+    const veins = o.rib && W >= 2;
+    const vs = Math.max(2.5, L / 5);
     const r = L + W + 1;
     for (let iy = Math.floor(Y - r); iy <= Math.ceil(Y + r); iy++) {
       for (let ix = Math.floor(X - r); ix <= Math.ceil(X + r); ix++) {
@@ -457,13 +464,25 @@ export class FloraCanvas {
         const u = px * ca + py * sa;
         const v = -px * sa + py * ca;
         if (u < 0 || u > L) continue;
-        const half = W * Math.pow(Math.sin((Math.PI * u) / L), 0.75);
+        const t = u / L;
+        // Heart: round lobes at the stalk end, widest a third of the way, a drawn-out tip.
+        const half =
+          shape === 1
+            ? W * (t < 0.3 ? 0.78 + 0.22 * Math.sin((t / 0.3) * Math.PI * 0.5) : Math.pow(Math.cos(((t - 0.3) / 0.7) * Math.PI * 0.5), 0.8)) * (t < 0.04 ? 0.6 + t * 10 : 1)
+            : W * Math.pow(Math.sin(Math.PI * t), 0.75);
         if (Math.abs(v) > half + 0.15) continue;
         const side = v * litSide >= 0 ? 1 : -1;
-        let tone = 0.5 + (o.bias ?? 0) + side * 0.12 * (o.amp ?? 1);
-        if (o.rib && Math.abs(v) < 0.5 && u > L * 0.08 && u < L * 0.85 && W >= 2) tone += 0.2;
+        let tone = 0.5 + bias + side * 0.12 * amp;
+        if (veins) {
+          const av = Math.abs(v);
+          if (av < 0.55 && t > 0.04 && t < 0.9) tone += 0.2;
+          // Side veins: lines running from the midrib out toward the tip.
+          else if (av < half - 0.8 && (((u - av * 0.9) % vs) + vs) % vs < 1.25) tone += side > 0 ? 0.2 : -0.22;
+          // Rim of the blade curls: the edge a step darker on the shaded half.
+          else if (av > half - 1.1 && side < 0) tone -= 0.12;
+        }
         // Tip a little darker (curls away).
-        tone -= (u / L) * 0.08;
+        tone -= t * 0.08;
         this.set(ix, iy, mat, tone, z0, (o.flag ?? 0) | (W < 1.2 ? FF.THIN : 0));
       }
     }

@@ -479,17 +479,20 @@ export const GRASS: FloraSpecies = {
     const blades: { a: number; len: number; back: boolean }[] = [];
     for (let i = 0; i < n; i++) blades.push({ a: rng.spread(0.75), len: rng.range(26, 44), back: i % 3 === 0 });
     blades.sort((a, b) => (a.back === b.back ? 0 : a.back ? -1 : 1));
-    for (const b of blades) {
+    blades.forEach((b, i) => {
       const bx = cx + b.a * 6 + rng.spread(2);
       const tx = bx + Math.sin(b.a) * b.len * 0.9;
       const ty = Math.cos(b.a) * b.len;
       const bend = b.a * 8 + rng.spread(4);
-      c.curve(bx, 0, (bx + tx) / 2 - bend * 0.2, ty * 0.6, tx + bend, ty - Math.abs(bend) * 0.4, 1.5, 0.5, b.back ? m.grass : rng.chance(0.4) ? m.grassLight : m.grass, {
+      const light = rng.chance(0.4);
+      // One-texel blades at the smallest levels: half of them keep the tuft's weight.
+      if (c.s <= 0.25 && i % 2) return;
+      c.curve(bx, 0, (bx + tx) / 2 - bend * 0.2, ty * 0.6, tx + bend, ty - Math.abs(bend) * 0.4, 1.5, 0.5, b.back ? m.grass : light ? m.grassLight : m.grass, {
         z: b.back ? -4 : 4,
         bias: b.back ? -0.14 : 0.04,
         flag: FF.SOFT,
       });
-    }
+    });
   },
 };
 
@@ -532,30 +535,32 @@ export const CYCAD: FloraSpecies = {
   },
 };
 
-/** Elephant-ear plant: big arrow-shaped leaves on curving stalks. */
+/** Elephant-ear plant: big arrow-shaped, veined leaves drooping from curved stalks. */
 export const EAR: FloraSpecies = {
   key: 'ear',
-  w: 80,
+  w: 88,
   h: 72,
   heightM: 1.9,
   variants: 3,
   paint(c, m, rng) {
     const cx = this.w / 2;
-    const n = rng.int(4, 6);
-    const leaves: { side: number; h: number; out: number; back: boolean }[] = [];
-    for (let i = 0; i < n; i++) leaves.push({ side: i % 2 ? 1 : -1, h: rng.range(26, 44), out: rng.range(8, 22), back: i < 2 });
+    const n = rng.int(5, 7);
+    const leaves: { side: number; h: number; out: number; back: boolean; droop: number }[] = [];
+    for (let i = 0; i < n; i++) leaves.push({ side: i % 2 ? 1 : -1, h: rng.range(26, 46), out: rng.range(4, 20), back: i < 2, droop: rng.range(0.5, 1.15) });
     leaves.sort((a, b) => (a.back === b.back ? b.h - a.h : a.back ? -1 : 1));
+    c.ellipse(cx, 2, 7, 3, m.leafDark, { z: -10, bias: -0.22 });
     for (const l of leaves) {
       const tx = cx + l.side * l.out;
       const ty = l.h;
-      c.curve(cx + l.side * 2, 0, cx + l.side * l.out * 0.2, ty * 0.6, tx, ty, 1.2, 0.8, m.ear, { z: l.back ? -6 : 2, bias: -0.1, flag: FF.SOFT });
-      // Leaf droops outward and down from the stalk tip.
-      const ang = l.side > 0 ? -0.35 - rng.next() * 0.4 : Math.PI + 0.35 + rng.next() * 0.4;
-      c.leaf(tx - Math.cos(ang) * 3, ty - Math.sin(ang) * 3 + 2, ang, rng.range(22, 30), rng.range(8, 11), l.back ? m.leafDark : m.ear, {
+      c.curve(cx + l.side * 1.5, 0, cx + l.side * l.out * 0.15, ty * 0.65, tx, ty, 1.3, 0.8, m.ear, { z: l.back ? -6 : 2, bias: -0.08, flag: FF.SOFT });
+      // The blade hangs outward and down from the stalk tip, its base lobes around the stalk.
+      const ang = l.side > 0 ? -l.droop : Math.PI + l.droop;
+      c.leaf(tx - Math.cos(ang) * 2, ty - Math.sin(ang) * 2, ang, rng.range(22, 30), rng.range(8.5, 11), l.back ? m.leafDark : m.ear, {
         z: l.back ? -4 : 6,
         bias: l.back ? -0.12 : 0.04,
         rib: true,
-        amp: 1.5,
+        shape: 1,
+        amp: 1.4,
       });
     }
   },
