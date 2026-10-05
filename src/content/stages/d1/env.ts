@@ -24,6 +24,9 @@ import {
 } from './props';
 import { D, RIVER, RIVER_WIDTH } from './layout';
 import { flowMat, flowRibbon, tm, waterClock } from './retro';
+import { FloraField, floraArtToggle, floraAtlas } from '../../pixel/floraField';
+import { D1_BIOME } from '../../pixel/floraBiomes';
+import { BUSH, CANOPY_TREE, CYCAD, FERN, GRASS, JUNGLE_TREE, PALM } from '../../pixel/floraSpecies';
 
 /**
  * JUNGLE RUN environment: a lush tropical park road by day — dirt road, giant
@@ -40,6 +43,11 @@ const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3();
 const _e = new THREE.Euler();
+const _box = new THREE.Box3();
+
+/** ART: SPRITES plants (pixel billboards): species painted for this stage, and their wind sway (m at the top). */
+const D1_FLORA = [JUNGLE_TREE, CANOPY_TREE, PALM, FERN, BUSH, GRASS, CYCAD];
+const SWAY: Record<string, number> = { jungleTree: 0.16, canopyTree: 0.14, palm: 0.32, fern: 0.1, bush: 0.04, grass: 0.12, cycad: 0.05 };
 
 type Layer = 'verge' | 'near' | 'mid' | 'fill' | 'far' | 'patch' | 'rock';
 
@@ -73,6 +81,16 @@ export class JungleEnv {
   private riverX: Float32Array;
   private riverZ: Float32Array;
   private flora = new Flora();
+  /**
+   * ART: SPRITES vegetation: every plant of the stage as a hand-pixelled billboard
+   * (one instanced draw). `veg3D` holds the ART: 3D plant chunks, `vegPx` the
+   * billboards plus the rest of those chunks (rocks, ground patches, signs); the
+   * ART setting shows one or the other, live.
+   */
+  private flora2d = new FloraField(floraAtlas(D1_FLORA, D1_BIOME, 'd1'), { far: FOG_FAR + 10 });
+  private veg3D = new THREE.Group();
+  private vegPx = new THREE.Group();
+  private untoggle: (() => void) | null = null;
   /** Vegetation chunk meshes, hidden when entirely inside the fog. */
   private chunks: THREE.Mesh[] = [];
   private instanced: THREE.InstancedMesh[] = [];
@@ -162,6 +180,7 @@ export class JungleEnv {
       update: (dt, w) => this.update(dt, w),
       dispose: () => {
         if (current === this) current = null;
+        this.untoggle?.();
         for (const m of this.instanced) m.dispose();
         this.herd.dispose();
       },
@@ -251,6 +270,9 @@ export class JungleEnv {
     w.scene.fog = new THREE.Fog(0xb3cfc2, 24, FOG_FAR);
     EnvKit.lights(root, { sky: 0xeaf6ff, ground: 0x5a7430, hemi: 1.35, sun: 0xfff0d2, sunIntensity: 2.3, sunDir: [0.45, 1, 0.3] });
 
+    this.veg3D.name = 'd1-veg3d';
+    this.vegPx.name = 'd1-vegPx';
+    root.add(this.veg3D, this.vegPx);
     this.buildBackdrop();
     // Subdivided (a 2-triangle 1.6 km plane loses depth precision and flickers
     // through the road) and sunk well below the road/verge ribbons.
@@ -267,6 +289,47 @@ export class JungleEnv {
     this.buildMeadow();
     this.buildCliffs();
     this.buildEnd();
+    this.vegPx.add(this.flora2d.build());
+    this.untoggle = floraArtToggle(w.scene, [this.vegPx], [this.veg3D]);
+  }
+
+  /**
+   * ART: SPRITES stand-ins for a scenery group: every child tagged
+   * `userData.flora` (a plant) is recorded as a pixel billboard of the same
+   * height at the same spot; everything else (rocks, ground patches, signs) is
+   * cloned into the returned group for the SPRITES scenery. `g` is untouched
+   * (ART: 3D still bakes it as before).
+   */
+  private floraSplit(g: THREE.Object3D): THREE.Group {
+    g.updateMatrixWorld(true);
+    const kept = new THREE.Group();
+    for (const c of g.children) {
+      const key = c.userData.flora as string | undefined;
+      if (!key) {
+        kept.add(c.clone());
+        continue;
+      }
+      _box.setFromObject(c);
+      c.getWorldPosition(_v);
+      // As tall as the 3D plant — taller for a wide, low one so the sprite (square texels) spans most of its width.
+      const wide = Math.max(_box.max.x - _box.min.x, _box.max.z - _box.min.z) * 0.8;
+      const h = Math.max(_box.max.y - _v.y, this.flora2d.heightFor(key, wide, _v.x, _v.z));
+      this.flora2d.add(key, _v.x, _v.y - 0.06, _v.z, h, { tint: (c.userData.tint as number | undefined) ?? 1, sway: SWAY[key] ?? 0 });
+    }
+    return kept;
+  }
+
+  /** Bake the SPRITES scenery split off a group (see floraSplit) and register it for fog culling. */
+  private keepPx(kept: THREE.Group, cull = true) {
+    if (!kept.children.length) return;
+    merged(kept);
+    this.vegPx.add(kept);
+    for (const c of kept.children) {
+      const m = c as THREE.Mesh;
+      if (!m.isMesh) continue;
+      m.geometry.computeBoundingSphere();
+      if (cull) this.chunks.push(m);
+    }
   }
 
   private buildBackdrop() {
@@ -397,8 +460,10 @@ export class JungleEnv {
       r.position.copy(this.P(dd, lat));
       rocks.add(r);
     }
+    const rocksPx = this.floraSplit(rocks);
     merged(rocks);
-    this.root.add(rocks);
+    this.veg3D.add(rocks);
+    this.keepPx(rocksPx, false);
 
     // Waterfall pouring off the cliff into the pool.
     const top = this.P(468, -37.5, 21);
@@ -443,6 +508,8 @@ export class JungleEnv {
     const CH = 60;
     const start = -40;
     const end = this.len + 70;
+    let keptPx = new THREE.Group();
+    let keptN = 0;
     for (let c0 = start; c0 < end; c0 += CH) {
       // Left and right halves are separate meshes so each can be frustum-culled.
       const gl = new THREE.Group();
@@ -532,15 +599,21 @@ export class JungleEnv {
         }
         this.root.add(shafts);
       }
+      // ART: SPRITES: the rocks / patches / signs of both halves of three chunks in one bake (the plants are billboards).
       for (const g of [gl, gr]) {
+        keptPx.add(...this.floraSplit(g).children);
         merged(g);
-        this.root.add(g);
+        this.veg3D.add(g);
         for (const c of g.children) {
           const m = c as THREE.Mesh;
           if (!m.isMesh) continue;
           m.geometry.computeBoundingSphere();
           this.chunks.push(m);
         }
+      }
+      if (++keptN % 3 === 0 || c0 + CH >= end) {
+        this.keepPx(keptPx);
+        keptPx = new THREE.Group();
       }
     }
     // Bushes the dilos burst out of at the fallen tree (beside/behind their spots, never
@@ -562,8 +635,10 @@ export class JungleEnv {
     const rk2 = f.rock(rng, 1.5);
     rk2.position.copy(this.P(D.FORD_HOLD + 11, -3.5));
     extra.add(rk2);
+    const extraPx = this.floraSplit(extra);
     merged(extra);
-    this.root.add(extra);
+    this.veg3D.add(extra);
+    this.keepPx(extraPx, false);
   }
 
   private place(obj: THREE.Object3D, d: number, lat: number, y = 0, yawOff = 0) {
@@ -689,8 +764,10 @@ export class JungleEnv {
     Kit.add(tw, Kit.box(2.6, 0.9, 0.08), wood, 0, 7.05, 1.3);
     tw.position.copy(this.P(D.STAMPEDE_WAIT - 6, 22));
     g.add(tw);
+    const gPx = this.floraSplit(g);
     merged(g);
-    this.root.add(g);
+    this.veg3D.add(g);
+    this.keepPx(gPx, false);
 
     // Herd.
     const hadros: { from: THREE.Vector3; to: THREE.Vector3; delay: number; speed: number; scale: number }[] = [];
@@ -858,6 +935,7 @@ export class JungleEnv {
     this.time += dt;
     const t = this.time;
     waterClock.value = t;
+    this.flora2d.time.value = t;
     const d = w.rig.d;
     this.backdrop.position.set(w.camera.position.x, 0, w.camera.position.z);
     if (this.heatTip && (w.weapons.heat > 0.5 || w.weapons.overheated)) {

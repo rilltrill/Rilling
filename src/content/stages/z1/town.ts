@@ -55,6 +55,10 @@ export interface Town {
   dynamic: THREE.Group;
   /** Animated / special objects, grouped by zone so they cull with it. */
   dynZones: Record<ZoneId, THREE.Group>;
+  /** ART: 3D street-tree trunks + crowns (out of the zone bakes: ART: SPRITES draws pixel billboards instead). */
+  trees3D: THREE.Group;
+  /** Where those trees stand (foot) and how big the 3D ones are (m). */
+  flora: { key: string; x: number; y: number; z: number; h: number; w: number }[];
 }
 
 export function zoneFor(x: number, z: number): ZoneId {
@@ -1106,9 +1110,32 @@ export function buildTown(): Town {
     occ(SQ_X1, SQ_X1 + 18, -266, -302, 11);
   }
 
+  // ART: SPRITES: the street trees' trunks + crowns become pixel billboards. Their 3D meshes
+  // leave the zone bakes for one group of their own (ART: 3D), so either can be shown.
+  const trees3D = new THREE.Group();
+  trees3D.name = 'z1-trees3d';
+  const flora: Town['flora'] = [];
+  const box3 = new THREE.Box3();
+  const foot = new THREE.Vector3();
+  for (const k of Object.keys(zones) as ZoneId[]) {
+    zones[k].updateMatrixWorld(true);
+    const found: THREE.Object3D[] = [];
+    zones[k].traverse((o) => {
+      if (o.userData.flora) found.push(o);
+    });
+    for (const o of found) {
+      box3.setFromObject(o);
+      o.getWorldPosition(foot);
+      flora.push({ key: o.userData.flora as string, x: foot.x, y: foot.y, z: foot.z, h: box3.max.y - foot.y, w: Math.max(box3.max.x - box3.min.x, box3.max.z - box3.min.z) });
+      trees3D.attach(o);
+    }
+  }
+
   const gp = gas.spawnPoints!;
   return {
     zones,
+    trees3D,
+    flora,
     pools,
     beams,
     anim,
