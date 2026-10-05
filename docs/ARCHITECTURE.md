@@ -254,8 +254,9 @@ bloater (belly ellipsoid + pustule glows), the bosses; for the theropod painter:
    (actions: `windup= stagger= sever=L|R|l|r pop die= pounce= walk= hit`; `--stage "zoo&zooEnv=night"`).
    It writes `-3d.png`, `-sprites.png`, a 3D|SPRITES `-montage.png` of zoomed crops and
    `-texels.png` (each sprite's raw texels ×4 — judge the pixels there).
-4. Add the type to `tests/unit/pixelcast.test.ts` (alignment) and check
-   `node scripts/bench-art.mjs`.
+4. Add the type to `tests/unit/pixelcast.test.ts` (alignment: sprite parts vs real
+   raycasts), check `node scripts/pixel-aim.mjs --place "…"` (shoots the game's hitboxes
+   where the sprite draws each head / torso) and `node scripts/bench-art.mjs`.
 
 ### Style guide (keep new characters consistent)
 - **Pixel density**: 1 texel = 1 retro pixel (≈ 288 lines) until the figure is
@@ -289,11 +290,15 @@ bloater (belly ellipsoid + pustule glows), the bosses; for the theropod painter:
   (`f.warp`, ≤ 7 %), the impostor/painted sprite flashes white/red on hits.
 - **Gore**: `Mat.blood / gore / bone / ribs`; wounds and stains are decals only drawn while
   that side faces the camera; stumps are a ragged gore ball + a bone knob; a popped head
-  leaves a neck stump; severed limbs are painted on their own (`paintPart`). Blood squirts
-  and chunks are FX pixel particles (gib sprites).
+  leaves a neck stump; severed limbs are painted on their own (`paintPart`). In SPRITES the
+  FX go pixel too: chunks are gib sprites, and soft particles (blood spray, mist, dust,
+  smoke) use ordered-dither coverage on the pixel grid instead of soft alpha.
 - **Budgets**: ≤ 160 primitives per figure (pilots use 60–90), 2 draws + one 12 KB upload
-  per redraw, ≤ 6 redraws per frame, painter CPU ~0.1–0.4 ms per redraw on desktop.
-  Memory: a 256² RGBA8 G-buffer + per-sprite RGBA8 targets pooled by power-of-two size.
+  per redraw, ≤ 6 redraws per frame; painters allocate nothing per redraw. Measured
+  (`bench-art`, SwiftShader desktop): ~2 paints/frame in a 9-zombie horde, figure building
+  ≈ 0.1 ms/frame avg (≤ 0.6 ms), paints incl. GL submission ≈ 0.35 ms/frame; z1 horde 193 →
+  64 draw calls, d3 raptor pack 261 → 68. Memory: a 256² RGBA8 G-buffer + per-sprite RGBA8
+  targets pooled by power-of-two size (≈ 3.5 MB total with the impostor scratch).
 
 ### Impostor bake (characters without a painter)
 `SpriteArt.bakeNow` re-renders the source's 3D model with the main camera's projection
