@@ -221,7 +221,8 @@ export class MenuCast {
     const prevAlpha = renderer.getClearAlpha();
     renderer.getClearColor(_c);
     try {
-      for (const a of this.actors) {
+      for (let i = 0; i < this.actors.length; i++) {
+        const a = this.actors[i];
         const due = !a.ready || this.time >= a.next || a.gh !== gh || a.gw !== gw;
         if (!due || (paints >= MAX_PAINTS && a.ready)) continue;
         a.next = Math.max(a.next + 1 / MENU_FPS, this.time + 0.5 / MENU_FPS);
@@ -231,7 +232,8 @@ export class MenuCast {
       renderer.setRenderTarget(prev);
       renderer.setClearColor(_c, prevAlpha);
     }
-    for (const a of this.actors) {
+    for (let i = 0; i < this.actors.length; i++) {
+      const a = this.actors[i];
       if (!a.ready) continue;
       (a.mat.uniforms.uPx.value as THREE.Vector2).set((a.tw * a.k * tw) / a.gw, (a.th * a.k * th) / a.gh);
     }
