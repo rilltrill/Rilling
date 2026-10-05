@@ -105,10 +105,11 @@ export function paintFloraAtlas(species: FloraSpecies[], biome: FloraBiome, biom
         let cov = c.coverage();
         // Strand plants: thin this level until it covers what the finer level covers (no weight pop at the switch).
         if (sp.balance && l > 0 && cov > covPrev * 1.03) {
+          // Bisection on density (blades / leaflets are discrete: coverage moves in steps), ≤ 7 repaints of a small level.
+          let err = Math.abs(cov / covPrev - 1);
           let lo = 0.02;
           let hi = 1;
-          let err = Math.abs(cov / covPrev - 1);
-          for (let it = 0; it < 7; it++) {
+          for (let it = 0; it < 7 && err > 0.015; it++) {
             const mid = (lo + hi) / 2;
             const cm = paintAt(mid);
             const cv = cm.coverage();
@@ -450,6 +451,8 @@ export class FloraField {
   private items: Inst[] = [];
   /** Height (m) of the 3D plant each billboard stands in for (NaN when placed with `add`): for audits / tests. */
   readonly refHeights: number[] = [];
+  /** Billboards standing off the ground by design (a cliff top, a vine on a rock face): for audits / tests. */
+  readonly perched: number[] = [];
   readonly time: { value: number };
   readonly wind: { value: THREE.Vector3 };
   constructor(
@@ -490,7 +493,7 @@ export class FloraField {
    * without standing taller than FLORA_MAX_HEIGHT_K × the 3D plant (and never
    * shorter than it). Returns the billboard's height (0 = unknown key).
    */
-  fit(key: string, x: number, y: number, z: number, widthM: number, heightM: number, o: { variants?: number[]; tint?: number; sway?: number; aspectTol?: number } = {}): number {
+  fit(key: string, x: number, y: number, z: number, widthM: number, heightM: number, o: { variants?: number[]; tint?: number; sway?: number; aspectTol?: number; perched?: boolean } = {}): number {
     const base = this.atlas.sprites.get(key) ?? [];
     const cand = o.variants ? base.filter((s) => o.variants!.includes(s.variant)) : [...base, ...(this.atlas.sprites.get(`${key}Wide`) ?? [])];
     if (!cand.length || !(heightM > 0)) return 0;
@@ -505,6 +508,7 @@ export class FloraField {
     const flip = (hsh >>> 8) & 1 ? -1 : 1;
     this.items.push({ x, y, z, sp, hM: h, flip, tint: o.tint ?? 1, sway: o.sway ?? 0, phase: x * 0.17 + z * 0.13 });
     this.refHeights.push(heightM);
+    if (o.perched) this.perched.push(this.items.length - 1);
     return h;
   }
 
@@ -545,6 +549,7 @@ export class FloraField {
     mesh.name = 'flora-billboards';
     // (Audit: the 3D plant height each billboard stands in for, NaN when placed with `add`.)
     mesh.userData.floraRef = Float32Array.from(this.refHeights);
+    mesh.userData.floraPerched = Uint32Array.from(this.perched);
     return mesh;
   }
 

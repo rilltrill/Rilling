@@ -118,7 +118,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     rim: 0x8aa0e0,
     rimStrength: 0.08,
     // Matched to the 3D street trees (dark silhouettes under the neon); the flashlight / neon tint, never bleach.
-    gain: 0.5,
+    gain: 0.56,
     localCap: 0.2,
   });
   for (const f of town.flora) {

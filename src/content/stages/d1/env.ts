@@ -26,7 +26,7 @@ import { D, RIVER, RIVER_WIDTH } from './layout';
 import { flowMat, flowRibbon, tm, waterClock } from './retro';
 import { FloraField, floraArtToggle, floraAtlas, floraReach } from '../../pixel/floraField';
 import { D1_BIOME } from '../../pixel/floraBiomes';
-import { BUSH, BUSH_WIDE, CANOPY_TREE, CYCAD, FERN, FERN_WIDE, GRASS, JUNGLE_TREE, PALM } from '../../pixel/floraSpecies';
+import { BUSH, BUSH_WIDE, CANOPY_TREE, CLIFF_TOP, CYCAD, FERN, FERN_WIDE, GRASS, JUNGLE_TREE, PALM, VINES } from '../../pixel/floraSpecies';
 
 /**
  * JUNGLE RUN environment: a lush tropical park road by day — dirt road, giant
@@ -46,7 +46,7 @@ const _e = new THREE.Euler();
 const _box = new THREE.Box3();
 
 /** ART: SPRITES plants (pixel billboards): species painted for this stage, and their wind sway (m at the top). */
-const D1_FLORA = [JUNGLE_TREE, CANOPY_TREE, PALM, FERN, FERN_WIDE, BUSH, BUSH_WIDE, GRASS, CYCAD];
+const D1_FLORA = [JUNGLE_TREE, CANOPY_TREE, PALM, FERN, FERN_WIDE, BUSH, BUSH_WIDE, GRASS, CYCAD, CLIFF_TOP, VINES];
 const SWAY: Record<string, number> = { jungleTree: 0.16, canopyTree: 0.14, palm: 0.32, fern: 0.1, bush: 0.04, grass: 0.12, cycad: 0.05 };
 
 type Layer = 'verge' | 'near' | 'mid' | 'fill' | 'far' | 'patch' | 'rock';
@@ -799,6 +799,7 @@ export class JungleEnv {
 
   private buildCliffs() {
     const g = new THREE.Group();
+    const px = new THREE.Group();
     const rng = new Rng(19);
     // Huge stones: big rock texels so the faces read as strata, not noise.
     const rockCols = [0x8a8274, 0x77705f, 0x9a9282].map((c) => tm(c, 'rock', 0.32));
@@ -814,12 +815,12 @@ export class JungleEnv {
         if (this.distRiver(p.x, p.z) < RIVER_WIDTH / 2 + 2.5) continue;
         const h = rng.range(9, 15) + k * 4 + Math.max(0, 6 - Math.abs(d - 466) * 0.2);
         const s = rng.range(5, 8);
-        Kit.add(g, this.flora.rockGeo(rng), rng.pick(rockCols), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, s, h * 0.55, s * 0.9);
+        px.add(Kit.add(g, this.flora.rockGeo(rng), rng.pick(rockCols), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, s, h * 0.55, s * 0.9).clone());
         // Jungle on top + vines hanging down the face.
-        Kit.add(g, this.flora.blob(rng), rng.chance(0.5) ? topA : topDark, p.x, h * 0.98, p.z, 0, rng.next() * 6, 0, s * 0.9, 1.6, s * 0.8);
+        this.cliffFlora('cliffTop', Kit.add(g, this.flora.blob(rng), rng.chance(0.5) ? topA : topDark, p.x, h * 0.98, p.z, 0, rng.next() * 6, 0, s * 0.9, 1.6, s * 0.8));
         if (rng.chance(0.6)) {
           const vl = rng.range(3, 7);
-          Kit.add(g, Kit.box(0.5, vl, 0.2), vine, p.x + 2, h * 0.9 - vl / 2, p.z, 0, rng.next() * 6, 0);
+          this.cliffFlora('vines', Kit.add(g, Kit.box(0.5, vl, 0.2), vine, p.x + 2, h * 0.9 - vl / 2, p.z, 0, rng.next() * 6, 0));
         }
       }
     }
@@ -827,11 +828,28 @@ export class JungleEnv {
     for (let k = 0; k < 8; k++) {
       const p = this.P(457 + k * 3.4, -42 - rng.range(0, 4) - Math.abs(k - 3.5) * 1.2);
       const h = rng.range(22, 27) - Math.abs(k - 3.5) * 1.5;
-      Kit.add(g, this.flora.rockGeo(rng), rng.pick(rockCols), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, 5, h * 0.55, 4.5);
-      Kit.add(g, this.flora.blob(rng), topA, p.x, h * 0.96, p.z, 0, 0, 0, 5, 1.8, 4.5);
+      px.add(Kit.add(g, this.flora.rockGeo(rng), rng.pick(rockCols), p.x, h * 0.45, p.z, 0, rng.next() * 6, 0, 5, h * 0.55, 4.5).clone());
+      this.cliffFlora('cliffTop', Kit.add(g, this.flora.blob(rng), topA, p.x, h * 0.96, p.z, 0, 0, 0, 5, 1.8, 4.5));
     }
+    // ART: 3D shows the cliffs as built; ART: SPRITES the rocks alone with the plants as billboards.
     merged(g);
-    this.root.add(g);
+    this.veg3D.add(g);
+    this.keepPx(px, false);
+  }
+
+  /**
+   * A cliff plant (the jungle on a pillar's top, a vine on its face) as an ART:
+   * SPRITES billboard: footed at the 3D mesh's lowest point, as tall as it, its
+   * width from the mesh's reach. Perched (off the ground) by design.
+   */
+  private cliffFlora(key: string, m: THREE.Object3D) {
+    m.updateMatrixWorld(true);
+    _box.setFromObject(m);
+    _v.set((_box.min.x + _box.max.x) / 2, _box.min.y, (_box.min.z + _box.max.z) / 2);
+    this.flora2d.fit(key, _v.x, _v.y + (key === 'cliffTop' ? 0.6 : 0), _v.z, floraReach(m, _v), _box.max.y - _box.min.y - (key === 'cliffTop' ? 0.6 : 0), {
+      sway: key === 'cliffTop' ? 0.08 : 0.03,
+      perched: true,
+    });
   }
 
   private buildEnd() {

@@ -258,14 +258,27 @@ export class FloraCanvas {
     const bias = o.bias ?? 0;
     const W = this.w;
     const H = this.h;
-    for (let iy = Math.floor(Y - ext - droop * R); iy <= Math.ceil(Y + ext); iy++) {
-      for (let ix = Math.floor(X - ext); ix <= Math.ceil(X + ext); ix++) {
+    // Nothing reaches past the longest tip (or `ext`): rows and spans are clipped to that disc and the canvas.
+    let tmax = 0;
+    for (let b = 0; b < TIP_BINS; b++) if (tab[b] > tmax) tmax = tab[b];
+    const lim = Math.min(ext, R * Math.max(0.82, tmax)) + 1e-3;
+    const lim2 = lim * lim;
+    const ext2 = ext * ext;
+    const iy0 = Math.max(0, Math.floor(Y - lim * (1 + droop)));
+    const iy1 = Math.min(H - 1, Math.ceil(Y + lim));
+    for (let iy = iy0; iy <= iy1; iy++) {
+      let v = iy + 0.5 - Y;
+      // Leaves hang: the lower rim reaches further down.
+      if (v < 0) v /= 1 + droop;
+      const span2 = lim2 - v * v;
+      if (span2 < 0) continue;
+      const span = Math.sqrt(span2);
+      const ix0 = Math.max(0, Math.floor(X - span - 0.5));
+      const ix1 = Math.min(W - 1, Math.ceil(X + span - 0.5));
+      for (let ix = ix0; ix <= ix1; ix++) {
         const u = ix + 0.5 - X;
-        let v = iy + 0.5 - Y;
-        // Leaves hang: the lower rim reaches further down.
-        if (v < 0) v /= 1 + droop;
         const d2 = u * u + v * v;
-        if (d2 > ext * ext) continue;
+        if (d2 > ext2) continue;
         let tipT = false;
         if (d2 > inner2) {
           const th = Math.atan2(v, u);
@@ -289,7 +302,6 @@ export class FloraCanvas {
         let t = 0.5 + 0.5 * (nx * LX + ny * LY + nz * LZ) * amp + bias;
         // Leaf tips beyond the disc are single leaves: a touch darker than the cluster face.
         if (tipT) t -= 0.06;
-        if (ix < 0 || iy < 0 || ix >= W || iy >= H) continue;
         const i = iy * W + ix;
         this.mat[i] = mat;
         this.tone[i] = t;

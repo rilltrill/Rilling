@@ -521,7 +521,11 @@ describe.each([
     // (A few stand in raised planters or on far hillsides where gameplay's groundAt
     // approximates the terrain mesh: the billboard foot is the 3D plant's own.)
     let floating = 0;
+    // (Plants perched on d1's cliff tops / rock faces stand where their 3D twins do, off the ground by design.)
+    const perched = new Set(bb.userData.floraPerched as Uint32Array);
+    expect(perched.size / g.instanceCount, `${id} perched plants`).toBeLessThan(0.12);
     for (let i = 0; i < g.instanceCount; i++) {
+      if (perched.has(i)) continue;
       p.fromBufferAttribute(pos, i);
       const ground = env.groundAt ? env.groundAt(p.x, p.z) : 0;
       if (Math.abs(p.y - ground) > (id === 'z1' ? 0.25 : 0.6)) floating++;

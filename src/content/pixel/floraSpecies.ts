@@ -277,7 +277,8 @@ function vine(c: FloraCanvas, x: number, y: number, len: number, mat: number, rn
   }
   c.stroke(pts, ws, mat, { z, bias, flag: FF.THIN | FF.SOFT, flat: 1 });
   for (let i = 2; i < n; i += 1) {
-    if (rng.chance(0.35)) continue;
+    // (A balanced coarser level keeps an evenly spread share of the leaves: the RNG is drawn either way.)
+    if (rng.chance(0.35) || (i * 0.618034 + 0.2) % 1 >= c.density) continue;
     const t = i / n;
     const px = x + Math.sin(t * 5 + ph) * amp * t;
     const py = y - len * t;
@@ -1137,4 +1138,73 @@ export const STREET_TREE: FloraSpecies = {
   },
 };
 
-export const ALL_SPECIES = [JUNGLE_TREE, CANOPY_TREE, PALM, FERN, FERN_WIDE, BUSH, BUSH_WIDE, GRASS, CYCAD, EAR, STREET_TREE];
+// ─── Cliffs ──────────────────────────────────────────────────────────────────
+
+/**
+ * Jungle growing over a cliff top (d1's rock pillars): a flat, ragged tangle of
+ * leaf-cluster masses (the back ones darker), closing in a rounded dark
+ * underside on the rock; one variant with a small tree poking up, one with a
+ * fan of palm fronds — so a row of cliffs never repeats a silhouette.
+ */
+export const CLIFF_TOP: FloraSpecies = {
+  key: 'cliffTop',
+  w: 208,
+  h: 80,
+  heightM: 3.6,
+  variants: 3,
+  paint(c, m, rng, v) {
+    const cx = this.w / 2;
+    c.ellipse(cx, 7, 92, 9, m.leafDark, { z: -40, bias: -0.36, amp: 0.4, flag: FF.SOFT });
+    const back: Mass[] = [
+      { x: cx - 52 + rng.spread(6), y: 26, rx: 42, ry: 15, z: -30, mat: m.leafDark, bias: -0.12 },
+      { x: cx + 50 + rng.spread(6), y: 28, rx: 42, ry: 15, z: -30, mat: m.leafDark, bias: -0.12 },
+    ];
+    if (v === 1) {
+      // A small tree poking up out of the tangle.
+      const tx = cx + rng.spread(30);
+      c.stroke([tx, 20, tx + rng.spread(4), 52], [2.6, 1.8], m.bark, { z: -10, bark: 1.2, seed: 2 });
+      back.push({ x: tx, y: 62, rx: 26, ry: 13, z: -12, mat: m.leaf, bias: 0 });
+    }
+    crownMasses(c, back, rng, 5);
+    const front: Mass[] = [
+      { x: cx - 74, y: 16, rx: 26, ry: 12, z: 2, mat: m.leaf, bias: -0.03 },
+      { x: cx - 28, y: 22, rx: 32, ry: 15, z: 6, mat: v === 0 ? m.leafLight : m.leaf, bias: 0 },
+      { x: cx + 22, y: 20, rx: 30, ry: 14, z: 6, mat: m.leaf, bias: 0 },
+      { x: cx + 72, y: 15, rx: 26, ry: 11, z: 2, mat: m.leaf, bias: -0.03 },
+      { x: cx + rng.spread(20), y: 34, rx: 26, ry: 11, z: 10, mat: m.leafLight, bias: 0.01 },
+    ];
+    crownMasses(c, front, rng, 5);
+    if (v === 2) {
+      // A fan of palm fronds bursting out of the tangle.
+      const px = cx + rng.spread(36);
+      for (let i = 0; i < 6; i++) frond(c, px, 30, Math.PI * (0.12 + 0.76 * (i / 5)) + rng.spread(0.08), rng.range(30, 40), rng.range(10, 18), 9, m.frond, m.frondDark, rng, { z: 14, bias: -0.04 });
+    }
+  },
+};
+
+/**
+ * Hanging vines on a cliff face: a leafy clump at the lip and a curtain of
+ * wavy strands with leaf pairs of different lengths (the longest reaches the
+ * sprite's bottom row: the billboard's foot is where the 3D vine ends).
+ */
+export const VINES: FloraSpecies = {
+  key: 'vines',
+  w: 48,
+  h: 112,
+  heightM: 5,
+  variants: 3,
+  balance: true,
+  paint(c, m, rng, v) {
+    const cx = this.w / 2;
+    const H = this.h;
+    const n = 3 + (v % 2);
+    for (let i = 0; i < n; i++) {
+      const x = cx + (i - (n - 1) / 2) * rng.range(6, 9);
+      const len = i === 1 ? H - 4 : rng.range(H * 0.45, H - 10);
+      vine(c, x, H - 6, len, i % 2 ? m.vine : m.leafDark, rng, i % 2 ? 4 : -4, i % 2 ? 0.02 : -0.1);
+    }
+    c.mass(cx, H - 8, 18, 7, m.vine, rng, { z: 10, puff: 3.6, bias: -0.02, droop: 0.6 });
+  },
+};
+
+export const ALL_SPECIES = [JUNGLE_TREE, CANOPY_TREE, PALM, FERN, FERN_WIDE, BUSH, BUSH_WIDE, GRASS, CYCAD, EAR, STREET_TREE, CLIFF_TOP, VINES];

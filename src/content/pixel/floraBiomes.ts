@@ -68,8 +68,9 @@ export const Z1_BIOME: FloraBiome = {
   frondDark: 0x2c4424,
   fern: 0x3f5e30,
   fernLight: 0x4a6a36,
-  bark: 0x4a3a2c,
-  barkDark: 0x3e3024,
+  // (a notch darker than the 3D bark: its cylinder is mostly in shade under the street lamps)
+  bark: 0x3e3126,
+  barkDark: 0x32281f,
   palmTrunk: 0x4a3a2c,
   palmRing: 0x3e3024,
   moss: 0x4a5a30,
