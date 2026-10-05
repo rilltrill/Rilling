@@ -665,7 +665,7 @@ function tm() {
     TM.head = Mat.hide(0x84694a, { stripes: 0.7, stripe: 0x3e2e20, belly: TM.belly, scale: 0.34 });
     TM.back = Mat.hide(0x4e3d2a, { scale: 0.3 });
     TM.limb = Mat.hide(0x76603f, { scale: 0.22 });
-    TM.thigh = Mat.hide(0x84694a, { belly: TM.belly, scale: 0.3 });
+    TM.thigh = Mat.hide(0x775e40, { belly: TM.belly, scale: 0.3 });
     TM.scute = Mat.hide(0x3a3028, { scale: 0.12 });
     TM.horn = Mat.bone(0x8a7a62);
     TM.teeth = Mat.teeth(0xeee2c2);
@@ -779,7 +779,10 @@ export function bossDPaintTyrant(f: PixelFigure, T: BossDTyrantRig, time: number
     f.coneE(f.at(L.hip, 0, 0.2, 0), f.at(L.hip, 0, -1.48, 0), X(f, L.hip), Z(f, L.hip), 0.58 * s, 0.68 * s, 0.36 * s, 0.4 * s, M.thigh).u(1.1 + i);
     f.ellipsoid(L.hip, sd * 0.06, -0.35, 0.05, 0.52, 0.9, 0.74, M.thigh).u(1.4 + i).k(0.2 * s);
     // Lit crescent down the thigh's front, a dark crease behind the knee.
-    f.decal(f.at(L.hip, 0, -0.05, 0.62), f.at(L.hip, 0, -1.0, 0.42), 0.06 * s, 0.05 * s, M.hide).flag(PF.FLAT | PF.SHADE_ONLY).tone(0.2).min(0.5);
+    f.decal(f.at(L.hip, 0, -0.05, 0.62), f.at(L.hip, 0, -1.0, 0.42), 0.05 * s, 0.04 * s, M.hide).flag(PF.FLAT | PF.SHADE_ONLY).tone(0.12).min(0.5);
+    // A muscle crease curving across the drumstick, a band of the hide's stripe over the top.
+    f.decal(f.at(L.hip, sd * 0.56, -0.2, 0.45), f.at(L.hip, sd * 0.6, -0.75, -0.2), 0.035 * s, 0.03 * s, M.hide).flag(PF.FLAT | PF.SHADE_ONLY).tone(-0.25).min(0.5);
+    f.decal(f.at(L.hip, sd * 0.55, 0.05, 0.5), f.at(L.hip, sd * 0.58, -0.15, -0.5), 0.07 * s, 0.06 * s, M.hide).flag(PF.FLAT | PF.SHADE_ONLY).tone(-0.18).min(0.5);
     f.decal(f.at(L.hip, sd * 0.5, 0.0, -0.1), f.at(L.hip, sd * 0.42, -1.2, -0.1), 0.06 * s, 0.05 * s, M.hide).flag(PF.FLAT | PF.SHADE_ONLY).tone(-0.2).min(0.5);
     f.coneE(f.at(L.knee, 0, 0.08, 0), f.at(L.knee, 0, -1.43, 0), X(f, L.knee), Z(f, L.knee), 0.36 * s, 0.42 * s, 0.22 * s, 0.26 * s, M.limb).u(2.6).k(0.1 * s);
     f.coneE(f.at(L.foot, 0, 0.9, 0), f.at(L.foot, 0, -0.02, 0), X(f, L.foot), Z(f, L.foot), 0.24 * s, 0.27 * s, 0.19 * s, 0.19 * s, M.limb).u(3.5).k(0.08 * s);
@@ -870,8 +873,9 @@ export function bossDPaintTyrant(f: PixelFigure, T: BossDTyrantRig, time: number
   // ── Brows and cheek horns (armour) ──
   f.layer(0.03 * s, PART.ARMOR);
   for (let sd = 1; sd >= -1; sd -= 2) {
-    f.cone(f.at(h, sd * 0.33, 0.56, 0.3), f.at(h, sd * 0.42, 0.5, 0.92), 0.12 * s, 0.1 * s, M.back).k(0.04 * s);
-    f.cone(f.at(h, sd * 0.4, 0.62, 0.42), f.at(h, sd * 0.44, 0.58, 0.6), 0.09 * s, 0.08 * s, M.back).k(0.04 * s);
+    // Brow ridges: a bony scowl over each eye, highest at the back (a V from the front).
+    f.cone(f.at(h, sd * 0.3, 0.6, 0.3), f.at(h, sd * 0.44, 0.52, 0.95), 0.13 * s, 0.09 * s, M.back).k(0.04 * s);
+    f.cone(f.at(h, sd * 0.38, 0.68, 0.4), f.at(h, sd * 0.46, 0.6, 0.66), 0.1 * s, 0.08 * s, M.back).k(0.04 * s);
     f.cone(f.at(h, sd * 0.52, 0.2, 0.15), f.at(h, sd * 0.78, 0.3, 0.15), 0.11 * s, 0.02 * s, M.horn).min(0.5);
   }
 
