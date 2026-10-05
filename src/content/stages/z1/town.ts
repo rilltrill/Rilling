@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
+import { floraReach } from '../../pixel/floraField';
 import { Rng } from '../../../core/Rng';
 import {
   BUILDING_COLORS, C, CAR_COLORS, GROUND_H, M, bench, facadeMat, boardSign, bladeSign, building, buildingHeight,
@@ -1130,7 +1131,7 @@ export function buildTown(): Town {
     for (const o of found) {
       box3.setFromObject(o);
       o.getWorldPosition(foot);
-      flora.push({ key: o.userData.flora as string, x: foot.x, y: foot.y, z: foot.z, h: box3.max.y - foot.y, w: Math.max(box3.max.x - box3.min.x, box3.max.z - box3.min.z) });
+      flora.push({ key: o.userData.flora as string, x: foot.x, y: foot.y, z: foot.z, h: box3.max.y - foot.y, w: floraReach(o, foot) });
       trees3D.attach(o);
     }
   }

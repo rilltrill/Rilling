@@ -1,4 +1,4 @@
-import { makeRamp, STEPS, type RampOptions } from '../../gameplay/pixel/materials';
+import { hexToOklch, makeRamp, oklchToHex, STEPS, type RampOptions } from '../../gameplay/pixel/materials';
 
 /**
  * FLORA painter (ART: SPRITES scenery). A tiny software rasteriser that paints
@@ -11,8 +11,10 @@ import { makeRamp, STEPS, type RampOptions } from '../../gameplay/pixel/material
  *  - the sprite-artist light from the upper left and front, flattened profile,
  *    ordered (Bayer 4×4) dither only in the narrow band between two steps;
  *  - a dark exterior outline on the shadow side (bottom / right), none on the
- *    lit top-left edge (those texels carry the night-rim flag instead), never
- *    on 1-texel runs (blades, vines, leaflets);
+ *    lit top-left edge, never on 1-texel runs (blades, vines, leaflets); the
+ *    back-lit right edge carries the night-rim flag (a cool rim at night, as on
+ *    the PixelCast sprites — never on the lit side, which would double the
+ *    highlight);
  *  - an inner contour where a cluster overlaps one well behind it and one step
  *    of cast shadow below-right of it, so canopies read as layered leaf masses,
  *    not blobs.
@@ -65,16 +67,37 @@ export class FloraRng {
   }
 }
 
+/** Ramp options for a flora palette entry: `cap` = the brightest step's OKLab lightness (night biomes). */
+export interface FloraRampOptions extends RampOptions {
+  cap?: number;
+}
+
 /** Ramps used by one atlas (index = material id − 1). */
 export class FloraPalette {
   readonly ramps: number[][] = [];
   private keys = new Map<string, number>();
   /** Material id (≥ 1) for a base colour and ramp options. */
-  add(hex: number, o: RampOptions = {}): number {
-    const key = `${hex}|${o.dark ?? ''}|${o.light ?? ''}|${o.shift ?? ''}|${o.sat ?? ''}|${o.shadowHue ?? ''}`;
+  add(hex: number, o: FloraRampOptions = {}): number {
+    const key = `${hex}|${o.dark ?? ''}|${o.light ?? ''}|${o.shift ?? ''}|${o.sat ?? ''}|${o.shadowHue ?? ''}|${o.cap ?? ''}`;
     let id = this.keys.get(key);
     if (id === undefined) {
-      this.ramps.push(makeRamp(hex, o));
+      let ramp = makeRamp(hex, o);
+      if (o.cap !== undefined) {
+        // Squeeze the steps above the cap under it (keeping their order and hue): a night
+        // plant's top light stays at the 3D foliage's lit value instead of going mint / pale.
+        const cap = o.cap;
+        const top = hexToOklch(ramp[ramp.length - 1])[0];
+        if (top > cap) {
+          const base = Math.min(hexToOklch(ramp[3])[0], cap - 0.04);
+          ramp = ramp.map((c, i) => {
+            const [L, C, h] = hexToOklch(c);
+            if (L <= base) return c;
+            const t = (L - base) / Math.max(1e-3, top - base);
+            return oklchToHex(base + t * (cap - base), C, h);
+          });
+        }
+      }
+      this.ramps.push(ramp);
       id = this.ramps.length;
       if (id > 255) throw new Error('flora palette full');
       this.keys.set(key, id);
@@ -108,6 +131,12 @@ export class FloraCanvas {
   readonly tone: Float32Array;
   readonly z: Float32Array;
   readonly flag: Uint8Array;
+  /**
+   * Strand density for this level (1 = everything): balanced species (grass,
+   * ferns, fronds) draw fewer / narrower strands below 1 — set by the atlas
+   * painter so every mip level keeps the coverage of the one above it.
+   */
+  density = 1;
   constructor(
     readonly w: number,
     readonly h: number,
@@ -118,6 +147,13 @@ export class FloraCanvas {
     this.tone = new Float32Array(n);
     this.z = new Float32Array(n).fill(-1e9);
     this.flag = new Uint8Array(n);
+  }
+
+  /** Opaque fraction of the canvas. */
+  coverage(): number {
+    let n = 0;
+    for (let i = 0; i < this.mat.length; i++) if (this.mat[i]) n++;
+    return n / this.mat.length;
   }
 
   /** Smallest drawn radius / half-width (canvas texels). */
@@ -344,13 +380,16 @@ export class FloraCanvas {
   /**
    * Tapered stroke along a polyline (`pts` = x0,y0,x1,y1,…; `w` = half-widths
    * per point) with cylinder shading across it. `bark` adds vertical fissures,
-   * `rings` dark bands every n texels along it (palm trunks).
+   * `rings` dark bands every n texels along it (palm trunks: `ringStep` = how
+   * much darker, `slant` tilts them, spacing wanders a little). `bands` = the
+   * sprite artist's flat cylinder (lit column left, base, shadow band right)
+   * instead of the smooth light.
    */
   stroke(
     pts: number[],
     w: number[],
     mat: number,
-    o: ShadeOpts & { bark?: number; rings?: number; ringMat?: number; flat?: number; seed?: number } = {},
+    o: ShadeOpts & { bark?: number; rings?: number; ringMat?: number; ringStep?: number; slant?: number; bands?: boolean; flat?: number; seed?: number } = {},
   ) {
     const s = this.s;
     const n = pts.length / 2;
@@ -393,6 +432,11 @@ export class FloraCanvas {
           const ny = tx * sa * (1 - flat);
           const nz = Math.sqrt(Math.max(0, 1 - sa * sa * (1 - flat)));
           let tone = FloraCanvas.lit(nx, ny, nz, o);
+          if (o.bands) {
+            // Flat cylinder bands on ramp-step centres (u = −1 left … 1 right of an upward stroke).
+            const u = -sa;
+            tone = (o.bias ?? 0) + (u < -0.6 ? 0.75 : u < 0.36 ? 0.5 : u < 0.76 ? 0.25 : 0.06);
+          }
           const al = (along0 + t * len) / s; // level-0 texels along the stroke
           if (o.bark) {
             // Vertical fissures that wander a little along the trunk.
@@ -404,11 +448,13 @@ export class FloraCanvas {
           }
           let m = mat;
           if (o.rings) {
-            const rr = (al / o.rings) % 1;
+            // Irregular spacing and a slight slant (a leaf scar wraps round the trunk, not a stacked disc).
+            const ph = (al + sa * hw * (o.slant ?? 0)) / o.rings + (o.slant ? 0.3 * Math.sin(al * 0.29 + (o.seed ?? 0)) : 0);
+            const rr = ph - Math.floor(ph);
             if (rr < 1 / o.rings + 0.08) {
-              tone -= 0.28;
+              tone -= o.ringStep ?? 0.28;
               if (o.ringMat) m = o.ringMat;
-            } else if (rr < 2.2 / o.rings + 0.08) tone += 0.06;
+            } else if (!o.ringStep && rr < 2.2 / o.rings + 0.08) tone += 0.06;
           }
           this.set(ix, iy, m, tone, z0 + Math.sqrt(Math.max(0, 1 - sa * sa)) * hw * 0.5, (o.flag ?? 0) | (hw < 1 ? FF.THIN : 0));
         }
@@ -418,7 +464,7 @@ export class FloraCanvas {
   }
 
   /** Quadratic-curve tapered stroke (blades, stalks, vines): a → (control c) → b. */
-  curve(ax: number, ay: number, cx: number, cy: number, bx: number, by: number, w0: number, w1: number, mat: number, o: ShadeOpts & { steps?: number } = {}) {
+  curve(ax: number, ay: number, cx: number, cy: number, bx: number, by: number, w0: number, w1: number, mat: number, o: ShadeOpts & { steps?: number; bands?: boolean; flat?: number } = {}) {
     const n = o.steps ?? Math.max(3, Math.ceil(Math.hypot(bx - ax, by - ay) * this.s / 3));
     const pts: number[] = [];
     const ws: number[] = [];
@@ -549,13 +595,13 @@ export interface ResolveOpts {
   outline?: number;
 }
 
-/** Alpha of a lit-edge texel (the billboard shader adds the night rim there). */
+/** Alpha of a back-lit (right) edge texel (the billboard shader adds the night rim there). */
 export const RIM_ALPHA = 236;
 
 /**
  * Resolve a painted canvas to RGBA8 (row 0 = the sprite's BOTTOM row, ready
  * for a texture whose v = 0 is the bottom). Alpha: 0 empty, RIM_ALPHA on the
- * lit exterior edge, 255 elsewhere.
+ * back-lit (right) exterior edge, 255 elsewhere.
  */
 export function resolveCanvas(c: FloraCanvas, pal: FloraPalette, o: ResolveOpts = {}): Uint8Array {
   const { w, h } = c;
@@ -590,9 +636,13 @@ export function resolveCanvas(c: FloraCanvas, pal: FloraPalette, o: ResolveOpts 
       // The smallest mip levels are mostly 1-texel runs (never outlined): half of them a step
       // darker keeps the plant's weight when it switches level.
       if (thin && c.s <= 0.25 && (x + y) & 1) step = Math.max(1, step - 1);
-      if ((eR || eD) && !thin) step = o.outline ?? 0;
-      else if ((eU || eL) && !thin) alpha = RIM_ALPHA;
-      else if (!(fl & FF.SOFT) && !(fl & FF.FLAT)) {
+      if ((eR || eD) && !thin) {
+        step = o.outline ?? 0;
+        // Back-lit edge (right, away from the sprite light): the night rim goes here.
+        if (eR) alpha = RIM_ALPHA;
+      } else if ((eU || eL) && !thin) {
+        // Lit top-left edge: no outline (selective outline).
+      } else if (!(fl & FF.SOFT) && !(fl & FF.FLAT)) {
         // Inner contour where a nearer cluster borders this texel; cast shadow below-right of one.
         const zc = c.z[i];
         let contour = false;

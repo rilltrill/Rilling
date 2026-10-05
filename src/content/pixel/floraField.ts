@@ -15,14 +15,19 @@ import { floraMats, type FloraBiome, type FloraSpecies } from './floraSpecies';
  * (`texelFetch`, level picked from the on-screen texel size), discards the
  * transparent ones (alpha-tested, depth-writing: correct against characters and
  * terrain), and is otherwise a MeshLambertMaterial: stage lights, lightning,
- * flashlight, fog and tone mapping exactly like the 3D scenery.
+ * flashlight, fog and tone mapping like the 3D scenery — with two plant rules
+ * (FRAG_LIGHT): sky light (hemisphere + sun / moon) lights a plant's top, while
+ * local lights (lamps, neon, headlights, the flashlight) see a view-facing card
+ * and are half desaturated and clamped, so a plant under a coloured lamp is
+ * tinted, never bleached brighter than the cast; a per-stage gain matches the
+ * plants to the stage's 3D vegetation.
  *
  * Wind: the vertex shader computes each plant's sway (shared clock, per-plant
  * phase) and the fragment shader shifts every texel ROW sideways by a whole
  * number of texels growing with height² — the trunk foot stays put and the
  * crown bends in crisp pixel steps (a raster wobble, never smeared texels).
- * Night: lit exterior-edge texels (palette alpha = RIM_ALPHA) get a cool
- * moonlight rim so silhouettes read in the dark.
+ * Night: back-lit (right) exterior-edge texels (palette alpha = RIM_ALPHA) get
+ * a cool rim so silhouettes read in the dark, as on the PixelCast sprites.
  *
  * Gameplay never sees these: they are not raycast, and bullet occluders /
  * collision stay the stage's own (invisible) meshes.
@@ -49,7 +54,7 @@ export interface FloraAtlasData {
   h: number;
   /** Index images, level 0 first, down to 1×1 (levels ≥ FLORA_LEVELS are blank, never sampled). */
   levels: { data: Uint8Array; width: number; height: number }[];
-  /** 256 × RGBA8 sRGB; entry 0 = transparent, alpha RIM_ALPHA = lit exterior edge. */
+  /** 256 × RGBA8 sRGB; entry 0 = transparent, alpha RIM_ALPHA = back-lit exterior edge. */
   palette: Uint8Array;
   sprites: Map<string, FloraSprite[]>;
   /** Distinct colours used (≤ 255). */
@@ -88,9 +93,36 @@ export function paintFloraAtlas(species: FloraSpecies[], biome: FloraBiome, biom
     for (let v = 0; v < sp.variants; v++) {
       const seed = hashStr(`${biomeKey}|${sp.key}|${v}`);
       const raw: { data: Uint8Array; w: number; h: number }[] = [];
+      let covPrev = 0;
       for (let l = 0; l < FLORA_LEVELS; l++) {
-        const c = new FloraCanvas(sp.w >> l, sp.h >> l, 1 / (1 << l));
-        sp.paint(c, mats, new FloraRng(seed), v);
+        const paintAt = (density: number) => {
+          const c = new FloraCanvas(sp.w >> l, sp.h >> l, 1 / (1 << l));
+          c.density = density;
+          sp.paint(c, mats, new FloraRng(seed), v);
+          return c;
+        };
+        let c = paintAt(1);
+        let cov = c.coverage();
+        // Strand plants: thin this level until it covers what the finer level covers (no weight pop at the switch).
+        if (sp.balance && l > 0 && cov > covPrev * 1.03) {
+          let lo = 0.02;
+          let hi = 1;
+          let err = Math.abs(cov / covPrev - 1);
+          for (let it = 0; it < 7; it++) {
+            const mid = (lo + hi) / 2;
+            const cm = paintAt(mid);
+            const cv = cm.coverage();
+            const e = Math.abs(cv / covPrev - 1);
+            if (e < err) {
+              c = cm;
+              cov = cv;
+              err = e;
+            }
+            if (cv > covPrev) hi = mid;
+            else lo = mid;
+          }
+        }
+        covPrev = cov;
         raw.push({ data: resolveCanvas(c, pal), w: c.w, h: c.h });
       }
       // Crop to the level-0 content (aligned), keeping the foot on the bottom row.
@@ -227,9 +259,13 @@ const VERT_DECL = /* glsl */ `
   uniform float uFFar;
   varying vec2 vFTex;
   varying float vFSway;
+  varying vec3 vFLocN;
   flat varying vec4 vFBox;
   flat varying vec4 vFMisc;
 `;
+
+/** Sky-light normal of a billboard: (up, toward the viewer) — the top of a plant leaning toward the viewer. */
+export const FLORA_SKY_NORMAL = [0.85, 0.45] as const;
 
 // Camera right (flattened): every plant faces the view plane, yaw only.
 const VERT_NORMAL = /* glsl */ `
@@ -237,8 +273,11 @@ const VERT_NORMAL = /* glsl */ `
   fR.y = 0.0;
   fR /= max(length(fR), 1e-4);
   vec3 fB = vec3(-fR.z, 0.0, fR.x);
-  // Lit like the top of a plant leaning toward the viewer (sky light + key light).
-  vec3 objectNormal = normalize(vec3(0.0, 0.85, 0.0) + fB * 0.45);
+  // Sky light (hemisphere + sun / moon, lightning): lit like the top of a plant leaning toward the viewer.
+  vec3 objectNormal = normalize(vec3(0.0, ${FLORA_SKY_NORMAL[0].toFixed(2)}, 0.0) + fB * ${FLORA_SKY_NORMAL[1].toFixed(2)});
+  // Local lights (lamps, neon, headlights, flashlight): a mostly view-facing card, so a light
+  // behind or above the plant leaves it a silhouette instead of lighting the whole sprite.
+  vFLocN = normalize(normalMatrix * normalize(fB * 0.9 + vec3(0.0, 0.3, 0.0)));
 `;
 
 const VERT_BEGIN = /* glsl */ `
@@ -260,14 +299,33 @@ const FRAG_DECL = /* glsl */ `
   uniform sampler2D uFAtlas;
   uniform sampler2D uFPal;
   uniform vec3 uFRim;
+  uniform float uFGain;
+  uniform float uFLocCap;
   varying vec2 vFTex;
   varying float vFSway;
+  varying vec3 vFLocN;
   flat varying vec4 vFBox;
   flat varying vec4 vFMisc;
 `;
 
+/**
+ * Mip bias: the next (coarser, hand-painted) level takes over as soon as a
+ * texel would come out smaller than a screen pixel (log2 bias 1.0: a level is
+ * shown at 1–2 pixels per texel, never minified). Nearest sampling of a
+ * minified level skips texels differently every frame — 1-texel blades and
+ * leaflets crawl as the rail camera moves; a level that is never minified
+ * skips none.
+ */
+export const FLORA_MIP_BIAS = 1.0;
+
+/** The shader's level pick for `rho` level-0 texels per screen pixel (CPU twin of FRAG_MAP, for tests). */
+export function floraLevelFor(rho: number): number {
+  return Math.max(0, Math.min(FLORA_LEVELS - 1, Math.floor(Math.log2(Math.max(rho, 1e-3)) + FLORA_MIP_BIAS)));
+}
+
 const FRAG_MAP = /* glsl */ `
   float fRim = 0.0;
+  vec3 fPaint = vec3(0.0);
   {
     float h01 = clamp(vFTex.y / vFBox.w, 0.0, 1.0);
     float shift = floor(vFSway * h01 * h01 + 0.5);
@@ -278,25 +336,98 @@ const FRAG_MAP = /* glsl */ `
     // Mip level from the on-screen texel size (texels per pixel), painted levels only.
     vec2 g = max(abs(dFdx(vFTex)), abs(dFdy(vFTex)));
     float rho = max(g.x, g.y);
-    int lv = int(clamp(floor(log2(max(rho, 1e-3)) + 0.4), 0.0, ${(FLORA_LEVELS - 1).toFixed(1)}));
+    int lv = int(clamp(floor(log2(max(rho, 1e-3)) + ${FLORA_MIP_BIAS.toFixed(2)}), 0.0, ${(FLORA_LEVELS - 1).toFixed(1)}));
     ivec2 ip = (ivec2(vFBox.xy) >> lv) + (ivec2(int(tx), int(ty)) >> lv);
     float idx = texelFetch(uFAtlas, ip, lv).r;
     if (idx < 0.5 / 255.0) discard;
     vec4 pc = texelFetch(uFPal, ivec2(int(idx * 255.0 + 0.5), 0), 0);
-    diffuseColor.rgb *= pc.rgb * vFMisc.y;
+    // Lighting runs on white (light only); the painted colour is applied after it (FRAG_LIGHT).
+    fPaint = pc.rgb * vFMisc.y;
     fRim = pc.a < 0.99 ? 1.0 : 0.0;
   }
 `;
 
+/** Accumulator + normal for the local lights (point / spot), declared ahead of the light loops. */
+const FRAG_LOCAL_DECL = /* glsl */ `
+  ReflectedLight fLoc = ReflectedLight(vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0));
+  vec3 fLocN = normalize(vFLocN);
+`;
+
+/**
+ * Light → colour. Sky light (hemisphere + sun / moon, which carry the storm's
+ * lightning) as it comes; local lights (lamps, neon, headlights, flashlight)
+ * half desaturated and clamped (`uFLocCap`), so a coloured lamp tints a plant
+ * without bleaching it and nothing lit by a lamp outshines the cast (PixelCast
+ * sprites only take the stage tint). `uFGain` matches the plants' overall
+ * brightness to the stage's 3D vegetation.
+ */
+const FRAG_LIGHT = /* glsl */ `
+  #include <aomap_fragment>
+  {
+    vec3 fE = fLoc.directDiffuse;
+    float fEl = dot(fE, vec3(0.2126, 0.7152, 0.0722));
+    fE = min(mix(vec3(fEl), fE, 0.5), vec3(uFLocCap));
+    vec3 fSky = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse;
+    reflectedLight.directDiffuse = fPaint * (fSky + fE) * uFGain;
+    reflectedLight.indirectDiffuse = vec3(0.0);
+  }
+`;
+
+/** The point / spot light loops of three's light chunk, re-pointed at the local accumulator and normal. */
+const RE_DIRECT_CALL = 'RE_Direct( directLight, geometryPosition, geometryNormal, geometryViewDir, geometryClearcoatNormal, material, reflectedLight );';
+const RE_DIRECT_LOCAL = 'RE_Direct( directLight, geometryPosition, fLocN, geometryViewDir, geometryClearcoatNormal, material, fLoc );';
+
+/** `lights_fragment_begin` with point and spot lights accumulated separately (null if three's chunk changed shape). */
+export function floraLightsChunk(chunk: string = THREE.ShaderChunk.lights_fragment_begin): string | null {
+  const cut = ['#if ( NUM_SUN_LIGHTS > 0 )', '#if ( NUM_DIR_LIGHTS > 0 )'].map((m) => chunk.indexOf(m)).filter((i) => i >= 0);
+  if (!cut.length) return null;
+  const at = Math.min(...cut);
+  const head = chunk.slice(0, at);
+  const local = head.split(RE_DIRECT_CALL);
+  // Exactly the point and spot loops.
+  if (local.length !== 3 || head.indexOf('NUM_POINT_LIGHTS') < 0 || head.indexOf('NUM_SPOT_LIGHTS') < 0) return null;
+  return FRAG_LOCAL_DECL + local.join(RE_DIRECT_LOCAL) + chunk.slice(at);
+}
+
 export interface FloraFieldOptions {
   /** Plants farther than this (m, horizontal) from the camera are not drawn (fog). */
   far: number;
-  /** Moonlight rim on lit edges (linear RGB added as emission; 0 = off). */
+  /** Cool rim on the back-lit (right) exterior edge (linear RGB added as emission; 0 = off). */
   rim?: number;
   rimStrength?: number;
+  /** Overall light multiplier (matches the plants to the stage's 3D vegetation; default 1). */
+  gain?: number;
+  /** Ceiling of the local-light (point / spot) term (default 0.6). */
+  localCap?: number;
   /** Shared wind clock (s) and wind (y = gust); defaults to the field's own. */
   time?: { value: number };
   wind?: { value: THREE.Vector3 };
+}
+
+/** Tallest a billboard may stand relative to the 3D plant it replaces (it never hides much more than the plant did). */
+export const FLORA_MAX_HEIGHT_K = 1.15;
+
+const _rv = new THREE.Vector3();
+
+/**
+ * Rotation-independent width of a 3D plant: twice the largest horizontal
+ * distance of its vertices from its foot (world space; call after
+ * `updateMatrixWorld`). An AABB overstates a plant turned ~45° by up to √2.
+ */
+export function floraReach(o: THREE.Object3D, foot: THREE.Vector3): number {
+  let r2 = 0;
+  o.traverse((c) => {
+    const m = c as THREE.Mesh;
+    if (!m.isMesh) return;
+    const pos = m.geometry.getAttribute('position');
+    if (!pos) return;
+    for (let i = 0; i < pos.count; i++) {
+      _rv.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+      const d = (_rv.x - foot.x) ** 2 + (_rv.z - foot.z) ** 2;
+      if (d > r2) r2 = d;
+    }
+  });
+  return Math.sqrt(r2) * 2;
 }
 
 interface Inst {
@@ -317,6 +448,8 @@ interface Inst {
  */
 export class FloraField {
   private items: Inst[] = [];
+  /** Height (m) of the 3D plant each billboard stands in for (NaN when placed with `add`): for audits / tests. */
+  readonly refHeights: number[] = [];
   readonly time: { value: number };
   readonly wind: { value: THREE.Vector3 };
   constructor(
@@ -343,7 +476,36 @@ export class FloraField {
     const sp = list[(o.variant ?? h) % list.length];
     const flip = o.flip === undefined ? ((h >>> 8) & 1 ? -1 : 1) : o.flip ? -1 : 1;
     this.items.push({ x, y, z, sp, hM: heightM, flip, tint: o.tint ?? 1, sway: o.sway ?? 0, phase: x * 0.17 + z * 0.13 });
+    this.refHeights.push(NaN);
     return true;
+  }
+
+  /**
+   * A billboard standing in for a 3D plant `widthM` wide (`floraReach`) and
+   * `heightM` tall: picks, among the variants of `key` and of its `<key>Wide`
+   * sibling (low, spreading sprites), one whose aspect suits the plant (by
+   * position among those within `aspectTol` (1.3×) of the best fit — trees pass
+   * a wider tolerance to keep every silhouette in play; `variants` restricts
+   * the pick to those of `key`), and sizes it to span most of the plant's width
+   * without standing taller than FLORA_MAX_HEIGHT_K × the 3D plant (and never
+   * shorter than it). Returns the billboard's height (0 = unknown key).
+   */
+  fit(key: string, x: number, y: number, z: number, widthM: number, heightM: number, o: { variants?: number[]; tint?: number; sway?: number; aspectTol?: number } = {}): number {
+    const base = this.atlas.sprites.get(key) ?? [];
+    const cand = o.variants ? base.filter((s) => o.variants!.includes(s.variant)) : [...base, ...(this.atlas.sprites.get(`${key}Wide`) ?? [])];
+    if (!cand.length || !(heightM > 0)) return 0;
+    const want = Math.max(0.05, widthM * 0.75) / heightM;
+    const score = (s: FloraSprite) => Math.abs(Math.log(s.w / s.h / want));
+    let best = Infinity;
+    for (const s of cand) best = Math.min(best, score(s));
+    const pool = cand.filter((s) => score(s) <= best + Math.log(o.aspectTol ?? 1.3));
+    const hsh = hashStr(`${Math.round(x * 10)}|${Math.round(z * 10)}`);
+    const sp = pool[hsh % pool.length];
+    const h = Math.min(heightM * FLORA_MAX_HEIGHT_K, Math.max(heightM, (widthM * 0.75 * sp.h) / sp.w));
+    const flip = (hsh >>> 8) & 1 ? -1 : 1;
+    this.items.push({ x, y, z, sp, hM: h, flip, tint: o.tint ?? 1, sway: o.sway ?? 0, phase: x * 0.17 + z * 0.13 });
+    this.refHeights.push(heightM);
+    return h;
   }
 
   /** Height (m) at which the sprite `add(key, x, ?, z, …)` would pick is `widthM` wide. */
@@ -381,6 +543,8 @@ export class FloraField {
     mesh.matrixAutoUpdate = false;
     mesh.raycast = () => {};
     mesh.name = 'flora-billboards';
+    // (Audit: the 3D plant height each billboard stands in for, NaN when placed with `add`.)
+    mesh.userData.floraRef = Float32Array.from(this.refHeights);
     return mesh;
   }
 
@@ -411,8 +575,14 @@ export class FloraField {
       uFWind: this.wind,
       uFFar: { value: this.o.far },
       uFRim: { value: new THREE.Vector3(rim.r, rim.g, rim.b) },
+      uFGain: { value: this.o.gain ?? 1 },
+      uFLocCap: { value: this.o.localCap ?? 0.6 },
     };
+    const lights = floraLightsChunk();
+    if (!lights) throw new Error('flora: three lights_fragment_begin changed shape');
     const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    // (Exposed for tests and look-dev tuning.)
+    m.userData.flora = uniforms;
     m.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, uniforms);
       shader.vertexShader = shader.vertexShader
@@ -423,9 +593,11 @@ export class FloraField {
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>\n${FRAG_DECL}`)
         .replace('#include <map_fragment>', FRAG_MAP)
+        .replace('#include <lights_fragment_begin>', lights)
+        .replace('#include <aomap_fragment>', FRAG_LIGHT)
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += uFRim * fRim * vFMisc.y;');
     };
-    m.customProgramCacheKey = () => 'floraBillboard1';
+    m.customProgramCacheKey = () => 'floraBillboard2';
     m.name = 'flora-billboard';
     return Kit.track(m);
   }
@@ -448,9 +620,10 @@ export function floraArtToggle(scene: THREE.Scene, sprites: THREE.Object3D[], th
   };
   apply();
   const prev = scene.onBeforeRender;
-  scene.onBeforeRender = function (this: THREE.Scene, ...args: Parameters<THREE.Scene['onBeforeRender']>) {
+  // Explicit parameters (no rest array): nothing is allocated per render.
+  scene.onBeforeRender = function (this: THREE.Scene, r, s, c, rt, m, g) {
     apply();
-    prev.apply(this, args);
+    prev.call(this, r, s, c, rt, m, g);
   };
   return () => {
     scene.onBeforeRender = prev;

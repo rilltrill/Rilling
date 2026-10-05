@@ -41,7 +41,8 @@ export const D3_BIOME: FloraBiome = {
   fernLight: 0x4b7d3e,
   bark: 0x4f4335,
   barkDark: 0x382f25,
-  palmTrunk: 0x6e5d4a,
+  // (darker than the 3D base colour: the 3D trunk's bark texture and shading read this dark at night)
+  palmTrunk: 0x5a4c3c,
   palmRing: 0x4c3f32,
   moss: 0x4b6a36,
   vine: 0x2f4a26,
@@ -53,6 +54,9 @@ export const D3_BIOME: FloraBiome = {
   coconut: 0x4a3a22,
   flowers: [],
   sat: 0.95,
+  // Storm night: highlights stay near the 3D foliage's lit value (no mint / pale tops in the headlights).
+  light: 0.3,
+  cap: 0.58,
 };
 
 /** MAIN STREET (z1): town street trees at night. */
@@ -78,6 +82,16 @@ export const Z1_BIOME: FloraBiome = {
   coconut: 0x3e3024,
   flowers: [0xb04040],
   sat: 0.9,
+  light: 0.3,
+  cap: 0.55,
   // Street props (z1 props.ts colours): hydrant, trash can, traffic cone.
-  extra: { hydrant: 0xa82218, can: 0x3c4c42, canLid: 0x34363d, cone: 0xd9641c, band: 0xdedad0, coneBase: 0x2a2a30 },
+  // Identity colours kept saturated: highlights climb toward warm, never toward white.
+  extra: {
+    hydrant: { hex: 0xa82218, light: 0.3, sat: 1.1 },
+    can: { hex: 0x3c4c42, light: 0.3 },
+    canLid: { hex: 0x34363d, light: 0.3 },
+    cone: { hex: 0xd9641c, light: 0.26, sat: 1.15 },
+    band: { hex: 0xc4c6c0, light: 0.18, dark: 0.5 },
+    coneBase: { hex: 0x2a2a30, light: 0.3 },
+  },
 };

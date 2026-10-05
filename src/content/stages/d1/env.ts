@@ -24,9 +24,9 @@ import {
 } from './props';
 import { D, RIVER, RIVER_WIDTH } from './layout';
 import { flowMat, flowRibbon, tm, waterClock } from './retro';
-import { FloraField, floraArtToggle, floraAtlas } from '../../pixel/floraField';
+import { FloraField, floraArtToggle, floraAtlas, floraReach } from '../../pixel/floraField';
 import { D1_BIOME } from '../../pixel/floraBiomes';
-import { BUSH, CANOPY_TREE, CYCAD, FERN, GRASS, JUNGLE_TREE, PALM } from '../../pixel/floraSpecies';
+import { BUSH, BUSH_WIDE, CANOPY_TREE, CYCAD, FERN, FERN_WIDE, GRASS, JUNGLE_TREE, PALM } from '../../pixel/floraSpecies';
 
 /**
  * JUNGLE RUN environment: a lush tropical park road by day — dirt road, giant
@@ -46,7 +46,7 @@ const _e = new THREE.Euler();
 const _box = new THREE.Box3();
 
 /** ART: SPRITES plants (pixel billboards): species painted for this stage, and their wind sway (m at the top). */
-const D1_FLORA = [JUNGLE_TREE, CANOPY_TREE, PALM, FERN, BUSH, GRASS, CYCAD];
+const D1_FLORA = [JUNGLE_TREE, CANOPY_TREE, PALM, FERN, FERN_WIDE, BUSH, BUSH_WIDE, GRASS, CYCAD];
 const SWAY: Record<string, number> = { jungleTree: 0.16, canopyTree: 0.14, palm: 0.32, fern: 0.1, bush: 0.04, grass: 0.12, cycad: 0.05 };
 
 type Layer = 'verge' | 'near' | 'mid' | 'fill' | 'far' | 'patch' | 'rock';
@@ -311,10 +311,14 @@ export class JungleEnv {
       }
       _box.setFromObject(c);
       c.getWorldPosition(_v);
-      // As tall as the 3D plant — taller for a wide, low one so the sprite (square texels) spans most of its width.
-      const wide = Math.max(_box.max.x - _box.min.x, _box.max.z - _box.min.z) * 0.8;
-      const h = Math.max(_box.max.y - _v.y, this.flora2d.heightFor(key, wide, _v.x, _v.z));
-      this.flora2d.add(key, _v.x, _v.y - 0.06, _v.z, h, { tint: (c.userData.tint as number | undefined) ?? 1, sway: SWAY[key] ?? 0 });
+      // A sprite whose aspect suits the 3D plant (wide, low ferns / bushes get the wide variants), spanning
+      // most of its width (rotation-independent reach) but never more than 1.15× as tall as the plant.
+      const tree = key === 'jungleTree' || key === 'canopyTree';
+      this.flora2d.fit(key, _v.x, _v.y - 0.06, _v.z, floraReach(c, _v), _box.max.y - _v.y, {
+        tint: (c.userData.tint as number | undefined) ?? 1,
+        sway: SWAY[key] ?? 0,
+        aspectTol: tree ? 2.2 : undefined,
+      });
     }
     return kept;
   }

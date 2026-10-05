@@ -15,9 +15,9 @@ import * as P from './props';
 import { ditherPool, radialGeometry, retroHook, tx, type TexSpec } from './retro';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { D, GORGE_DEPTH, ROAD_HALF, railHeading, railLength, railPoint } from './layout';
-import { FloraField, floraArtToggle, floraAtlas } from '../../pixel/floraField';
+import { FloraField, floraArtToggle, floraAtlas, floraReach } from '../../pixel/floraField';
 import { D3_BIOME } from '../../pixel/floraBiomes';
-import { BUSH, EAR, FERN, JUNGLE_TREE, PALM } from '../../pixel/floraSpecies';
+import { BUSH, BUSH_WIDE, EAR, FERN, FERN_WIDE, JUNGLE_TREE, PALM } from '../../pixel/floraSpecies';
 
 /**
  * TYRANT CHASE environment — the park at night in a violent thunderstorm.
@@ -45,8 +45,8 @@ const FOG_FAR = 80;
 const CHUNK = 60;
 
 /** ART: SPRITES plants (pixel billboards) painted for this stage. */
-const D3_FLORA = [JUNGLE_TREE, PALM, FERN, BUSH, EAR];
-/** What a vegetation prefab is in ART: SPRITES: species, size of the 3D plant (m), sway (m at the top), forced variants. */
+const D3_FLORA = [JUNGLE_TREE, PALM, FERN, FERN_WIDE, BUSH, BUSH_WIDE, EAR];
+/** What a vegetation prefab is in ART: SPRITES: species, size of the 3D plant (m: height, rotation-independent width), sway (m at the top), forced variants. */
 interface FloraTag {
   key: string;
   h: number;
@@ -56,6 +56,7 @@ interface FloraTag {
 }
 const floraTags = new WeakMap<Prefab, FloraTag>();
 const _box = new THREE.Box3();
+const _origin = new THREE.Vector3();
 
 let current: ParkEnv | null = null;
 
@@ -237,6 +238,9 @@ export class ParkEnv {
       far: FOG_FAR + 8,
       rim: 0x8aa4d8,
       rimStrength: 0.22,
+      // Matched to the 3D storm vegetation's brightness; headlights / beacons tint, never bleach.
+      gain: 0.74,
+      localCap: 0.3,
       time: this.baker.uniforms.uTime,
       wind: this.baker.uniforms.uWind,
     });
@@ -433,11 +437,11 @@ export class ParkEnv {
       sk.add(p, _m);
       return;
     }
-    const v = tag.variants;
-    const h = Math.max(tag.h, this.flora2d.heightFor(tag.key, tag.w * 0.8, pos.x, pos.z)) * scale;
-    this.flora2d.add(tag.key, pos.x, pos.y - 0.06, pos.z, h, {
+    // A sprite whose aspect suits the 3D plant, never more than 1.15× as tall as it (see FloraField.fit).
+    this.flora2d.fit(tag.key, pos.x, pos.y - 0.06, pos.z, tag.w * scale, tag.h * scale, {
       sway: tag.sway * scale,
-      variant: v ? v[(Math.floor(Math.abs(pos.x * 7.3 + pos.z * 3.1)) >>> 0) % v.length] : undefined,
+      variants: tag.variants,
+      aspectTol: tag.key === 'jungleTree' ? 2.2 : undefined,
     });
   }
 
@@ -722,7 +726,8 @@ export class ParkEnv {
         if (flora) {
           holder.updateMatrixWorld(true);
           _box.setFromObject(holder);
-          tag = { ...flora, h: _box.max.y, w: Math.max(_box.max.x - _box.min.x, _box.max.z - _box.min.z) };
+          // Width: rotation-independent reach from the foot (the prefab is placed turned).
+          tag = { ...flora, h: _box.max.y, w: floraReach(holder, _origin) };
         }
         const p = this.baker.prefab(holder);
         if (tag) floraTags.set(p, tag);
