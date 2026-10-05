@@ -1646,8 +1646,8 @@ export class SpriteArt {
     const gh = this.gridH;
     const cw = sizeClass(W);
     const ch = sizeClass(H);
-    const key = `${cw}x${ch}`;
-    if (!s.rt || s.rtKey !== key) {
+    // (Key strings only when the size class changes: no allocation per redraw.)
+    if (!s.rt || s.rt.width !== cw || s.rt.height !== ch) {
       if (s.rt) this.giveBack(s.rtKey, s.rt);
       const t = this.takeTarget(cw, ch);
       s.rt = t.rt;

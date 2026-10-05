@@ -150,7 +150,7 @@ abstract class Theropod extends Dino {
     p.sickle = this.spec.sickle;
     p.breath = this.r.torso.scale.y;
     p.squash = this.state === 'dying' ? 0 : Math.min(1, this.flinch) ** 2 * 0.8;
-    return paintTheropod(f, this.r, this.spec, this.spec.pal, p);
+    return paintTheropod(f, this.r, this.spec, p);
   }
 
   protected override build() {

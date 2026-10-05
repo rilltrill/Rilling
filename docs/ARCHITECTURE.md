@@ -232,6 +232,20 @@ plates aren't painted yet).
    `paintTheropod`) or write a new one with the same building blocks. Return false to fall
    back to the impostor bake. Subclasses that add meshes the painter doesn't know about
    (armour, glowing weak spots) must paint them or set `pixelArt = false`.
+   Painter API (allocation-free — painters run ~12×/s per character):
+   ```ts
+   f.layer(0.04 * s, PART.LIMB, farSide ? -0.1 : 0);          // blend k (m), hit part, tone
+   f.cone(f.at(elbow, 0, 0, 0), f.at(elbow, 0, -0.25, 0), 0.05 * s, 0.036 * s, M.sleeve)
+     .mat2(M.skin, 0.93)                                      // bare wrist below the cuff
+     .k(0.02 * s).rag(0.008 * s, PF.SPIKY).z(-0.02).tone(-0.1).u(0.4).seed(3).min(0.5).part(PART.LIMB);
+   f.coneE(a, b, axisX, axisY, rxA, ryA, rxB, ryB, mat);       // elliptical section
+   f.ellipsoid(joint, cx, cy, cz, rx, ry, rz, mat);            // projected ellipsoid
+   f.decal(a, b, ra, rb, mat).flag(PF.FLAT | PF.SHADE_ONLY).tone(-0.4);
+   f.facing(point, normal) > 0.1                               // only paint what faces the camera
+   ```
+   `f.at / f.dir / f.vec / f.mix` return pooled vectors; resolve materials once per look
+   (`Mat.*` builds key strings — cache the ids, see `human.ts` `mats()`); use index loops,
+   not `for (… of [1, -1])`; never allocate option objects per redraw.
 3. Look-dev: `node scripts/pixel-look.mjs --place "walker@office:-1:3.5,raptor@red:1.5:7:-30:windup=0.8,civ@worker:0:5"`
    (actions: `windup= stagger= sever=L|R|l|r pop die= pounce= walk= hit`; `--stage "zoo&zooEnv=night"`).
    It writes `-3d.png`, `-sprites.png`, a 3D|SPRITES `-montage.png` of zoomed crops and

@@ -555,7 +555,7 @@ export class PixelCast {
       this.matVersion = mt.version;
       this.matTex.needsUpdate = true;
     }
-    this.primData.set(f.data.subarray(0, f.count * PRIM_FLOATS));
+    this.primData.set(f.data);
     this.primTex.needsUpdate = true;
     const L = this.look;
     const pu = this.paintMat.uniforms;

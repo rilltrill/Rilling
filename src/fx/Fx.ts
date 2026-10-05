@@ -169,6 +169,8 @@ export class Fx {
   setGibSprites(on: boolean, target?: { value: THREE.Vector2 }) {
     this.meat.setSprite(on, this.soft.lightUniform, target);
     this.shards.setSprite(on, this.soft.lightUniform, target);
+    // Blood spray, dust and smoke as crisp dithered pixel clusters.
+    this.soft.setPixel(on);
   }
 
   /**

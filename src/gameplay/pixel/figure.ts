@@ -167,6 +167,10 @@ export class PixelFigure {
   private layerK: number[] = [];
   private layerTone: number[] = [];
   private layerDepth: number[] = [];
+  private layerPart: number[] = [];
+  /** Index of the primitive just added (−1 = dropped) and its px-per-metre scale (modifiers). */
+  private last = -1;
+  private lastS = 1;
   // Projection.
   private V = new Float32Array(16);
   private P = new Float32Array(16);
@@ -218,6 +222,8 @@ export class PixelFigure {
     this.layerK.length = 0;
     this.layerTone.length = 0;
     this.layerDepth.length = 0;
+    this.layerPart.length = 0;
+    this.last = -1;
     this.poolN = 0;
     this.V.set(cam.matrixWorldInverse.elements);
     this.P.set(cam.projectionMatrix.elements);
@@ -294,29 +300,111 @@ export class PixelFigure {
     return this.S / Math.max(1e-4, -vz);
   }
 
-  /** Start a new layer. Its primitives melt together; layers composite by depth. */
-  layer(o: LayerOpts = {}): number {
-    if (this.curLayer >= MAX_LAYERS - 1) return this.curLayer;
-    this.curLayer++;
-    this.layerK.push(o.k ?? 0.04);
-    this.layerTone.push(o.tone ?? 0);
-    this.layerDepth.push(o.depth ?? 0);
-    return this.curLayer;
+  /**
+   * Start a new layer: its primitives melt together (default blend radius `k`,
+   * metres); layers composite by depth. `part` = the hit part its primitives draw
+   * (override per primitive with `.part()`), `tone` darkens / lightens the whole
+   * layer (far-side limbs), `depth` pushes it back (mouth interiors).
+   */
+  layer(k = 0.04, part: PartCode = PART.NONE, tone = 0, depth = 0): this {
+    if (this.curLayer < MAX_LAYERS - 1) {
+      this.curLayer++;
+      this.layerK.push(k);
+      this.layerTone.push(tone);
+      this.layerDepth.push(depth);
+      this.layerPart.push(part);
+    }
+    return this;
+  }
+
+  // ─── Modifiers: patch the primitive just added (chainable, allocation-free) ──
+
+  /** Hit part this primitive draws (tests / gore); default: the layer's. */
+  part(p: PartCode): this {
+    if (this.last >= 0) this.data[this.last * PRIM_FLOATS + PARTI] = p;
+    return this;
+  }
+  /** Smooth-blend radius (metres) with what the layer holds so far. */
+  k(m: number): this {
+    if (this.last >= 0) this.data[this.last * PRIM_FLOATS + K] = m * this.lastS;
+    return this;
+  }
+  /** Ragged edge: amplitude (metres) and edge style flags (`PF.SPIKY`, `PF.RAG_END`). */
+  rag(m: number, flags = 0): this {
+    if (this.last >= 0) {
+      const o = this.last * PRIM_FLOATS;
+      this.data[o + RAG] = m * this.lastS;
+      this.data[o + FLAGS] = (this.data[o + FLAGS] | flags) >>> 0;
+    }
+    return this;
+  }
+  /** Add flags (`PF.*`). */
+  flag(f: number): this {
+    if (this.last >= 0) {
+      const o = this.last * PRIM_FLOATS + FLAGS;
+      this.data[o] = (this.data[o] | f) >>> 0;
+    }
+    return this;
+  }
+  /** Tone bias (−1..1): darker / lighter than the lighting says. */
+  tone(t: number): this {
+    if (this.last >= 0) this.data[this.last * PRIM_FLOATS + TONE] += t;
+    return this;
+  }
+  /**
+   * Depth bias (metres, negative = nearer) for which primitive's material shows
+   * where several of one layer overlap: a hair cap with −0.03 wins over the
+   * forehead it sits on, so the hairline is the cap's edge.
+   */
+  z(m: number): this {
+    if (this.last >= 0) {
+      const o = this.last * PRIM_FLOATS;
+      this.data[o + ZA] += m;
+      this.data[o + ZB] += m;
+    }
+    return this;
+  }
+  /** A second material beyond `split` (0..1) along the axis (sleeve → bare forearm). */
+  mat2(mat: number, split: number): this {
+    if (this.last >= 0) {
+      const o = this.last * PRIM_FLOATS;
+      this.data[o + MB] = mat;
+      this.data[o + SPLIT] = split;
+    }
+    return this;
+  }
+  /** Pattern coordinate along the axis at A (metres; stripes run on along chains). */
+  u(u0: number): this {
+    if (this.last >= 0) this.data[this.last * PRIM_FLOATS + U0] = u0;
+    return this;
+  }
+  /** Noise seed (ragged edges, patterns). */
+  seed(n: number): this {
+    if (this.last >= 0) this.data[this.last * PRIM_FLOATS + SEED] = n;
+    return this;
+  }
+  /** Smallest radius in texels (default 0.55 — one-texel lines survive). */
+  min(px: number): this {
+    if (this.last >= 0) this.minPx[this.last] = px;
+    return this;
   }
 
   /** Solid tapered round cone from world point a (radius ra, metres) to b (rb). */
-  cone(a: THREE.Vector3, b: THREE.Vector3, ra: number, rb: number, mat: number, o?: PrimOpts): number {
-    return this.emit(a, b, ra, rb, mat, 0, o);
+  cone(a: THREE.Vector3, b: THREE.Vector3, ra: number, rb: number, mat: number, o?: PrimOpts): this {
+    this.emit(a, b, ra, rb, mat, 0, o);
+    return this;
   }
 
   /** A ball (solid circle) of radius r at world point c. */
-  ball(c: THREE.Vector3, r: number, mat: number, o?: PrimOpts): number {
-    return this.emit(c, c, r, r, mat, 0, o);
+  ball(c: THREE.Vector3, r: number, mat: number, o?: PrimOpts): this {
+    this.emit(c, c, r, r, mat, 0, o);
+    return this;
   }
 
   /** Painted onto the current layer where it is covered (no coverage of its own). */
-  decal(a: THREE.Vector3, b: THREE.Vector3, ra: number, rb: number, mat: number, o?: PrimOpts): number {
-    return this.emit(a, b, ra, rb, mat, PF.DECAL, o);
+  decal(a: THREE.Vector3, b: THREE.Vector3, ra: number, rb: number, mat: number, o?: PrimOpts): this {
+    this.emit(a, b, ra, rb, mat, PF.DECAL, o);
+    return this;
   }
 
   /**
@@ -325,7 +413,7 @@ export class PixelFigure {
    * (world directions ⟂ the axis), across the axis as seen on screen. Torsos,
    * dinosaur bodies and tails read wide from the front and slim from the side.
    */
-  coneE(a: THREE.Vector3, b: THREE.Vector3, ux: THREE.Vector3, uy: THREE.Vector3, rxA: number, ryA: number, rxB: number, ryB: number, mat: number, o?: PrimOpts): number {
+  coneE(a: THREE.Vector3, b: THREE.Vector3, ux: THREE.Vector3, uy: THREE.Vector3, rxA: number, ryA: number, rxB: number, ryB: number, mat: number, o?: PrimOpts): this {
     // Screen-space axis direction.
     const pa = this.project(a, PA);
     const pb = this.project(b, PB);
@@ -352,7 +440,8 @@ export class PixelFigure {
       ra = Math.max(rxA * Math.hypot(uxx, uxy), ryA * Math.hypot(uyx, uyy));
       rb = Math.max(rxB * Math.hypot(uxx, uxy), ryB * Math.hypot(uyx, uyy));
     }
-    return this.emit(a, b, ra, rb, mat, 0, o);
+    this.emit(a, b, ra, rb, mat, 0, o);
+    return this;
   }
 
   /**
@@ -361,7 +450,7 @@ export class PixelFigure {
    * Drawn as its exact projected ellipse (as a stadium: a round cone along the
    * major axis with the minor radius) — skulls, hips, bellies, dino thighs.
    */
-  ellipsoid(obj: THREE.Object3D, cx: number, cy: number, cz: number, rx: number, ry: number, rz: number, mat: number, o?: PrimOpts): number {
+  ellipsoid(obj: THREE.Object3D, cx: number, cy: number, cz: number, rx: number, ry: number, rz: number, mat: number, o?: PrimOpts): this {
     const e = obj.matrixWorld.elements;
     const c = this.at(obj, cx, cy, cz);
     const V = this.V;
@@ -392,7 +481,8 @@ export class PixelFigure {
     // Camera right = row 0 of V's rotation, camera up = row 1.
     const a = this.vec().set(c.x + V[0] * ux + V[1] * uy, c.y + V[4] * ux + V[5] * uy, c.z + V[8] * ux + V[9] * uy);
     const b = this.vec().set(c.x - V[0] * ux - V[1] * uy, c.y - V[4] * ux - V[5] * uy, c.z - V[8] * ux - V[9] * uy);
-    return this.emit(a, b, B, B, mat, 0, o);
+    this.emit(a, b, B, B, mat, 0, o);
+    return this;
   }
 
   /** View depth (metres in front of the camera) of a world point. */
@@ -424,6 +514,7 @@ export class PixelFigure {
     if (this.curLayer < 0) this.layer();
     if (this.count >= MAX_PRIMS) {
       this.overflow++;
+      this.last = -1;
       return -1;
     }
     const i = this.count++;
@@ -454,9 +545,11 @@ export class PixelFigure {
     d[off + U0] = o?.u0 ?? 0;
     d[off + ULEN] = _w.subVectors(b, a).length();
     d[off + TONE] = (o?.tone ?? 0) + this.layerTone[this.curLayer];
-    d[off + PARTI] = o?.part ?? PART.NONE;
+    d[off + PARTI] = o?.part ?? this.layerPart[this.curLayer];
     // Min radius (texels are ≥ 1 retro px; layout re-applies it in texels).
     this.minPx[i] = o?.minPx ?? 0.55;
+    this.last = i;
+    this.lastS = 0.5 * (sa + sb);
     if (!(flags & PF.DECAL)) {
       this.minDepth = Math.min(this.minDepth, pa.z, pb.z);
       this.foot.expandByPoint(a);
@@ -553,8 +646,9 @@ export class PixelFigure {
         }
       }
     }
-    d.set(tmp.subarray(0, w * PRIM_FLOATS));
-    this.minPx.set(this.minPx2.subarray(0, w));
+    // (Whole-array copies: no subarray views allocated per redraw.)
+    d.set(tmp);
+    this.minPx.set(this.minPx2);
     this.count = w;
     return true;
   }
