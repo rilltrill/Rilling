@@ -16,7 +16,7 @@ import { D } from './layout';
 import { park } from './env';
 import { ventGun } from './alpha';
 import type { PixelFigure } from '../../../gameplay/pixel/figure';
-import { bossDPaintTyrant, bossDTyrantRig, type BossDTyrantRig } from '../../pixel/bossesDino';
+import { bossDCarcass, bossDPaintTyrant, bossDTyrantRig, type BossDTyrantRig } from '../../pixel/bossesDino';
 
 /**
  * THE TYRANT — a 12 m, 5–6 m tall Tyrannosaurus and the signature chase.
@@ -1742,7 +1742,8 @@ export class Tyrant extends Boss {
       // Leave the carcass in the world for the escape shot.
       if (!this.corpseKept) {
         this.corpseKept = true;
-        this.world.scene.attach(this.model);
+        // (Held by a carcass entity so ART: SPRITES keeps painting it; same model in 3D.)
+        this.world.add(bossDCarcass(this.world, this.model, (f) => this.paintPixels(f)));
       }
       return true;
     }

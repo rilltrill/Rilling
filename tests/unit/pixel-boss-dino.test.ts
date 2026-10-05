@@ -420,4 +420,40 @@ describe('PixelCast alignment: the Tyrant (d3)', () => {
     const s2 = f.sample((((h.x * 0.5 + 0.5) * GW - f.ox) / f.kpx | 0) + 0.5, (((h.y * 0.5 + 0.5) * GH - f.oy) / f.kpx | 0) + 0.5);
     expect(s2.layer).toBeGreaterThanOrEqual(0);
   });
+
+  it('after the death the carcass stays painted: a non-hostile, unshootable entity holds the body', () => {
+    const { world, camera, e, pin } = setup(0.5, -16, -0.5);
+    run(e, 0.5, pin);
+    e.flinchSide = 1;
+    const model = e.model as THREE.Object3D;
+    const hostile0 = world.hostileCount();
+    e.die(null);
+    for (let t = 0; t < 8 && !e.removed; t += 1 / 60) e.update(1 / 60);
+    expect(e.removed).toBe(true);
+    const carcass = world.entities.find((x) => x !== e && (x as Enemy).name === 'carcass') as Enemy | undefined;
+    expect(carcass, 'a carcass entity took the body over').toBeDefined();
+    expect(model.parent).toBe(carcass!.model);
+    // Gameplay: not hostile, never aimed at, nothing to shoot, outside every wave / slot query.
+    expect(carcass!.hostile).toBe(false);
+    expect(carcass!.assistable).toBe(false);
+    expect(carcass!.state).toBe('dying');
+    expect(world.shootables.objects.filter((o) => (o.userData.shot as { owner: Entity } | undefined)?.owner === carcass)).toEqual([]);
+    expect(world.hostileCount()).toBeLessThanOrEqual(hostile0);
+    // It is painted where the body lies (the boss's own painter, final pose: eyes shut).
+    world.scene.updateMatrixWorld(true);
+    camera.position.copy(JEEP);
+    camera.lookAt(model.getWorldPosition(new THREE.Vector3()).setY(1));
+    camera.updateMatrixWorld();
+    const f = new PixelFigure();
+    f.begin(camera, GW, GH);
+    expect(carcass!.paintPixels!(f)).toBe(true);
+    expect(f.layout(1, 24, 256)).toBe(true);
+    const c = (e.anchor as THREE.Object3D).getWorldPosition(new THREE.Vector3()).project(camera);
+    const s2 = f.sample((((c.x * 0.5 + 0.5) * GW - f.ox) / f.kpx | 0) + 0.5, (((c.y * 0.5 + 0.5) * GH - f.oy) / f.kpx | 0) + 0.5);
+    expect(s2.layer, 'the carcass body is painted').toBeGreaterThanOrEqual(0);
+    // It stays put and inert.
+    const p0 = model.getWorldPosition(new THREE.Vector3());
+    for (let t = 0; t < 1; t += 1 / 60) carcass!.update(1 / 60);
+    expect(model.getWorldPosition(new THREE.Vector3()).distanceTo(p0)).toBeLessThan(1e-6);
+  });
 });
