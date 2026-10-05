@@ -124,8 +124,8 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   for (const f of town.flora) {
     // Trees span their crown (never more than 1.15× as tall as the 3D tree); props keep the 3D one's height.
     if (f.key === 'streetTree') flora2d.fit(f.key, f.x, f.y, f.z, f.w, f.h, { sway: 0.07 });
-    // (Painted props are lit like the 3D props' glossy paint: a notch brighter than the trees.)
-    else flora2d.add(f.key, f.x, f.y, f.z, f.h, { tint: 1.35 });
+    // (Painted props are lit like the 3D props' glossy paint: the trees' gain undone, ~ the 3D props' brightness.)
+    else flora2d.add(f.key, f.x, f.y, f.z, f.h, { tint: 2 });
   }
   const vegPx = new THREE.Group();
   vegPx.name = 'z1-vegPx';

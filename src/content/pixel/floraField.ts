@@ -608,7 +608,7 @@ export class FloraField {
         .replace('#include <map_fragment>', FRAG_MAP)
         .replace('#include <lights_fragment_begin>', lights)
         .replace('#include <aomap_fragment>', FRAG_LIGHT)
-        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += uFRim * fRim * vFMisc.y;');
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += uFRim * fRim;');
     };
     m.customProgramCacheKey = () => 'floraBillboard2';
     m.name = 'flora-billboard';
