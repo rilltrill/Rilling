@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { atlasCode, stampInfo } from './stamps';
 
 /**
  * PixelCast figures: a character's sprite frame described as a short list of
@@ -23,8 +24,8 @@ import * as THREE from 'three';
 
 /** Most primitives one figure may hold (the GPU table has this many rows). */
 export const MAX_PRIMS = 160;
-/** Floats per primitive (5 RGBA32F texels). */
-export const PRIM_FLOATS = 20;
+/** Floats per primitive (6 RGBA32F texels; the last is its texel bounding box). */
+export const PRIM_FLOATS = 24;
 /** Most layers per figure (4 bits in the G-buffer). */
 export const MAX_LAYERS = 15;
 
@@ -46,6 +47,8 @@ export const PF = {
   FLAT: 64,
   /** Tone bias applies to the decal only (doesn't recolour, darkens/lightens the layer). */
   SHADE_ONLY: 128,
+  /** A hand-pixelled bitmap (`stamps.ts`), drawn screen-aligned by whole texels. */
+  STAMP: 256,
 } as const;
 
 /** Hit-part code of a primitive (alignment tests / gore). */
@@ -107,10 +110,24 @@ const AX = 0,
   U0 = 16,
   ULEN = 17,
   TONE = 18,
-  PARTI = 19;
+  PARTI = 19,
+  BB0 = 20,
+  BB1 = 21,
+  BB2 = 22,
+  BB3 = 23;
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
+const _ca = new THREE.Vector3();
+const _cb = new THREE.Vector3();
+
+/**
+ * Nearest view depth (metres) a primitive is drawn at: parts closer to the lens
+ * are cut there (see `emit`), so a tail sweeping past the camera stays sane.
+ */
+export const NEAR_CLIP = 0.3;
+/** Largest texel size (retro px): closer than that the sprite clips, it never turns into a mosaic. */
+export const MAX_KPX = 3;
 
 /** Polynomial smooth-min share of `b` (0..1) in a blend of radius k. */
 function shareB(a: number, b: number, k: number): number {
@@ -162,6 +179,8 @@ export class PixelFigure {
   count = 0;
   /** Primitives dropped because the table was full (stats). */
   overflow = 0;
+  /** Primitives cut (or dropped) at the near clip plane this frame. */
+  clipped = 0;
   /** Current layer index (−1 before the first `layer()`). */
   private curLayer = -1;
   private layerK: number[] = [];
@@ -195,6 +214,10 @@ export class PixelFigure {
   d1 = 1;
   /** Texels per metre at depth 1 (after layout). */
   texS = 1;
+  /** Layers after `layout`: count, [first, end) primitive per layer and each layer's texel bounding box. */
+  layers = 0;
+  readonly layerRange = new Float32Array(MAX_LAYERS * 2);
+  readonly layerBox = new Float32Array(MAX_LAYERS * 4);
   /** World-space footprint of the figure (x/z min/max) for the ground shadow. */
   readonly foot = new THREE.Box3();
   /** Painter hint: most texels the sprite may be tall/wide before texels grow. */
@@ -205,6 +228,8 @@ export class PixelFigure {
   dt = 0;
   /** Stage darkness 0 (day) .. 1 (night): painters may add glows. */
   night = 0;
+  /** Texel size (retro px) this sprite had last redraw: painters pick stamp sizes in texels. */
+  kHint = 1;
 
   private pool: THREE.Vector3[] = [];
   private poolN = 0;
@@ -218,6 +243,7 @@ export class PixelFigure {
   begin(cam: THREE.Camera & { projectionMatrix: THREE.Matrix4 }, gw: number, gh: number) {
     this.count = 0;
     this.overflow = 0;
+    this.clipped = 0;
     this.curLayer = -1;
     this.layerK.length = 0;
     this.layerTone.length = 0;
@@ -234,6 +260,7 @@ export class PixelFigure {
     this.minDepth = Infinity;
     this.foot.makeEmpty();
     this.maxTexels = 140;
+    this.kHint = 1;
   }
 
   // ─── Painter API ──────────────────────────────────────────────────────────
@@ -408,6 +435,67 @@ export class PixelFigure {
   }
 
   /**
+   * A hand-pixelled STAMP (`stamps.ts`): its anchor cell lands on world point
+   * `p`; one cell is `cellM` metres there, rounded to WHOLE texels (≥ 1) by
+   * `layout` — pixel art is never resampled. Materials fill the stamp's slots
+   * 0–3. Decal stamps (default) paint onto the current layer where it is covered
+   * (eyes, mouths); `solid` ones add coverage of their own (hands, claws) and get
+   * the layer's outline. `mirror` flips it left–right.
+   */
+  stamp(p: THREE.Vector3, cellM: number, id: number, m0: number, m1 = 0, m2 = 0, m3 = 0, mirror = false, solid = false): this {
+    if (this.curLayer < 0) this.layer();
+    if (this.count >= MAX_PRIMS || id < 0) {
+      if (id >= 0) this.overflow++;
+      this.last = -1;
+      return this;
+    }
+    const z = this.depth(p);
+    if (z < NEAR_CLIP) {
+      this.last = -1;
+      return this;
+    }
+    const i = this.count++;
+    const d = this.data;
+    const off = i * PRIM_FLOATS;
+    const pa = this.project(p, PA);
+    const sa = this.S / pa.z;
+    d[off + AX] = pa.x;
+    d[off + AY] = pa.y;
+    d[off + BX] = 0;
+    d[off + BY] = 0;
+    d[off + RA] = cellM * sa;
+    d[off + RB] = 0;
+    const zz = pa.z + this.layerDepth[this.curLayer];
+    d[off + ZA] = zz;
+    d[off + ZB] = zz;
+    d[off + MA] = m0;
+    d[off + MB] = m1;
+    d[off + SPLIT] = m2;
+    d[off + K] = 0;
+    d[off + LAYER] = this.curLayer;
+    d[off + FLAGS] = PF.STAMP | (solid ? 0 : PF.DECAL);
+    d[off + RAG] = mirror ? 1 : 0;
+    d[off + SEED] = id;
+    d[off + U0] = m3;
+    d[off + ULEN] = 0;
+    d[off + TONE] = this.layerTone[this.curLayer];
+    d[off + PARTI] = this.layerPart[this.curLayer];
+    this.minPx[i] = 0;
+    this.last = i;
+    this.lastS = sa;
+    if (solid) {
+      this.minDepth = Math.min(this.minDepth, pa.z);
+      this.foot.expandByPoint(p);
+    }
+    return this;
+  }
+
+  /** Texels one stamp cell of `cellM` metres at world point `p` would be (k = 1): pick stamp sizes. */
+  px(p: THREE.Vector3, m: number): number {
+    return m * this.pxPerM(p);
+  }
+
+  /**
    * Round cone whose cross-section is an ELLIPSE: at each end the radius drawn is
    * the projected half-width of the ellipse with semi-axes `rx`·ux and `ry`·uy
    * (world directions ⟂ the axis), across the axis as seen on screen. Torsos,
@@ -517,6 +605,28 @@ export class PixelFigure {
       this.last = -1;
       return -1;
     }
+    // Near-plane clip: a part reaching beside / behind the camera (a tail sweeping
+    // past the lens, a pounce) must not project to enormous coordinates — that would
+    // blow the whole sprite up into giant texels. Cut it at NEAR_CLIP (radius
+    // interpolated); drop it when it is wholly behind.
+    const za = this.depth(a);
+    const zc = this.depth(b);
+    if (za < NEAR_CLIP || zc < NEAR_CLIP) {
+      if (za < NEAR_CLIP && zc < NEAR_CLIP) {
+        this.clipped++;
+        this.last = -1;
+        return -1;
+      }
+      const t = (NEAR_CLIP - za) / (zc - za);
+      if (za < NEAR_CLIP) {
+        a = _ca.copy(a).lerp(b, t);
+        ra = ra + (rb - ra) * t;
+      } else {
+        b = _cb.copy(a).lerp(b, t);
+        rb = ra + (rb - ra) * t;
+      }
+      this.clipped++;
+    }
     const i = this.count++;
     const d = this.data;
     const off = i * PRIM_FLOATS;
@@ -588,7 +698,7 @@ export class PixelFigure {
     for (let i = 0; i < n; i++) {
       const o = i * PRIM_FLOATS;
       if (d[o + FLAGS] & PF.DECAL) continue;
-      const r = Math.max(d[o + RA], d[o + RB]) + d[o + RAG] + 1;
+      const r = d[o + FLAGS] & PF.STAMP ? d[o + RA] * 8 : Math.max(d[o + RA], d[o + RB]) + d[o + RAG] + 1;
       x0 = Math.min(x0, d[o + AX] - r, d[o + BX] - r);
       x1 = Math.max(x1, d[o + AX] + r, d[o + BX] + r);
       y0 = Math.min(y0, d[o + AY] - r, d[o + BY] - r);
@@ -605,11 +715,16 @@ export class PixelFigure {
     const cx1 = Math.min(x1, this.gw + clip);
     const cy1 = Math.min(y1, this.gh + clip);
     if (!(cx1 > cx0 && cy1 > cy0)) return false;
-    // Texel scale from the WHOLE figure's size (a character half off screen keeps its texels).
-    const size = Math.max(y1 - y0, (x1 - x0) * 0.75);
+    // Texel scale from the WHOLE figure's size (a character half off screen keeps its
+    // texels) — unless it reaches far past the screen (a body sweeping by the lens):
+    // then from what is on screen, so it never turns into a mosaic of giant blocks.
+    let size = Math.max(y1 - y0, (x1 - x0) * 0.75);
+    if (size > 1.5 * this.gh) size = Math.max(cy1 - cy0, (cx1 - cx0) * 0.75);
     let k = Math.max(1, Math.ceil(size / this.maxTexels - 0.08));
-    if (prevK === k - 1 && size < this.maxTexels * prevK * 1.12) k = prevK;
-    else if (prevK === k + 1 && size > this.maxTexels * k * 0.9) k = prevK;
+    // Hysteresis: a character hovering at the boundary doesn't pop between sizes.
+    if (prevK === k - 1 && size < this.maxTexels * prevK * 1.18) k = prevK;
+    else if (prevK === k + 1 && size > this.maxTexels * k * 0.85) k = prevK;
+    k = Math.min(k, MAX_KPX);
     k = Math.max(k, Math.ceil((Math.max(cx1 - cx0, cy1 - cy0) + 4) / maxSize));
     this.kpx = k;
     const gx0 = Math.floor(cx0 / k) - 1;
@@ -632,20 +747,84 @@ export class PixelFigure {
           if (d[o + LAYER] !== L || (d[o + FLAGS] & PF.DECAL ? 1 : 0) !== pass) continue;
           const t = w * PRIM_FLOATS;
           for (let j = 0; j < PRIM_FLOATS; j++) tmp[t + j] = d[o + j];
-          tmp[t + AX] = (d[o + AX] - this.ox) / k;
-          tmp[t + AY] = (d[o + AY] - this.oy) / k;
-          tmp[t + BX] = (d[o + BX] - this.ox) / k;
-          tmp[t + BY] = (d[o + BY] - this.oy) / k;
           const mp = this.minPx[i];
-          tmp[t + RA] = Math.max(d[o + RA] / k, mp);
-          tmp[t + RB] = Math.max(d[o + RB] / k, mp);
-          tmp[t + K] = d[o + K] / k;
-          tmp[t + RAG] = d[o + RAG] / k;
           this.minPx2[w] = mp;
+          if (d[o + FLAGS] & PF.STAMP) {
+            // Stamp: whole-texel cells, its anchor cell's centre on the anchor's texel.
+            const st = stampInfo(d[o + SEED]);
+            const cell = Math.max(1, Math.round(d[o + RA] / k));
+            const mir = d[o + RAG] > 0.5;
+            const ax = mir ? st.w - 1 - st.ax : st.ax;
+            const sx = Math.floor((d[o + AX] - this.ox) / k) - ax * cell - ((cell - 1) >> 1);
+            const sy = Math.floor((d[o + AY] - this.oy) / k) - st.ay * cell - ((cell - 1) >> 1);
+            tmp[t + AX] = sx;
+            tmp[t + AY] = sy;
+            tmp[t + BX] = st.x0;
+            tmp[t + BY] = st.y0;
+            tmp[t + RA] = cell;
+            tmp[t + RB] = st.w;
+            tmp[t + SEED] = st.h;
+            tmp[t + BB0] = sx;
+            tmp[t + BB1] = sy;
+            tmp[t + BB2] = sx + st.w * cell;
+            tmp[t + BB3] = sy + st.h * cell;
+            w++;
+            continue;
+          }
+          const ax = (d[o + AX] - this.ox) / k;
+          const ay = (d[o + AY] - this.oy) / k;
+          const bx = (d[o + BX] - this.ox) / k;
+          const by = (d[o + BY] - this.oy) / k;
+          const ra = Math.max(d[o + RA] / k, mp);
+          const rb = Math.max(d[o + RB] / k, mp);
+          const kk = d[o + K] / k;
+          const rag = d[o + RAG] / k;
+          tmp[t + AX] = ax;
+          tmp[t + AY] = ay;
+          tmp[t + BX] = bx;
+          tmp[t + BY] = by;
+          tmp[t + RA] = ra;
+          tmp[t + RB] = rb;
+          tmp[t + K] = kk;
+          tmp[t + RAG] = rag;
+          // Texel bounding box (the paint pass rejects a primitive with one fetch).
+          const reach = (d[o + FLAGS] & PF.TEETH ? 2 * Math.max(ra, rb) : Math.max(ra, rb)) + kk + rag + 1;
+          tmp[t + BB0] = Math.min(ax, bx) - reach;
+          tmp[t + BB1] = Math.min(ay, by) - reach;
+          tmp[t + BB2] = Math.max(ax, bx) + reach;
+          tmp[t + BB3] = Math.max(ay, by) + reach;
           w++;
         }
       }
     }
+    // Layer table: primitive range + bounding box of its solids (a texel outside
+    // it can't be covered by the layer, so the paint pass skips the whole layer).
+    const lr = this.layerRange;
+    const lb = this.layerBox;
+    let L = -1;
+    for (let i = 0; i < w; i++) {
+      const t = i * PRIM_FLOATS;
+      const li = tmp[t + LAYER];
+      if (li !== L) {
+        if (L >= 0) lr[L * 2 + 1] = i;
+        for (let q = L + 1; q <= li; q++) {
+          lr[q * 2] = i;
+          lr[q * 2 + 1] = i;
+          lb[q * 4] = 1e9;
+          lb[q * 4 + 1] = 1e9;
+          lb[q * 4 + 2] = -1e9;
+          lb[q * 4 + 3] = -1e9;
+        }
+        L = li;
+      }
+      if (tmp[t + FLAGS] & PF.DECAL) continue;
+      lb[L * 4] = Math.min(lb[L * 4], tmp[t + BB0]);
+      lb[L * 4 + 1] = Math.min(lb[L * 4 + 1], tmp[t + BB1]);
+      lb[L * 4 + 2] = Math.max(lb[L * 4 + 2], tmp[t + BB2]);
+      lb[L * 4 + 3] = Math.max(lb[L * 4 + 3], tmp[t + BB3]);
+    }
+    if (L >= 0) lr[L * 2 + 1] = w;
+    this.layers = L + 1;
     // (Whole-array copies: no subarray views allocated per redraw.)
     d.set(tmp);
     this.minPx.set(this.minPx2);
@@ -698,6 +877,26 @@ export class PixelFigure {
         cI = -1;
       }
       if (d[o + FLAGS] & PF.DECAL) continue;
+      if (d[o + FLAGS] & PF.STAMP) {
+        // Solid stamp: covered where its cell has a code (hard edge, no blend).
+        const cell = d[o + RA];
+        const sw = d[o + RB];
+        const qx = Math.floor((x - d[o + AX]) / cell);
+        const qy = Math.floor((y - d[o + AY]) / cell);
+        if (qx < 0 || qy < 0 || qx >= sw || qy >= d[o + SEED]) continue;
+        const cxs = d[o + RAG] > 0.5 ? sw - 1 - qx : qx;
+        if (!atlasCode(d[o + BX] + cxs, d[o + BY] + qy)) continue;
+        const z = d[o + ZA];
+        if (lD > 1e8) lZ = z;
+        lD = Math.min(lD, -0.5);
+        if (!cCov || z < cZ) {
+          cCov = true;
+          cZ = z;
+          cD = -0.5;
+          cI = i;
+        }
+        continue;
+      }
       const ax = d[o + AX];
       const ay = d[o + AY];
       const bx = d[o + BX];
@@ -737,4 +936,4 @@ const PB = { x: 0, y: 0, z: 0 };
 const SORT = new Float32Array(MAX_PRIMS * PRIM_FLOATS);
 
 /** Field offsets (the GPU shader reads the same layout). */
-export const PRIM_LAYOUT = { AX, AY, BX, BY, RA, RB, ZA, ZB, MA, MB, SPLIT, K, LAYER, FLAGS, RAG, SEED, U0, ULEN, TONE, PARTI } as const;
+export const PRIM_LAYOUT = { AX, AY, BX, BY, RA, RB, ZA, ZB, MA, MB, SPLIT, K, LAYER, FLAGS, RAG, SEED, U0, ULEN, TONE, PARTI, BB0, BB1, BB2, BB3 } as const;

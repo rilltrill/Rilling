@@ -1612,6 +1612,7 @@ export class SpriteArt {
     f.begin(cam, this.gridW, this.gridH);
     f.time = this.world.time;
     f.night = this.night;
+    f.kHint = s.k > 0 ? s.k : 1;
     const ok = root ? e.paintPixels!(f) : e.paintPart!(s.obj, f);
     if (!ok || f.count === 0) return null;
     // Something reaching through the lens: the 3D bake handles near-plane clipping.
@@ -1722,7 +1723,8 @@ export class SpriteArt {
         const fl = fog as THREE.Fog;
         a = THREE.MathUtils.clamp((dist - fl.near) / Math.max(1e-3, fl.far - fl.near), 0, 1);
       }
-      env.fogAmount = a;
+      // Painted sprites get half the fog scenery gets: the cast stays legible as icons down the street.
+      env.fogAmount = a * 0.5;
       toDisplay(fog.color, this.expU.value, env.fog);
     }
   }

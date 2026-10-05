@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS, type HitPart } from '../../src/core/types';
 import { Civilian } from '../../src/gameplay/Civilian';
 import type { Entity, ShotHit } from '../../src/gameplay/Entity';
 import type { Enemy } from '../../src/gameplay/Enemy';
-import { PixelFigure, PART, sdRoundCone, MAX_PRIMS, type FigureSample } from '../../src/gameplay/pixel/figure';
+import { PixelFigure, PART, sdRoundCone, MAX_PRIMS, MAX_KPX, NEAR_CLIP, type FigureSample } from '../../src/gameplay/pixel/figure';
 import { makeRamp, Mat, STEPS, materialTable } from '../../src/gameplay/pixel/materials';
 import { nullHud } from './sim';
 
@@ -248,6 +248,48 @@ describe('PixelCast alignment (sprite parts land on the hitboxes)', () => {
       expectAligned(check(world, camera, e), `${variant} pounce`);
     });
   }
+});
+
+describe('PixelCast near the camera (no giant texels)', () => {
+  it('a raptor whose tail sweeps past the lens keeps small texels', () => {
+    const { world, camera } = makeWorld();
+    const e = spawn(world, 'raptor', 0.35, -1.4, { variant: 'green' });
+    run(e, 0.1);
+    for (let i = 0; i <= 8; i++) {
+      // Turn it so the tail swings from behind the camera, past its side, to the far side.
+      e.root.rotation.y = Math.PI + (i / 8 - 0.5) * 2.4;
+      e.root.position.set(0.35 + (i - 4) * 0.08, 0, -1.4);
+      run(e, 0.02);
+      world.scene.updateMatrixWorld(true);
+      aim(camera);
+      const f = new PixelFigure();
+      f.begin(camera, GW, GH);
+      expect(e.paintPixels!(f)).toBe(true);
+      if (!f.layout(1, 24, 256)) continue;
+      expect(f.kpx, `sweep ${i}`).toBeLessThanOrEqual(3);
+      expect(f.W).toBeLessThanOrEqual(256);
+      expect(f.H).toBeLessThanOrEqual(256);
+      expect(f.minDepth).toBeGreaterThanOrEqual(NEAR_CLIP - 1e-6);
+    }
+  });
+
+  it('a walker stepping in to 1 m stays a sprite with ≤ 3 px texels', () => {
+    const { world, camera } = makeWorld();
+    const e = spawn(world, 'walker', 0.1, -1.0, { variant: 'worker' });
+    run(e, 0.3);
+    e.root.position.set(0.1, 0, -1.0);
+    world.scene.updateMatrixWorld(true);
+    aim(camera);
+    const f = new PixelFigure();
+    f.begin(camera, GW, GH);
+    expect(e.paintPixels!(f)).toBe(true);
+    expect(f.layout(1, 24, 256)).toBe(true);
+    expect(f.kpx).toBeLessThanOrEqual(MAX_KPX);
+    // The head is still drawn as head right in front of the lens.
+    const head = toNdc(camera, (e as unknown as { r: { head: THREE.Object3D } }).r.head, 0.13);
+    const s2 = f.sample((((head.x * 0.5 + 0.5) * GW - f.ox) / f.kpx | 0) + 0.5, (((head.y * 0.5 + 0.5) * GH - f.oy) / f.kpx | 0) + 0.5);
+    expect(s2.part).toBe(PART.HEAD);
+  });
 });
 
 function toNdc(camera: THREE.Camera, obj: THREE.Object3D, y: number): THREE.Vector3 {

@@ -56,6 +56,8 @@ export const PAT = {
   CAMO: 13,
   /** Exposed ribs: bone bars across `u` over gore. */
   RIBS: 14,
+  /** Armour plate: brushed metal, scratches, rivets. */
+  PLATE: 15,
 } as const;
 export type PatternId = (typeof PAT)[keyof typeof PAT];
 
@@ -311,6 +313,10 @@ export const Mat = {
         spec: 0.15,
       }),
     );
+  },
+  /** Riot armour / steel plates: scratched, riveted, a hard glint. */
+  plate(hex: number): number {
+    return material(`plate|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.62, dark: 0.32, sat: 1.2 }), PAT.PLATE, { strength: 0.8, scale: 0.09, spec: 0.9, dither: 0.06 }));
   },
   /** Dark mouth interior / throat. */
   mouth(hex = 0x3a0808): number {
