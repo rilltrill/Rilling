@@ -1216,6 +1216,7 @@ const LUNGE_MAX_DROP = 1.5;
 
 /** Fresh infected: sprints in hunched, lunges, low hp. */
 export class Runner extends Zombie {
+  protected override pixelArt = true;
   private lunged = false;
   private lungeFrom = new THREE.Vector3();
   private lungeTo = new THREE.Vector3();

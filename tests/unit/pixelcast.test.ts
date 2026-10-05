@@ -213,6 +213,16 @@ describe('PixelCast alignment (sprite parts land on the hitboxes)', () => {
     expect(s2.part).toBe(PART.HEAD);
   });
 
+  it('runner: sprinting, winding up', () => {
+    const { world, camera } = makeWorld();
+    const e = spawn(world, 'runner', -0.4, -5, { variant: 'office' });
+    run(e, 0.3);
+    expectAligned(check(world, camera, e), 'runner run');
+    e.setState('windup');
+    run(e, e.windup * 0.7);
+    expectAligned(check(world, camera, e), 'runner windup');
+  });
+
   it('civilian worker with hands up', () => {
     const { world, camera } = makeWorld();
     const c = new Civilian(world, new THREE.Vector3(-0.3, 0, -4), 'world', 'worker');

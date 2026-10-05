@@ -931,6 +931,8 @@ export class SpriteArt {
     world.scene.add(this.group);
     world.fx.setGibSprites(true, this.targetU);
     this.cast = new PixelCast(renderer);
+    // Two small programs: compile now, so even a run without warm-up (attract demo) doesn't hitch.
+    this.cast.precompile();
   }
 
   /**

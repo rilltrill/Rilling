@@ -191,9 +191,13 @@ In SPRITES, characters that have a **painter** are drawn as hand-made pixel art 
 bloaters, compys, dilos, pteros, trikes, projectiles, pickups) still uses the older live
 **impostor bake** (its 3D model re-rendered into pixels) until someone paints it.
 Pilots painted today: **walker** (every outfit; office / worker / nurse are the reference),
-**civilian** (all variants; the z1 worker is the reference) and **raptor** (all palettes
-incl. the red alpha; d1/d2/d3 subclasses inherit it). `RiotWalker` opts out (its armour
-plates aren't painted yet).
+**runner** (same humanoid painter), **civilian** (all variants; the z1 worker is the
+reference) and **raptor** (all palettes incl. the red alpha; d1/d2/d3 subclasses inherit
+it). `RiotWalker` opts out (its armour plates aren't painted yet). Next up for the
+humanoid painter: crawler (legless halves: `HumanPose.legless` + a waist stump), brute
+(riot plates as `PART.ARMOR` prims), spitter (glowing throat sac as a `PF.GLOW` weak part),
+bloater (belly ellipsoid + pustule glows), the bosses; for the theropod painter: compy
+(compact spec), dilo (frill fans as their own layer).
 
 ### How it works
 - The invisible 3D rig keeps animating and stays the hitbox (raycasts, aim assist,
