@@ -55,7 +55,12 @@ const _box = new THREE.Box3();
 const ray = new THREE.Raycaster();
 const sample: FigureSample = { layer: -1, prim: -1, part: 0, mat: 0, depth: 0 };
 
-function check(world: World, camera: THREE.PerspectiveCamera, e: Entity): Check {
+/**
+ * `skip`: hitboxes left out of the coverage grid (still in the centre checks) — the
+ * pickups' halo ring is drawn as the art asks, a 1–2 px line, thinner than its 6 cm
+ * tube hitbox (the rest of the tube stays shootable: generous, never a miss on art).
+ */
+function check(world: World, camera: THREE.PerspectiveCamera, e: Entity, skip?: (o: THREE.Object3D) => boolean): Check {
   world.scene.updateMatrixWorld(true);
   camera.updateMatrixWorld();
   const f = new PixelFigure();
@@ -65,11 +70,13 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity): Check 
   expect(f.overflow).toBe(0);
   expect(f.layout(1, 24, 256)).toBe(true);
   const boxes = world.shootables.objects.filter((o) => (o.userData.shot as { owner: Entity } | undefined)?.owner === e);
-  const shoot = (ndc: THREE.Vector2): number => {
+  const area = skip ? boxes.filter((o) => !skip(o)) : boxes;
+  const shootIn = (ndc: THREE.Vector2, set: THREE.Object3D[]): number => {
     ray.setFromCamera(ndc, camera);
-    const hits = ray.intersectObjects(boxes, false);
+    const hits = ray.intersectObjects(set, false);
     return hits.length ? PART_OF[(hits[0].object.userData.shot as { part: HitPart }).part] : 0;
   };
+  const shoot = (ndc: THREE.Vector2): number => shootIn(ndc, boxes);
   let centres = 0;
   const miss: string[] = [];
   for (const b of boxes) {
@@ -94,7 +101,7 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity): Check 
   for (let y = -6.5; y < f.H + 6; y += 1) {
     for (let x = -6.5; x < f.W + 6; x += 1) {
       const ndc = new THREE.Vector2(((f.ox + x * f.kpx) / GW) * 2 - 1, ((f.oy + y * f.kpx) / GH) * 2 - 1);
-      const want = shoot(ndc) > 0;
+      const want = shootIn(ndc, area) > 0;
       f.sample(x, y, sample);
       const got = sample.layer >= 0;
       if (want) hit++;
@@ -107,6 +114,7 @@ function check(world: World, camera: THREE.PerspectiveCamera, e: Entity): Check 
 
 function expectCovered(c: Check, label: string, o: { cover?: number; ratio?: number } = {}) {
   const info = `${label}: centres ${c.centres - c.miss.length}/${c.centres} [${c.miss.join(' ')}] cover ${c.cover.toFixed(2)} ratio ${c.ratio.toFixed(2)} prims ${c.prims}`;
+  if (process.env.CAST_REPORT) console.log(info);
   expect(c.centres, info).toBeGreaterThan(0);
   expect(c.miss, info).toEqual([]);
   expect(c.cover, info).toBeGreaterThanOrEqual(o.cover ?? 0.85);
@@ -130,7 +138,11 @@ describe('PixelCast pickups (painted, covering their hitboxes)', () => {
       ] as const) {
         p.root.position.z = z;
         for (let a = 0; a < t; a += 1 / 60) p.update(1 / 60);
-        expectCovered(check(world, camera, p), `${kind} t${t} z${z}`);
+        expectCovered(
+          check(world, camera, p, (o) => o.name === 'halo'),
+          `${kind} t${t} z${z}`,
+          { ratio: 1.9 },
+        );
       }
     });
   }
@@ -177,7 +189,8 @@ const THROWN: Record<string, { make: Maker; cover?: number; ratio?: number }> = 
   'Butcher barrel': { make: (w) => ({ mesh: boss<{ thrownBarrel: THREE.Mesh }>(w, 'butcher').thrownBarrel.clone(), size: 0.5, spin: 5, source: 'THE BUTCHER', burst: 'explode', color: 0xc22a20 }) },
   'Butcher door': { make: (w) => ({ mesh: boss<{ thrownDoor: THREE.Mesh }>(w, 'butcher').thrownDoor.clone(), size: 0.6, spin: 6, source: 'THE BUTCHER', burst: 'debris', color: 0xe8e8e0 }) },
   'Carnotaur boulder': { make: (w) => ({ mesh: boss<{ thrownRock(): THREE.Object3D }>(w, 'carnotaur').thrownRock(), size: 0.5, color: 0x8a7d6a, spin: 5, burst: 'debris', source: 'HORNED DEVIL' }), ratio: 1.9 },
-  'Tyrant palm': { make: (w) => ({ mesh: boss<{ debrisMesh(k: number): THREE.Object3D }>(w, 'tyrant').debrisMesh(0), size: 0.55, color: 0x6e5d4a, spin: 4, burst: 'debris', source: 'THE TYRANT', sfxDestroy: 'wood_break' }) },
+  // (Comb fronds: leaflets with gaps over the 3D's solid frond boards — a shot in a gap still hits.)
+  'Tyrant palm': { make: (w) => ({ mesh: boss<{ debrisMesh(k: number): THREE.Object3D }>(w, 'tyrant').debrisMesh(0), size: 0.55, color: 0x6e5d4a, spin: 4, burst: 'debris', source: 'THE TYRANT', sfxDestroy: 'wood_break' }), cover: 0.72 },
   'Tyrant rock': { make: (w) => ({ mesh: boss<{ debrisMesh(k: number): THREE.Object3D }>(w, 'tyrant').debrisMesh(1), size: 0.55, color: 0x8a7d6a, spin: 4, burst: 'debris', source: 'THE TYRANT' }), ratio: 1.9 },
   'Tyrant panel': { make: (w) => ({ mesh: boss<{ debrisMesh(k: number): THREE.Object3D }>(w, 'tyrant').debrisMesh(2), size: 0.55, color: 0x8a7d6a, spin: 4, burst: 'debris', source: 'THE TYRANT' }) },
   'falling branch': {
