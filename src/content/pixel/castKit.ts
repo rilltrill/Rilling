@@ -27,8 +27,33 @@ const FLAT = 0.2 + 0.76 * LZ;
 /** Camera basis of the current redraw (world → view directions): right, up, back. */
 const CV = { rx: 1, ry: 0, rz: 0, ux: 0, uy: 1, uz: 0, bx: 0, by: 0, bz: 1 };
 
+/**
+ * The scene's key light (world direction toward the light) blended into the
+ * face tones of hard props: `k` 0 = the sprite artist's fixed screen light only
+ * (default; every `castView` resets to it), 1 = the scene's sun and sky alone.
+ */
+const WL = { k: 0, x: 0, y: 1, z: 0 };
+
+/**
+ * Light this redraw's boxes and cylinders partly from the scene's key light
+ * (`dir` = world direction toward it): a tumbling car shows its belly lit by the
+ * sunset when it turns it to the sun, not the fixed sprite light's shadow step.
+ */
+export function castWorldLight(dir: THREE.Vector3 | null, k = 0.6) {
+  if (!dir || dir.lengthSq() < 1e-8) {
+    WL.k = 0;
+    return;
+  }
+  const l = dir.length();
+  WL.x = dir.x / l;
+  WL.y = dir.y / l;
+  WL.z = dir.z / l;
+  WL.k = k;
+}
+
 /** Take the camera basis for this redraw (call once at the top of a prop painter). */
 export function castView(cam: THREE.Camera) {
+  WL.k = 0;
   const e = cam.matrixWorld.elements;
   const r = Math.hypot(e[0], e[1], e[2]) || 1;
   const u = Math.hypot(e[4], e[5], e[6]) || 1;
@@ -63,7 +88,13 @@ export function faceTone(n: THREE.Vector3, gain = 1): number {
   const vz = n.x * CV.bx + n.y * CV.by + n.z * CV.bz;
   const d = vx * LX + vy * LY + vz * LZ;
   // A little wrap so a face turned away is a dark step, not black.
-  const t = 0.22 + 0.74 * Math.max((d + 0.18) / 1.18, 0);
+  let t = 0.22 + 0.74 * Math.max((d + 0.18) / 1.18, 0);
+  if (WL.k > 0) {
+    // Scene light: the key light's wrap-lit share plus the sky above / the ground's bounce below.
+    const dw = n.x * WL.x + n.y * WL.y + n.z * WL.z;
+    const tw = 0.24 + 0.56 * Math.max((dw + 0.25) / 1.25, 0) + 0.14 * (0.5 + 0.5 * n.y);
+    t += (tw - t) * WL.k;
+  }
   return (t - FLAT) * gain;
 }
 
@@ -143,8 +174,13 @@ const FACES: readonly (readonly number[])[] = [
 const FACE_AXIS = [0, 0, 1, 1, 2, 2];
 const FACE_SIGN = [1, -1, 1, -1, 1, -1];
 
-/** Result of `box`: which faces were drawn (bit i = face i) and their tones. */
-export const BOX = { mask: 0, tone: [0, 0, 0, 0, 0, 0] };
+/** Result of `box`: which faces were drawn (bit i = face i), their tones and how squarely each faces the camera (0..1). */
+export const BOX = { mask: 0, tone: [0, 0, 0, 0, 0, 0], facing: [0, 0, 0, 0, 0, 0] };
+
+/** Face `i` of the last `box` faces the camera at least `min` (details drawn on a grazing face smear across its neighbours). */
+export function faceShown(i: number, min = 0.22): boolean {
+  return (BOX.mask & (1 << i)) !== 0 && BOX.facing[i] >= min;
+}
 
 const _n = new THREE.Vector3();
 const _c = new THREE.Vector3();
@@ -163,7 +199,9 @@ export function box(f: PixelFigure, obj: THREE.Object3D, cx: number, cy: number,
     const sg = FACE_SIGN[i];
     const n = f.dir(obj, ax === 0 ? sg : 0, ax === 1 ? sg : 0, ax === 2 ? sg : 0);
     _c.set(cx + (ax === 0 ? sg * hx : 0), cy + (ax === 1 ? sg * hy : 0), cz + (ax === 2 ? sg * hz : 0)).applyMatrix4(obj.matrixWorld);
-    if (f.facing(_c, n) < 0.02) continue;
+    const fc = f.facing(_c, n);
+    BOX.facing[i] = fc;
+    if (fc < 0.02) continue;
     mask |= 1 << i;
     const t = faceTone(n, gain);
     BOX.tone[i] = t;

@@ -4,7 +4,7 @@ import type { World } from './World';
 import { Kit } from '../content/kit/ModelKit';
 import type { SfxName } from '../audio/names';
 import type { PixelFigure } from './pixel/figure';
-import { paintThrown, thrownKind, thrownState, type ThrownKind, type ThrownState } from '../content/pixel/castThrown';
+import { paintThrown, sceneKeyLight, thrownKind, thrownState, type ThrownKind, type ThrownState } from '../content/pixel/castThrown';
 
 export interface ProjectileOptions {
   /** Launch point in WORLD coordinates. */
@@ -131,6 +131,7 @@ export class Projectile extends Entity {
     if (!st) {
       st = this.px = thrownState(this.mesh, o.color, o.size, (++thrownSeq * 0.618) % 1);
       thrownKind(st, { color: o.color, size: o.size, burst: o.burst, source: o.source, pixel: o.pixel, hasMesh: this.custom });
+      st.light = sceneKeyLight(this.world.scene);
       // Translucent parts (a bile skin) are painted, not kept as live 3D over the sprite.
       this.mesh.traverse((m) => {
         const mat = (m as THREE.Mesh).material as THREE.Material | undefined;

@@ -208,14 +208,46 @@ function writeRow(id: number, m: PixelMaterial) {
 export function material(key: string, make: () => PixelMaterial): number {
   const hit = byKey.get(key);
   if (hit !== undefined) return hit;
-  if (mats.length >= MAX_MATERIALS) return 1;
   const m = make();
+  if (mats.length >= MAX_MATERIALS) {
+    // Full (a long stage's walkers each bring their own skin and cloth shades): the
+    // closest existing material stands in for this key from now on — never id 1's colour.
+    const near = closestMaterial(m);
+    byKey.set(key, near);
+    return near;
+  }
   mats.push(m);
   const id = mats.length;
   byKey.set(key, id);
   writeRow(id, m);
   version++;
   return id;
+}
+
+/**
+ * Id of the existing material nearest to `m` (base colour in OKLab; a glow only
+ * stands in for a glow, and a matching pattern is preferred). The full-table path.
+ */
+function closestMaterial(m: PixelMaterial): number {
+  const [L0, C0, h0] = hexToOklch(m.ramp[BASE_STEP] ?? m.ramp[0]);
+  const a0 = C0 * Math.cos((h0 * Math.PI) / 180);
+  const b0 = C0 * Math.sin((h0 * Math.PI) / 180);
+  let best = 1;
+  let bd = Infinity;
+  for (let i = 0; i < mats.length; i++) {
+    const o = mats[i];
+    const [L, C, h] = hexToOklch(o.ramp[BASE_STEP] ?? o.ramp[0]);
+    const da = C * Math.cos((h * Math.PI) / 180) - a0;
+    const db = C * Math.sin((h * Math.PI) / 180) - b0;
+    let d = (L - L0) * (L - L0) + da * da + db * db;
+    if (o.glow !== m.glow) d += 10;
+    if (o.pattern !== m.pattern) d += 0.0025;
+    if (d < bd) {
+      bd = d;
+      best = i + 1;
+    }
+  }
+  return best;
 }
 
 /** The material behind an id (undefined for 0 / unknown). */
