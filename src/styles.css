@@ -3032,10 +3032,16 @@ button {
 }
 
 .hud-boss-head {
-  display: flex;
+  display: inline-flex;
+  max-width: 100%;
   align-items: center;
   gap: 6px;
   margin-bottom: 4px;
+  /* A dark nameplate: signage in the scene behind the bar (e.g. ST. MERCY's lobby sign)
+     must not read as part of the boss name. */
+  padding: 2px 8px 2px 4px;
+  background: rgba(4, 6, 24, 0.85);
+  box-shadow: 2px 2px 0 #000;
 }
 
 .hud-boss-skull {
