@@ -27,8 +27,11 @@ import './boss';
  *
  * Pressure curve: the finale's regular fights carry real threat through the
  * alpha pack (see alpha.ts: red = alpha, it takes sustained fire to break its
- * pounce and its pack pounces with it), so the Tyrant isn't the only thing
- * that can hurt you; the Tyrant itself is tuned in boss.ts (TYRANT_TUNE).
+ * pounce and its pack pounces with it) and the storm (lightning drops burning
+ * branches while the road ambushes' rings close), so the Tyrant isn't the only
+ * thing that can hurt you; the Tyrant itself is tuned in boss.ts (TYRANT_TUNE).
+ * Calibrated against the human-like bot (tests/unit/humanbot.test.ts, seeds
+ * 1–18): ≈ 3.5–4 hearts lost at σ 0.03, ≈ 6.5–7.5 at σ 0.05.
  */
 
 let viewModel: JeepViewModel | null = null;

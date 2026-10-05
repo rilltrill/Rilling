@@ -12,6 +12,7 @@ import { car } from './props';
 import { z3Scene } from './env';
 import { BRIDGE } from './scenery';
 import { D } from './layout';
+import { ventGun } from './minions';
 
 /**
  * THE BEHEMOTH — a 7.6 m construction worker turned giant, rebar speared
@@ -23,9 +24,10 @@ import { D } from './layout';
  *
  *  Phase 1  throws cars (shootable, explode) · double-fist bridge slam
  *  Phase 2  roars, rips a lamp post off the railing → club swings, concrete
- *           slabs, runners leap off the bridge girders
+ *           slabs, runners leap off the bridge girders — and when one of them
+ *           goes for you, the giant piles in with a slam (THE PINCER)
  *  Phase 3  enraged: leaps onto the deck right behind the truck and reaches
- *           for you, faster throws, crawlers drop off its back
+ *           for you, faster throws, runners drop off its back
  *
  * Every attack has a ring telegraph and can be interrupted by pumping the weak
  * points during the wind-up (or the thrown object can be shot down).
@@ -76,6 +78,12 @@ const _q = new THREE.Quaternion();
 
 /** Highest launch point of a thrown car/slab above the deck (keeps the flight out from under the boss bar). */
 const THROW_MAX_Y = 5.6;
+/**
+ * The giant's difficulty dials (measured with tests/unit/humanbot.test.ts — see the stage header).
+ *   interruptNeed  weak-point damage that staggers a wind-up, per phase (Behemoth.interruptNeed)
+ *   pincerLag      seconds from a runner's ring opening to the pincer slam (Behemoth.pincerCue)
+ */
+export const BEHEMOTH_TUNE = { interruptNeed: [7, 8, 9], pincerLag: 0.25 };
 
 /**
  * Boss projectile. The base Projectile aims 0.9 m along rig −Z (straight ahead
@@ -83,6 +91,11 @@ const THROW_MAX_Y = 5.6;
  * point just in front of where the camera actually looks. The launch point is
  * kept at most THROW_MAX_Y above the deck so that, with the low arc, the whole
  * flight crosses the middle of the screen instead of skimming the top edge.
+ *
+ * Its flight IS its ring, so the twin gun can never be locked out under it: the
+ * giant vents the gun as it lets go (Behemoth.release), and should flat-out fire
+ * still overheat it before the impact (a 1.95 s car at a 120 Hz frame rate), the
+ * flight vents it again — every throw can be shot down for its whole flight.
  */
 class Throwable extends Projectile {
   private onKill: (() => void) | null;
@@ -107,6 +120,10 @@ class Throwable extends Projectile {
     if (_d.lengthSq() < 1e-6) return;
     _d.normalize();
     to.set(rig.offset.x + _d.x * 1.1 - _d.z * w.rng.spread(0.35), rig.eyeHeight - 0.15 + w.rng.spread(0.15), rig.offset.z + _d.z * 1.1 + _d.x * w.rng.spread(0.35));
+  }
+  override update(dt: number): void {
+    if (this.world.weapons.overheated) ventGun(this.world);
+    super.update(dt);
   }
   override onShot(hit: ShotHit): ShotOutcome {
     const r = super.onShot(hit);
@@ -184,6 +201,8 @@ export class Behemoth extends Boss {
   private roared = 0;
   private minionT = 10;
   private minionFlip = false;
+  /** A runner's ring just opened: the next attack is a slam right on its heels (see pincerCue). */
+  private pincer = false;
   private leapFrom = new THREE.Vector3();
   private leapTo = new THREE.Vector3();
   private focus = new THREE.Object3D();
@@ -544,15 +563,17 @@ export class Behemoth extends Boss {
   }
 
   /**
-   * Weak-point damage needed to stagger a wind-up: 8–10 twin-gun rounds (0.8)
-   * on the wound/head, ≈0.6–0.75 s of on-target fire inside a 1.0–1.5 s ring.
-   * Answer the ring on the glow and it breaks with time to spare; spray the body,
-   * chase a runner first or react late and it lands. (At 11–13 a loose aim lost
-   * ~6 hearts to the giant alone on top of the riot-brute stops; those stops and
-   * the runners that leap aboard mid-fight now carry that pressure.)
+   * Weak-point damage needed to stagger a wind-up (BEHEMOTH_TUNE.interruptNeed,
+   * 7/8/9 by phase): 5, 5 and 6 twin-gun rounds on any glowing weak point —
+   * wound, eyes, split skull — at 1.6 a round, i.e. ~0.5 s of on-target fire
+   * inside a 1.0–1.5 s ring (the World vents an overheated gun as the ring
+   * opens). Answer the ring on the glow and it breaks in time; spray the body or
+   * react late and it lands. The giant's real test is the pincer (pincerCue):
+   * the same burst, right after dropping a runner.
    */
   private interruptNeed() {
-    return [6, 7, 8][this.phase] ?? 8;
+    const need = BEHEMOTH_TUNE.interruptNeed;
+    return need[Math.min(this.phase, need.length - 1)];
   }
 
   protected override onPhase(phase: number): void {
@@ -717,6 +738,9 @@ export class Behemoth extends Boss {
       },
     );
     w.add(p);
+    // The windup's own vent (World.checkBossWindup) was ~1.4 s ago: held fire would lock the
+    // gun out again mid-flight. Vent it now so the whole flight can be shot at.
+    ventGun(w);
     w.audio.play('whoosh', { volume: 1, pitch: 0.6 });
   }
 
@@ -800,6 +824,10 @@ export class Behemoth extends Boss {
           break;
         }
         if (t >= this.chaseFor) this.pickAttack();
+        else if (this.phase >= 1 && t > 0.6 && !this.pincer && this.pincerCue()) {
+          this.pincer = true;
+          this.chaseFor = t + BEHEMOTH_TUNE.pincerLag;
+        }
         break;
       }
       case 'roar': {
@@ -985,13 +1013,40 @@ export class Behemoth extends Boss {
 
   private backToChase(pause: number) {
     this.chaseFor = pause + this.world.rng.range(0.4, 1.2);
+    this.pincer = false;
     this.go('chase');
+  }
+
+  /**
+   * THE PINCER (phases 2–3), the finale's stop pattern brought to the boss: a
+   * runner on the deck behind the truck has just started its ring (≤ 0.3 of the
+   * way in), and the giant piles in with a slam `pincerLag` later. Two rings in a
+   * row, both framed mid-screen: drop the runner (a headshot or two), then pump
+   * the wound — the slam ring opens after the runner's and outlasts it by
+   * ~0.5–0.75 s, and the World vents the gun as it opens. From the runner's ring:
+   * ~0.3 s to react, a round or two to drop it, ~0.5 s on the glow — done ~0.3 s
+   * before a phase-3 slam lands (1.25 s ring) even at a 30 fps fire rate. A
+   * player who answers both in order breaks both; one who freezes on either
+   * eats one of them.
+   */
+  private pincerCue(): boolean {
+    for (const e of this.world.enemies()) {
+      if (e.isBoss || e.state !== 'windup' || !e.telegraph) continue;
+      if (e.telegraph.progress < 0.3) return true;
+    }
+    return false;
   }
 
   private pickAttack() {
     const r = this.world.rng;
     this.attacks++;
     let next: BState;
+    if (this.pincer) {
+      this.pincer = false;
+      this.lastAttack = 'slamWind';
+      this.go('slamWind');
+      return;
+    }
     if (this.phase === 0) {
       next = this.lastAttack === 'grab' && r.chance(0.6) ? 'slamWind' : r.chance(0.7) ? 'grab' : 'slamWind';
     } else if (this.phase === 1) {

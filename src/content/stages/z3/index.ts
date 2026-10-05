@@ -19,10 +19,13 @@ import './minions';
  * bridge → THE BEHEMOTH climbs onto the bridge and chases the truck.
  *
  * As the campaign finale it is the hardest DEAD ZONE stage, tuned with the
- * human-like bot (tests/unit/humanbot.test.ts, seeds 1–12): ≈ 3.5–4 hearts lost
- * at σ 0.03 and ≈ 7–7.5 at σ 0.05 (the challenge of the build the owner played),
- * spread over the riot-brute stops and the boss — the army barricade is the
- * heaviest stop (≈ 1.5 at σ 0.03), and no regular fight regularly costs 3+.
+ * human-like bot (tests/unit/humanbot.test.ts, seeds 1–18): ≈ 3.3 hearts lost
+ * at σ 0.03 and ≈ 7.3 at σ 0.05 (the challenge of the build the owner played,
+ * without its overheat-lockout hits). A clean aim pays for each riot brute it
+ * doesn't break in time (≈ 1 a stop, 2 at the army barricade, never 3+) and now
+ * and then for the giant's pincer (a runner's ring, then a slam on its heels —
+ * boss.ts pincerCue); a loose aim also pays the giant's wind-ups, which only a
+ * weak-point burst stops (BEHEMOTH_TUNE).
  */
 
 /** World position at rail distance d, x metres right, y up (for `world: true` spawns/looks). */
@@ -41,24 +44,30 @@ let viewModel: TruckViewModel | null = null;
  * packs that creep up both flanks out of sight and rush together, spitters on
  * the overpass deck, and at every stop a riot brute that can't be staggered by
  * the light rounds. Its pack slips aboard first and lies in wait; the brute
- * vaults in close and the pack comes round both sides with it, so the short
- * runner rings land while the big one soaks fire and heats the barrels. The
- * brute's smash ring closes on its split, glowing skull ("SHOOT THE HEAD!"):
- * the head takes ×2.5, the riot plates only dent (RIOT_ARMOR_DENT), so a
- * body-aimer still gets there, just slower. A player who hosepipes the nearest
- * target gets punished; one who answers the rings in order (and feathers the
- * trigger to keep the barrels cool) stays clean. Every attack still starts
- * framed in the middle band of the screen with a clear line of fire.
+ * vaults in close and the pack comes round both sides with it, so the player
+ * has to answer the short runner rings AND break the big one in time. The
+ * brute's smash ring (2 s) closes on its split, glowing skull ("SHOOT THE
+ * HEAD!"): the head takes ×2.5, the riot plates only dent (RIOT_ARMOR_DENT).
+ * Head fire started within 0.4 s of the ring opening kills even a fresh one
+ * (~19 rounds) in time; a body-aimer, or one who hosepipes the runners first,
+ * eats the smash.
+ * That is the stops' whole threat (riot_brute is the dial). No attack here
+ * rides on the gun overheating: every finale enemy (minions.ts — hence the
+ * finale_* roster ids) holds its ring while the barrels are locked out
+ * (gunLocked), and what can't hold still once it's under way — a crawler's leap,
+ * a spitter's glob, the giant's thrown car — vents a hot gun as it sets off
+ * (ventGun). Runner and brute rings also start framed in the middle band of the
+ * screen with a clear line of fire.
  */
 const TOUGH: Record<string, number> = {
-  walker: 1.6,
+  finale_walker: 1.6,
   truck_runner: 1.6,
   pack_runner: 2,
-  crawler: 1.4,
+  finale_crawler: 1.4,
   roadside_crawler: 1.4,
-  riot_brute: 1.8,
-  bloater: 1.4,
-  spitter: 1.4,
+  riot_brute: 2.7,
+  finale_bloater: 1.4,
+  finale_spitter: 1.4,
   deck_spitter: 1.4,
 };
 
@@ -132,18 +141,18 @@ const beats: Beat[] = toughen([
     waves: [
       {
         spawns: [
-          { type: 'walker', pos: [-2.8, 0, 10.5], opts: { variant: 'cop' } },
-          { type: 'walker', pos: [2.2, 0, 12.5], t: 0.5, opts: { variant: 'civilian' } },
-          { type: 'walker', pos: [-3.0, 0, 17], t: 0.9, opts: { variant: 'office' } },
-          { type: 'crawler', pos: [1.6, 0, 8.5], entry: 'rise', t: 1.6 },
+          { type: 'finale_walker', pos: [-2.8, 0, 10.5], opts: { variant: 'cop' } },
+          { type: 'finale_walker', pos: [2.2, 0, 12.5], t: 0.5, opts: { variant: 'civilian' } },
+          { type: 'finale_walker', pos: [-3.0, 0, 17], t: 0.9, opts: { variant: 'office' } },
+          { type: 'finale_crawler', pos: [1.6, 0, 8.5], entry: 'rise', t: 1.6 },
         ],
       },
       {
         start: { remaining: 1 },
         spawns: [
-          { type: 'walker', pos: [-9.5, 0, 9], opts: { variant: 'worker' } },
-          { type: 'walker', pos: [-11.5, 0, 12], t: 0.4, opts: { variant: 'nurse' } },
-          { type: 'crawler', pos: [-3.6, 0, 8], entry: 'rise', t: 1.0 },
+          { type: 'finale_walker', pos: [-9.5, 0, 9], opts: { variant: 'worker' } },
+          { type: 'finale_walker', pos: [-11.5, 0, 12], t: 0.4, opts: { variant: 'nurse' } },
+          { type: 'finale_crawler', pos: [-3.6, 0, 8], entry: 'rise', t: 1.0 },
           { type: 'pack_runner', pos: [4.5, 0, -5], entry: 'leap', t: 1.8, opts: { variant: 'civilian', pack: 'pile' } },
           { type: 'pack_runner', pos: [-5, 0, -6], entry: 'leap', t: 2.1, opts: { variant: 'office', pack: 'pile' } },
           { type: 'pack_runner', pos: [-4, 0, -8], entry: 'leap', t: 2.4, opts: { variant: 'worker', pack: 'pile' } },
@@ -158,9 +167,9 @@ const beats: Beat[] = toughen([
           { type: 'pack_runner', pos: [5, 0, -7], entry: 'leap', t: 0.3, opts: { variant: 'worker', pack: 'pile2', cue: 'brute', wait: 9 } },
           { type: 'pack_runner', pos: [4, 0, -9], entry: 'leap', t: 0.6, opts: { variant: 'nurse', pack: 'pile2', cue: 'brute', wait: 9 } },
           { type: 'riot_brute', pos: [-4.6, 0, 8.4], entry: 'leap', t: 2.2, opts: { landAt: [-1.6, 0, 4.1], leapArc: 2.8 } },
-          { type: 'walker', pos: [-3.4, 0, 16], t: 0.3, opts: { variant: 'patient' } },
-          { type: 'walker', pos: [4.4, 0, 15.5], t: 0.6, opts: { variant: 'doctor' } },
-          { type: 'bloater', pos: [3.7, 0, 17.5], t: 2.4 },
+          { type: 'finale_walker', pos: [-3.4, 0, 16], t: 0.3, opts: { variant: 'patient' } },
+          { type: 'finale_walker', pos: [4.4, 0, 15.5], t: 0.6, opts: { variant: 'doctor' } },
+          { type: 'finale_bloater', pos: [3.7, 0, 17.5], t: 2.4 },
         ],
       },
     ],
@@ -218,13 +227,13 @@ const beats: Beat[] = toughen([
     waves: [
       {
         spawns: [
-          { type: 'walker', pos: [-1.5, 7.3, 19.2], entry: 'drop', opts: { variant: 'worker' } },
-          { type: 'walker', pos: [3.2, 7.3, 19.4], entry: 'drop', t: 0.9, opts: { variant: 'civilian' } },
+          { type: 'finale_walker', pos: [-1.5, 7.3, 19.2], entry: 'drop', opts: { variant: 'worker' } },
+          { type: 'finale_walker', pos: [3.2, 7.3, 19.4], entry: 'drop', t: 0.9, opts: { variant: 'civilian' } },
           { type: 'deck_spitter', pos: [12, 7.3, 19.6], t: 1.6 },
           // Two runners vault off the deck and sprint for the truck while the walkers shamble in.
           { type: 'truck_runner', pos: [-3.6, 7.3, 19.3], entry: 'drop', t: 2.2, opts: { variant: 'soldier' } },
           { type: 'truck_runner', pos: [4.6, 7.3, 19.5], entry: 'drop', t: 2.6, opts: { variant: 'biker' } },
-          { type: 'walker', pos: [-5.5, 7.3, 19.3], entry: 'drop', t: 3.2, opts: { variant: 'soldier' } },
+          { type: 'finale_walker', pos: [-5.5, 7.3, 19.3], entry: 'drop', t: 3.2, opts: { variant: 'soldier' } },
         ],
       },
     ],
@@ -237,12 +246,12 @@ const beats: Beat[] = toughen([
     waves: [
       {
         spawns: [
-          { type: 'walker', pos: [0, 0, 24], opts: { variant: 'office' } },
-          { type: 'walker', pos: [-3, 0, 26], t: 0.4, opts: { variant: 'patient' } },
-          { type: 'walker', pos: [3, 0, 27], t: 0.8, opts: { variant: 'cop' } },
+          { type: 'finale_walker', pos: [0, 0, 24], opts: { variant: 'office' } },
+          { type: 'finale_walker', pos: [-3, 0, 26], t: 0.4, opts: { variant: 'patient' } },
+          { type: 'finale_walker', pos: [3, 0, 27], t: 0.8, opts: { variant: 'cop' } },
           { type: 'truck_runner', pos: [-7, 0, 9], entry: 'leap', t: 1.4 },
           { type: 'truck_runner', pos: [7, 0, 10], entry: 'leap', t: 1.7, opts: { variant: 'nurse' } },
-          { type: 'walker', pos: [-4.5, 7.3, 19.3], entry: 'drop', t: 2.4, opts: { variant: 'soldier' } },
+          { type: 'finale_walker', pos: [-4.5, 7.3, 19.3], entry: 'drop', t: 2.4, opts: { variant: 'soldier' } },
           { type: 'truck_runner', pos: [2.5, 7.3, 19.4], entry: 'drop', t: 3.0, opts: { variant: 'worker' } },
         ],
       },
@@ -317,12 +326,12 @@ const beats: Beat[] = toughen([
     waves: [
       {
         spawns: [
-          { type: 'walker', pos: [3.8, 0, 19], opts: { variant: 'worker' } },
-          { type: 'walker', pos: [-10.2, 0, 17], t: 0.4, opts: { variant: 'civilian' } },
-          { type: 'walker', pos: [-3.5, 0, 11.5], t: 0.8, opts: { variant: 'office' } },
-          { type: 'crawler', pos: [-1.5, 0, 9.5], entry: 'rise', t: 1.3 },
-          { type: 'walker', pos: [3.6, 0, 22], t: 1.6, opts: { variant: 'cop' } },
-          { type: 'crawler', pos: [1.2, 0, 10.5], entry: 'rise', t: 2.2 },
+          { type: 'finale_walker', pos: [3.8, 0, 19], opts: { variant: 'worker' } },
+          { type: 'finale_walker', pos: [-10.2, 0, 17], t: 0.4, opts: { variant: 'civilian' } },
+          { type: 'finale_walker', pos: [-3.5, 0, 11.5], t: 0.8, opts: { variant: 'office' } },
+          { type: 'finale_crawler', pos: [-1.5, 0, 9.5], entry: 'rise', t: 1.3 },
+          { type: 'finale_walker', pos: [3.6, 0, 22], t: 1.6, opts: { variant: 'cop' } },
+          { type: 'finale_crawler', pos: [1.2, 0, 10.5], entry: 'rise', t: 2.2 },
           { type: 'truck_runner', pos: [-6.5, 0, -6], entry: 'leap', t: 2.6, opts: { variant: 'civilian' } },
         ],
       },
@@ -334,9 +343,9 @@ const beats: Beat[] = toughen([
           { type: 'pack_runner', pos: [-5, 0, -7], entry: 'leap', t: 0.3, opts: { variant: 'biker', pack: 'tank1', cue: 'brute', wait: 9 } },
           { type: 'pack_runner', pos: [4.5, 0, -9], entry: 'leap', t: 0.6, opts: { variant: 'cop', pack: 'tank1', cue: 'brute', wait: 9 } },
           { type: 'riot_brute', pos: [-8.6, 0, 9.5], entry: 'leap', t: 2.2, opts: { landAt: [-2, 0, 3.8], leapArc: 3 } },
-          { type: 'walker', pos: [-11, 0, 15], t: 0.5, opts: { variant: 'nurse' } },
-          { type: 'walker', pos: [-12.5, 0, 19], t: 0.9, opts: { variant: 'soldier' } },
-          { type: 'walker', pos: [-9.6, 0, 21], t: 1.3, opts: { variant: 'patient' } },
+          { type: 'finale_walker', pos: [-11, 0, 15], t: 0.5, opts: { variant: 'nurse' } },
+          { type: 'finale_walker', pos: [-12.5, 0, 19], t: 0.9, opts: { variant: 'soldier' } },
+          { type: 'finale_walker', pos: [-9.6, 0, 21], t: 1.3, opts: { variant: 'patient' } },
         ],
       },
       {
@@ -345,8 +354,8 @@ const beats: Beat[] = toughen([
           { type: 'pack_runner', pos: [5, 0, -7], entry: 'leap', opts: { pack: 'tank' } },
           { type: 'pack_runner', pos: [-5, 0, -6], entry: 'leap', t: 0.4, opts: { variant: 'biker', pack: 'tank' } },
           { type: 'pack_runner', pos: [4.5, 0, -9], entry: 'leap', t: 0.7, opts: { variant: 'office', pack: 'tank' } },
-          { type: 'spitter', pos: [-14, 0, 21], t: 1.0 },
-          { type: 'bloater', pos: [3.8, 0, 21], t: 1.4 },
+          { type: 'finale_spitter', pos: [-14, 0, 21], t: 1.0 },
+          { type: 'finale_bloater', pos: [3.8, 0, 21], t: 1.4 },
         ],
       },
     ],
@@ -376,8 +385,8 @@ const beats: Beat[] = toughen([
       {
         start: { atD: D.TUNNEL_FROM + 8 },
         spawns: [
-          { type: 'crawler', pos: [-3, 6, 9], entry: 'drop' },
-          { type: 'crawler', pos: [3, 6, 11], entry: 'drop', t: 0.5 },
+          { type: 'finale_crawler', pos: [-3, 6, 9], entry: 'drop' },
+          { type: 'finale_crawler', pos: [3, 6, 11], entry: 'drop', t: 0.5 },
         ],
       },
       {
@@ -385,7 +394,7 @@ const beats: Beat[] = toughen([
         spawns: [
           { type: 'pack_runner', pos: [-3.5, 0, -7], entry: 'leap', opts: { variant: 'patient', pack: 'tun' } },
           { type: 'pack_runner', pos: [3.5, 0, -9], entry: 'leap', t: 0.4, opts: { pack: 'tun' } },
-          { type: 'crawler', pos: [0.8, 6, 10], entry: 'drop', t: 1.4 },
+          { type: 'finale_crawler', pos: [0.8, 6, 10], entry: 'drop', t: 1.4 },
           { type: 'pack_runner', pos: [4.5, 0, -7], entry: 'leap', t: 0.8, opts: { variant: 'soldier', pack: 'tun' } },
         ],
       },
@@ -411,11 +420,11 @@ const beats: Beat[] = toughen([
     waves: [
       {
         spawns: [
-          { type: 'walker', pos: [-3, 0, 17], t: 0.8, opts: { variant: 'office' } },
-          { type: 'walker', pos: [2.5, 0, 19], t: 1.2, opts: { variant: 'civilian' } },
-          { type: 'walker', pos: [0, 0, 22], t: 1.6, opts: { variant: 'patient' } },
-          { type: 'walker', pos: [-5.5, 0, 21], t: 2.0, opts: { variant: 'nurse' } },
-          { type: 'crawler', pos: [2.2, 6.5, 10], entry: 'drop', t: 2.6 },
+          { type: 'finale_walker', pos: [-3, 0, 17], t: 0.8, opts: { variant: 'office' } },
+          { type: 'finale_walker', pos: [2.5, 0, 19], t: 1.2, opts: { variant: 'civilian' } },
+          { type: 'finale_walker', pos: [0, 0, 22], t: 1.6, opts: { variant: 'patient' } },
+          { type: 'finale_walker', pos: [-5.5, 0, 21], t: 2.0, opts: { variant: 'nurse' } },
+          { type: 'finale_crawler', pos: [2.2, 6.5, 10], entry: 'drop', t: 2.6 },
         ],
       },
       {
@@ -424,23 +433,23 @@ const beats: Beat[] = toughen([
           { type: 'pack_runner', pos: [-2, 0, -9], opts: { pack: 'stall' } },
           { type: 'pack_runner', pos: [3, 0, -11], t: 0.4, opts: { pack: 'stall' } },
           { type: 'pack_runner', pos: [-4.5, 0, -10], t: 0.8, opts: { variant: 'soldier', pack: 'stall' } },
-          { type: 'bloater', pos: [0.5, 0, 16], t: 1.0 },
-          { type: 'walker', pos: [-2.5, 0, 18], t: 1.4, opts: { variant: 'doctor' } },
-          { type: 'walker', pos: [3.2, 0, 19], t: 1.6, opts: { variant: 'cop' } },
+          { type: 'finale_bloater', pos: [0.5, 0, 16], t: 1.0 },
+          { type: 'finale_walker', pos: [-2.5, 0, 18], t: 1.4, opts: { variant: 'doctor' } },
+          { type: 'finale_walker', pos: [3.2, 0, 19], t: 1.6, opts: { variant: 'cop' } },
         ],
       },
       {
         // Out of the dark: a brute leaps off the walkway into the headlight while crawlers drop from the ceiling.
         start: { remaining: 1 },
         spawns: [
-          { type: 'crawler', pos: [-2.5, 6.5, 9], entry: 'drop' },
-          { type: 'crawler', pos: [2.5, 6.5, 11], entry: 'drop', t: 0.4 },
+          { type: 'finale_crawler', pos: [-2.5, 6.5, 9], entry: 'drop' },
+          { type: 'finale_crawler', pos: [2.5, 6.5, 11], entry: 'drop', t: 0.4 },
           { type: 'pack_runner', pos: [4.5, 0, -8], t: 0.2, opts: { variant: 'nurse', pack: 'stall2', cue: 'brute', wait: 9 } },
           { type: 'pack_runner', pos: [-4, 0, -9], t: 0.5, opts: { variant: 'worker', pack: 'stall2', cue: 'brute', wait: 9 } },
           { type: 'pack_runner', pos: [3.5, 0, -10], t: 0.8, opts: { variant: 'office', pack: 'stall2', cue: 'brute', wait: 9 } },
           { type: 'riot_brute', pos: [-5.8, 0, 9.5], t: 2.6, entry: 'leap', opts: { landAt: [-1.4, 0, 3.9], leapArc: 2.6 } },
-          { type: 'walker', pos: [-4, 0, 16], t: 1.2, opts: { variant: 'worker' } },
-          { type: 'walker', pos: [4, 0, 17], t: 1.5, opts: { variant: 'soldier' } },
+          { type: 'finale_walker', pos: [-4, 0, 16], t: 1.2, opts: { variant: 'worker' } },
+          { type: 'finale_walker', pos: [4, 0, 17], t: 1.5, opts: { variant: 'soldier' } },
         ],
       },
     ],
@@ -485,10 +494,10 @@ const beats: Beat[] = toughen([
     waves: [
       {
         spawns: [
-          { type: 'walker', pos: [-1.2, 0, 13], opts: { variant: 'soldier' } },
-          { type: 'walker', pos: [1.4, 0, 14.5], t: 0.4, opts: { variant: 'soldier' } },
-          { type: 'walker', pos: [-4.4, 0, 15], t: 0.8, opts: { variant: 'soldier' } },
-          { type: 'walker', pos: [4.6, 0, 13.5], t: 1.2, opts: { variant: 'biker' } },
+          { type: 'finale_walker', pos: [-1.2, 0, 13], opts: { variant: 'soldier' } },
+          { type: 'finale_walker', pos: [1.4, 0, 14.5], t: 0.4, opts: { variant: 'soldier' } },
+          { type: 'finale_walker', pos: [-4.4, 0, 15], t: 0.8, opts: { variant: 'soldier' } },
+          { type: 'finale_walker', pos: [4.6, 0, 13.5], t: 1.2, opts: { variant: 'biker' } },
           { type: 'truck_runner', pos: [-5, 0, -7], entry: 'leap', t: 1.8, opts: { variant: 'soldier' } },
         ],
       },
@@ -500,10 +509,10 @@ const beats: Beat[] = toughen([
           { type: 'pack_runner', pos: [4.5, 0, -6], entry: 'leap', t: 0.3, opts: { variant: 'soldier', pack: 'barr1', cue: 'brute', wait: 9 } },
           { type: 'pack_runner', pos: [-4, 0, -8.5], entry: 'leap', t: 0.6, opts: { variant: 'soldier', pack: 'barr1', cue: 'brute', wait: 9 } },
           { type: 'riot_brute', pos: [-6.5, 0, 9.5], entry: 'leap', t: 2.2, opts: { landAt: [-1.8, 0, 4.1], leapArc: 2.8 } },
-          { type: 'walker', pos: [-9.5, 0, 14], t: 0.4, opts: { variant: 'soldier' } },
-          { type: 'walker', pos: [-12, 0, 16], t: 0.8, opts: { variant: 'biker' } },
-          { type: 'spitter', pos: [7, 0, 20], t: 1.2 },
-          { type: 'spitter', pos: [-6, 0, 22], t: 2.0, opts: { variant: 'soldier' } },
+          { type: 'finale_walker', pos: [-9.5, 0, 14], t: 0.4, opts: { variant: 'soldier' } },
+          { type: 'finale_walker', pos: [-12, 0, 16], t: 0.8, opts: { variant: 'biker' } },
+          { type: 'finale_spitter', pos: [7, 0, 20], t: 1.2 },
+          { type: 'finale_spitter', pos: [-6, 0, 22], t: 2.0, opts: { variant: 'soldier' } },
         ],
       },
       {
@@ -515,9 +524,9 @@ const beats: Beat[] = toughen([
           { type: 'pack_runner', pos: [-4.5, 0, -7], entry: 'leap', opts: { variant: 'soldier', pack: 'barr' } },
           { type: 'pack_runner', pos: [4.5, 0, -7], entry: 'leap', t: 0.4, opts: { variant: 'soldier', pack: 'barr' } },
           { type: 'pack_runner', pos: [5, 0, -9], entry: 'leap', t: 0.8, opts: { variant: 'soldier', pack: 'barr' } },
-          { type: 'bloater', pos: [-1.5, 0, 16], t: 0.9 },
-          { type: 'walker', pos: [1, 0, 19], t: 1.3, opts: { variant: 'soldier' } },
-          { type: 'walker', pos: [-3, 0, 17], t: 1.8, opts: { variant: 'soldier' } },
+          { type: 'finale_bloater', pos: [-1.5, 0, 16], t: 0.9 },
+          { type: 'finale_walker', pos: [1, 0, 19], t: 1.3, opts: { variant: 'soldier' } },
+          { type: 'finale_walker', pos: [-3, 0, 17], t: 1.8, opts: { variant: 'soldier' } },
           { type: 'riot_brute', pos: [-5.5, 0, 12], entry: 'leap', t: 2.2, opts: { landAt: [-0.8, 0, 4.1], leapArc: 2.8 } },
         ],
       },

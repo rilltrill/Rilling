@@ -91,9 +91,10 @@ const P3_Z = 15.5;
  * (0.3 × the raw 0.8), so 15–17 ≈ 10 eye / throat hits ≈ 0.7–0.9 s of steady
  * fire — ~13 rounds, which never overheats a gun the ring's vent left at 35 %.
  * Tuned together with the stage's pre-boss pressure (the alpha pack, alpha.ts)
- * against the human-like bot (σ 0.03, ~0.3 s reactions): ≈ 1.5–2 hearts per
- * fight for an average player and rarely 3+; the low-heart mercy keeps weaker
- * players from dying to a late streak.
+ * against the human-like bot (σ 0.03, ~0.3 s reactions): ≈ 1–2 hearts per
+ * fight for an average player (who arrives a couple of hearts down from the
+ * pack) and rarely 3+; the low-heart mercy keeps weaker players from dying to
+ * a late streak.
  */
 export const TYRANT_TUNE = {
   /** Phase 1 bites are slower but need more fire (the head is right behind the jeep). */
@@ -210,6 +211,8 @@ export class Tyrant extends Boss {
   /** The Tyrant's own hit meshes (sightline checks for its pack; gathered on first use). */
   private bodyHits: THREE.Object3D[] | null = null;
   private readonly sightRay = new THREE.Raycaster();
+  /** Reused raycast result list for clearSightlines (no per-frame allocation). */
+  private readonly sightHits: THREE.Intersection[] = [];
   private throat!: THREE.Mesh;
   private mat!: THREE.Material;
   /** Warm, low-contrast hit tint for body parts (never a white strobe). */
@@ -896,7 +899,9 @@ export class Tyrant extends Boss {
     if (d < 0.5) return false;
     this.sightRay.set(cam, _u.divideScalar(d));
     this.sightRay.far = d - 0.3;
-    return this.sightRay.intersectObjects(this.bodyHits!, false).length > 0;
+    this.sightHits.length = 0;
+    this.sightRay.intersectObjects(this.bodyHits!, false, this.sightHits);
+    return this.sightHits.length > 0;
   }
 
   private stompFx(volume: number, shake: number) {

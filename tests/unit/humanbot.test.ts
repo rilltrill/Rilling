@@ -9,7 +9,8 @@
  *
  *   HUMANBOT=1 ZG_STAGES=z1,z2 ZG_SEEDS=1,2,3,4 ZG_SIGMA=0.03 npx vitest run tests/unit/humanbot.test.ts
  *
- * Knobs: ZG_REACT=0.25,0.4  ZG_TAP=3 (taps/s)  ZG_MINION=0|9 (prioritise minions in boss fights).
+ * Knobs: ZG_REACT=0.25,0.4  ZG_TAP=3 (taps/s)  ZG_MINION=0|9 (prioritise minions in boss fights)
+ *        ZG_FPS=30 (simulation frame rate; phones run 60).
  * Targets of a good arcade curve: stage 1 ≈ 0–2 hearts lost, stage 2 moderate,
  * stage 3 hardest but fair; no encounter regularly deals ≥ 3 damage.
  */
@@ -603,7 +604,7 @@ it.skipIf(process.env.HUMANBOT !== '1')('human-like bot runs', { timeout: 3_600_
   for (const s of STAGES) {
     for (const seed of SEEDS) {
       const t0 = Date.now();
-      const r = simulateHuman(s, { seed, sigma: SIGMA, minionFirst: Number(process.env.ZG_MINION ?? 0), react: process.env.ZG_REACT ? (process.env.ZG_REACT.split(',').map(Number) as [number, number]) : undefined, tapRate: Number(process.env.ZG_TAP ?? 3) });
+      const r = simulateHuman(s, { seed, sigma: SIGMA, minionFirst: Number(process.env.ZG_MINION ?? 0), react: process.env.ZG_REACT ? (process.env.ZG_REACT.split(',').map(Number) as [number, number]) : undefined, tapRate: Number(process.env.ZG_TAP ?? 3), fps: process.env.ZG_FPS ? Number(process.env.ZG_FPS) : undefined });
       all.push(r);
       const top = Object.entries(r.perBeat)
         .filter(([, v]) => v.dmg > 0)

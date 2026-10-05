@@ -33,7 +33,7 @@ import { paintCarnotaur, type CarnoPose, type CarnoRig } from '../../pixel/bosse
  *   takes ~5 eye hits of steady fire (≈ 0.35 s of the mounted gun on target), so
  *   a ram or bite breaks around 0.8 s into its 1.2–1.9 s ring for a player who
  *   keeps the gun on the eyes. During the tail sweep the ring sits on the tail and
- *   tail hits count in full. The intro roar prompts SHOOT ITS GLOWING EYES!
+ *   tail hits count in full. The intro roar prompts HOLD FIRE ON ITS EYES!
  *   Fairness with the mounted gun: every windup/throw starts only when its ring is
  *   inside the play area (not under the HUD or the boss bar) and vents the turret,
  *   so an overheat lockout can never eat a telegraph. Rocks are lobbed low enough
@@ -93,15 +93,18 @@ export const DEVIL_TUNE = {
    * Meter that breaks a RAM, by phase: 5 eye hits after the grace (≈ 0.35 s of
    * mounted-gun fire on the eyes, 14 rounds/s). The ram's ring is the longest
    * (1.9 s; 1.75 s / 1.6 s in phases 2 / 3): steady fire on the eyes breaks it
-   * ≈ 0.8 s in; hosing the skull or the body doesn't stop it.
+   * ≈ 0.95 s in (measured with perfect aim — the gun's spread costs rounds on the
+   * small eyes); hosing the skull or the body doesn't stop it.
    */
   ramGuard: [6.6, 7, 7.4],
   /**
    * Meter that breaks a BITE (shorter ring: 1.45 s; 1.33 s / 1.23 s in phases
-   * 2 / 3; the open throat counts as a weak point too): 4–5 eye/throat hits
-   * after the grace, ≈ 0.3–0.35 s of fire on target — it breaks ≈ 0.8 s in.
+   * 2 / 3; the open throat counts as a weak point too): 4 eye/throat hits after
+   * the grace — it breaks ≈ 1.0 s in with perfect aim. Phase 3's ring is the
+   * shortest, so it asks no more than phase 2 (with a rallied raptor up at the
+   * same time a 0.4 s reaction still has to make it).
    */
-  biteGuard: [6.4, 6.6, 6.8],
+  biteGuard: [6.4, 6.6, 6.4],
   /** Meter that breaks a tail sweep (ring on the tail; tail, body and eye hits count in full): ≈ 5–6 tail hits. */
   tailGuard: [4.6, 4.6, 5.2],
   /** Stumble (jaws hanging open) after a broken attack. */
@@ -782,6 +785,10 @@ export class Carnotaur extends Boss {
       if (_a.y <= ROCK_LAUNCH_NDC_Y || _v.y < 1.4) break;
       _v.y -= 0.3;
     }
+    // Launch a little in front of the snout (toward the jeep) so the rock's ring
+    // is shootable from its first frame, not hidden inside the head's hitboxes.
+    w.camera.getWorldPosition(_u);
+    _v.addScaledVector(_u.sub(_v).normalize(), 0.45);
     _a.copy(_v).project(w.camera);
     if (!ndcInPlayArea(_a.x, _a.y, _a.z, 0.82)) return;
     this.ventGun(false);
@@ -892,7 +899,7 @@ export class Carnotaur extends Boss {
           this.roaringFor = this.pendingRoar;
           w.audio.play('rex_roar', { volume: 1, pitch: this.roaringFor >= 2 ? 1.1 : 0.95 });
           // Its attacks break only under fire on the weak point: say so up front.
-          if (this.roaringFor === 0) w.hud.prompt('SHOOT ITS GLOWING EYES!');
+          if (this.roaringFor === 0) w.hud.prompt('HOLD FIRE ON ITS EYES!');
           if (this.roaringFor === 1) w.hud.prompt('IT CALLED THE PACK!');
           if (this.roaringFor === 2) {
             w.hud.prompt('FRENZY!');
