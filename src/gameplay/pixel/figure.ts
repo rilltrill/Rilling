@@ -461,8 +461,9 @@ export class PixelFigure {
     const sa = this.S / pa.z;
     d[off + AX] = pa.x;
     d[off + AY] = pa.y;
-    d[off + BX] = 0;
-    d[off + BY] = 0;
+    // (B = A until layout: bounds, warps and squashes treat the stamp as a point.)
+    d[off + BX] = pa.x;
+    d[off + BY] = pa.y;
     d[off + RA] = cellM * sa;
     d[off + RB] = 0;
     const zz = pa.z + this.layerDepth[this.curLayer];

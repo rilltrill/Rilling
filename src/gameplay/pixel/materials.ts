@@ -124,6 +124,8 @@ export interface RampOptions {
   shift?: number;
   /** Chroma multiplier (default 1.08 — sprite palettes are punchy). */
   sat?: number;
+  /** Hue the shadows lean toward (default 285, violet; hi-vis fabric leans green). */
+  shadowHue?: number;
 }
 
 /**
@@ -148,7 +150,8 @@ export function makeRamp(hex: number, o: RampOptions = {}): number[] {
       const Li = L - (L - Lmin) * Math.pow(s, 0.9);
       // Shadows: richer chroma, hue toward blue-violet (grey bases get a cool tint).
       const Ci = Math.max(C * (1 + 0.18 * s) * (i === 0 ? 0.85 : 1), 0.018 * s * shift);
-      const hi = C < 0.02 ? hueToward(h, 285, 1) : hueToward(h, 285, 0.12 * s * shift);
+      const sh = o.shadowHue ?? 285;
+      const hi = C < 0.02 ? hueToward(h, sh, 1) : hueToward(h, sh, (sh === 285 ? 0.12 : 0.35) * s * shift);
       out.push(oklchToHex(Li, Ci, hi));
     } else {
       const s = (i - BASE_STEP) / (STEPS - 1 - BASE_STEP); // 1 at the highlight
@@ -248,14 +251,14 @@ export const Mat = {
       return base(makeRamp(hex, { light: 0.45 }), PAT.PLAID, { scale: check, strength: 0.9, dither: 0.08, secondary: dark });
     });
   },
-  /** Zombie skin: pale, with rot patches (a sicklier green-grey) and bruises. */
-  deadSkin(hex: number): number {
-    return material(`dead|${h6(hex)}`, () => {
+  /** Zombie skin: pale, with rot patches (a sicklier green-grey) and bruises. `rot` < 0.85 = cleaner (faces). */
+  deadSkin(hex: number, rot = 0.85): number {
+    return material(`dead|${h6(hex)}|${rot}`, () => {
       const [L, C, h] = hexToOklch(hex);
       // Rot patches: a sicker, darker green; bruises a purple shade (tertiary).
-      const rot = Mat.flat(oklchToHex(L * 0.74, Math.max(C, 0.06) * 1.5, hueToward(h, 130, 0.7)), 'rot');
+      const rotM = Mat.flat(oklchToHex(L * 0.74, Math.max(C, 0.06) * 1.5, hueToward(h, 130, 0.7)), 'rot');
       const bruise = Mat.flat(oklchToHex(L * 0.62, Math.max(C, 0.05) * 1.2, hueToward(h, 330, 0.75)), 'bruise');
-      return base(makeRamp(hex, { light: 0.62, sat: 1.15 }), PAT.ROT, { strength: 0.85, scale: 0.07, secondary: rot, tertiary: bruise, dither: 0.12 });
+      return base(makeRamp(hex, { light: 0.62, sat: 1.15 }), PAT.ROT, { strength: rot, scale: 0.07, secondary: rotM, tertiary: bruise, dither: 0.12 });
     });
   },
   /** Living skin (civilians): warm, smooth. */
@@ -267,6 +270,10 @@ export const Mat = {
   },
   leather(hex: number): number {
     return material(`leather|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.45 }), PAT.LEATHER, { strength: 0.5, spec: 0.6, dither: 0.1 }));
+  },
+  /** Hi-vis fabric: neon, shadows sinking to olive (not grey), a faint weave. */
+  hivis(hex: number): number {
+    return material(`hivis|${h6(hex)}`, () => base(makeRamp(hex, { dark: 0.3, light: 0.4, shadowHue: 135, sat: 1.0 }), PAT.WEAVE, { strength: 0.6, dither: 0.1 }));
   },
   /** Hard hats, helmets, badges: glossy. */
   gloss(hex: number): number {

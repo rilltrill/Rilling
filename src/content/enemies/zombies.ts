@@ -8,7 +8,7 @@ import { registerEnemy } from '../registry';
 import { Kit } from '../kit/ModelKit';
 import type { HumanoidRig, Limb } from '../kit/humanoid';
 import type { PixelFigure } from '../../gameplay/pixel/figure';
-import { paintHuman, paintLooseArm, type HumanPose } from '../pixel/human';
+import { humanMem, paintHuman, paintLooseArm, type HumanPose } from '../pixel/human';
 import {
   ZBody,
   footWorld,
@@ -177,7 +177,7 @@ export abstract class Zombie extends Enemy {
 
   /** Zombie types whose pixel art is drawn (the rest use the 3D impostor bake). */
   protected pixelArt = false;
-  private readonly pose2d: HumanPose = { severed: this.severed, headless: false, jaw: 0, face: 'zombie', squash: 0, time: 0, speed: 0 };
+  protected readonly pose2d: HumanPose = { severed: this.severed, headless: false, jaw: 0, face: 'zombie', squash: 0, time: 0, speed: 0, smear: 1, mem: humanMem() };
 
   /** Jaw for the painter: a slow groan, gaping through the windup, snapping shut on the bite. */
   protected pixelJaw(): number {

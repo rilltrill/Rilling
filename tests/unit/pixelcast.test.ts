@@ -273,6 +273,24 @@ describe('PixelCast near the camera (no giant texels)', () => {
     }
   });
 
+  it('mid-range figures are painted at one texel per pixel (hands and faces are stamps, not bounds)', () => {
+    const { world, camera } = makeWorld();
+    for (const id of ['walker', 'raptor']) {
+      const e = spawn(world, id, 0.2, -5, id === 'walker' ? { variant: 'worker' } : {});
+      run(e, 0.3);
+      world.scene.updateMatrixWorld(true);
+      aim(camera);
+      const f = new PixelFigure();
+      f.begin(camera, GW, GH);
+      expect(e.paintPixels!(f)).toBe(true);
+      expect(f.layout(1, 24, 256)).toBe(true);
+      expect(f.kpx, id).toBe(1);
+      expect(f.W, id).toBeLessThan(160);
+      e.root.visible = false;
+      world.shootables.removeOwner(e);
+    }
+  });
+
   it('a walker stepping in to 1 m stays a sprite with ≤ 3 px texels', () => {
     const { world, camera } = makeWorld();
     const e = spawn(world, 'walker', 0.1, -1.0, { variant: 'worker' });
