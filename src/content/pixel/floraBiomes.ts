@@ -78,4 +78,6 @@ export const Z1_BIOME: FloraBiome = {
   coconut: 0x3e3024,
   flowers: [0xb04040],
   sat: 0.9,
+  // Street props (z1 props.ts colours): hydrant, trash can, traffic cone.
+  extra: { hydrant: 0xa82218, can: 0x3c4c42, canLid: 0x34363d, cone: 0xd9641c, band: 0xdedad0, coneBase: 0x2a2a30 },
 };

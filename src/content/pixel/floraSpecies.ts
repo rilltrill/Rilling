@@ -42,6 +42,8 @@ export interface FloraBiome {
   flowers: number[];
   /** Ramp chroma multiplier (night biomes are calmer). */
   sat?: number;
+  /** Extra named colours (street props): each becomes a ramp in `FloraMats.extra`. */
+  extra?: Record<string, number>;
 }
 
 /** Material ids of a biome inside one palette. */
@@ -67,6 +69,8 @@ export interface FloraMats {
   ear: number;
   coconut: number;
   flowers: number[];
+  /** Ramps of the biome's `extra` colours, by name. */
+  extra: Record<string, number>;
 }
 
 export function floraMats(pal: FloraPalette, b: FloraBiome): FloraMats {
@@ -95,6 +99,7 @@ export function floraMats(pal: FloraPalette, b: FloraBiome): FloraMats {
     ear: leaf(b.ear),
     coconut: wood(b.coconut),
     flowers: b.flowers.map((f) => pal.add(f, { sat: 1.1, dark: 0.45, light: 0.6 })),
+    extra: Object.fromEntries(Object.entries(b.extra ?? {}).map(([k, hex]) => [k, pal.add(hex, { sat: 1.05, dark: 0.36, light: 0.55 })])),
   };
 }
 

@@ -1,7 +1,8 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { FLORA_LEVELS, FloraField, floraArtToggle, paintFloraAtlas, type FloraAtlasData } from '../../src/content/pixel/floraField';
-import { ALL_SPECIES } from '../../src/content/pixel/floraSpecies';
+import { ALL_SPECIES, type FloraSpecies } from '../../src/content/pixel/floraSpecies';
+import { STREET_PROPS } from '../../src/content/pixel/floraProps';
 import { D1_BIOME, D3_BIOME, Z1_BIOME } from '../../src/content/pixel/floraBiomes';
 import { RIM_ALPHA } from '../../src/content/pixel/floraPaint';
 import { Kit, RETRO_FOLIAGE } from '../../src/content/kit/ModelKit';
@@ -43,16 +44,18 @@ function stats(a: FloraAtlasData, sp: { x: number; y: number; w: number; h: numb
 }
 
 describe('FLORA atlas', () => {
+  // z1 also paints the street props (hydrants, trash cans, cones: its biome has their colours).
+  const Z1_SPECIES: FloraSpecies[] = [...ALL_SPECIES, ...STREET_PROPS];
   const atlases = [
-    ['d1', paintFloraAtlas(ALL_SPECIES, D1_BIOME, 'd1')],
-    ['d3', paintFloraAtlas(ALL_SPECIES, D3_BIOME, 'd3')],
-    ['z1', paintFloraAtlas(ALL_SPECIES, Z1_BIOME, 'z1')],
+    ['d1', paintFloraAtlas(ALL_SPECIES, D1_BIOME, 'd1'), ALL_SPECIES],
+    ['d3', paintFloraAtlas(ALL_SPECIES, D3_BIOME, 'd3'), ALL_SPECIES],
+    ['z1', paintFloraAtlas(Z1_SPECIES, Z1_BIOME, 'z1'), Z1_SPECIES],
   ] as const;
 
   it('paints every variant of every species at every painted level, packed without overlaps', () => {
-    for (const [, a] of atlases) {
+    for (const [, a, species] of atlases) {
       const rects: { x: number; y: number; w: number; h: number }[] = [];
-      for (const sp of ALL_SPECIES) {
+      for (const sp of species) {
         const list = a.sprites.get(sp.key)!;
         expect(list, sp.key).toHaveLength(sp.variants);
         list.forEach((r, v) => {
@@ -116,11 +119,13 @@ describe('FLORA atlas', () => {
   });
 
   it('keeps the hand-painted mip levels consistent (no pop when a plant switches level)', () => {
-    for (const [id, a] of atlases) {
-      for (const sp of ALL_SPECIES) {
+    for (const [id, a, species] of atlases) {
+      for (const sp of species) {
         for (const r of a.sprites.get(sp.key)!) {
           const s0 = stats(a, r, 0);
           for (const l of [1, 2]) {
+            // (A level only a few texels tall — a far cone — is a handful of screen pixels.)
+            if (r.h >> l < 16) continue;
             const s = stats(a, r, l);
             expect(Math.abs(s.lum - s0.lum) / s0.lum, `${id} ${sp.key}#${r.variant} level ${l} brightness`).toBeLessThan(0.22);
             expect(s.cov / s0.cov, `${id} ${sp.key}#${r.variant} level ${l} coverage`).toBeLessThan(1.7);
@@ -221,7 +226,7 @@ function railDist(curve: THREE.Curve<THREE.Vector3>, p: THREE.Vector3): number {
 describe.each([
   ['d1', 'd1-vegPx', 'd1-veg3d', 600, 3.4],
   ['d3', 'd3-vegPx', 'd3-veg3d', 600, 3.4],
-  ['z1', 'z1-vegPx', 'z1-veg3d', 15, 4.5],
+  ['z1', 'z1-vegPx', 'z1-veg3d', 40, 4.5],
 ] as const)('FLORA in stage %s', (id, pxName, d3Name, minPlants, roadClear) => {
   afterAll(() => Kit.disposeAll());
 
@@ -273,7 +278,8 @@ describe.each([
       if (Math.abs(p.y - ground) > (id === 'z1' ? 0.25 : 0.6)) floating++;
       expect(dim.getY(i)).toBeGreaterThan(0.3);
       expect(dim.getY(i)).toBeLessThan(26);
-      if (i % 7 === 0) expect(railDist(curve, p), `${id} plant ${i} off the road`).toBeGreaterThan(roadClear);
+      // (Small props — z1's barricade cones — may stand on the road; trees and plants never.)
+      if (i % 7 === 0 && dim.getY(i) > 1.2) expect(railDist(curve, p), `${id} plant ${i} off the road`).toBeGreaterThan(roadClear);
     }
     expect(floating / g.instanceCount, `${id} plants off the ground`).toBeLessThan(0.01);
     RETRO_FOLIAGE.value = was;

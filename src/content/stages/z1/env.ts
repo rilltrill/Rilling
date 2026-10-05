@@ -10,6 +10,7 @@ import { FirePlume, Rain, nightSky } from './vfx';
 import { FloraField, floraArtToggle, floraAtlas } from '../../pixel/floraField';
 import { Z1_BIOME } from '../../pixel/floraBiomes';
 import { STREET_TREE } from '../../pixel/floraSpecies';
+import { STREET_PROPS } from '../../pixel/floraProps';
 
 /** Per-world handles the stage script needs (set pieces, lights). */
 export interface Z1Scene {
@@ -107,13 +108,18 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     zoneBoxes.push({ id, groups: [g, d], box });
   }
   root.add(town.dynamic);
-  // Street trees: 3D trunks + crowns (ART: 3D) or hand-pixelled billboards (ART: SPRITES), switched live.
+  // Street trees + round street props: 3D (ART: 3D) or hand-pixelled billboards (ART: SPRITES), switched live.
   const veg3D = new THREE.Group();
   veg3D.name = 'z1-veg3d';
   bakeMerge(town.trees3D);
   veg3D.add(town.trees3D);
-  const flora2d = new FloraField(floraAtlas([STREET_TREE], Z1_BIOME, 'z1'), { far: FOG_FAR + 6, rim: 0x8aa0e0, rimStrength: 0.08 });
-  for (const f of town.flora) flora2d.add(f.key, f.x, f.y + 0.06, f.z, Math.max(f.h, flora2d.heightFor(f.key, f.w * 0.8, f.x, f.z)), { sway: 0.07 });
+  const flora2d = new FloraField(floraAtlas([STREET_TREE, ...STREET_PROPS], Z1_BIOME, 'z1'), { far: FOG_FAR + 6, rim: 0x8aa0e0, rimStrength: 0.08 });
+  for (const f of town.flora) {
+    const tree = f.key === 'streetTree';
+    // Trees are sized to their crown (wide); props keep their own proportions (as tall as the 3D one).
+    const h = tree ? Math.max(f.h, flora2d.heightFor(f.key, f.w * 0.8, f.x, f.z)) : f.h;
+    flora2d.add(f.key, f.x, f.y, f.z, h, { sway: tree ? 0.07 : 0 });
+  }
   const vegPx = new THREE.Group();
   vegPx.name = 'z1-vegPx';
   vegPx.add(flora2d.build());

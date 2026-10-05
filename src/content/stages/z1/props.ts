@@ -397,6 +397,7 @@ export function streetLamp(): THREE.Group {
 
 export function hydrant(): THREE.Group {
   const g = new THREE.Group();
+  g.userData.flora = 'hydrant'; // a pixel billboard in ART: SPRITES (see town.ts)
   const red = Kit.tex('metal', 0xa82218, 2, 0.6);
   cyl(g, 0.14, 0.16, 0.6, 8, red, 0, 0.3, 0);
   Kit.add(g, Kit.sphere(0.15, 8, 5), red, 0, 0.62, 0);
@@ -406,6 +407,7 @@ export function hydrant(): THREE.Group {
 
 export function trashCan(): THREE.Group {
   const g = new THREE.Group();
+  g.userData.flora = 'trashCan'; // a pixel billboard in ART: SPRITES (see town.ts)
   cyl(g, 0.3, 0.26, 0.95, 8, Kit.tex('corrugated', 0x3c4c42, 2), 0, 0.48, 0);
   cyl(g, 0.33, 0.33, 0.06, 8, M.metal, 0, 0.98, 0);
   return g;
@@ -439,6 +441,7 @@ export function mailbox(): THREE.Group {
 
 export function trafficCone(): THREE.Group {
   const g = new THREE.Group();
+  g.userData.flora = 'cone'; // a pixel billboard in ART: SPRITES (see town.ts)
   box(g, 0.4, 0.04, 0.4, M.orange, 0, 0.02, 0);
   Kit.add(g, Kit.cone(0.15, 0.6, 8), M.orange, 0, 0.32, 0);
   cyl(g, 0.095, 0.115, 0.12, 8, M.white, 0, 0.3, 0);
