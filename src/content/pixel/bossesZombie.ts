@@ -451,7 +451,7 @@ export function paintPatientZero(f: PixelFigure, R: PZRig, st: PZPose): boolean 
   f.layer(0.02 * s, PART.WEAK, rot, -0.1 * s);
   const eyesL = f.layerIndex;
   const headOn = f.facing(f.at(h, 0, 1.0, 1.0), f.dir(h, 0, 0, 1));
-  if (headOn > -0.5) f.ellipsoid(h, 0, 1.08, 0.6, 0.74, 0.58, 0.38, faceM).tone(0.05).k(0.06 * sh).flag(PF.PLANAR);
+  if (headOn > -0.5) f.ellipsoid(h, 0, 1.08, 0.56, 0.74, 0.58, 0.3, faceM).tone(0.05).k(0.06 * sh).flag(PF.PLANAR).part(PART.TORSO);
   for (let i = 0; i < R.eyes.length; i++) {
     const e = R.eyes[i];
     const hold = e.mesh.parent;
@@ -1119,8 +1119,10 @@ export function paintBehemoth(f: PixelFigure, R: BehemothRig, st: BehemothPose):
     const glow = coreOn || flash;
     // (Pulled forward over the vest's front while it faces us; from the side the chest hides it.)
     f.layer(0.03 * s, PART.WEAK, 0, -0.12 * s * Math.min(1, Math.max(0, front * 1.6)));
-    f.ellipsoid(w, 0, 0, 0.0, 0.74, 0.76, 0.06, flash ? M.white : M.char).flag(PF.FLAT | (flash ? PF.GLOW : 0)).rag(0.08 * ws, PF.SPIKY).seed(41);
-    if (glow) f.decal(f.at(w, 0, 0, 0.06), f.at(w, 0, 0, 0.06), 0.62 * ws, 0.64 * ws, flash ? M.white : M.rim).flag(D | PF.GLOW).rag(0.05 * ws, PF.SPIKY).seed(42);
+    // (The charred edge past the rim's hitbox is the torn chest — torso; the glowing band inside
+    // it is the rim — weak.)
+    f.ellipsoid(w, 0, 0, 0.0, 0.76, 0.78, 0.06, flash ? M.white : M.char).flag(PF.FLAT | (flash ? PF.GLOW : 0)).rag(0.08 * ws, PF.SPIKY).seed(41).part(PART.TORSO);
+    f.ellipsoid(w, 0, 0, 0.02, 0.6, 0.62, 0.05, flash ? M.white : glow ? M.rim : M.char).flag(PF.FLAT | (glow ? PF.GLOW : 0)).rag(0.04 * ws, PF.SPIKY).seed(42).z(-0.02);
     const pulse = 1 + 0.1 * Math.sin(t * (hot ? 9 : 5));
     const coreM = flash ? M.white : !coreOn ? M.coreDead : hot ? M.coreOrange : M.core;
     f.ellipsoid(R.core, 0, 0, 0, 0.46, 0.46, 0.5, coreM).flag(glow ? PF.GLOW : 0).z(-0.04);
@@ -1212,10 +1214,10 @@ export function paintBehemoth(f: PixelFigure, R: BehemothRig, st: BehemothPose):
   // (The dome's lower half is inside the head: only the cap above the brim shows.)
   f.layer(0.02 * s, PART.ARMOR, 0, -0.24 * s);
   // (The crown a touch taller than the 3D's, so the dome reads above the brim from the truck.)
-  f.ellipsoid(h, 0, 1.08, -0.02, 0.6, 0.42, 0.64, M.hat).k(0.02 * s).tone(0.04);
+  f.ellipsoid(h, 0, 1.07, -0.02, 0.6, 0.4, 0.64, M.hat).k(0.02 * s).tone(0.04);
   // Brim: the lip overhanging the face, its underside in shadow (a flat pill across the front:
   // from below it shows above the forehead, never over it).
-  f.coneE(f.at(h, -0.52, 0.955, 0.62), f.at(h, 0.52, 0.955, 0.62), f.dir(h, 0, 1, 0), f.dir(h, 0, 0, 1), 0.035 * hs, 0.24 * hs, 0.035 * hs, 0.24 * hs, M.hat).tone(-0.24).k(0.015 * s);
+  f.coneE(f.at(h, -0.54, 0.955, 0.68), f.at(h, 0.54, 0.955, 0.68), f.dir(h, 0, 1, 0), f.dir(h, 0, 0, 1), 0.035 * hs, 0.19 * hs, 0.035 * hs, 0.19 * hs, M.hat).tone(-0.24).k(0.015 * s);
   if (f.facing(f.at(h, 0, 1.1, 0.6), f.dir(h, 0, 0.2, 1)) > 0.05) {
     f.decal(f.at(h, -0.16, 1.12, 0.6), f.at(h, 0.16, 1.12, 0.6), 0.08 * hs, 0.08 * hs, M.sticker).flag(D);
     // The raised centre ridge, front to back.
