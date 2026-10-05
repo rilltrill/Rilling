@@ -362,35 +362,66 @@ Tyrant (d3).
 ### Props, pickups, gibs and the title screen (`content/pixel/cast*.ts`)
 - **Prop kit** (`castKit.ts`): hard objects drawn the way sprite artists draw them, from the
   prop's own (tumbling) mesh frame: `box` = the visible faces as flat triangles, each a ramp
-  step by how it faces the sprite light (`faceTone`), one outline round the lot; `cylinder` =
-  the exact silhouette (side quad + the two end ellipses) with a highlight band down the lit
-  side and a shadow band; `hoop` = the visible half of a ring (rims, bands, bark, halos);
-  `sparkle` = a screen-space four-point glint; `line` / `paint` = SHADE_ONLY / material decals
-  (seams, cracks, stripes, labels). Prop materials come from `castMat` (keys `cast-…`).
-- **Pickups** (`castPickups.ts`, hooked in `Pickup.paintPixels`): first-aid kit (lid seam,
-  latches, handle, glowing cross), plank crates with the weapon's colour stencilled on and the
-  gun itself on the lid (pump shotgun / SMG / revolver), a bomb with a fizzing fuse star, a
-  self-lit faceted gem; all with a crisp glowing halo ring that breathes with the 3D torus, a
-  shine sweeping across every ~1.7 s and a sparkle. Blinking hides the sprite with the model.
+  step by how it faces the light (`faceTone`), one outline round the lot (`BOX.facing` /
+  `faceShown`: details only on faces turned to the camera — a grazing face's decals would smear
+  across its neighbours); `cylinder` = the exact silhouette (side quad + the two end ellipses)
+  with a highlight band down the lit side and a shadow band; `hoop`, `sparkle`, `line` /
+  `paint` (SHADE_ONLY / material decals). `castWorldLight` blends the scene's key light (world
+  space, plus sky above / ground bounce below) into the face tones of a redraw — the thrown car
+  shows its belly lit by the sunset when it turns it to the sun; `castView` resets to the
+  sprite artist's fixed light. Prop materials come from `castMat` (keys `cast-…`) and are made
+  the first time a kind / colour is painted (the 255-entry table is shared by the whole cast).
+  The table FILLS in a long session (a headless z1 run: full at ~180 s of 215, every walker's
+  random skin / cloth shades add ~4 rows): from then on `material()` maps a new key to the
+  closest existing material (OKLab base colour, glow only for glow, pattern preferred) — the
+  documented behaviour — instead of id 1.
+- **Pickups** (`castPickups.ts`, hooked in `Pickup.paintPixels`): a scuffed first-aid kit
+  (lid seam, latches, end straps, grime, dent, square-cut cross), plank crates with a muted
+  band of the weapon's colour and the gun on the lid, a bomb with a fizzing fuse star, a
+  brilliant-cut gem (table / crown / pavilion facets in five unlit steps, alternating light /
+  dark, turning with the spin; a pale rim on the lit edge and a dark-gold one on the shadow
+  side; inner fire, star glint). All: a 1–2 px halo ring (front arc bright, back arc dim and
+  behind the item, travelling beads, opened a touch at eye level so it never reads as a stripe
+  through the item) and every ~1.7 s a short glint running along the top edge into a twinkle.
 - **Thrown things** (`castThrown.ts`, `Projectile.paintPixels`): goo globs (spitter acid, dilo
-  venom, Patient Zero's bile — wobbling wet body, hot core, teardrop tail, trailing droplets,
-  drips), the Butcher's meat hook / oil drum / police door, the Behemoth's car (sedan / hatch /
-  SUV and its paint read off the mesh) and concrete slab, boulders and the Tyrant's palm trunk /
-  rock / wrecked panel, the storm's burning branch, a lumpy fallback chunk. The kind comes from
-  `ProjectileOptions.pixel` when a thrower sets it, else it is recognised once from the
-  options + mesh (`thrownKind`). Trails follow the flight path's tangent. A thrower may still
-  assign its own `paintPixels` (Specimen X's darts).
-- **Gibs** (`fx/Gibs.ts`, SPRITES only): lobed meat chunks / angular splinters whose outline
-  turns with the tumble, three hard tone steps, a dark edge, wet specks and bone flecks.
+  venom, Patient Zero's bile) are UNLIT ramps built from the thrower's glow colour (glow texels
+  skip the night tint and fog: the warning is the brightest thing in frame day and night) — a
+  lobed wobbling mass, a dark-olive edge on the shadow side only, a pale-lime crescent, a
+  yellow-white hot core, bubbles; flying at the camera a ragged splash rim and drips, side-on
+  three fading strands. Rocks are drawn from the mesh's REAL facets (four hard tone steps,
+  lit ridges, cracks along facet edges, grit, moss clumps, grass blades from a crack). The
+  Behemoth's car: scene-lit, beat-up paint (dirt, scratches, rust in the material), belly
+  (rails, axles, exhaust + muffler, tank, sump, oil stains, floor-pan ribs), chrome bumpers,
+  lamps, grille, arches with the paint's lip, wipers, a cracked windscreen. The Tyrant's palm:
+  comb fronds in FLORA's d3 palette, chevron leaf scars, a flat splintered foot; its panel a
+  rusted park-jeep door; the storm branch: ragged layered fire inside the glow sphere. The
+  kind comes from `ProjectileOptions.pixel` when a thrower sets it (the d3 storm does), else it
+  is recognised once from the options + mesh (`thrownKind`); the "every real thrower" table in
+  `pixel-cast.test.ts` drives each actual throw (boss methods included) and pins its look. Shot
+  down in SPRITES, a prop breaks into debris of its painted material (`thrownDebrisColor`).
+- **Gibs** (`fx/Gibs.ts`, SPRITES only): flesh (bloody chunks) = lobed meat chunks, wet
+  specks, bone flecks; hard debris (not bloody) takes its material from its colour — grey
+  concrete / stone as chipped polygons in three facet tones with grit and rust rebar flecks,
+  red painted metal with a bare-steel lit edge, browns as grained splinters, greens as leafy
+  scraps. A per-instance `aHard` attribute (sprite geometry only) carries flesh vs hard.
 - **Title screen** (`castMenu.ts` + `ui/MenuBackdrop.ts`): the attract horde, the crag raptor
   and the pterosaurs are joint-only rigs posed like the 3D ones and painted by the same
   painters through a stand-alone `MenuCast` (PixelCast + pixel-snapped billboards writing
-  per-texel depth, run from the shot scene's `onBeforeRender`). It follows ART (link override,
-  saved setting, default), re-read at every cut.
+  per-texel depth). Painting runs in `MenuCast.prepare`, right after the shot is posed and
+  before it is rendered (the scene's `onBeforeRender` only records the target, sets uniforms
+  and paints itself on the first frame / a resize), capped at 4 repaints and 52 k texels per
+  frame. Both shots light the cast as backlit silhouettes (`MenuLight`: a near-black sky-tinted
+  tint, a warm 1-px rim on the top / right outline, unlit eye glints); far pterosaurs get their
+  wing outline stroked ≥ 2 texels. ART follows the link override, then the saved setting —
+  polled every 0.25 s, so a change on the menus shows at once (and then wins over the link).
+  Title-screen cost must be measured DRAINED (a 1-px `readPixels` per frame): `gl.finish`
+  doesn't wait in Chrome, and an undrained loop bills the GPU backlog to whichever later GL
+  call syncs — the PixelCast upload — which made SPRITES look ~100× slower than 3D.
 - Tests: `tests/unit/pixel-cast.test.ts` (every pickup and thrown kind: painted, every hitbox
-  centre on a painted texel, ≥ 85 % of the hitbox silhouette covered (≥ 80 % for the hook and
-  the branch), sprite area ≤ 1.6× the hitbox's (≤ 2.4× where goo trails,
-  flames, smoke or the hook's chain stream past it).
+  centre on a painted texel, ≥ 85 % of the hitbox silhouette covered (≥ 80 % hook / branch,
+  ≥ 72 % the palm's comb fronds; the pickups' halo tube is left out of the grid — drawn 1–2 px
+  by design, its hitbox stays shootable), sprite area ≤ 1.6× the hitbox's (≤ 2.4× where goo,
+  flames, smoke or the hook's chain stream past it); and the real-thrower → kind table).
 
 ### Impostor bake (characters without a painter)
 `SpriteArt.bakeNow` re-renders the source's 3D model with the main camera's projection

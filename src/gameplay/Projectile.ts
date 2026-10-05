@@ -4,7 +4,7 @@ import type { World } from './World';
 import { Kit } from '../content/kit/ModelKit';
 import type { SfxName } from '../audio/names';
 import type { PixelFigure } from './pixel/figure';
-import { paintThrown, sceneKeyLight, thrownKind, thrownState, type ThrownKind, type ThrownState } from '../content/pixel/castThrown';
+import { paintThrown, sceneKeyLight, thrownDebrisColor, thrownKind, thrownState, type ThrownKind, type ThrownState } from '../content/pixel/castThrown';
 
 export interface ProjectileOptions {
   /** Launch point in WORLD coordinates. */
@@ -158,9 +158,14 @@ export class Projectile extends Entity {
     }
     this.removed = true;
     this.root.getWorldPosition(_v);
-    if (this.opts.burst === 'explode') this.world.fx.explosion(_v, 0.8);
-    else if (this.opts.burst === 'goo') this.world.fx.blood(_v, hit.dir, { color: this.opts.color, amount: 1.2 });
-    else this.world.fx.debris(_v, this.opts.color);
+    // ART: SPRITES painted it (`px`): its debris breaks off in the painted material (red drum
+    // metal, grey concrete, wood…; the FX RNG, never the world's). ART: 3D unchanged.
+    const st = this.px;
+    if (this.opts.burst === 'explode') {
+      this.world.fx.explosion(_v, 0.8);
+      if (st) this.world.fx.debris(_v, thrownDebrisColor(st));
+    } else if (this.opts.burst === 'goo') this.world.fx.blood(_v, hit.dir, { color: this.opts.color, amount: 1.2 });
+    else this.world.fx.debris(_v, st ? thrownDebrisColor(st) : this.opts.color);
     this.world.audio.play(this.opts.sfxDestroy, { vary: 0.1 });
     const pts = this.world.score.add(this.opts.points);
     this.world.hud.popup(`+${pts}`, hit.screenX, hit.screenY, 'points');

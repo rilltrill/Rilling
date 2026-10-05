@@ -74,6 +74,35 @@ export function thrownState(mesh: THREE.Object3D, color: number, size: number, s
   };
 }
 
+/**
+ * Colour of the debris a shot-down thrown thing breaks into in ART: SPRITES (the
+ * gib sprites take their material from it: grey concrete / stone chips, red
+ * painted-metal chips with bare-steel edges, wooden splinters).
+ */
+export function thrownDebrisColor(st: ThrownState): number {
+  switch (st.kind) {
+    case 'hook':
+      return 0x8a8f96;
+    case 'barrel':
+      return 0xc22a20;
+    case 'door':
+      return 0xd8d8d0;
+    case 'car':
+      return st.car.paint;
+    case 'slab':
+      return 0x8a847c;
+    case 'rock':
+      return st.rock.r > 0.5 ? 0x6e6a60 : 0x7d7262;
+    case 'palm':
+    case 'branch':
+      return 0x6e5d4a;
+    case 'panel':
+      return 0xbfb6a0;
+    default:
+      return st.color;
+  }
+}
+
 // ─── Recognising what was thrown ────────────────────────────────────────────
 
 const _box = new THREE.Box3();

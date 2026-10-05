@@ -248,3 +248,114 @@ describe('PixelCast thrown things (painted, covering their hitboxes)', () => {
     });
   }
 });
+
+// ─── Each real thrower → its look ────────────────────────────────────────────
+
+/**
+ * Thrown kinds are recognised from the thrower's options and mesh (a thrower may
+ * also say `pixel:`). This table drives each REAL throw in the game (the bosses'
+ * own throw methods, the spitters, the storm's falling branches) and checks the
+ * look it gets — a colour / size / mesh tweak in a boss file that would silently
+ * swap a look (a rock painted as a chunk) fails here instead.
+ */
+describe('PixelCast thrown kinds (every real thrower gets its intended look)', () => {
+  type Dyn = Record<string, unknown>;
+  /** Call a (private) method of the real thrower. */
+  const call = (e: Dyn, m: string, ...a: unknown[]) => (e[m] as (...a: unknown[]) => unknown).apply(e, a);
+  type Thrower = { id: string; want: string[]; fire: (e: Dyn) => void; detached?: boolean };
+  const THROWERS: Record<string, Thrower> = {
+    'z1 spitter acid': { id: 'spitter', want: ['glob'], fire: (e) => call(e, 'strike') },
+    'd1 dilo venom': { id: 'dilo', want: ['glob'], fire: (e) => call(e, 'spit') },
+    'z1 Butcher hook, drum, door': {
+      id: 'butcher',
+      want: ['hook', 'barrel', 'door'],
+      detached: true,
+      fire: (e) => {
+        call(e, 'throwHook');
+        e.heavyKind = 'barrel';
+        call(e, 'throwHeavy');
+        e.heavyKind = 'door';
+        (e.propBarrel as THREE.Object3D).visible = false;
+        call(e, 'throwHeavy');
+      },
+    },
+    'z2 Patient Zero bile': { id: 'patient_zero', want: ['glob'], detached: true, fire: (e) => call(e, 'spitGlob') },
+    'z3 Behemoth car, slab': {
+      id: 'behemoth',
+      want: ['car', 'slab'],
+      detached: true,
+      fire: (e) => {
+        call(e, 'release', 'car');
+        call(e, 'release', 'slab');
+      },
+    },
+    'd1 Carnotaur boulder': { id: 'carnotaur', want: ['rock'], detached: true, fire: (e) => call(e, 'flingRock') },
+    'd3 Tyrant palm, rock, panel': {
+      id: 'tyrant',
+      want: ['palm', 'rock', 'panel'],
+      detached: true,
+      fire: (e) => {
+        const from = new THREE.Vector3(0.5, 2, -9);
+        e.phase = 0;
+        call(e, 'fling', from, 0);
+        call(e, 'fling', from, 1);
+        e.phase = 1;
+        call(e, 'fling', from, 0);
+      },
+    },
+  };
+  for (const [name, t] of Object.entries(THROWERS)) {
+    it(name, () => {
+      const { world, camera } = makeWorld();
+      const kinds: string[] = [];
+      const f = new PixelFigure();
+      const add = world.add.bind(world);
+      world.add = (<T extends Entity>(e: T): T => {
+        const r = add(e);
+        if (e instanceof Projectile) {
+          world.scene.updateMatrixWorld(true);
+          f.begin(camera, GW, GH);
+          e.paintPixels(f);
+          kinds.push((e as unknown as { px: { kind: string } }).px.kind);
+        }
+        return r;
+      }) as typeof world.add;
+      const e = createEnemy(t.id, world, { pos: new THREE.Vector3(0.4, 0, -9), frame: 'world', entry: 'walk', hpMul: 1, speedMul: 1, opts: {} });
+      if (t.detached) e.buildDetached();
+      else world.add(e);
+      e.root.position.set(0.4, 0, -9);
+      e.root.lookAt(camera.position.x, 0, camera.position.z);
+      world.scene.add(e.root);
+      world.scene.updateMatrixWorld(true);
+      t.fire(e as unknown as Dyn);
+      expect(kinds, name).toEqual(t.want);
+    });
+  }
+  it('d3 storm: falling burning branches', { timeout: 60_000 }, async () => {
+    const { world, camera } = makeWorld();
+    const kinds: string[] = [];
+    const f = new PixelFigure();
+    // The storm's own stage (its park env is what the hazard needs).
+    const { ALL_STAGES } = await import('../../src/content/stages');
+    const { StageRunner } = await import('../../src/gameplay/StageRunner');
+    new StageRunner(world, ALL_STAGES.find((st) => st.id === 'd3')!).start();
+    const add = world.add.bind(world);
+    world.add = (<T extends Entity>(e: T): T => {
+      const r = add(e);
+      if (e instanceof Projectile) {
+        world.scene.updateMatrixWorld(true);
+        f.begin(camera, GW, GH);
+        e.paintPixels(f);
+        kinds.push((e as unknown as { px: { kind: string } }).px.kind);
+      }
+      return r;
+    }) as typeof world.add;
+    const { lightningTree } = await import('../../src/content/stages/d3/hazards');
+    world.update(1 / 60);
+    // (Rig-relative [right, up, forward], as the stage calls it.)
+    lightningTree(world, [-2, 4.5, 16], 2);
+    for (let i = 0; i < 90; i++) world.update(1 / 60);
+    expect(kinds.length).toBeGreaterThan(0);
+    expect(new Set(kinds)).toEqual(new Set(['branch']));
+  });
+});

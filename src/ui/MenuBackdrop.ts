@@ -693,7 +693,8 @@ function buildCity(sh: Shared): Vignette {
   });
 
   // ART: SPRITES — the same horde as PixelCast pixel art (rigs posed from the zeds below).
-  const cast = own(new MenuCast({ tint: new THREE.Color(0.5, 0.48, 0.56), rim: new THREE.Color(0.5, 0.62, 0.95), rimAmount: 0.16 }));
+  // (Backlit silhouettes like the 3D horde against the burning wreck: near-black, a warm fire rim.)
+  const cast = own(new MenuCast({ tint: new THREE.Color(0.25, 0.21, 0.26), rim: new THREE.Color(1, 0.55, 0.26), rimAmount: 0.45 }));
   const pixelZeds = zeds.map((_, i) => menuZombie(i));
   for (const pz of pixelZeds) cast.add((f) => paintMenuZombie(f, pz));
   cast.attach(scene);
@@ -869,6 +870,7 @@ function buildCity(sh: Shared): Vignette {
       updateZeds(dt);
       updateFire(t, dt);
       updateRain(dt, cam);
+      if (sprites) cast.prepare(cam);
     },
     flash(k) {
       cast.flash = k;
@@ -1134,7 +1136,8 @@ function buildJungle(sh: Shared): Vignette {
   scene.add(pteros);
 
   // ART: SPRITES — the raptor and the pterosaurs as PixelCast pixel art (posed like the 3D ones).
-  const cast = own(new MenuCast({ tint: new THREE.Color(0.56, 0.46, 0.46), rim: new THREE.Color(1, 0.66, 0.4), rimAmount: 0.4 }));
+  // (The shot is a sunset silhouette: near-black sky-tinted bodies, a warm sun rim, the raptor's eye a single glint.)
+  const cast = own(new MenuCast({ tint: new THREE.Color(0.17, 0.1, 0.09), rim: new THREE.Color(1, 0.6, 0.3), rimAmount: 0.8 }));
   const pRaptor = menuRaptor();
   cast.add((f) => paintMenuRaptor(f, pRaptor));
   const pPteros: MenuPtero[] = [];
@@ -1262,6 +1265,7 @@ function buildJungle(sh: Shared): Vignette {
         flies.tint[i * 3 + 2] = 0.45;
       }
       flies.commit();
+      if (sprites) cast.prepare(cam);
     },
     flash(k) {
       cast.flash = k;
@@ -1287,22 +1291,41 @@ function buildJungle(sh: Shared): Vignette {
  * saved setting (an old save that only stored the earlier '3d' default reads as
  * the current default, as Save migrates it), else the default.
  */
-function menuArt(): ArtStyle {
-  try {
-    const u = new URLSearchParams(globalThis.location?.search ?? '').get('art');
-    if (u === 'sprites' || u === '3d') return u;
-  } catch {
-    /* no location */
+function menuArt(ignoreLink = false): ArtStyle {
+  if (!ignoreLink) {
+    try {
+      const u = new URLSearchParams(globalThis.location?.search ?? '').get('art');
+      if (u === 'sprites' || u === '3d') return u;
+    } catch {
+      /* no location */
+    }
   }
+  return savedArt(readSave()) ?? DEFAULT_SETTINGS.art;
+}
+
+const SAVE_KEY = 'overrun.save.v1';
+
+function readSave(): string | null {
   try {
-    const raw = globalThis.localStorage?.getItem('overrun.save.v1');
+    return globalThis.localStorage?.getItem(SAVE_KEY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The ART setting in a raw save (an old save's pre-migration value reads as unset). */
+function savedArt(raw: string | null): ArtStyle | null {
+  try {
     const st = raw ? (JSON.parse(raw) as { settings?: { art?: unknown; artV?: unknown } }).settings : null;
     if (st && st.artV === DEFAULT_SETTINGS.artV && (st.art === 'sprites' || st.art === '3d')) return st.art;
   } catch {
-    /* storage unavailable */
+    /* corrupt save */
   }
-  return DEFAULT_SETTINGS.art;
+  return null;
 }
+
+/** How often the title screen looks for an ART change in the save (seconds). */
+const ART_POLL = 0.25;
 
 const SHOT = 10;
 const FADE = 0.9;
@@ -1330,6 +1353,11 @@ export class MenuBackdrop {
   private clock = 0;
   /** Character art (re-read from the settings at every cut). */
   private art: ArtStyle = menuArt();
+  /** The save as last read (an ART change made on the menus shows within ART_POLL, not at the next cut). */
+  private saveRaw: string | null = readSave();
+  private artPoll = ART_POLL;
+  /** The player changed ART here: their choice wins over a `&art=` link from now on (as in Game). */
+  private artChosen = false;
 
   constructor() {
     const own = <T extends Disposable>(x: T): T => {
@@ -1432,10 +1460,24 @@ export class MenuBackdrop {
     if (this.disposed) return;
     this.clock += dt;
     this.t += dt;
+    // An ART change on the menus is saved: pick it up now, not at the next cut.
+    this.artPoll -= dt;
+    if (this.artPoll <= 0) {
+      this.artPoll = ART_POLL;
+      const raw = readSave();
+      if (raw !== this.saveRaw) {
+        this.saveRaw = raw;
+        const a = savedArt(raw);
+        if (a && a !== this.art) {
+          this.artChosen = true;
+          this.setArt(a);
+        }
+      }
+    }
     if (this.t >= SHOT) {
       this.t = 0;
       this.current = this.locked ?? (this.current === 'city' ? 'jungle' : 'city');
-      this.setArt(menuArt());
+      this.setArt(menuArt(this.artChosen));
       this.shot(this.current).reset();
       this.strikeT = -1;
     }

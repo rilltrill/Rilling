@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { PixelFigure } from '../../gameplay/pixel/figure';
+import { PART, PixelFigure } from '../../gameplay/pixel/figure';
+import { Mat } from '../../gameplay/pixel/materials';
 import { PixelCast, type CastEnv } from '../../gameplay/pixel/PixelCast';
 import type { HumanoidRig } from '../kit/humanoid';
 import { humanLook, paintHuman, type HumanLook, type HumanPose } from './human';
@@ -16,13 +17,21 @@ import { paintPtero } from './beasts';
  * backdrop each frame and painted by the SAME painters as the game's cast
  * (`paintHuman`, `paintTheropod`, `paintPtero`) about 12×/s into small render
  * targets, shown as pixel-snapped billboards that write per-texel depth (so
- * the wreck and the crag still occlude them). It runs from the scene's
- * `onBeforeRender` (the renderer, camera and target of the shot's own draw),
- * restores the render target afterwards, allocates nothing per frame.
+ * the wreck and the crag still occlude them). Painting happens in `prepare`,
+ * right after the backdrop poses its shot and BEFORE the shot is rendered —
+ * not inside the scene's draw — on the grid of the shot's last draw (the
+ * scene's `onBeforeRender` only records the renderer / target, sets the
+ * billboards' uniforms, and paints itself only on the very first frame or a
+ * resize). Repaints are capped per frame (count and texels, like SpriteArt);
+ * the render target is restored afterwards; nothing is allocated per frame.
+ * Both shots light the cast as BACKLIT SILHOUETTES (near-black, sky-tinted,
+ * a warm 1-px rim on the top / sun side, unlit eye glints): see `MenuLight`.
  */
 
 const MENU_FPS = 12;
 const MAX_PAINTS = 4;
+/** Repainted texels per frame (SpriteArt's budget): a close horde never floods the GPU. */
+const TEXEL_BUDGET = 52000;
 
 const SHOW_VERT = /* glsl */ `
   uniform vec2 uTarget;
@@ -91,7 +100,12 @@ interface Actor {
   gh: number;
 }
 
-/** Stage light for the cast of one shot (display space). */
+/**
+ * Stage light for the cast of one shot (display space): `tint` multiplies every
+ * lit texel (a near-black, sky-tinted tint = a backlit silhouette), `rim` is mixed
+ * into the top / right outline texels by `rimAmount` (the warm sun or fire behind).
+ * Unlit texels (eye glints) keep their colour.
+ */
 export interface MenuLight {
   tint: THREE.Color;
   rim: THREE.Color;
@@ -167,11 +181,19 @@ export class MenuCast {
     this.actors.push({ paint, mesh, mat, rt: null, next: 0, k: 1, ready: false, tw: 1, th: 1, gw: 1, gh: 1 });
   }
 
-  /** Hook the cast into `scene` (painted right before each of its draws). */
+  private scene: THREE.Scene | null = null;
+  /** Grid and target of the shot's last draw (what `prepare` paints for). */
+  private gw = 0;
+  private gh = 0;
+  /** Grid `prepare` painted for since the last draw (−1 = none: the draw paints itself). */
+  private preparedFor = -1;
+
+  /** Hook the cast into `scene`: its draw records the target and shows the painted actors. */
   attach(scene: THREE.Scene) {
+    this.scene = scene;
     scene.add(this.group);
-    scene.onBeforeRender = (renderer, sc, camera, target) => {
-      if (this.group.visible) this.render(renderer, camera as THREE.PerspectiveCamera, target as unknown as THREE.WebGLRenderTarget | null, sc as THREE.Scene);
+    scene.onBeforeRender = (renderer, _sc, camera, target) => {
+      if (this.group.visible) this.draw(renderer, camera as THREE.PerspectiveCamera, target as unknown as THREE.WebGLRenderTarget | null);
     };
   }
 
@@ -183,7 +205,18 @@ export class MenuCast {
     }
   }
 
-  private render(renderer: THREE.WebGLRenderer, cam: THREE.PerspectiveCamera, target: THREE.WebGLRenderTarget | null, scene: THREE.Scene) {
+  /**
+   * Paint the actors that are due, now — call after posing the shot and before
+   * rendering it (keeps the repaints out of the scene's own draw). Does nothing
+   * before the first draw (the renderer and grid aren't known yet).
+   */
+  prepare(cam: THREE.PerspectiveCamera) {
+    if (!this.group.visible || !this.renderer || !this.cast || this.gw <= 0) return;
+    this.paintDue(this.renderer, cam, this.gw, this.gh);
+    this.preparedFor = this.gw * 65536 + this.gh;
+  }
+
+  private draw(renderer: THREE.WebGLRenderer, cam: THREE.PerspectiveCamera, target: THREE.WebGLRenderTarget | null) {
     if (!this.cast || this.renderer !== renderer) {
       this.cast?.dispose();
       this.cast = new PixelCast(renderer);
@@ -207,6 +240,19 @@ export class MenuCast {
     }
     this.targetU.value.set(tw, th);
     this.expU.value = renderer.toneMappingExposure;
+    // Not prepared for this grid (first frame, a resize): paint here, once.
+    if (this.preparedFor !== gw * 65536 + gh) this.paintDue(renderer, cam, gw, gh);
+    this.preparedFor = -1;
+    this.gw = gw;
+    this.gh = gh;
+    for (let i = 0; i < this.actors.length; i++) {
+      const a = this.actors[i];
+      if (!a.ready) continue;
+      (a.mat.uniforms.uPx.value as THREE.Vector2).set((a.tw * a.k * tw) / a.gw, (a.th * a.k * th) / a.gh);
+    }
+  }
+
+  private paintDue(renderer: THREE.WebGLRenderer, cam: THREE.PerspectiveCamera, gw: number, gh: number) {
     cam.updateMatrixWorld();
     // Light, rim and fog for this frame.
     const L = this.light;
@@ -214,9 +260,10 @@ export class MenuCast {
     this.env.tint.copy(L.tint).multiplyScalar(fl);
     this.env.rim.copy(L.rim);
     this.env.rimAmount = L.rimAmount;
-    const fog = scene.fog as THREE.FogExp2 | null;
+    const fog = (this.scene?.fog ?? null) as THREE.FogExp2 | null;
     if (fog) toDisplay(fog.color, this.expU.value, this.env.fog);
     let paints = 0;
+    let texels = 0;
     const prev = renderer.getRenderTarget();
     const prevAlpha = renderer.getClearAlpha();
     renderer.getClearColor(_c);
@@ -224,18 +271,18 @@ export class MenuCast {
       for (let i = 0; i < this.actors.length; i++) {
         const a = this.actors[i];
         const due = !a.ready || this.time >= a.next || a.gh !== gh || a.gw !== gw;
-        if (!due || (paints >= MAX_PAINTS && a.ready)) continue;
+        if (!due) continue;
+        // Caps (count, texels) only ever delay a repaint: an actor never painted yet goes now.
+        if (a.ready && (paints >= MAX_PAINTS || texels + a.tw * a.th > TEXEL_BUDGET)) continue;
         a.next = Math.max(a.next + 1 / MENU_FPS, this.time + 0.5 / MENU_FPS);
-        if (this.paintOne(a, cam, gw, gh, fog)) paints++;
+        if (this.paintOne(a, cam, gw, gh, fog)) {
+          paints++;
+          texels += a.tw * a.th;
+        }
       }
     } finally {
       renderer.setRenderTarget(prev);
       renderer.setClearColor(_c, prevAlpha);
-    }
-    for (let i = 0; i < this.actors.length; i++) {
-      const a = this.actors[i];
-      if (!a.ready) continue;
-      (a.mat.uniforms.uPx.value as THREE.Vector2).set((a.tw * a.k * tw) / a.gw, (a.th * a.k * th) / a.gh);
     }
   }
 
@@ -529,7 +576,8 @@ const MENU_PTERO_PAL: Palette = {
   claw: 0x1a1612,
   teeth: 0xe8dfc8,
   mouth: 0x6a2a26,
-  eye: 0xffa030,
+  // (Unlit: a dim ember, not red specks on the sky.)
+  eye: 0x4a2a1c,
 };
 
 export interface MenuPtero {
@@ -559,6 +607,41 @@ export function poseMenuPtero(P: MenuPtero, pos: THREE.Vector3, yaw: number, ban
   P.model.updateMatrixWorld(true);
 }
 
+/** Wing outline points (the 3D wing's polygon, `paintPtero`'s INNER / OUTER) for the menu strokes: [joint 0 = shoulder / 1 = wrist, x, z]. */
+const WING_EDGE: readonly (readonly [number, number, number])[] = [
+  [0, 0, 0.17],
+  [0, 0.98, 0.13],
+  [1, 0.6, 0.06],
+  [1, 1.25, -0.24],
+  [1, 0.75, -0.22],
+  [1, 0.0, -0.1],
+  [0, 0.55, -0.32],
+  [0, 0.0, -0.46],
+];
+let wingMat = 0;
+
+/**
+ * A menu pterosaur: the game's painter, plus its wings' outline and a spar through
+ * each membrane stroked at least 2 texels wide — a far, small flier keeps a clear
+ * wing silhouette at phone scale instead of 1-px membranes lost in the sky.
+ */
 export function paintMenuPtero(f: PixelFigure, P: MenuPtero): boolean {
-  return paintPtero(f, P.rig, MENU_PTERO_PAL);
+  if (!paintPtero(f, P.rig, MENU_PTERO_PAL)) return false;
+  wingMat ||= Mat.flat(0x2a201a, 'menuwing');
+  const r = P.rig;
+  const s = P.model.scale.x;
+  f.layer(0.02 * s, PART.LIMB, 0, 0.02);
+  for (let i = 0; i < 2; i++) {
+    const side = i === 0 ? 1 : -1;
+    for (let k = 0; k < WING_EDGE.length - 1; k++) {
+      const a = WING_EDGE[k];
+      const b = WING_EDGE[k + 1];
+      const ja = a[0] === 0 ? r.shoulders[i] : r.wrists[i];
+      const jb = b[0] === 0 ? r.shoulders[i] : r.wrists[i];
+      // (The wrist's own frame starts at the shoulder's 0.98: the two segments meet there.)
+      f.cone(f.at(ja, side * a[1], 0, a[2]), f.at(jb, side * b[1], 0, b[2]), 0.03 * s, 0.03 * s, wingMat).min(1);
+    }
+    f.cone(f.at(r.shoulders[i], side * 0.15, 0, -0.12), f.at(r.wrists[i], side * 0.7, 0, -0.1), 0.04 * s, 0.03 * s, wingMat).min(1);
+  }
+  return true;
 }

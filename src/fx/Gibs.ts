@@ -88,24 +88,38 @@ function jitterGeo(base: THREE.BufferGeometry, amount: number, seed: number): TH
 
 /**
  * ART: SPRITES look for gibs: each chunk is a camera-facing pixel-art chunk
- * snapped to the retro pixel grid, drawn the way the PixelCast sprites are —
- * a ragged lobed blob (meat) or an angular splinter (shards) whose outline
- * turns as the chunk tumbles, three hard tone steps from the upper-left light,
- * a 1-px dark edge, a wet highlight speck on meat and a pale bone fleck on
- * some chunks, a bright facet edge on shards. No tumbling cubes next to
- * pixel-art characters, no soft gradients. Same instances, same physics —
- * only the draw changes.
+ * snapped to the retro pixel grid, drawn the way the PixelCast sprites are.
+ * FLESH (bloody chunks): a ragged lobed blob whose outline turns as the chunk
+ * tumbles, three hard tone steps from the upper-left light, a 1-px dark edge, a
+ * wet highlight speck and a pale bone fleck on some. HARD debris (anything not
+ * bloody) takes its material from its colour: concrete / stone (grey) is an
+ * angular chipped polygon in three facet tones with grit and the odd rust
+ * rebar fleck; painted metal (red, the oil drum) the same chip with a 1-px
+ * bare-steel edge on its lit side; wood (browns) long splinters with grain;
+ * leaves (greens) small lobed scraps. No tumbling cubes next to pixel-art
+ * characters, no soft gradients. Same instances, same physics — only the draw
+ * changes.
  */
 const GIB_SPRITE_VERT = /* glsl */ `
   uniform vec2 uTarget;
+  attribute float aHard;
   varying vec2 vUv;
   varying vec3 vCol;
   varying float vPx;
   varying float vSeed;
   varying float vAng;
+  varying float vHard;
+  varying float vCls;
   void main() {
     vUv = uv;
     vCol = instanceColor;
+    vHard = aHard;
+    // Material class from the colour: 0 stone / concrete / grey metal, 1 painted metal (red),
+    // 2 wood (warm browns), 3 leaves (greens).
+    vec3 k = instanceColor;
+    float mx = max(k.r, max(k.g, k.b));
+    float sat = mx > 1e-3 ? (mx - min(k.r, min(k.g, k.b))) / mx : 0.0;
+    vCls = sat < 0.24 ? 0.0 : (k.r >= k.g && k.r >= k.b) ? (k.g < k.r * 0.5 ? 1.0 : 2.0) : (k.g >= k.b ? 3.0 : 0.0);
     vec3 c = instanceMatrix[3].xyz;
     float sz = (length(instanceMatrix[0].xyz) + length(instanceMatrix[1].xyz) + length(instanceMatrix[2].xyz)) / 3.0;
     vec4 mv = modelViewMatrix * vec4(c, 1.0);
@@ -132,17 +146,31 @@ const GIB_SPRITE_FRAG = /* glsl */ `
   varying float vPx;
   varying float vSeed;
   varying float vAng;
+  varying float vHard;
+  varying float vCls;
   float hash(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
-  // Outline radius toward direction d (unit square coords): lobed meat or a splinter.
+  float hash2(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233)) + vSeed * 3.7) * 43758.5453); }
+  // Splinter: a stretched diamond with a chipped corner (shards, wood).
+  bool splinter() { return uShard > 0.5 || (vHard > 0.5 && vCls > 1.5 && vCls < 2.5); }
+  // Chip: a hard chunk (stone, concrete, metal) — an irregular 5–6 sided polygon.
+  bool chip() { return vHard > 0.5 && !splinter() && vCls < 2.5; }
+  // Outline radius toward direction d (unit square coords).
   float radius(vec2 d) {
     float a = atan(d.y, d.x) - vAng;
     float h1 = hash(vSeed + 0.3) * 6.2832;
     float h2 = hash(vSeed + 7.1) * 6.2832;
-    if (uShard > 0.5) {
-      // A long splinter: a stretched diamond with a chipped corner.
+    if (splinter()) {
       vec2 r = vec2(cos(a), sin(a));
       float e = abs(r.x) / 1.0 + abs(r.y) / 0.5;
       return (0.95 + 0.12 * sin(3.0 * a + h1)) / max(e, 1e-3);
+    }
+    if (chip()) {
+      float n = 5.0 + floor(hash(vSeed + 1.7) * 2.0);
+      float seg = 6.2832 / n;
+      float b = a + h1;
+      float i = floor(b / seg);
+      float aa = b - (i + 0.5) * seg;
+      return 0.97 * cos(seg * 0.5) / cos(aa) * (0.84 + 0.2 * hash(vSeed + i * 3.1 + 0.5));
     }
     return 0.86 + 0.15 * sin(3.0 * a + h1) + 0.08 * sin(5.0 * a + h2);
   }
@@ -154,27 +182,53 @@ const GIB_SPRITE_FRAG = /* glsl */ `
     vec2 q = floor(vUv * vPx) + 0.5;
     if (vPx > 2.5 && inside(q) < 0.5) discard;
     vec2 d = (q / vPx) * 2.0 - 1.0;
-    // Three hard steps from the upper-left light (a lit cap, the base, a shadow side).
-    float l = dot(d, vec2(-0.6, 0.8));
-    float tone = l > 0.28 ? 1.22 : l < -0.3 ? 0.6 : 0.92;
-    if (uShard > 0.5) {
-      // Two facets split along the splinter, a bright edge between them.
-      vec2 ax = vec2(cos(vAng), sin(vAng));
+    vec2 ax = vec2(cos(vAng), sin(vAng));
+    float tone;
+    if (splinter()) {
+      // Two facets split along the splinter, a bright edge between them; wood shows its grain.
       float side = d.x * -ax.y + d.y * ax.x;
       tone = side > 0.0 ? 1.18 : 0.72;
       if (vPx > 4.5 && abs(side) < 1.0 / vPx) tone = 1.45;
+      if (vHard > 0.5 && vCls > 1.5 && vPx > 5.5 && fract(side * vPx * 0.5 + 0.25) < 0.3) tone *= 0.82;
+    } else if (chip()) {
+      // Three facets round an off-centre peak, each one hard step by how it faces the light.
+      vec2 pk = vec2(hash(vSeed + 2.2), hash(vSeed + 4.4)) * 0.5 - 0.25;
+      float fa = atan(d.y - pk.y, d.x - pk.x) - vAng - hash(vSeed + 9.0) * 6.2832;
+      float id = floor(mod(fa, 6.2832) / 2.0944);
+      float mid = (id + 0.5) * 2.0944 + vAng + hash(vSeed + 9.0) * 6.2832;
+      float l = dot(vec2(cos(mid), sin(mid)), vec2(-0.6, 0.8));
+      tone = l > 0.3 ? 1.24 : l < -0.35 ? 0.6 : 0.9;
+    } else {
+      // Flesh / leaves: three hard steps from the upper-left light (a lit cap, the base, a shadow side).
+      float l = dot(d, vec2(-0.6, 0.8));
+      tone = l > 0.28 ? 1.22 : l < -0.3 ? 0.6 : 0.92;
     }
     vec3 col = vCol * uLight * tone;
     if (vPx > 3.5) {
       // 1-px dark edge on chunks big enough to carry one.
       float n = inside(q + vec2(1.0, 0.0)) * inside(q - vec2(1.0, 0.0)) * inside(q + vec2(0.0, 1.0)) * inside(q - vec2(0.0, 1.0));
-      if (n < 0.5) col = vCol * uLight * 0.34;
-      else if (uShard < 0.5) {
-        // Wet speck up-left of the middle; a pale bone fleck on every third chunk.
-        vec2 sp = floor(vec2(0.36, 0.64) * vPx) + 0.5;
-        if (q == sp) col = mix(col, vec3(1.0, 0.92, 0.86), 0.7);
-        vec2 bp = floor(vec2(0.6 + 0.15 * sin(vAng), 0.4) * vPx) + 0.5;
-        if (hash(vSeed + 3.3) > 0.66 && vPx > 5.5 && (q == bp || q == bp + vec2(1.0, 0.0))) col = vec3(0.86, 0.8, 0.66) * uLight;
+      bool litEdge = inside(q + vec2(-1.0, 0.0)) < 0.5 || inside(q + vec2(0.0, 1.0)) < 0.5;
+      if (n < 0.5) {
+        col = vCol * uLight * 0.34;
+        // Painted metal: the paint chipped off its lit edge (bare steel).
+        if (vHard > 0.5 && vCls > 0.5 && vCls < 1.5 && litEdge) col = vec3(0.72, 0.74, 0.78) * uLight;
+      } else if (vHard < 0.5 || vCls > 2.5) {
+        if (vHard < 0.5) {
+          // Flesh: wet speck up-left of the middle; a pale bone fleck on every third chunk.
+          vec2 sp = floor(vec2(0.36, 0.64) * vPx) + 0.5;
+          if (q == sp) col = mix(col, vec3(1.0, 0.92, 0.86), 0.7);
+          vec2 bp = floor(vec2(0.6 + 0.15 * sin(vAng), 0.4) * vPx) + 0.5;
+          if (hash(vSeed + 3.3) > 0.66 && vPx > 5.5 && (q == bp || q == bp + vec2(1.0, 0.0))) col = vec3(0.86, 0.8, 0.66) * uLight;
+        }
+      } else if (chip()) {
+        // Grit: pits and pale flecks; concrete carries a rusty rebar fleck now and then.
+        float g = hash2(q);
+        if (g > 0.88) col *= 0.72;
+        else if (g < 0.06) col *= 1.2;
+        if (vCls < 0.5 && hash(vSeed + 5.5) > 0.6 && vPx > 6.5) {
+          vec2 r0 = floor(vec2(0.35, 0.4) * vPx) + 0.5;
+          if (q == r0 || q == r0 + vec2(1.0, 1.0) || q == r0 + vec2(2.0, 1.0)) col = vec3(0.5, 0.26, 0.14) * uLight;
+        }
       }
     }
     gl_FragColor = vec4(col, 1.0);
@@ -196,6 +250,10 @@ export class GibMesh {
   private rng: FxRng;
   private d: Float32Array;
   private col: Float32Array;
+  /** Per instance: 1 = hard debris (not bloody), 0 = flesh — the SPRITES look only. */
+  private hard: Float32Array;
+  private hardAttr: THREE.InstancedBufferAttribute;
+  private hardRange = newRange();
   private n = 0;
   private recycle = 0;
   private matRange = newRange();
@@ -215,6 +273,9 @@ export class GibMesh {
     this.mesh = new THREE.InstancedMesh(geo, mat, capacity);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.col = new Float32Array(capacity * 3).fill(1);
+    this.hard = new Float32Array(capacity);
+    this.hardAttr = new THREE.InstancedBufferAttribute(this.hard, 1);
+    this.hardAttr.setUsage(THREE.DynamicDrawUsage);
     this.mesh.instanceColor = new THREE.InstancedBufferAttribute(this.col, 3);
     this.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     this.mesh.frustumCulled = false;
@@ -272,6 +333,7 @@ export class GibMesh {
     this.col[c] = color.r;
     this.col[c + 1] = color.g;
     this.col[c + 2] = color.b;
+    this.hard[i] = flags & (GIB_FLAG.BLOODY | GIB_FLAG.SPLAT | GIB_FLAG.DRIP) ? 0 : 1;
   }
 
   update(dt: number) {
@@ -290,6 +352,7 @@ export class GibMesh {
           col[i * 3] = col[n * 3];
           col[i * 3 + 1] = col[n * 3 + 1];
           col[i * 3 + 2] = col[n * 3 + 2];
+          this.hard[i] = this.hard[n];
         }
         continue;
       }
@@ -384,6 +447,7 @@ export class GibMesh {
     if (n > 0) {
       uploadRange(this.mesh.instanceMatrix, this.matRange, 0, n * 16);
       uploadRange(this.mesh.instanceColor!, this.colRange, 0, n * 3);
+      if (this.solid) uploadRange(this.hardAttr, this.hardRange, 0, n);
     }
   }
 
@@ -437,7 +501,10 @@ export class GibMesh {
   setSprite(on: boolean, light?: THREE.Color, target?: { value: THREE.Vector2 }) {
     if (on && !this.solid && light && target) {
       this.solid = { geo: this.mesh.geometry, mat: this.mesh.material as THREE.Material };
-      this.spriteGeo ??= new THREE.PlaneGeometry(1, 1);
+      if (!this.spriteGeo) {
+        this.spriteGeo = new THREE.PlaneGeometry(1, 1);
+        this.spriteGeo.setAttribute('aHard', this.hardAttr);
+      }
       this.spriteMat ??= new THREE.ShaderMaterial({
         vertexShader: GIB_SPRITE_VERT,
         fragmentShader: GIB_SPRITE_FRAG,
