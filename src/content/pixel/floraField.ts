@@ -89,6 +89,8 @@ export function paintFloraAtlas(species: FloraSpecies[], biome: FloraBiome, biom
     lv: { data: Uint8Array; w: number; h: number }[];
   }
   const painted: Painted[] = [];
+  /** Balanced density found per species and level (a starting guess for the next variant). */
+  const hints = new Map<string, number>();
   for (const sp of species) {
     for (let v = 0; v < sp.variants; v++) {
       const seed = hashStr(`${biomeKey}|${sp.key}|${v}`);
@@ -105,23 +107,29 @@ export function paintFloraAtlas(species: FloraSpecies[], biome: FloraBiome, biom
         let cov = c.coverage();
         // Strand plants: thin this level until it covers what the finer level covers (no weight pop at the switch).
         if (sp.balance && l > 0 && cov > covPrev * 1.03) {
-          // Bisection on density (blades / leaflets are discrete: coverage moves in steps), ≤ 7 repaints of a small level.
+          // Bisection on density (blades / leaflets are discrete: coverage moves in steps), ≤ 7 repaints of a
+          // small level; the density the previous variant settled on is tried first (usually close enough).
           let err = Math.abs(cov / covPrev - 1);
           let lo = 0.02;
           let hi = 1;
-          for (let it = 0; it < 7 && err > 0.015; it++) {
-            const mid = (lo + hi) / 2;
-            const cm = paintAt(mid);
+          let best = 1;
+          const tryAt = (d: number) => {
+            const cm = paintAt(d);
             const cv = cm.coverage();
             const e = Math.abs(cv / covPrev - 1);
             if (e < err) {
               c = cm;
               cov = cv;
               err = e;
+              best = d;
             }
-            if (cv > covPrev) hi = mid;
-            else lo = mid;
-          }
+            if (cv > covPrev) hi = Math.min(hi, d);
+            else lo = Math.max(lo, d);
+          };
+          const hint = hints.get(`${sp.key}|${l}`);
+          if (hint !== undefined) tryAt(hint);
+          for (let it = 0; it < 7 && err > 0.015 && hi - lo > 0.01; it++) tryAt((lo + hi) / 2);
+          hints.set(`${sp.key}|${l}`, best);
         }
         covPrev = cov;
         raw.push({ data: resolveCanvas(c, pal), w: c.w, h: c.h });

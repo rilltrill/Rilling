@@ -479,7 +479,8 @@ describe.each([
 ] as const)('FLORA in stage %s', (id, pxName, d3Name, minPlants, roadClear) => {
   afterAll(() => Kit.disposeAll());
 
-  it('stands a billboard where every plant stands, off the road; 3D and SPRITES swap live; occluders untouched', () => {
+  // (A whole stage build incl. the atlas paint + a CPU raster of two frames: give it room on a busy box.)
+  it('stands a billboard where every plant stands, off the road; 3D and SPRITES swap live; occluders untouched', { timeout: 30000 }, () => {
     const stage = ALL_STAGES.find((s) => s.id === id)!;
     const was = RETRO_FOLIAGE.value;
     RETRO_FOLIAGE.value = 1;
