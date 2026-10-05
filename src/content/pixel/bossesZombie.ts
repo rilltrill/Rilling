@@ -1218,6 +1218,9 @@ export function paintBehemoth(f: PixelFigure, R: BehemothRig, st: BehemothPose):
   // Brim: the lip overhanging the face, its underside in shadow (a flat pill across the front:
   // from below it shows above the forehead, never over it).
   f.coneE(f.at(h, -0.54, 0.955, 0.68), f.at(h, 0.54, 0.955, 0.68), f.dir(h, 0, 1, 0), f.dir(h, 0, 0, 1), 0.035 * hs, 0.19 * hs, 0.035 * hs, 0.19 * hs, M.hat).tone(-0.24).k(0.015 * s);
+  // The whole disc, flat at its centre's depth: it shows out past the temples (and above the
+  // head from below) while the face, nearer, hides its back half — like the 3D brim.
+  f.ellipsoid(h, 0, 0.94, 0.08, 0.8, 0.035, 0.82, M.hat).flag(PF.FLAT).tone(-0.3).k(0.01 * s);
   if (f.facing(f.at(h, 0, 1.1, 0.6), f.dir(h, 0, 0.2, 1)) > 0.05) {
     f.decal(f.at(h, -0.16, 1.12, 0.6), f.at(h, 0.16, 1.12, 0.6), 0.08 * hs, 0.08 * hs, M.sticker).flag(D);
     // The raised centre ridge, front to back.
