@@ -181,7 +181,63 @@ function frond(
     pts.push(px, py);
     ws.push((o.rachis ?? 1) * (1 - 0.5 * (i / n)));
   }
-  c.stroke(pts, ws, mat, { z: z + 1, bias: bias + 0.14, flag: FF.SOFT, flat: 0.7 });
+  c.stroke(pts, ws, mat, { z: z + 1, bias: bias + 0.1, flag: FF.SOFT, flat: 0.7 });
+}
+
+/**
+ * Fern frond: an arching, tapering band along a drooping rachis whose edges
+ * break into swept-forward leaflets — a serrated outline, dark notches between
+ * the leaflets, a pale midrib, the upper half lit and the underside in shade.
+ * (A one-texel comb merges into a solid blade at this size; the band reads as
+ * a fern at every distance.)
+ */
+function fernFrond(
+  c: FloraCanvas,
+  x: number,
+  y: number,
+  ang: number,
+  len: number,
+  droop: number,
+  wid: number,
+  mat: number,
+  o: { z?: number; bias?: number; spacing?: number } = {},
+) {
+  const ca = Math.cos(ang);
+  const sa = Math.sin(ang);
+  const at = (t: number): [number, number] => [x + ca * len * t, y + sa * len * t - droop * t * t];
+  const z = o.z ?? 0;
+  const bias = o.bias ?? 0;
+  const sp = o.spacing ?? 3.2;
+  const steps = Math.max(8, Math.ceil(len / 0.6));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    if (t < 0.05) continue;
+    const [px, py] = at(t);
+    const [qx, qy] = at(Math.min(1, t + 0.01));
+    let tx = qx - px;
+    let ty = qy - py;
+    const tl = Math.sqrt(tx * tx + ty * ty) || 1;
+    tx /= tl;
+    ty /= tl;
+    // Leaflet phase along the frond: 0 at a notch, 1 at a leaflet's tip.
+    const ph = ((t * len) / sp) % 1;
+    const tip = Math.sin(ph * Math.PI);
+    const env = Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.05 + 0.02)), 0.7);
+    const w = wid * env * (0.5 + 0.5 * tip);
+    for (let side = -1; side <= 1; side += 2) {
+      // Perpendicular, swept toward the frond tip.
+      let nx = -ty * side + tx * 0.55;
+      let ny = tx * side + ty * 0.55;
+      const nl = Math.sqrt(nx * nx + ny * ny);
+      nx /= nl;
+      ny /= nl;
+      const up = ny > 0;
+      const tone = 0.5 + bias + (up ? 0.12 : -0.08) - t * 0.08 + (ph < 0.18 || ph > 0.88 ? -0.2 : 0);
+      c.line(px, py, px + nx * w, py + ny * w, mat, tone, z, FF.SOFT);
+    }
+    // Midrib.
+    c.line(px, py, px + tx * 0.6, py + ty * 0.6, mat, 0.5 + bias + 0.2, z + 0.5, FF.SOFT);
+  }
 }
 
 /** Hanging vine: a wavy 1-texel strand with leaf pairs every few texels. */
@@ -318,28 +374,34 @@ export const JUNGLE_TREE: FloraSpecies = {
   },
 };
 
-/** Background treeline filler: tall bare trunk and a broad dark crown (far layer: coarse texels). */
+/** Background treeline filler: a forked trunk under a broad, ragged crown (far layer: coarse texels). */
 export const CANOPY_TREE: FloraSpecies = {
   key: 'canopyTree',
-  w: 128,
+  w: 136,
   h: 136,
   heightM: 15,
   variants: 3,
   paint(c, m, rng, v) {
     const W = this.w;
     const H = this.h;
-    const cx = W / 2 + rng.spread(4);
-    const top = H * rng.range(0.5, 0.58);
+    const cx = W / 2 + rng.spread(3);
+    const fork = H * rng.range(0.34, 0.42);
     const lean = rng.spread(5);
     const bx = cx + lean;
-    c.mass(bx - 30, top + 24, 26, 15, m.leafDark, rng, { bias: -0.14, z: -30, puff: 4, glint: 0 });
-    c.mass(bx + 30, top + 28, 26, 15, m.leafDark, rng, { bias: -0.14, z: -30, puff: 4, glint: 0 });
-    c.stroke([cx, 0, cx + lean * 0.5, top * 0.5, bx, top + 4], [4.2, 3.4, 2.6], m.bark, { bark: 1.8, seed: v, z: 0 });
-    c.curve(bx, top - 6, bx - 10, top + 4, bx - 26, top + 10, 2, 1, m.bark, { z: -4 });
-    c.curve(bx, top - 2, bx + 12, top + 6, bx + 28, top + 12, 2, 1, m.bark, { z: -4 });
-    c.mass(bx - 22 + rng.spread(4), top + 14, 26, 14, m.leaf, rng, { z: 4, puff: 4.2, glint: 1, bias: -0.04 });
-    c.mass(bx + 22 + rng.spread(4), top + 18, 26, 14, v === 2 ? m.leafDark : m.leaf, rng, { z: 4, puff: 4.2, glint: 1, bias: -0.04 });
-    c.mass(bx + rng.spread(8), H - 20, 32, 16, m.leaf, rng, { z: 10, puff: 4.2, glint: 1 });
+    // Back crown masses (dark), the forked trunk, then the front crown in tiers.
+    c.mass(bx - 34, fork + 44, 24, 14, m.leafDark, rng, { bias: -0.14, z: -30, puff: 4, glint: 0 });
+    c.mass(bx + 32, fork + 50, 24, 14, m.leafDark, rng, { bias: -0.14, z: -30, puff: 4, glint: 0 });
+    c.mass(bx + rng.spread(10), H - 16, 28, 12, m.leafDark, rng, { bias: -0.12, z: -30, puff: 4, glint: 0 });
+    c.stroke([cx, 0, cx + lean * 0.4, fork * 0.6, bx, fork], [4.4, 3.8, 3.4], m.bark, { bark: 1.8, seed: v, z: 0 });
+    c.curve(bx, fork, bx - 6, fork + 16, bx - 20 + rng.spread(4), fork + 34, 2.6, 1.4, m.bark, { z: -2 });
+    c.curve(bx, fork, bx + 7, fork + 18, bx + 18 + rng.spread(4), fork + 40, 2.6, 1.4, m.bark, { z: -2 });
+    c.curve(bx - 3, fork + 8, bx - 18, fork + 14, bx - 38, fork + 22, 1.6, 0.8, m.bark, { z: -4 });
+    c.curve(bx + 3, fork + 12, bx + 18, fork + 20, bx + 40, fork + 28, 1.6, 0.8, m.bark, { z: -4 });
+    c.mass(bx - 42 + rng.spread(4), fork + 24, 20, 11, m.leaf, rng, { z: 4, puff: 4, glint: 1, bias: -0.04 });
+    c.mass(bx + 42 + rng.spread(4), fork + 30, 20, 11, v === 2 ? m.leafDark : m.leaf, rng, { z: 4, puff: 4, glint: 1, bias: -0.04 });
+    c.mass(bx - 16 + rng.spread(4), fork + 44, 26, 14, m.leaf, rng, { z: 8, puff: 4.2, glint: 1 });
+    c.mass(bx + 18 + rng.spread(4), fork + 52, 24, 13, m.leaf, rng, { z: 8, puff: 4.2, glint: 1 });
+    c.mass(bx + rng.spread(8), H - 14, 22, 11, m.leafLight, rng, { z: 12, puff: 4, glint: 1 });
   },
 };
 
@@ -403,7 +465,7 @@ export const PALM: FloraSpecies = {
 
 // ─── Undergrowth ─────────────────────────────────────────────────────────────
 
-/** Giant arching fern: a fountain of pinnate fronds, back ones darker, a dark heart. */
+/** Giant arching fern: a fountain of serrated fronds, back ones darker, a dark heart, fiddleheads. */
 export const FERN: FloraSpecies = {
   key: 'fern',
   w: 112,
@@ -413,26 +475,23 @@ export const FERN: FloraSpecies = {
   paint(c, m, rng, v) {
     const W = this.w;
     const cx = W / 2;
-    const n = rng.int(8, 10);
+    const n = rng.int(7, 8);
     const fronds: { side: number; elev: number; len: number; back: boolean }[] = [];
     for (let i = 0; i < n; i++) {
       const t = (i + 0.5) / n;
       const side = t < 0.5 ? -1 : 1;
-      const elev = 0.75 + (1 - Math.abs(t - 0.5) * 2) * 0.75 + rng.spread(0.1);
-      fronds.push({ side, elev, len: rng.range(42, 54) * (0.8 + 0.2 * Math.sin(Math.PI * t)), back: i % 3 === 1 });
+      const elev = 0.55 + (1 - Math.abs(t - 0.5) * 2) * 0.95 + rng.spread(0.08);
+      fronds.push({ side, elev, len: rng.range(44, 56) * (0.8 + 0.2 * Math.sin(Math.PI * t)), back: i % 3 === 1 });
     }
-    // Back fronds first; among the front ones the low, spreading fronds first.
+    // Back fronds first; among the front ones the upright ones first, the low spreading ones over them.
     fronds.sort((a, b) => (a.back === b.back ? b.elev - a.elev : a.back ? -1 : 1));
     c.ellipse(cx, 3, 8, 4, m.leafDark, { z: -10, bias: -0.25 });
     for (const f of fronds) {
       const ang = f.side > 0 ? f.elev : Math.PI - f.elev;
       const mat = f.back ? m.leafDark : v % 2 ? m.fern : m.fernLight;
-      frond(c, cx + f.side * 1.5, 2, ang, f.len, f.len * (0.45 + (1.5 - f.elev) * 0.4), 8, mat, f.back ? m.leafDark : m.fern, rng, {
+      fernFrond(c, cx + f.side * 1.5, 2, ang, f.len, f.len * (0.34 + (1.5 - f.elev) * 0.42), rng.range(4.4, 5.6), mat, {
         z: f.back ? -6 : 4 + f.elev * 4,
-        bias: f.back ? -0.12 : 0.02,
-        spacing: 2,
-        stiff: 0.75,
-        rachis: 0.8,
+        bias: f.back ? -0.1 : 0.02,
       });
     }
     // Fiddleheads.
