@@ -183,6 +183,9 @@ function roadStrip(ctx: Ctx, d0: number, d1: number, step: number, mat: THREE.Ma
   return new THREE.Mesh(Kit.track(g), mat);
 }
 
+/** Tag of the classic lane paint (ART: PIXEL WORLD paints the lines into its road). */
+const PAINT_TAG = { k: 'paint' } as const;
+
 /** Road paint: same asphalt texture at lower strength reads as worn paint. */
 const PAINT_WHITE = 0xd8d2c4;
 const PAINT_YELLOW = 0xd8a428;
@@ -196,7 +199,10 @@ export function buildRoad(ctx: Ctx, from: number, to: number) {
   for (let d0 = from; d0 < to; d0 += CHUNK) {
     const d1 = Math.min(to, d0 + CHUNK);
     const g = ctx.chunk(d0 + 1);
-    g.add(roadStrip(ctx, d0, d1, 5, asphalt()));
+    // (ART: PIXEL WORLD lays its painted road over d0…d1 in this chunk instead: `userData.pw`.)
+    const strip = roadStrip(ctx, d0, d1, 5, asphalt());
+    strip.userData.pw = { k: 'road', d0, d1 };
+    g.add(strip);
     // Solid edge lines.
     for (const [off, mat] of [
       [5.6, white],
@@ -204,12 +210,14 @@ export function buildRoad(ctx: Ctx, from: number, to: number) {
       [-8.6, yellow],
       [-20.0, white],
     ] as const) {
-      g.add(EnvKit.ribbon(ctx.curve, 0.16, mat, { from: d0, to: d1, step: 5, offset: off, y: 0.025 }));
+      const line = EnvKit.ribbon(ctx.curve, 0.16, mat, { from: d0, to: d1, step: 5, offset: off, y: 0.025 });
+      line.userData.pw = PAINT_TAG;
+      g.add(line);
     }
     // Lane dashes.
     for (let d = Math.ceil(d0 / 10) * 10; d < d1; d += 10) {
       for (const off of [-1.87, 1.87, -12.3, -16.2]) {
-        ctx.put(Kit.mesh(Kit.box(0.15, 0.03, 3), white), d, off, 0.02);
+        ctx.put(Kit.mesh(Kit.box(0.15, 0.03, 3), white), d, off, 0.02).userData.pw = PAINT_TAG;
       }
     }
   }
@@ -218,10 +226,12 @@ export function buildRoad(ctx: Ctx, from: number, to: number) {
 /** Road extension behind the start (seen in the opening look-back). */
 export function buildStartApron(ctx: Ctx, root: THREE.Group) {
   const g = new THREE.Group();
-  g.add(roadStrip(ctx, -320, 0, 5, asphalt()));
-  Kit.add(g, Kit.box(0.16, 0.03, 320), paint(PAINT_WHITE), 5.6, 0.02, 160);
-  Kit.add(g, Kit.box(0.16, 0.03, 320), paint(PAINT_YELLOW), -5.6, 0.02, 160);
-  for (let z = 4; z < 320; z += 10) for (const x of [-1.87, 1.87, -12.3, -16.2]) Kit.add(g, Kit.box(0.15, 0.03, 3), paint(PAINT_WHITE), x, 0.02, z);
+  const strip = roadStrip(ctx, -320, 0, 5, asphalt());
+  strip.userData.pw = { k: 'road', d0: -320, d1: 0 };
+  g.add(strip);
+  Kit.add(g, Kit.box(0.16, 0.03, 320), paint(PAINT_WHITE), 5.6, 0.02, 160).userData.pw = PAINT_TAG;
+  Kit.add(g, Kit.box(0.16, 0.03, 320), paint(PAINT_YELLOW), -5.6, 0.02, 160).userData.pw = PAINT_TAG;
+  for (let z = 4; z < 320; z += 10) for (const x of [-1.87, 1.87, -12.3, -16.2]) Kit.add(g, Kit.box(0.15, 0.03, 3), paint(PAINT_WHITE), x, 0.02, z).userData.pw = PAINT_TAG;
   for (let z = 2; z < 200; z += 4) {
     const s = new THREE.Group();
     jersey(s, 0, 0, 3.96);
@@ -246,15 +256,21 @@ export function buildStartApron(ctx: Ctx, root: THREE.Group) {
       const h = rng.range(5, 16);
       const w = rng.range(8, 18);
       const dep = rng.range(8, 14);
-      Kit.add(g, Kit.box(w, h, dep), M.lam(rng.pick([0x4a3434, 0x3a3644, 0x4c4032]), 'brick', 0.35, 1), x, h / 2, z);
-      Kit.add(g, Kit.box(w + 0.4, 0.5, dep + 0.4), S.conc(0x2e2628), x, h + 0.25, z);
+      const hex = rng.pick([0x4a3434, 0x3a3644, 0x4c4032]);
+      const blk = Kit.add(g, Kit.box(w, h, dep), M.lam(hex, 'brick', 0.35, 1), x, h / 2, z);
+      Kit.add(g, Kit.box(w + 0.4, 0.5, dep + 0.4), S.conc(0x2e2628), x, h + 0.25, z).userData.pw = { k: 'blockRoof' };
       const burning = rng.chance(0.5);
+      const wins: [number, number, number][] = [];
+      blk.userData.pw = { k: 'block', w, h, dep, hex, burning, wins };
       // Window rows on the face looking down the highway.
       for (let fy = 2; fy < h - 1; fy += 3) {
         for (let fx = -w / 2 + 1.5; fx < w / 2 - 1; fx += 2.6) {
-          const lit = burning && rng.chance(0.35) ? M.glow(0xff8a30, 1.3) : rng.chance(0.12) ? M.glow(0xffd090, 0.8) : S.clean(0x161420);
+          const fire = burning && rng.chance(0.35);
+          const warm = !fire && rng.chance(0.12);
+          const lit = fire ? M.glow(0xff8a30, 1.3) : warm ? M.glow(0xffd090, 0.8) : S.clean(0x161420);
           // A single quad facing down the highway (−Z): the only side anyone sees.
-          Kit.add(g, Kit.plane(1.2, 1.3), lit, x + fx, fy, z - dep / 2 - 0.05, 0, Math.PI, 0);
+          Kit.add(g, Kit.plane(1.2, 1.3), lit, x + fx, fy, z - dep / 2 - 0.05, 0, Math.PI, 0).userData.pw = { k: 'blockWin' };
+          wins.push([fx, fy, fire ? 2 : warm ? 1 : 0]);
         }
       }
       if (burning) ctx.fires.add(new THREE.Vector3(x, h, z), rng.range(1.6, 2.6), 1);
@@ -280,8 +296,8 @@ export function buildFurniture(ctx: Ctx, d0: number, d1: number, opts: { rails?:
     }
     if (opts.rails !== false) {
       for (const x of [X.RAIL_R + 0.3, X.FAR_EDGE - 0.4]) {
-        ctx.put(Kit.mesh(Kit.box(0.12, 0.75, 0.12), post), d, x, 0.37);
-        ctx.put(Kit.mesh(Kit.box(0.08, 0.3, 4.0), rail), d + 2, x + (x > 0 ? -0.08 : 0.08), 0.62);
+        ctx.put(Kit.mesh(Kit.box(0.12, 0.75, 0.12), post), d, x, 0.37).userData.pw = { k: 'rpost' };
+        ctx.put(Kit.mesh(Kit.box(0.08, 0.3, 4.0), rail), d + 2, x + (x > 0 ? -0.08 : 0.08), 0.62).userData.pw = { k: 'rail', side: x > 0 ? 1 : -1 };
       }
     }
   }
@@ -303,6 +319,7 @@ export function buildUtilityLine(ctx: Ctx, d0: number, d1: number, x: number) {
     const p = new THREE.Group();
     Kit.add(p, Kit.cyl(0.13, 0.17, 11, 6), wood, 0, 5.5, 0, 0, 0, lean);
     Kit.add(p, Kit.box(2.6, 0.16, 0.16), wood, 0, 10.3, 0, 0, 0, lean);
+    p.userData.pw = { k: 'upole', lean };
     ctx.put(p, d, x, 0, Math.PI / 2);
     const tips = [-1.1, 0, 1.1].map((o) => ctx.at(d, x, 10.45).addScaledVector(ctx.frame(d).forward, o));
     if (prev) {
@@ -318,6 +335,7 @@ export function buildUtilityLine(ctx: Ctx, d0: number, d1: number, x: number) {
         ]) {
           const len = p0.distanceTo(p1);
           const m = Kit.mesh(Kit.box(0.04, 0.04, len), wire);
+          m.userData.pw = { k: 'wire' };
           m.position.copy(p0).lerp(p1, 0.5);
           m.lookAt(p1);
           ctx.chunk(d).add(m);
@@ -362,13 +380,19 @@ function house(rng: Rng, burning: boolean): THREE.Group {
   const w = rng.range(8, 12);
   const dpt = rng.range(7, 10);
   const h = rng.range(3, 5.5);
-  Kit.add(g, Kit.box(w, h, dpt), M.lam(rng.pick([0x9a826a, 0x6a7e94, 0xa88e5e, 0x8a6a6a]), 'stucco', 0.35, 1), 0, h / 2, 0);
-  const roof = M.lam(rng.pick([0x4a2c2a, 0x2e3040, 0x54402a]), 'planks', 0.35, 1);
+  const wall = rng.pick([0x9a826a, 0x6a7e94, 0xa88e5e, 0x8a6a6a]);
+  Kit.add(g, Kit.box(w, h, dpt), M.lam(wall, 'stucco', 0.35, 1), 0, h / 2, 0);
+  const roofHex = rng.pick([0x4a2c2a, 0x2e3040, 0x54402a]);
+  const roof = M.lam(roofHex, 'planks', 0.35, 1);
   for (const s of [-1, 1]) Kit.add(g, Kit.box(w + 0.6, 0.25, dpt * 0.58), roof, 0, h + dpt * 0.18, s * dpt * 0.24, s * 0.62, 0, 0);
+  const wins: number[] = [];
   for (const x of [-w / 3, w / 3]) {
-    Kit.add(g, Kit.box(1.4, 1.2, 0.1), burning ? M.glow(0xff8a30, 1.3) : rng.chance(0.3) ? M.glow(0xffd090, 0.9) : S.clean(0x1a1a22), x, h * 0.55, dpt / 2 + 0.02);
+    const warm = !burning && rng.chance(0.3);
+    wins.push(burning ? 2 : warm ? 1 : 0);
+    Kit.add(g, Kit.box(1.4, 1.2, 0.1), burning ? M.glow(0xff8a30, 1.3) : warm ? M.glow(0xffd090, 0.9) : S.clean(0x1a1a22), x, h * 0.55, dpt / 2 + 0.02);
   }
   Kit.add(g, Kit.box(1.1, 2.1, 0.1), M.lam(0x4a3220, 'planks', 1.5, 0.9), 0, 1.05, dpt / 2 + 0.02);
+  g.userData.pw = { k: 'house', w, dpt, h, wall, roof: roofHex, burning, wins };
   return g;
 }
 
@@ -398,6 +422,7 @@ export function buildOutskirts(ctx: Ctx) {
     // Shop.
     Kit.add(g, Kit.box(12, 4.5, 8), M.lam(0x9a8a74, 'brick', 0.45, 1), 0, 2.25, 13);
     Kit.add(g, Kit.box(8, 2, 0.1), M.glow(0xfff0c0, 0.9), 0, 1.8, 8.95);
+    g.userData.pw = { k: 'gas' };
     ctx.put(g, d, 24, 0, Math.PI / 2);
     // Tall pole sign.
     const s = new THREE.Group();
@@ -405,6 +430,7 @@ export function buildOutskirts(ctx: Ctx) {
     Kit.add(s, Kit.box(5, 2.6, 0.6), S.plate(0xc42a20), 0, 13, 0);
     addText(s, 'GAS', M.glow(0xffe6a0, 1.3), 0, 13.4, 0.32, 0.2, 0.06);
     addText(s, '24H', M.glow(0xffffff, 1.0), 0, 12.3, 0.32, 0.12, 0.06);
+    s.userData.pw = { k: 'gasSign' };
     ctx.put(s, d - 18, 15, 0, -0.5);
     ctx.fires.add(ctx.at(d, 21, 1), 1.3, 1);
     const c = car(rng, { burnt: true });
@@ -416,10 +442,13 @@ export function buildOutskirts(ctx: Ctx) {
     const w = rng.range(22, 36);
     const h = rng.range(7, 11);
     const dep = rng.range(16, 24);
-    Kit.add(g, Kit.box(w, h, dep), M.lam(rng.pick([0x7a7a84, 0x5a6c80, 0x8a7460]), 'corrugated', 0.25, 0.9), 0, h / 2, 0);
+    const hex = rng.pick([0x7a7a84, 0x5a6c80, 0x8a7460]);
+    Kit.add(g, Kit.box(w, h, dep), M.lam(hex, 'corrugated', 0.25, 0.9), 0, h / 2, 0);
     Kit.add(g, Kit.box(w + 0.4, 0.5, dep + 0.4), S.steel(0x3a3a40), 0, h + 0.25, 0);
     for (let x = -w / 2 + 4; x < w / 2 - 3; x += 6) Kit.add(g, Kit.box(4, 4.5, 0.12), M.lam(0x4e5058, 'corrugated', 0.4, 1), x, 2.25, dep / 2 + 0.03);
-    if (rng.chance(0.6)) Kit.add(g, Kit.box(w * 0.5, 0.6, 0.12), M.glow(0xffd090, 0.8), 0, h - 1.5, dep / 2 + 0.05);
+    const lit = rng.chance(0.6);
+    if (lit) Kit.add(g, Kit.box(w * 0.5, 0.6, 0.12), M.glow(0xffd090, 0.8), 0, h - 1.5, dep / 2 + 0.05);
+    g.userData.pw = { k: 'warehouse', w, h, dep, hex, lit, i: Math.round(d) };
     ctx.put(g, d, rng.range(42, 60), 0, -Math.PI / 2);
     if (rng.chance(0.4)) ctx.fires.add(ctx.at(d, 48, h), 2.4, 1);
   }
@@ -432,10 +461,13 @@ export function buildOutskirts(ctx: Ctx) {
       const p = new THREE.Group();
       Kit.add(p, Kit.box(0.3, 4.6, 4.0), panel, 0, 2.3, 0);
       Kit.add(p, Kit.box(0.4, 4.8, 0.3), S.conc(0x6a665e), 0, 2.4, 2.0);
+      p.userData.pw = { k: 'soundwall', i: (d - 182) / 4 };
       ctx.put(p, d + 2, 11.5, 0);
       if ((d - 182) % 20 === 8 && t < tags.length) {
         const tg = new THREE.Group();
-        addText(tg, tags[t], S.clean(rng.pick([0xe02020, 0x30a8f0, 0xf0e020, 0xf4f4f4])), 0, 0, 0, 0.12, 0.02);
+        const col = rng.pick([0xe02020, 0x30a8f0, 0xf0e020, 0xf4f4f4]);
+        addText(tg, tags[t], S.clean(col), 0, 0, 0, 0.12, 0.02);
+        tg.userData.pw = { k: 'tag', text: tags[t], color: col };
         ctx.put(tg, d + 6, 11.33, 2.3, -Math.PI / 2);
         t++;
       }
@@ -480,6 +512,7 @@ export function buildPileup(ctx: Ctx) {
   for (let i = 0; i < 6; i++) {
     const f = Kit.mesh(Kit.cyl(0.04, 0.04, 0.3, 5), M.glow(0xff3020, 1.6));
     f.rotation.z = Math.PI / 2;
+    f.userData.pw = { k: 'flare' };
     ctx.put(f, P - 14 + i * 1.6, -5 + rng.spread(1.2), 0.05, rng.next() * 3);
   }
 }
@@ -532,6 +565,7 @@ export function buildOverpass(ctx: Ctx) {
   c.position.set(10, 7.3, 1.5);
   c.rotation.y = -Math.PI / 2 + 0.3;
   g.add(c);
+  g.userData.pw = { k: 'overpass' };
   ctx.put(g, d, 0, 0, 0);
   ctx.fires.add(ctx.at(d, -20, 9.5), 1.6, 0.5);
 }
@@ -551,6 +585,7 @@ export function buildBillboards(ctx: Ctx) {
     addText(f, 'REPENT', red, 0, 0.8, 0.12, 0.34, 0.06);
     addText(f, 'THE END IS NEAR', black, 0, -1.4, 0.12, 0.13, 0.05);
   });
+  repent.userData.pw.art = 'repent';
   ctx.put(repent, D.BILLBOARDS_FROM + 4, 18, 0, -0.42);
   const burger = billboard((f) => {
     Kit.add(f, Kit.box(12, 5, 0.1), sheet(0xd42a1c), 0, 0, 0.05);
@@ -563,6 +598,7 @@ export function buildBillboards(ctx: Ctx) {
     addText(f, 'BARN', yellow, 1.9, -0.8, 0.12, 0.26, 0.05);
     addText(f, 'EXIT 9 >', white, 1.9, -2.0, 0.12, 0.08, 0.04);
   });
+  burger.userData.pw.art = 'burger';
   ctx.put(burger, D.BILLBOARDS_FROM + 46, -27, 0, 0.42);
   // Burning, sagging billboard.
   const burnt = billboard((f) => {
@@ -570,6 +606,7 @@ export function buildBillboards(ctx: Ctx) {
     addText(f, 'MOTEL', M.lam(0x5a4a40, 'planks', 0.7, 0.6), 0, 0.5, 0.12, 0.28, 0.05);
   }, false);
   burnt.rotation.z = 0.12;
+  burnt.userData.pw.art = 'motel';
   ctx.put(burnt, D.BILLBOARDS_FROM + 92, 19, 0, -0.35);
   ctx.fires.add(ctx.at(D.BILLBOARDS_FROM + 92, 17, 13.5), 2.2, 1);
   // Motel with neon.
@@ -577,10 +614,14 @@ export function buildBillboards(ctx: Ctx) {
     const g = new THREE.Group();
     Kit.add(g, Kit.box(34, 6, 10), M.lam(0xa07460, 'stucco', 0.35, 1), 0, 3, 0);
     Kit.add(g, Kit.box(34.4, 0.4, 12), M.lam(0x4a3028, 'planks', 0.45, 1), 0, 6.2, 1);
+    const wins: number[] = [];
     for (let x = -15; x <= 15; x += 3.4) {
       Kit.add(g, Kit.box(1, 2.1, 0.1), M.lam(0x6a3e2a, 'planks', 1.5, 0.9), x - 0.8, 1.05, 5.02);
-      Kit.add(g, Kit.box(1, 1, 0.1), rng.chance(0.4) ? M.glow(0xffc070, 0.9) : S.clean(0x1a1a20), x + 0.6, 1.6, 5.02);
-      Kit.add(g, Kit.box(1, 1, 0.1), rng.chance(0.3) ? M.glow(0xffc070, 0.9) : S.clean(0x1a1a20), x + 0.6, 4.4, 5.02);
+      const lo = rng.chance(0.4);
+      Kit.add(g, Kit.box(1, 1, 0.1), lo ? M.glow(0xffc070, 0.9) : S.clean(0x1a1a20), x + 0.6, 1.6, 5.02);
+      const hi = rng.chance(0.3);
+      Kit.add(g, Kit.box(1, 1, 0.1), hi ? M.glow(0xffc070, 0.9) : S.clean(0x1a1a20), x + 0.6, 4.4, 5.02);
+      wins.push(lo ? 1 : 0, hi ? 1 : 0);
     }
     const sign = new THREE.Group();
     Kit.add(sign, Kit.cyl(0.25, 0.25, 9, 6), S.steel(PAL.metalDark), 0, 4.5, 0);
@@ -588,7 +629,9 @@ export function buildBillboards(ctx: Ctx) {
     addText(sign, 'MOTEL', M.glow(0xff3a8a, 1.5), 0, 9.9, 0.22, 0.2, 0.05);
     addText(sign, 'VACANCY', M.glow(0x40ff90, 1.2), 0, 8.95, 0.22, 0.09, 0.04);
     sign.position.set(-14, 0, 12);
+    sign.userData.pw = { k: 'motelSign' };
     g.add(sign);
+    g.userData.pw = { k: 'motel', wins };
     ctx.put(g, D.BILLBOARDS_FROM + 66, 46, 0, -Math.PI / 2 + 0.1);
   }
   // Gantry sign over the lanes.
@@ -604,6 +647,7 @@ export function buildBillboards(ctx: Ctx) {
     const p2 = signPanel(['BRIDGE  1', 'NO STOPPING'], 6.2, 2.4);
     p2.position.set(3.6, 7.4, 0.35);
     g.add(p2);
+    g.userData.pw = { k: 'gantry' };
     ctx.put(g, D.BILLBOARDS_FROM + 120, 0, 0, 0);
   }
 }
@@ -633,6 +677,7 @@ export function buildTankerSite(ctx: Ctx) {
     ];
     const g = new THREE.Group();
     slabs.forEach(([x, z, w, l, r], i) => Kit.add(g, Kit.box(w, 0.02, l), i % 2 ? sheen : oil, x, 0.004 * i, z, 0, r, 0));
+    g.userData.pw = { k: 'spill' };
     ctx.put(g, T - 5, -2, 0.03, 0.2);
   }
   ctx.fires.add(ctx.at(T + 3, 7.5, 0.6), 1.2, 1);
@@ -640,6 +685,7 @@ export function buildTankerSite(ctx: Ctx) {
   for (let i = 0; i < 5; i++) {
     const f = Kit.mesh(Kit.cyl(0.04, 0.04, 0.3, 5), M.glow(0xff3020, 1.6));
     f.rotation.z = Math.PI / 2;
+    f.userData.pw = { k: 'flare' };
     ctx.put(f, T - 11 - i * 1.3, 1.5 + ctx.rng.spread(2), 0.05, ctx.rng.next() * 3);
   }
 }
@@ -676,9 +722,11 @@ export function buildTunnel(ctx: Ctx): { lights: THREE.Group; fixtures: THREE.Ve
     Kit.add(seg, Kit.box(W + 1, 0.6, 6.02), ceil, C, TUNNEL.H + 0.3, 0);
     // Light fixture housings (dark) — the lit panels live in `lights`.
     for (const x of [-2.6, 3.8]) Kit.add(seg, Kit.box(0.5, 0.18, 2.2), S.trim(0x24242a), x, TUNNEL.H - 0.08, 0);
+    seg.userData.pw = { k: 'tseg', d: d + 3, i: (d - t0) / 6 };
     ctx.put(seg, d + 3, 0, 0, 0);
     for (const x of [-2.6, 3.8]) {
       const l = Kit.mesh(Kit.box(0.36, 0.06, 1.9), M.glow(0xffa848, 1.6));
+      l.userData.pw = { k: 'tlight' };
       ctx.put(l, d + 3, x, TUNNEL.H - 0.2, 0, lights);
     }
     fixtures.push(ctx.at(d + 3, 0.6, TUNNEL.H - 0.6));
@@ -686,14 +734,16 @@ export function buildTunnel(ctx: Ctx): { lights: THREE.Group; fixtures: THREE.Ve
       // Emergency exit sign + phone box on the right wall.
       const e = new THREE.Group();
       Kit.add(e, Kit.box(0.1, 0.5, 1.2), M.glow(0x30ff70, 1.2), 0, 0, 0);
+      e.userData.pw = { k: 'exit' };
       ctx.put(e, d, TUNNEL.R - 0.02, 3.2, 0);
-      ctx.put(Kit.mesh(Kit.box(0.3, 1.2, 0.8), S.steel(0xc03020)), d + 2, TUNNEL.R - 0.15, 1.1, 0);
+      ctx.put(Kit.mesh(Kit.box(0.3, 1.2, 0.8), S.steel(0xc03020)), d + 2, TUNNEL.R - 0.15, 1.1, 0).userData.pw = { k: 'phone' };
     }
     if ((d - t0) % 42 === 18) {
       // Jet fans.
       for (const x of [-1.4, 2.6]) {
         const f = Kit.mesh(Kit.cyl(0.55, 0.55, 3, 10), S.steel(0x5a5e64));
         f.rotation.x = Math.PI / 2;
+        f.userData.pw = { k: 'fan' };
         ctx.put(f, d, x, TUNNEL.H - 1.0, 0);
       }
     }
@@ -723,6 +773,7 @@ export function buildTunnel(ctx: Ctx): { lights: THREE.Group; fixtures: THREE.Ve
     if (dir > 0) addText(p, 'ROUTE 9 TUNNEL', S.clean(0xece8dc), 0.7, TUNNEL.H + 3.0, 1.06, 0.16, 0.05);
     // Lamps flanking the portal.
     for (const x of [-6.8, 8.2]) Kit.add(p, Kit.box(0.6, 0.3, 0.3), M.glow(0xffb050, 1.5), x, TUNNEL.H + 1.3, 1.1 * dir);
+    p.userData.pw = { k: 'portal', dir };
     ctx.put(p, d - dir, 0, 0, 0);
   }
   // The ridge the tunnel cuts through: rock masses either side and over the top.
@@ -736,14 +787,17 @@ export function buildTunnel(ctx: Ctx): { lights: THREE.Group; fixtures: THREE.Ve
       const geo = Kit.jitter(Kit.ico(1, 1), 0.25, Math.floor(rng.next() * 1000));
       const m = Kit.mesh(geo, rng.chance(0.5) ? rock : rockDark);
       m.scale.set(s, rng.range(16, 26), s);
+      m.userData.pw = { k: 'ridge', side, d };
       ctx.put(m, d, x, 0, rng.next() * 6, ridge);
     }
     // Over the bore.
     if (d < t0 + 4 || d > t1 - 4) continue;
     const top = Kit.mesh(Kit.jitter(Kit.ico(1, 1), 0.2, Math.floor(rng.next() * 1000)), rock);
     top.scale.set(30, 7, 12);
+    top.userData.pw = { k: 'ridge', side: 0, d };
     ctx.put(top, d, -6, TUNNEL.H + 9, rng.spread(0.3), ridge);
   }
+  ridge.userData.pw = { k: 'ridgeGroup' };
   ctx.landmarks.push(ridge);
   return { lights, fixtures };
 }
@@ -789,11 +843,12 @@ export function buildBridge(ctx: Ctx) {
       Kit.add(seg, Kit.box(0.12, 0.12, 10.02), orange, x, 1.4, 0);
       for (const z of [-2.5, 2.5]) Kit.add(seg, Kit.box(0.1, 0.6, 0.1), orange, x, 1.1, z);
     }
+    seg.userData.pw = { k: 'bseg', d: d + 5 };
     ctx.put(seg, d + 5, 0, 0, 0);
     // Suspenders.
     for (const [x] of [[BRIDGE.CABLE_R], [BRIDGE.CABLE_L]] as const) {
       const h = cableY(d + 5);
-      if (h > 2.5) ctx.put(Kit.mesh(Kit.cyl(0.07, 0.07, h - 1, 4), orange), d + 5, x, (h + 1) / 2, 0);
+      if (h > 2.5) ctx.put(Kit.mesh(Kit.cyl(0.07, 0.07, h - 1, 4), orange), d + 5, x, (h + 1) / 2, 0).userData.pw = { k: 'susp', h: h - 1 };
     }
   }
   // Lamp posts along both edges (the Behemoth rips one off in phase 2).
@@ -807,6 +862,7 @@ export function buildBridge(ctx: Ctx) {
       Kit.add(p, Kit.box(0.08, 0.08, 1.8), S.steel(PAL.metalDark), 0, 7.95, 0.9);
       Kit.add(p, Kit.box(0.34, 0.14, 0.6), S.trim(0x222226), 0, 7.9, 1.75);
       Kit.add(p, Kit.box(0.28, 0.05, 0.5), M.glow(PAL.sodium, 1.4), 0, 7.82, 1.75);
+      p.userData.pw = { k: 'blamp' };
       void yaw;
       ctx.put(p, d, x, 0, x > 0 ? -Math.PI / 2 : Math.PI / 2);
     }
@@ -819,6 +875,7 @@ export function buildBridge(ctx: Ctx) {
       const p = ctx.at(Math.min(d, b), x, cableY(Math.min(d, b)));
       const len = prev.distanceTo(p);
       const m = Kit.mesh(Kit.cyl(0.38, 0.38, len, 6), orange);
+      m.userData.pw = { k: 'cable', len };
       m.position.copy(prev).lerp(p, 0.5);
       m.lookAt(p);
       m.rotateX(Math.PI / 2);
@@ -844,6 +901,7 @@ export function buildBridge(ctx: Ctx) {
     const mid = (BRIDGE.CABLE_R + BRIDGE.CABLE_L) / 2;
     for (const y of [BRIDGE.TOWER_TOP - 2, 34, 18]) Kit.add(t, Kit.box(span, 2.4, 3.2), tower, mid, y, 0);
     Kit.add(t, Kit.box(span, 2.4, 3.2), tower, mid, -4, 0);
+    t.userData.pw = { k: 'tower' };
     ctx.put(t, d, 0, 0, 0, cables);
   }
   ctx.landmarks.push(cables);
@@ -853,6 +911,7 @@ export function buildBridge(ctx: Ctx) {
 export function buildBay(ctx: Ctx, root: THREE.Group) {
   const rng = ctx.rng;
   const water = new THREE.Mesh(Kit.plane(1400, 900), M.lam(0x34305a, 'water', 0.14, 0.9));
+  water.userData.pw = { k: 'water' };
   water.rotation.x = -Math.PI / 2;
   water.position.set(0, BRIDGE.WATER, -940);
   root.add(water);
@@ -870,11 +929,13 @@ export function buildBay(ctx: Ctx, root: THREE.Group) {
     }
     // Bridge abutment.
     Kit.add(g, Kit.box(40, -BRIDGE.WATER, 10), M.lam(0x7a746c, 'concrete', 0.5, 0.9), 0, BRIDGE.WATER / 2, -4);
+    g.userData.pw = { k: 'shore', far: yaw !== 0 };
     ctx.put(g, d, 0, 0, yaw);
   }
   // Far shore ground.
   const far = EnvKit.ground(700, PAL.dirt, 0, -1500, -0.04);
   far.material = M.lam(0x4a3e34, 'dirt', 0.5, 0.7);
+  far.userData.pw = { k: 'farShore' };
   root.add(far);
   // A burning freighter out in the bay.
   {
@@ -885,6 +946,7 @@ export function buildBay(ctx: Ctx, root: THREE.Group) {
     g.position.set(-150, BRIDGE.WATER, -905);
     g.rotation.y = 0.5;
     g.rotation.z = 0.08;
+    g.userData.pw = { k: 'ship' };
     ctx.chunk(D.TOWER_A + 60).add(g);
     ctx.fires.add(new THREE.Vector3(-150, BRIDGE.WATER + 10, -905), 4, 1);
     ctx.fires.add(new THREE.Vector3(-162, BRIDGE.WATER + 9, -925), 3, 1);
@@ -904,6 +966,7 @@ export function buildBay(ctx: Ctx, root: THREE.Group) {
       Kit.add(t, Kit.box(0.3, 10, 0.3), steel, 0, 5, 0);
       Kit.add(t, Kit.box(2.4, 1.2, 0.5), S.steel(0x2a2a2e), 0, 10.4, 0);
       for (const lx of [-0.6, 0.6]) Kit.add(t, Kit.box(0.9, 0.8, 0.1), M.glow(0xf0f4ff, 2), lx, 10.4, 0.27);
+      t.userData.pw = { k: 'flood', h: 10, w: 2.4 };
       t.position.set(x, 0, -4);
       g.add(t);
     }
@@ -920,7 +983,9 @@ export function buildBay(ctx: Ctx, root: THREE.Group) {
     addText(tank, 'U.S. ARMY', S.clean(0xece8dc), 0, 1.2, 3.31, 0.06, 0.02);
     tank.position.set(-14, 0, -10);
     tank.rotation.y = 0.5;
+    tank.userData.pw = { k: 'armyTank' };
     g.add(tank);
+    g.userData.pw = { k: 'checkpoint' };
     ctx.put(g, d, 0, 0, 0);
   }
 }
@@ -935,7 +1000,7 @@ export function buildBarricade(ctx: Ctx) {
     const s = new THREE.Group();
     jersey(s, 0, 0, 1.9, 0, 0xb8b4a8);
     // Military hazard band round the top of each block.
-    Kit.add(s, Kit.box(0.32, 0.2, 1.92), S.hazard(0xe8b420), 0, 0.8, 0);
+    Kit.add(s, Kit.box(0.32, 0.2, 1.92), S.hazard(0xe8b420), 0, 0.8, 0).userData.pw = { k: 'hazardBand' };
     s.position.set(x, 0, 0);
     s.rotation.y = Math.PI / 2;
     g.add(s);
@@ -943,13 +1008,14 @@ export function buildBarricade(ctx: Ctx) {
   sandbags(g, -4.4, 1.2, 3.4, 3);
   sandbags(g, 4.6, 1.2, 4.2, 3);
   // Gate posts.
-  for (const x of [-2.6, 2.6]) Kit.add(g, Kit.box(0.25, 2.6, 0.25), S.hazard(0xe8b420), x, 1.3, 0);
+  for (const x of [-2.6, 2.6]) Kit.add(g, Kit.box(0.25, 2.6, 0.25), S.hazard(0xe8b420), x, 1.3, 0).userData.pw = { k: 'gatePost' };
   // Floodlight towers.
   for (const x of [8.4, -9.4]) {
     const t = new THREE.Group();
     Kit.add(t, Kit.box(0.25, 7, 0.25), S.steel(PAL.metalDark), 0, 3.5, 0);
     Kit.add(t, Kit.box(1.8, 0.9, 0.4), S.steel(0x2a2a2e), 0, 7.2, 0);
     Kit.add(t, Kit.box(0.7, 0.6, 0.1), M.glow(0xf0f4ff, 1.8), -0.45, 7.2, 0.22);
+    t.userData.pw = { k: 'flood', h: 7, w: 1.8 };
     t.position.set(x, 0, -2);
     g.add(t);
   }
@@ -964,7 +1030,9 @@ export function buildBarricade(ctx: Ctx) {
   addText(tr, 'U.S. ARMY', S.clean(0xece8dc), 0, 2.9, -3.72, 0.07, 0.02);
   tr.position.set(-14, 0, 4);
   tr.rotation.y = 1.2;
+  tr.userData.pw = { k: 'armyTruck' };
   g.add(tr);
+  g.userData.pw = { k: 'barricade' };
   ctx.put(g, d, 0, 0, 0);
   ctx.fires.add(ctx.at(d - 6, -6.2, 0.6), 0.8, 0.8);
 }

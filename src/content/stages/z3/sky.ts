@@ -172,15 +172,37 @@ function skyline(rng: Rng): THREE.Group {
   return g;
 }
 
+/** Smoke column bases: over the city, plus a few nearer wrecks burning far off either side. */
+function plumeBases(rng: Rng): { pos: THREE.Vector3; size: number }[] {
+  const cityAz = azOf(CITY_DIR);
+  const bases: { pos: THREE.Vector3; size: number }[] = [];
+  for (let i = 0; i < 6; i++) {
+    const az = cityAz + rng.spread(0.9);
+    const d = rng.range(240, 270);
+    bases.push({ pos: new THREE.Vector3(Math.sin(az) * d, 20, Math.cos(az) * d), size: rng.range(0.6, 1.1) });
+  }
+  for (const az of [cityAz + 1.9, cityAz - 2.2, cityAz + 2.8]) {
+    bases.push({ pos: new THREE.Vector3(Math.sin(az) * 230, 0, Math.cos(az) * 230), size: 0.45 });
+  }
+  return bases;
+}
+
 export class DuskSky {
   readonly group = new THREE.Group();
   private plumes: Plumes;
   private sun: THREE.Group;
 
-  constructor() {
+  /** `painted`: ART: PIXEL WORLD paints the sky, sun, hills and city (z3/pixel.ts) — only the smoke columns are built here. */
+  constructor(painted = false) {
     const rng = new Rng(3301);
     const g = this.group;
     g.name = 'z3-sky';
+    this.sun = new THREE.Group();
+    if (painted) {
+      this.plumes = new Plumes(plumeBases(rng));
+      g.add(this.plumes.mesh);
+      return;
+    }
     const dome = EnvKit.sky(SKY.top, SKY.horizon, SKY.bottom, 330);
     // Painted-sky streaks: huge soft blobs at low strength (the dome follows the
     // camera, so they never swim). The dome's material is its own tracked instance.
@@ -190,7 +212,6 @@ export class DuskSky {
     g.add(glowRing());
 
     // Sun: hot disc + soft halos.
-    this.sun = new THREE.Group();
     this.sun.position.copy(SUN_DIR).multiplyScalar(R * 0.95);
     this.sun.lookAt(0, 0, 0);
     const disc = Kit.add(this.sun, Kit.track(new THREE.CircleGeometry(9, 24)), Kit.glow(0xffe0a0, 1.25), 0, 0, 0);
@@ -226,17 +247,7 @@ export class DuskSky {
     g.add(land);
 
     // Smoke columns over the city.
-    const bases: { pos: THREE.Vector3; size: number }[] = [];
-    for (let i = 0; i < 6; i++) {
-      const az = cityAz + rng.spread(0.9);
-      const d = rng.range(240, 270);
-      bases.push({ pos: new THREE.Vector3(Math.sin(az) * d, 20, Math.cos(az) * d), size: rng.range(0.6, 1.1) });
-    }
-    // A couple of nearer columns on either side of the road (wrecks burning far off).
-    for (const az of [cityAz + 1.9, cityAz - 2.2, cityAz + 2.8]) {
-      bases.push({ pos: new THREE.Vector3(Math.sin(az) * 230, 0, Math.cos(az) * 230), size: 0.45 });
-    }
-    this.plumes = new Plumes(bases);
+    this.plumes = new Plumes(plumeBases(rng));
     g.add(this.plumes.mesh);
   }
 

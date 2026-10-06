@@ -90,7 +90,8 @@ export function addText(
         let e = c;
         while (e < 5 && row[e] === '1') e++;
         const len = e - c;
-        Kit.add(parent, Kit.box(len * px, px, depth), mat, cx + (c + len / 2) * px, y + (3 - r) * px, z);
+        // (Tagged: ART: PIXEL WORLD paints the words instead of these blocks.)
+        Kit.add(parent, Kit.box(len * px, px, depth), mat, cx + (c + len / 2) * px, y + (3 - r) * px, z).userData.pwText = true;
         c = e;
       }
     }

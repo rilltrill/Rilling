@@ -10,12 +10,14 @@ import { M, bake } from './bake';
 import { FloraField, floraArtToggle, floraAtlas, floraReach } from '../../pixel/floraField';
 import { BUSH, BUSH_WIDE, DEAD_TREE } from '../../pixel/floraSpecies';
 import { Z3_BIOME } from '../../pixel/floraBiomes';
+import { pixelWorld } from '../../../core/art';
+import { Z3PixelWorld } from './pixel';
 
 /** Verge plants as pixel billboards (ART: SPRITES): dusk scrub and dead trees. */
 export const Z3_FLORA = [DEAD_TREE, BUSH, BUSH_WIDE];
 import { D } from './layout';
 import { PAL, S, car, tankerTank } from './props';
-import { DuskSky, SKY } from './sky';
+import { CITY_DIR, DuskSky, SKY, SUN_DIR } from './sky';
 import { FireField, type FireEmitter } from './vfx';
 import {
   BRIDGE,
@@ -227,7 +229,11 @@ export class Z3Scene {
       explode: { radius: 13, damage: 40 },
       onDestroy: () => this.blowTanker(pos),
     });
+    // (ART: PIXEL WORLD: the painted skin is never a hit box — the hidden classic meshes are.)
+    const painted = m.children.filter((c) => c.userData.pixelWorld);
+    for (const c of painted) m.remove(c);
     w.add(this.tank);
+    for (const c of painted) m.add(c);
     return this.tank;
   }
 
@@ -450,8 +456,15 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
   const ctx = makeCtx(curve, fires, root);
   const z = new Z3Scene(world, root, ctx);
   SCENES.set(world, z);
-  const sky = new DuskSky();
+  // ART: PIXEL WORLD: painted scenery (z3/pixel.ts); the classic builders below only record for it.
+  const pw = pixelWorld(world) ? new Z3PixelWorld(ctx) : null;
+  const sky = new DuskSky(!!pw);
   root.add(sky.group);
+  if (pw) {
+    const az = (v: THREE.Vector3) => ((Math.atan2(v.x, -v.z) * 180) / Math.PI + 360) % 360;
+    const el = (Math.asin(SUN_DIR.y) * 180) / Math.PI;
+    root.add(pw.buildBackdrop(Math.round(az(SUN_DIR) * 10) / 10, Math.round(el * 10) / 10, Math.round(az(CITY_DIR) * 10) / 10));
+  }
 
   // ─── Ground ───────────────────────────────────────────────────────────────
   // Dry dusk scrub either side of the interstate.
@@ -461,6 +474,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
   const behind = EnvKit.ground(560, 0x56493a, 0, 280, -0.06);
   behind.material = scrub;
   root.add(behind);
+  pw?.ground(root, [land, behind]);
 
   // ─── Roads + furniture ────────────────────────────────────────────────────
   const len = curve.getLength();
@@ -496,6 +510,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
   const rng = new Rng(4404);
   {
     const b = car(rng, { color: 0x7a1c1c, lights: true, doorOpen: true });
+    pw?.dynCar(b);
     bake(b);
     const g = new THREE.Group();
     g.add(b);
@@ -505,6 +520,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
   }
   {
     const c = car(rng, { color: 0xb06a20, lights: true });
+    pw?.dynCar(c);
     bake(c);
     const g = new THREE.Group();
     g.add(c);
@@ -512,6 +528,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
     ctx.put(g, D.OVERPASS + 2.5, -3.9, 7.3, 0, root);
     z.overpassCar = g;
     const burnt = car(rng, { burnt: true });
+    pw?.dynCar(burnt);
     bake(burnt);
     burnt.rotation.z = Math.PI;
     burnt.position.y = 1.6;
@@ -524,7 +541,9 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
   }
   {
     const tank = tankerTank();
+    pw?.dynTank(tank);
     bake(tank);
+    pw?.hideClassic(tank);
     ctx.put(tank, D.TANKER, -3.2, 0, 0.12, root);
     z.tankModel = tank;
     // Burnt halves (hidden until the blast).
@@ -532,6 +551,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
       const h = new THREE.Group();
       Kit.add(h, Kit.cyl(1.35, 1.35, 5.2, 10, ), S.burnt(PAL.burnt), 0, 1.35, 0, 0, 0, Math.PI / 2);
       Kit.add(h, Kit.cyl(1.2, 1.4, 0.4, 10), S.burnt(0x8a3a1a), s * -2.7, 1.35, 0, 0, 0, Math.PI / 2);
+      pw?.dynHalf(h);
       bake(h);
       ctx.put(h, D.TANKER, -3.2 + s * 2.8, 0, 0.12, root);
       h.visible = false;
@@ -559,6 +579,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
       Kit.add(g, Kit.box(1.0, 0.5, 0.04), S.plate(0xe0b820), s * 1.25, 1.5, 0.05);
       Kit.add(g, Kit.box(0.7, 0.08, 0.05), S.clean(0x1a1a1a), s * 1.25, 1.5, 0.07);
       // Panels swing as a whole: bake each one (steel + plate = 1 draw, grate = 1).
+      pw?.dynGate(g);
       bake(g);
       ctx.put(g, D.BARRICADE, 0, 0, 0, root);
       z.gate.push(g);
@@ -619,6 +640,11 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
     vegChunks.push(vg);
   }
   const all: THREE.Group[] = [...chunksOf(ctx).values(), ...ctx.landmarks, ...vegChunks];
+  if (pw) {
+    // Paint every chunk and landmark before its bake (the bake only sees what stays classic).
+    for (const g of [...chunksOf(ctx).values(), ...ctx.landmarks]) pw.convert(g);
+    pw.finish();
+  }
   for (const g of all) {
     bake(g);
     (g.name.endsWith('-veg') ? veg3D : root).add(g);
@@ -647,6 +673,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
     },
     update(dt: number, w: World) {
       sky.update(z.t + dt, w.camera.position);
+      pw?.backdrop?.update(w.camera.position);
       z.update(dt);
     },
     dispose() {

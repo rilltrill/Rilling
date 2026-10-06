@@ -71,6 +71,29 @@ export const S = {
   hazard: (c: number = 0xe8b420) => M.lam(c, 'hazard', 0.8, 1),
 };
 
+/** What a car shows (recorded by `car()` for ART: PIXEL WORLD). */
+export interface PwCarRecord {
+  k: 'car';
+  /** 0 sedan, 1 hatch, 2 SUV, 3 van, 4 police. */
+  kind: number;
+  len: number;
+  w: number;
+  bodyH: number;
+  cabH: number;
+  cabLen: number;
+  cabZ: number;
+  wheelR: number;
+  baseY: number;
+  burnt: boolean;
+  color: number;
+  lit: boolean;
+  police: boolean;
+  /** Open door side (±1, 0 = none). */
+  door: number;
+  /** Van courier stripe colour (0 = none). */
+  stripe: number;
+}
+
 export interface CarOpts {
   color?: number;
   burnt?: boolean;
@@ -122,13 +145,17 @@ export function car(rng: Rng, o: CarOpts = {}): THREE.Group {
     wheelR = 0.38;
   }
   const baseY = wheelR * 0.9;
+  let courier = 0;
   Kit.add(g, Kit.box(w, bodyH, len), body, 0, baseY + bodyH / 2, 0);
   if (kind === 3) {
     // Van: windscreen + side windows on the tall box.
     Kit.add(g, Kit.box(w * 0.92, 0.6, 0.06), glass, 0, baseY + bodyH - 0.45, len / 2 + 0.01);
     for (const s of [-1, 1]) Kit.add(g, Kit.box(0.04, 0.5, 1.2), glass, s * (w / 2 + 0.01), baseY + bodyH - 0.45, len / 2 - 1.0);
     // Courier stripe.
-    if (!burnt) Kit.add(g, Kit.box(w + 0.02, 0.22, len * 0.6), S.paint(rng.pick([0xd04020, 0x2050a0, 0xe0b020])), 0, baseY + bodyH * 0.45, -0.5);
+    if (!burnt) {
+      courier = rng.pick([0xd04020, 0x2050a0, 0xe0b020]);
+      Kit.add(g, Kit.box(w + 0.02, 0.22, len * 0.6), S.paint(courier), 0, baseY + bodyH * 0.45, -0.5);
+    }
   } else {
     // Cabin: glass block + roof.
     Kit.add(g, Kit.box(w * 0.86, cabH, cabLen), glass, 0, baseY + bodyH + cabH / 2, cabZ);
@@ -158,14 +185,19 @@ export function car(rng: Rng, o: CarOpts = {}): THREE.Group {
     Kit.add(g, Kit.box(0.5, 0.12, 0.28), M.glow(0x2050ff, 1.4), 0.32, baseY + bodyH + cabH + 0.17, cabZ);
     Kit.add(g, Kit.box(w + 0.01, 0.2, 1.6), S.paint(0x1a1a1e), 0, baseY + bodyH * 0.55, -0.3);
   }
+  let door = 0;
   if (o.doorOpen && kind !== 3) {
     const s = rng.chance(0.5) ? 1 : -1;
+    door = s;
     Kit.add(g, Kit.box(0.08, bodyH + cabH * 0.8, 1.05), body, s * (w / 2 + 0.45), baseY + (bodyH + cabH * 0.8) / 2, cabZ + 0.55, 0, s * 0.9, 0);
   }
   if (burnt) {
     // Scorch + rust patches.
     Kit.add(g, Kit.box(w * 0.7, 0.04, len * 0.35), S.burnt(PAL.burntRust), 0, baseY + bodyH + 0.01, len * 0.28);
   }
+  // ART: PIXEL WORLD paints the car from these (z3/pixel.ts); no draw, no rng.
+  const police = kind === 4 || (kind === 0 && o.color === 0xe8e8e8);
+  g.userData.pw = { k: 'car', kind, len, w, bodyH, cabH, cabLen, cabZ, wheelR, baseY, burnt, color, lit, police, door, stripe: courier } satisfies PwCarRecord;
   return g;
 }
 
@@ -184,6 +216,7 @@ export function bus(burnt = false): THREE.Group {
   Kit.add(g, Kit.box(2.2, 0.9, 0.06), S.clean(PAL.glass), 0, 2.3, 4.82);
   for (const s of [-1, 1]) for (const z of [4.6, -3.8]) wheel(g, s * 1.15, 0.5, z, 0.5, burnt);
   if (!burnt) for (const s of [-1, 1]) Kit.add(g, Kit.box(0.22, 0.22, 0.06), M.glow(0xff4020, 1.3), s * 0.9, 2.75, -5.62);
+  g.userData.pw = { k: 'bus', burnt };
   return g;
 }
 
@@ -204,6 +237,7 @@ export function semiCab(color: number, burnt = false): THREE.Group {
     wheel(g, s * 1.1, 0.52, -1.6, 0.52, burnt);
     wheel(g, s * 1.1, 0.52, -2.8, 0.52, burnt);
   }
+  g.userData.pw = { k: 'semi', color, burnt };
   return g;
 }
 
@@ -225,6 +259,7 @@ export function trailer(color = 0xd8d4cc, text = ''): THREE.Group {
       g.add(side);
     }
   }
+  g.userData.pw = { k: 'trailer', color, text };
   return g;
 }
 
@@ -250,6 +285,7 @@ export function tankerTank(): THREE.Group {
   }
   // Leaking valve (glowing fuel drip marks it as the thing to shoot).
   Kit.add(g, Kit.cyl(0.18, 0.18, 0.4, 8), band, 1.0, 0.4, 1.25, Math.PI / 2, 0, 0);
+  g.userData.pw = { k: 'tank' };
   return g;
 }
 
@@ -262,6 +298,7 @@ export function jersey(g: THREE.Object3D, x: number, z: number, len: number, ry 
   Kit.add(seg, Kit.box(0.8, 0.3, len), m, 0, 0.15, 0);
   Kit.add(seg, Kit.box(0.5, 0.25, len), m, 0, 0.42, 0);
   Kit.add(seg, Kit.box(0.3, 0.38, len), m, 0, 0.73, 0);
+  seg.userData.pw = { k: 'jersey', len, color };
   g.add(seg);
 }
 
@@ -277,6 +314,7 @@ export function lightPole(two: boolean, lit: boolean): THREE.Group {
     Kit.add(g, Kit.box(0.42, 0.16, 0.9), pole, 0, 10.05, s * 2.65);
     Kit.add(g, Kit.box(0.34, 0.06, 0.7), lamp, 0, 9.95, s * 2.65);
   }
+  g.userData.pw = { k: 'lpole', two, lit };
   return g;
 }
 
@@ -293,6 +331,7 @@ export function signPanel(lines: string[], width: number, height: number, color:
   lines.forEach((t, i) => {
     addText(g, t, S.clean(PAL.signText), 0, ((lines.length - 1) / 2 - i) * lh, 0.1, px, 0.03);
   });
+  g.userData.pw = { k: 'sign', lines, w: width, h: height, color };
   return g;
 }
 
@@ -313,6 +352,8 @@ export function billboard(art: (face: THREE.Group) => void, lit = true): THREE.G
   g.add(face);
   art(face);
   if (lit) for (const x of [-4, 0, 4]) Kit.add(g, Kit.box(0.5, 0.12, 0.3), M.glow(0xfff2d0, 1.3), x, 8.85, 0.85);
+  face.userData.pwFace = true;
+  g.userData.pw = { k: 'billboard', lit, art: '' };
   return g;
 }
 
@@ -329,6 +370,7 @@ export function sandbags(g: THREE.Object3D, x: number, z: number, len: number, r
       Kit.add(seg, Kit.box(0.6, 0.24, 0.42), m[(i + r) % 2], bx, 0.12 + r * 0.24, 0, 0, ((i * 7 + r * 3) % 5 - 2) * 0.03, 0);
     }
   }
+  seg.userData.pw = { k: 'sandbags', len, rows };
   g.add(seg);
 }
 
