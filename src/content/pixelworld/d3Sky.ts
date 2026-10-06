@@ -10,7 +10,7 @@ import { hash2, smooth } from './surfaces';
  *    where the rain curtains hang, towering storm clouds with moonlit rims and
  *    bruised violet bellies, rain shafts slanting down under their bases, the
  *    moon smothered behind a cloud bank (a glowing rim and a halo);
- *  - RANGES: the island's ridges — a far, hazy one with the volcano (a dull
+ *  - RANGES: the island's ridges — a far, hazy one (an optional volcano: a dull
  *    red crater glow and a plume lit from below) and a near one crowded with
  *    palm and canopy silhouettes — whose feet melt into the fog colour, where
  *    the fogged hills of the stage meet them;

@@ -1046,7 +1046,7 @@ export class D3PixelWorld {
   buildBackdrop(anchor: THREE.Vector3): THREE.Group {
     const s = this.skyAtlas;
     const sky = d3SkyTile(s, { fog: STORM.fog, horizon: STORM.skyHorizon, top: 0x101828, cloud: 0x1e2638, rim: 0x6a78a0, el0: -6, el1: 40, moonAz: 300, moonEl: 28 });
-    const far = d3RangeTile(s, { hex: 0x1e2838, fog: STORM.fog, el0: -2, el1: 12, height: 0.75, seed: 3, palms: 0.25, volcano: { az: 25, half: 70, glow: 0xff5a1a }, fogFoot: 0.32, moonAz: 300 });
+    const far = d3RangeTile(s, { hex: 0x1e2838, fog: STORM.fog, el0: -2, el1: 12, height: 0.75, seed: 3, palms: 0.25, fogFoot: 0.32, moonAz: 300 });
     const near = d3RangeTile(s, { hex: 0x121a24, fog: STORM.fog, el0: -2, el1: 9, height: 0.7, seed: 8, palms: 0.85, fogFoot: 0.36, moonAz: 300 });
     this.backdrop = new PwBackdrop(s, { tile: sky, el0: -6, el1: 40, radius: 330 }, [
       { tile: far, radius: 300, el0: -2, el1: 12, follow: 1 },
