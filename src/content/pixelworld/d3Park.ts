@@ -249,10 +249,11 @@ export function d3DangerBoardModule(atlas: PwAtlas, variant = 0): PwTile {
     // DANGER (bold ×2) and HIGH VOLTAGE.
     const tw = textWidth('DANGER', FONT_BOLD, { scale: 2 });
     drawText(c, 'DANGER', Math.round((W - tw) / 2), 9, FONT_BOLD, wh, 3.6, { scale: 2, shadow: { ramp: red, tone: 1 }, shadeFn: (_u, v) => (v < 0.25 ? 0.8 : 0) });
-    const tw2 = textWidth('HIGH VOLTAGE', FONT_5x7);
-    drawText(c, 'HIGH VOLTAGE', Math.round((W - tw2) / 2), 34, FONT_5x7, wh, 3.4, { shadow: { ramp: red, tone: 1.2 } });
+    // HIGH VOLTAGE in 2-texel strokes on even texels (whole through the first levels: legible at phone distance).
+    const tw2 = textWidth('HIGH VOLTAGE', FONT_3x5, { scale: 2 });
+    drawText(c, 'HIGH VOLTAGE', Math.round((W - tw2) / 4) * 2, 32, FONT_3x5, wh, 3.6, { scale: 2, shadow: { ramp: red, tone: 1.2 } });
     const tw3 = textWidth('KEEP OFF FENCE', FONT_3x5);
-    drawText(c, 'KEEP OFF FENCE', Math.round((W - tw3) / 2), 44, FONT_3x5, yl, 3.6);
+    drawText(c, 'KEEP OFF FENCE', Math.round((W - tw3) / 2), 45, FONT_3x5, yl, 3.6);
     // Lightning flashes either side.
     for (const x0 of [6, W - 16]) {
       const pts = [[6, 0], [2, 8], [6, 8], [1, 18], [9, 6], [5, 6], [9, 0]];
@@ -266,9 +267,10 @@ export function d3DangerBoardModule(atlas: PwAtlas, variant = 0): PwTile {
     // Chips with rust running from them, rain streaks, bullet holes.
     for (let i = 0; i < 14 + variant * 8; i++) {
       const x = rng.int(2, W - 3);
-      const y = rng.int(6, H - 10);
+      const y = rng.chance(0.5) ? rng.int(5, 8) : rng.int(24, 30);
       c.cluster(x, y, i, rust, 2.4);
-      if (i % 2 === 0) for (let j = 1; j < rng.int(4, 12); j++) if (j < 6 || bayer(x, y + j) > 0.5) c.tint(x, y + j, rust, 0);
+      const run = rng.int(4, 12);
+      if (i % 2 === 0 && y < 10) for (let j = 1; j < run; j++) if (j < 6 || bayer(x, y + j) > 0.5) c.tint(x, y + j, rust, 0);
     }
     for (let i = 0; i < 12; i++) c.streak(rng, rng.int(1, W - 2), 5, rng.int(8, 30), -0.6, 0);
     for (const [x, y] of [[30 + variant * 40, 26], [88 - variant * 30, 18]]) {
@@ -515,6 +517,24 @@ export function d3FlareDecal(atlas: PwAtlas): PwTile {
   });
 }
 
+/** The red light a road flare throws on the wet asphalt (decal 64 × 64, cut out, unlit): an ordered-dither pool fading out, a brighter smear of reflection toward the viewer. */
+export function d3FlarePoolDecal(atlas: PwAtlas): PwTile {
+  return atlas.tile(`d3flarepool`, 64, 64, (c, k) => {
+    const red = k.ramp(0xd02818, { light: 0.4, sat: 1.1 });
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      const dx = (x + 0.5 - 32) / 32;
+      const dy = (y + 0.5 - 32) / 32;
+      const d = Math.sqrt(dx * dx + dy * dy * 1.15);
+      if (d > 1) continue;
+      // 2-texel dither cells: the pool stays a pool through the first levels.
+      const b = bayer(x >> 1, y >> 1);
+      if (b < (d - 0.15) * 1.25) continue;
+      const streak = Math.abs(dx) < 0.1 + (1 - d) * 0.1 && dy > 0 ? 0.6 : 0;
+      c.set(x, y, red, (d < 0.35 ? 2.2 : d < 0.65 ? 1.6 : 1.1) + streak, PWF.GLOW);
+    }
+  });
+}
+
 /** A wooden utility pole (wrap 16 × 64, u round it): weathered grey timber, climbing-spike holes, a rust-streaked tag. */
 export function d3UtilityPoleTile(atlas: PwAtlas): PwTile {
   return atlas.tile(`d3utilpole`, 16, 64, (c, k) => {
@@ -533,28 +553,30 @@ export function d3UtilityPoleTile(atlas: PwAtlas): PwTile {
 export function d3FireModule(atlas: PwAtlas, frames: number): PwTile {
   const W = 32;
   const FH = 48;
-  return atlas.tile(`d3fire|${frames}`, W, FH * frames, (c, k) => {
-    const fire = k.ramp(0xff7a1a, { light: 0.6, sat: 1.1 });
-    const core = k.ramp(0xffd860, { light: 0.6, sat: 1.0 });
-    const red = k.ramp(0xc82a14, { light: 0.5, sat: 1.1 });
+  return atlas.tile(`d3fire|${frames}|2`, W, FH * frames, (c, k) => {
+    const fire = k.ramp(0xff7a14, { light: 0.5, sat: 1.15 });
+    const core = k.ramp(0xffe070, { light: 0.55, sat: 1.0 });
+    const red = k.ramp(0xd02a10, { light: 0.45, sat: 1.15 });
     const smoke = k.ramp(0x2a2624, { light: 0.4 });
+    // Four tongues (centre, height, phase): separate licks with gaps between, swaying up the frame.
+    const tongues = [
+      [16, 0.95, 0.3],
+      [8, 0.66, 1.7],
+      [24, 0.72, 3.1],
+      [13, 0.44, 4.6],
+    ];
     for (let f = 0; f < frames; f++) {
       const y0 = c.h - (f + 1) * FH;
-      const tongues = [
-        [16, 0.95, 0.3],
-        [9, 0.66, 1.7],
-        [24, 0.72, 3.1],
-      ];
       for (let vt = 0; vt < FH; vt++) {
         const h = vt / FH;
         for (let x = 0; x < W; x++) {
           let best = 9;
           let tip = 0;
           for (const [cx, hh, ph] of tongues) {
-            const top = hh * (0.86 + Math.sin(f * 1.9 + ph) * 0.12);
+            const top = hh * (0.84 + Math.sin(f * 1.9 + ph) * 0.14);
             if (h > top) continue;
-            const sway = Math.sin(h * 6 + f * 1.4 + ph) * 2.2 * h;
-            const half = (1 - h / top) * 7 * (0.9 + Math.sin(f * 2.3 + ph + h * 3) * 0.1) + 1;
+            const sway = Math.sin(h * 6 + f * 1.4 + ph) * 2.4 * h;
+            const half = Math.pow(1 - h / top, 0.8) * 5.4 * (0.9 + Math.sin(f * 2.3 + ph + h * 3) * 0.1) + 0.7;
             const d = Math.abs(x + 0.5 - cx - sway) / half;
             if (d < best) {
               best = d;
@@ -562,15 +584,28 @@ export function d3FireModule(atlas: PwAtlas, frames: number): PwTile {
             }
           }
           if (best > 1) continue;
-          const r = best < 0.35 && tip < 0.55 ? core : tip > 0.78 ? red : fire;
-          c.set(x, y0 + FH - 1 - vt, r, r === core ? 5 : best > 0.75 ? 3 : 4, PWF.GLOW);
+          // Ragged foot: the flames rise off the embers, not off a ruler line.
+          if (vt < 3 && hash2(x, f, 11) < 0.25 + (2 - vt) * 0.15) continue;
+          let r = fire;
+          let t = best < 0.6 ? 3.6 : 2.8;
+          if (best < 0.3 && tip < 0.5) {
+            r = core;
+            t = 4.2;
+          } else if (tip > 0.9) {
+            r = red;
+            t = 2.2;
+          } else if (tip > 0.72 || best > 0.85) {
+            r = red;
+            t = 3;
+          }
+          c.set(x, y0 + FH - 1 - vt, r, t, PWF.GLOW);
         }
       }
-      // Embers and a smoke lip.
+      // Sparks above the licks and a smoke lip.
       for (let i = 0; i < 5; i++) {
         const x = Math.floor(hash2(i, f, 7) * W);
         const y = Math.floor(hash2(i, f, 8) * FH * 0.35);
-        c.set(x, y0 + y, core, 5, PWF.GLOW);
+        c.set(x, y0 + y, core, 4.4, PWF.GLOW);
       }
       for (let x = 6; x < 26; x++) if (hash2(x, f, 9) > 0.55) c.set(x, y0 + 1 + (x & 1), smoke, 1.6);
     }

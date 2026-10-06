@@ -356,7 +356,7 @@ export function d3RangeTile(atlas: PwAtlas, o: D3RangeOpts): PwTile {
       } else x += 3;
     }
     if (o.volcano) {
-      // Crater glow (a ragged notch of unlit orange), a lit plume rising and leaning with the wind.
+      // Crater glow (a ragged notch of dull unlit orange: no beacon through the trees), a plume lit from below, leaning with the wind.
       const ty = Math.round(ridge[vx]);
       for (let dx = -10; dx <= 10; dx++) {
         const d = Math.abs(dx) / 10;
@@ -364,7 +364,7 @@ export function d3RangeTile(atlas: PwAtlas, o: D3RangeOpts): PwTile {
           const i = (ty + j) * TW + ((vx + dx + TW) % TW);
           if (ty + j < 0 || ty + j >= H) continue;
           R[i] = glow;
-          T[i] = j === 0 ? 4.4 - d : 3.2 - d;
+          T[i] = j === 0 ? 3.2 - d : 2.2 - d;
           F[i] = PWF.GLOW;
         }
       }
@@ -378,8 +378,8 @@ export function d3RangeTile(atlas: PwAtlas, o: D3RangeOpts): PwTile {
           const i = y * TW + ((cx + dx + TW) % TW);
           const near = up < 14;
           R[i] = near && dx < r * 0.4 ? glow : smoke;
-          T[i] = near ? (up < 6 ? 2.6 : 1.8) : dx < 0 ? 2.6 : 1.8;
-          F[i] = near && up < 8 ? PWF.GLOW : 0;
+          T[i] = near ? (up < 5 ? 1.9 : 1.4) : dx < 0 ? 2.6 : 1.8;
+          F[i] = near && up < 6 ? PWF.GLOW : 0;
         }
       }
     }

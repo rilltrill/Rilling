@@ -90,16 +90,19 @@ export function d3JeepMudTile(atlas: PwAtlas, o: { hex: number; under: number })
 }
 
 /** Gunmetal / bare steel (32 × 32 wrap): brushed bands, bright worn edges, scratches, rust spots, beads of rain. */
-export function d3SteelTile(atlas: PwAtlas, o: { hex: number }): PwTile {
-  return atlas.tile(`d3steel|${h6(o.hex)}`, 32, 32, (c, k) => {
+export function d3SteelTile(atlas: PwAtlas, o: { hex: number; calm?: boolean }): PwTile {
+  // `calm`: fewer, softer scuffs (a surface right at the lens: the cabin's door frame).
+  return atlas.tile(`d3steel|${h6(o.hex)}${o.calm ? '|calm' : ''}`, 32, 32, (c, k) => {
     const rng = k.rng;
     const s = k.ramp(o.hex, { light: 0.55, sat: 0.6 });
     const rust = k.ramp(0x7a3a1c, { light: 0.4 });
-    c.rect(0, 0, 32, 32, s, (x, y) => (hash2(x >> 3, y, 3) > 0.8 ? 3.6 : hash2(x >> 2, y >> 3, 4) > 0.85 ? 2.4 : 3));
-    for (let i = 0; i < 8; i++) {
+    const dash = o.calm ? 0.94 : 0.8;
+    c.rect(0, 0, 32, 32, s, (x, y) => (hash2(x >> 3, y, 3) > dash ? (o.calm ? 3.3 : 3.6) : hash2(x >> 2, y >> 3, 4) > 0.85 ? 2.4 : 3));
+    for (let i = 0; i < (o.calm ? 3 : 8); i++) {
       const x = rng.int(0, 31);
       const y = rng.int(0, 31);
-      for (let j = 0; j < rng.int(3, 7); j++) c.set(wrap(x + j, 32), y, s, 4.6);
+      const n = rng.int(3, 7);
+      for (let j = 0; j < n; j++) c.set(wrap(x + j, 32), y, s, o.calm ? 3.8 : 4.6);
     }
     for (let i = 0; i < 4; i++) c.cluster(rng.int(0, 30), rng.int(0, 30), i, rust, 2.6);
     for (let i = 0; i < 10; i++) {

@@ -37,7 +37,7 @@ export class D3JeepPixel {
     const steel = d3SteelTile(a, { hex: 0x4e5256 });
     const gun = d3SteelTile(a, { hex: 0x34383c });
     const gunDark = d3SteelTile(a, { hex: 0x222326 });
-    const frame = d3SteelTile(a, { hex: 0x22262c });
+    const frame = d3SteelTile(a, { hex: 0x22262c, calm: true });
     const brass = d3SteelTile(a, { hex: 0xd0b020 });
     const heli = d3JeepPaintTile(a, { hex: 0xc8ccd0, primer: 0x8a8c88, steel: 0x6a6e72, mud: 0x8a8070 });
     const tyre = d3TyreTile(a, { hex: 0x1e2022, mud });

@@ -10,7 +10,7 @@ import {
 import { d3BoltModule, d3RangeTile, d3SkyTile } from '../../pixelworld/d3Sky';
 import {
   d3BarrierBoardModule, d3CableTile, d3ConcreteTile, d3DangerBoardModule, d3DrumLidModule, d3DrumTile, d3FlareDecal, d3FrondModule, d3InsulatorModule, d3LampHeadModule, d3PalmBarkTile,
-  d3PoleTile, d3PylonFaceModule, d3SignBoardModule, d3UtilityPoleTile, d3WireSpanModule, d3FireModule, d3WindsockModule, d3VineModule,
+  d3PoleTile, d3PylonFaceModule, d3SignBoardModule, d3UtilityPoleTile, d3WireSpanModule, d3FireModule, d3WindsockModule, d3VineModule, d3FlarePoolDecal,
 } from '../../pixelworld/d3Park';
 import {
   d1CarBackModule, d1CarCabinModule, d1CarFrontModule, d1CarPaintTile, d1CarSideModule, d1CarUnderModule, d1TreadTile, d1WheelModule, type CarPaint,
@@ -248,7 +248,7 @@ export class D3PixelWorld {
   /** A rain puddle (the classic disc: radius r, stretched `sz` along its local z, turned `yaw`). */
   puddle(p: THREE.Vector3, yaw: number, rx: number, rz: number, variant: number, muddy = false) {
     // (One painted puddle per kind; `variant` mirrors it so neighbours differ.)
-    const t = d3PuddleDecal(this.atlas, muddy ? { rim: D3C.mudDeep, water: 0x3a3428, sky: 0x6a6a70 } : { rim: 0x2a2620, water: D3C.water, sky: D3C.sky }, 0);
+    const t = d3PuddleDecal(this.atlas, muddy ? { rim: D3C.mudDeep, water: 0x47505c, sky: 0x8088a0 } : { rim: 0x2a2620, water: D3C.water, sky: D3C.sky }, 0);
     const sub = { x: 0, y: 0, w: t.w, h: t.h / D3_ANIM_FRAMES };
     const ax = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     const az = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
@@ -938,8 +938,11 @@ export class D3PixelWorld {
     }
     // Flares burning on the shoulders.
     const flare = d3FlareDecal(a);
+    const pool = d3FlarePoolDecal(a);
     for (const [d, lat] of [[404, 3.3], [409, -3.4], [437, 3.2], [446, -3.3], [471, 3.4], [489, -3.2], [503, 3.3], [512, -3.4]] as [number, number][]) {
       const p = at(d, lat);
+      // The red light it throws on the wet road (unlit, so it reads in the dark), then the flare.
+      pwDecal(this.chunk(d), p.x, 0.034, p.z, 3.4, 3.4, yaw(d), pool);
       pwDecal(this.chunk(d), p.x, 0.04, p.z, 0.9, 0.9, yaw(d) + d, flare);
     }
     // Fronds and branches blown onto the road.
