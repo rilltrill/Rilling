@@ -20,13 +20,13 @@ function neutral(t: PwTile, base = N): PwTile {
 }
 
 /**
- * Glazed subway tile (world, v from the floor; NEUTRAL): 8 × 4 texel tiles in
+ * Glazed subway tile (world, v from the floor; NEUTRAL): 16 × 8 texel tiles in
  * running bond, recessed grout, glaze glints on top edges, a coved vinyl skirting,
  * grime runs from the ceiling, cracked and missing tiles, a rust stain. 128 × 160.
  */
 export function subwayTileWall(atlas: PwAtlas, o: { tw?: number; th?: number; stack?: boolean } = {}): PwTile {
-  const TW = o.tw ?? 8;
-  const TH = o.th ?? 4;
+  const TW = o.tw ?? 16;
+  const TH = o.th ?? 8;
   return neutral(
     atlas.tile(
       `d2subway|${TW}x${TH}|${o.stack ? 's' : 'r'}`,
@@ -45,7 +45,7 @@ export function subwayTileWall(atlas: PwAtlas, o: { tw?: number; th?: number; st
           for (let x = 0; x < 128; x++) {
             const lx = (x + off) % TW;
             const ly = y % TH;
-            if (lx === 0 || ly === 0) c.set(x, y, grout, ly === 0 ? 2 : 2.5);
+            if (lx === 0 || ly === 0) c.set(x, y, grout, ly === 0 ? 2.5 : 2.75);
             else {
               const tid = Math.floor((x + off) / TW) * 97 + row;
               let tone = hash2(tid, 1, 3) > 0.85 ? 2.75 : 3;
@@ -107,7 +107,7 @@ export function vinylFloorTile(atlas: PwAtlas): PwTile {
             const a = horiz ? x : y;
             const b = horiz ? y : x;
             // Directional mottle: short streaks along the tile's grain.
-            const m = hash2(Math.floor(a / 3), b, tx * 7 + ty);
+            const m = hash2(Math.floor(a / 4), b >> 1, tx * 7 + ty);
             let t = hash2(tx, ty, 3) > 0.7 ? 2.75 : 3;
             if (m > 0.86) t += 0.75;
             else if (m < 0.1) t -= 0.75;
@@ -127,7 +127,12 @@ export function vinylFloorTile(atlas: PwAtlas): PwTile {
   );
 }
 
-/** Steel floor grating with depth (world): bearing bars with lit tops, cross bars, a dark void below with pipe shapes. 32 × 32. */
+/**
+ * Steel floor grating with depth (world): chunky bearing bars (3 texels: lit
+ * top, face, shadow) every 8 texels over a dark void with a pipe glimpsed
+ * below, a cross bar every metre. Coarse on purpose: a fine real-world pitch would
+ * crawl at this density. 32 × 32.
+ */
 export function gratingTile(atlas: PwAtlas, hex: number): PwTile {
   return atlas.tile(
     `d2grating|${h6(hex)}`,
@@ -136,27 +141,23 @@ export function gratingTile(atlas: PwAtlas, hex: number): PwTile {
     (c, k) => {
       const m = k.ramp(hex, { light: 0.55, sat: 0.6 });
       const voidR = k.ramp(0x14161c, { light: 0.4 });
-      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) c.set(x, y, voidR, y >= 12 && y <= 18 ? 2 : 1);
-      // A pipe glimpsed under the deck.
-      for (let x = 0; x < 32; x++) {
-        c.set(x, 13, voidR, 3);
-        c.set(x, 17, voidR, 0.5);
+      // The void below: a pipe glimpsed as a soft band (low contrast: it slides past as you walk).
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) c.set(x, y, voidR, y >= 10 && y <= 19 ? (y === 11 || y === 12 ? 2.25 : 1.75) : 1.25);
+      for (let x = 0; x < 32; x += 8) {
+        c.vline(x, 0, 32, m, 4);
+        c.vline(x + 1, 0, 32, m, 3);
+        c.vline(x + 2, 0, 32, m, 1.75);
       }
-      for (let x = 0; x < 32; x += 4) {
-        c.vline(x, 0, 32, m, 3.5);
-        c.vline(x + 1, 0, 32, m, 2.25);
-      }
-      for (let y = 0; y < 32; y += 16) {
-        c.hline(0, y, 32, m, 4);
-        c.hline(0, y + 1, 32, m, 2);
-      }
-      c.scatter(k.rng, 0, 0, 32, 32, 6, 0, -0.75, { shapes: 2 });
+      // One cross bar a metre (lit top, shadow).
+      c.hline(0, 0, 32, m, 3.5);
+      c.hline(0, 1, 32, m, 2.5);
+      c.scatter(k.rng, 0, 0, 32, 32, 3, 0, -0.75, { shapes: 9 });
     },
     { wrap: true },
   );
 }
 
-/** Canteen chequer (world): cream / near-black vinyl squares, grimy grout, chipped edges, grease blots with a glint, a cracked square. 128 × 128. */
+/** Canteen chequer (world): cream / grey-teal vinyl squares, grimy grout, chipped edges, grease blots with a glint, a cracked square. 128 × 128. */
 export function kitchenChequerTile(atlas: PwAtlas): PwTile {
   return atlas.tile(
     'd2chequer',
@@ -164,8 +165,9 @@ export function kitchenChequerTile(atlas: PwAtlas): PwTile {
     128,
     (c, k) => {
       const rng = k.rng;
+      // Cream and a grey-teal two value steps apart (a near-black chequer crawls in motion).
       const A = k.ramp(0xb8b4a2, { light: 0.35, sat: 0.7 });
-      const B = k.ramp(0x3a3c46, { light: 0.45, sat: 0.6 });
+      const B = k.ramp(0x6e7a78, { light: 0.4, sat: 0.6 });
       const grease = k.ramp(0x3a2a1a, { light: 0.6, sat: 0.8 });
       for (let y = 0; y < 128; y++) {
         for (let x = 0; x < 128; x++) {
@@ -175,8 +177,8 @@ export function kitchenChequerTile(atlas: PwAtlas): PwTile {
           const ly = y & 15;
           const r = (tx + ty) % 2 ? B : A;
           let t = hash2(tx, ty, 9) > 0.75 ? 2.75 : 3;
-          if (lx === 0 || ly === 0) t = r === A ? 1.75 : 1.5;
-          else if (lx === 1 || ly === 1) t += 0.75;
+          // Grimy grout: 2 texels, a step down (never a hairline).
+          if (lx < 2 || ly < 2) t -= 0.75;
           c.set(x, y, r, t);
         }
       }

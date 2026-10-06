@@ -1,10 +1,10 @@
 import { bayer, PWF } from './canvas';
 import type { PwAtlas, PwTile } from './atlas';
-import { drawText, FONT_3x5, FONT_5x7, neonText, textWidth } from './font';
+import { drawText, FONT_5x7, FONT_BOLD, textWidth, type PixelFont } from './font';
 import { NEUTRAL_HEX } from './retexture';
 import { crack, hash2 } from './surfaces';
 import { REX, silhouette } from './d2art';
-import { bloodSmear, bloodSplat, bulletHole, clawMarks, plate, rivet, scuffs, shiftW, stencil, wrapI } from './d2kit';
+import { bloodSmear, bloodSplat, bulletHole, clawMarks, litText, plate, recordFit, rivet, scuffs, shiftW, stencil, wrapI } from './d2kit';
 
 /**
  * RESEARCH LABS · CONTAINMENT: straw-strewn pens and hay bales, heavy slab
@@ -233,35 +233,73 @@ export function tankWallTile(atlas: PwAtlas): PwTile {
 }
 
 /**
- * The SPECIMEN X board over the tank (fit, 6 × 2 m): a black riveted steel
- * board in a hazard frame, SPECIMEN X in red neon tubes, a CLASS 5
- * CONTAINMENT plate, warning triangles, a red skull pictogram. 192 × 64.
+ * The SPECIMEN X board over the tank (the boss arena's focal sign): a black
+ * riveted steel board in a hazard frame, SPECIMEN X in red backlit letters at
+ * the classic letters' size (glyph pixel 0.16 m: painted at 25 texels a metre,
+ * 4 texels a glyph pixel) with a two-ring glow, a CLASS 5 CONTAINMENT plate,
+ * warning triangles. Sized from the measured text run (+ margins), so nothing
+ * is ever clipped.
  */
-export function specimenBoardTile(atlas: PwAtlas): PwTile {
-  return atlas.tile('d2specimenboard', 192, 64, (c, k) => {
+export const SPECIMEN_BOARD_D = 25;
+export function specimenBoardTile(atlas: PwAtlas): { tile: PwTile; wM: number; hM: number } {
+  const t = 'SPECIMEN X';
+  const t2 = 'CLASS 5 CONTAINMENT';
+  const scale = 4;
+  let f: PixelFont = FONT_BOLD;
+  let tw = textWidth(t, f, { scale, spacing: 1 });
+  if (tw > 260) {
+    f = FONT_5x7;
+    tw = textWidth(t, f, { scale, spacing: 1 });
+  }
+  const th = f.base * scale;
+  const fr = 5;
+  // (Text origin on whole glyph cells of levels 1–2: x and the bottom edge multiples of 4.)
+  const pad = 31;
+  const W = tw + 2 * (fr + pad);
+  const tw2 = textWidth(t2, FONT_BOLD);
+  const plateH = 14;
+  const H = fr + 6 + th + 7 + plateH + 6 + fr;
+  const key = `d2specimenboard|${W}x${H}`;
+  recordFit(key, t, W, H, tw, th, fr + 2);
+  recordFit(`${key}|plate`, t2, W, H, tw2 + 8, plateH, fr);
+  const tile = atlas.tile(key, W, H, (c, k) => {
     const rng = k.rng;
     const b = k.ramp(0x18181e, { light: 0.45, sat: 0.6 });
     const yel = k.ramp(0xe8c020, { light: 0.45 });
     const blk = k.ramp(0x1a1a1e, { light: 0.4 });
     const red = k.ramp(0xff3020, { light: 0.6, sat: 1.1 });
     const cream = k.ramp(0xd8d0c0, { light: 0.4 });
-    c.rect(0, 0, 192, 64, b, 2.5);
-    for (let y = 0; y < 64; y++) for (let x = 0; x < 192; x++) if (x < 4 || x >= 188 || y < 4 || y >= 60) c.set(x, y, Math.floor((x + y) / 5) % 2 ? blk : yel, 3);
-    for (let x = 8; x < 188; x += 12) for (const y of [6, 57]) rivet(c, x, y, b, 3);
-    const t = 'SPECIMEN X';
-    const tw = textWidth(t, FONT_5x7, { scale: 4 });
-    neonText(c, t, Math.round((192 - tw) / 2), 9, FONT_5x7, red, { scale: 4, core: 5, halo: 2 });
-    plate(c, 46, 43, 100, 12, cream, { tone: 3 });
-    const t2 = 'CLASS 5 CONTAINMENT';
-    drawText(c, t2, 46 + Math.round((100 - textWidth(t2, FONT_3x5)) / 2), 47, FONT_3x5, blk, 1);
-    for (const x of [16, 162]) {
-      c.poly([x, 54, x + 7, 42, x + 14, 54], yel, 3);
-      c.vline(x + 7, 46, 4, blk, 1);
-      c.set(x + 7, 52, blk, 1);
+    c.rect(0, 0, W, H, b, 1.5);
+    // Steel panels behind the letters (seams every ~2 m), a lit top lip.
+    for (let x = fr + 48; x < W - fr; x += 50) {
+      c.vline(x, fr, H - 2 * fr, b, 0.5);
+      c.vline(x + 1, fr, H - 2 * fr, b, 2.5);
     }
-    bulletHole(c, rng, 150, 20);
-    clawMarks(c, 20, 10, 24, 1.0, { n: 4, gap: 3, depth: 2, wrap: false });
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (x < fr || x >= W - fr || y < fr || y >= H - fr) c.set(x, y, Math.floor((x + y) / 6) % 2 ? blk : yel, x === 0 || y === 0 ? 4 : x === W - 1 || y === H - 1 ? 2 : 3);
+    for (let x = fr + 6; x < W - fr - 4; x += 16) for (const y of [fr + 2, H - fr - 4]) rivet(c, x, y, b, 3);
+    const tx = fr + pad;
+    const ty = fr + 6;
+    litText(c, t, tx, ty, f, red, { scale, spacing: 1, core: 5, halo: 2.25, rings: 2 });
+    // One tube flickering dead (the hall took a beating).
+    for (let y = ty; y < ty + Math.round(th * 0.4); y++) for (let x = tx + 6; x < tx + 10; x++) if (c.at(x, y) === red && c.toneAt(x, y) > 4) c.set(x, y, red, 2.5, PWF.GLOW);
+    // The CLASS 5 plate under the letters.
+    const pw = tw2 + 10;
+    const px = Math.round((W - pw) / 2);
+    const py = ty + th + 7;
+    plate(c, px, py, pw, plateH, cream, { tone: 3 });
+    drawText(c, t2, px + 5, py + 3, FONT_BOLD, blk, 1);
+    // Warning triangles either side of the plate.
+    for (const x of [px - 30, px + pw + 12]) {
+      c.poly([x, py + plateH, x + 9, py - 3, x + 18, py + plateH], yel, 3);
+      c.poly([x + 3, py + plateH - 2, x + 9, py + 2, x + 15, py + plateH - 2], yel, 3.75);
+      c.rect(x + 8, py + 2, 2, 6, blk, 1);
+      c.rect(x + 8, py + 10, 2, 2, blk, 1);
+    }
+    bulletHole(c, rng, W - fr - 40, fr + 10);
+    bulletHole(c, rng, fr + 24, H - fr - 12);
+    clawMarks(c, fr + 8, fr + 6, 30, 1.0, { n: 4, gap: 3, depth: 2, wrap: false });
   });
+  return { tile, wM: W / SPECIMEN_BOARD_D, hM: H / SPECIMEN_BOARD_D };
 }
 
 /** A heavy blast door leaf (fit; 16 texels a metre): ribs, hazard chevrons, a stencilled X, rivets, dents, gouges. 58 × 100. */
@@ -297,20 +335,23 @@ export function drainTile(atlas: PwAtlas): PwTile {
   });
 }
 
-/** Stencilled arena markings for the walls (cut out): HOLDING HALL X with a red rule. */
-export function hallMarkTile(atlas: PwAtlas, text: string, scale: number, hex = 0xd8d0b8): { tile: PwTile; wM: number; hM: number } {
+/** Stencilled arena markings for the walls (cut out): HOLDING HALL X with a red rule. Text on whole glyph cells (scale 2 or 4). */
+export function hallMarkTile(atlas: PwAtlas, text: string, scale: 2 | 4, hex = 0xd8d0b8): { tile: PwTile; wM: number; hM: number } {
   const tw = textWidth(text, FONT_5x7, { scale });
-  const W = tw + 8;
-  const H = 7 * scale + 10;
-  const tile = atlas.tile(`d2hallmark|${text}|${scale}|${hex.toString(16)}`, W, H, (c, k) => {
+  const m = scale;
+  const W = tw + 2 * m;
+  const H = 7 * scale + 2 * m + 4;
+  const key = `d2hallmark|${text}|${scale}|${hex.toString(16)}`;
+  recordFit(key, text, W, H - 4, tw, 7 * scale, m);
+  const tile = atlas.tile(key, W, H, (c, k) => {
     const ink = k.ramp(hex, { light: 0.45 });
     const red = k.ramp(0xb02018, { light: 0.45 });
-    stencil(c, text, 4, 2, FONT_5x7, ink, { scale, tone: 3, rng: k.rng, runs: 4, overspray: false });
-    for (let x = 4; x < W - 4; x++) {
+    stencil(c, text, m, m, FONT_5x7, ink, { scale, tone: 3, rng: k.rng, runs: 4, overspray: false });
+    for (let x = m; x < W - m; x++) {
       c.set(x, H - 4, red, 3);
       c.set(x, H - 3, red, 2.5);
     }
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (c.at(x, y) && hash2(x, y, 29) > 0.88) c.set(x, y, 0, 0);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (c.at(x, y) && hash2(x >> 1, y >> 1, 29) > 0.94) c.set(x, y, 0, 0);
   });
   return { tile, wM: W / 32, hM: H / 32 };
 }

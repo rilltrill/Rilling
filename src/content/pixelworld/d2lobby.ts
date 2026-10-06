@@ -3,7 +3,7 @@ import type { PwAtlas, PwTile } from './atlas';
 import { drawText, FONT_3x5, FONT_5x7, FONT_BOLD, textWidth } from './font';
 import { crack, hash2, smooth } from './surfaces';
 import { BRACHIO, frond, moon, palmShape, PTERO, RAPTOR, REX, silhouette, TRIKE, ammonite } from './d2art';
-import { bloodSmear, bloodSplat, bulletHole, clawMarks, handprint, h6, plate, rivet, scuffs, shiftW, wrapI } from './d2kit';
+import { bloodSmear, bloodSplat, bulletHole, clawMarks, handprint, h6, litText, plate, recordFit, rivet, scuffs, shiftW, wrapI } from './d2kit';
 
 /**
  * RESEARCH LABS · the visitor-centre LOBBY painted as a 90s arcade backdrop:
@@ -576,55 +576,65 @@ export function muralTile(atlas: PwAtlas): PwTile {
 }
 
 /**
- * The WELCOME banner (12.6 × 4.5 m at 16 texels a metre, cut out): the two
+ * The WELCOME banner (12.6 × 4.5 m at 24 texels a metre, cut out): the two
  * hanging ropes, a green cloth with gold hems and sagging folds, WELCOME in
- * big lit letters, TO PRIMAL ISLAND below, a torn corner flapping. 202 × 72.
+ * big backlit letters at the classic letters' size with a warm glow round
+ * them, TO PRIMAL ISLAND lit below, a torn corner flapping. 302 × 108.
  */
 export function welcomeBannerTile(atlas: PwAtlas): PwTile {
-  return atlas.tile('d2welcome', 202, 72, (c, k) => {
+  const W = 302;
+  const Hh = 108;
+  const top = 38;
+  const bot = Hh;
+  const scale = 5;
+  const f = FONT_BOLD;
+  const tw = textWidth('WELCOME', f, { scale, spacing: 1 });
+  const tw2 = textWidth('TO PRIMAL ISLAND', f, { scale: 2, spacing: 1 });
+  recordFit('d2welcome', 'WELCOME', W, Hh, tw, f.base * scale, 8);
+  recordFit('d2welcome|sub', 'TO PRIMAL ISLAND', W, Hh, tw2, f.base * 2, 8);
+  return atlas.tile('d2welcome', W, Hh, (c, k) => {
     const rng = k.rng;
     const cloth = k.ramp(0x1e5a34, { light: 0.45, sat: 1.0 });
     const gold = k.ramp(0xe0a020, { light: 0.55 });
     const rope = k.ramp(0x2a2622, { light: 0.4 });
     const letters = k.ramp(0xffc23a, { light: 0.6, sat: 1.1 });
     const sub = k.ramp(0xf0e8c8, { light: 0.5 });
-    const top = 26;
-    const bot = 72;
-    // Ropes up to the roof (x ±5.8 m at the cloth, converging a little).
+    // Ropes up to the roof (x ±5.8 m at the cloth, converging a little), 2 texels thick.
     for (const s of [-1, 1]) {
       for (let y = 0; y < top; y++) {
-        const x = Math.round(101 + s * (93 - (top - y) * 0.18));
-        c.set(x, y, rope, y % 3 === 0 ? 2 : 3);
+        const x = Math.round(W / 2 + s * (139 - (top - y) * 0.18));
+        c.set(x, y, rope, y % 3 === 0 ? 2 : 3.5);
         c.set(x + 1, y, rope, 1.5);
       }
     }
-    // Cloth with folds (vertical light / shadow bands from the sag between the ropes).
+    // Cloth with folds (vertical light / shadow bands from the sag between the ropes), gold hems.
     for (let y = top; y < bot; y++) {
-      for (let x = 0; x < 202; x++) {
-        // Folds: the cloth sags between the ropes — soft vertical light / shadow pairs.
-        const fp = (x + Math.round(Math.sin(y * 0.15) * 1.5)) % 34;
-        const t = 3 + (fp === 0 || fp === 1 ? -0.75 : fp === 2 ? 0.75 : 0);
-        if (y < top + 3 || y > bot - 5) {
-          c.set(x, y, gold, y === top || y === bot - 4 ? 4 : 3);
+      for (let x = 0; x < W; x++) {
+        const fp = (x + Math.round(Math.sin(y * 0.1) * 2)) % 50;
+        const t = 3 + (fp < 3 ? -0.75 : fp < 5 ? 0.75 : 0);
+        if (y < top + 4 || y > bot - 7) {
+          c.set(x, y, gold, y === top || y === bot - 6 ? 4 : y === top + 3 || y === bot - 1 ? 2 : 3);
           continue;
         }
         c.set(x, y, cloth, t);
       }
     }
+    // Stitching under the top hem / over the bottom hem.
+    for (let x = 2; x < W; x += 4) {
+      c.set(x, top + 5, gold, 2.5);
+      c.set(x, bot - 8, gold, 2.5);
+    }
     // Torn bottom-right corner (cut away) with a flap hanging lower.
-    for (let y = bot - 12; y < bot; y++) for (let x = 182 + (bot - y); x < 202; x++) c.set(x, y, 0, 0);
-    c.poly([178, bot - 13, 196, bot - 13, 190, bot - 1], cloth, 2);
+    for (let y = bot - 18; y < bot; y++) for (let x = 272 + (bot - y); x < W; x++) c.set(x, y, 0, 0);
+    c.poly([266, bot - 19, 292, bot - 19, 284, bot - 1], cloth, 2);
+    c.line(266, bot - 19, 284, bot - 1, cloth, 1);
     // Ragged lower hem: a few notches.
-    for (let x = 6; x < 176; x += 13 + (x % 5)) for (let j = 0; j < 2; j++) c.set(x + j, bot - 1, 0, 0);
-    // WELCOME: tall bold letters, lit tops, a dark drop shadow.
-    const sh = { ramp: cloth, tone: 1 };
-    const scale = 3;
-    const tw = textWidth('WELCOME', FONT_5x7, { scale, spacing: 1 });
-    drawText(c, 'WELCOME', Math.round((202 - tw) / 2), top + 5, FONT_5x7, letters, 4, { scale, spacing: 1, shadow: sh, shadowD: 2, flag: PWF.GLOW, shadeFn: (_u, v) => (v < 0.2 ? 1 : v > 0.85 ? -1 : 0) });
-    const tw2 = textWidth('TO PRIMAL ISLAND', FONT_5x7, { scale: 1, spacing: 1 });
-    drawText(c, 'TO PRIMAL ISLAND', Math.round((202 - tw2) / 2), bot - 14, FONT_5x7, sub, 4, { scale: 1, spacing: 1, shadow: sh, flag: PWF.GLOW });
-    // Grime and a stain.
-    c.scatter(rng, 2, top + 3, 198, bot - top - 8, 30, 0, -1, { shapes: 4 });
+    for (let x = 9; x < 262; x += 19 + (x % 7)) for (let j = 0; j < 3; j++) c.set(x + j, bot - 1, 0, 0);
+    // Grime and a stain (before the letters).
+    c.scatter(rng, 3, top + 6, W - 6, bot - top - 14, 40, 0, -1, { shapes: 4 });
+    // WELCOME: backlit bold letters with a two-ring warm glow; the subline lit below.
+    litText(c, 'WELCOME', Math.round((W - tw) / 2), top + 9, f, letters, { scale, spacing: 1, core: 5, halo: 2.5, rings: 2 });
+    litText(c, 'TO PRIMAL ISLAND', Math.round((W - tw2) / 2), top + 9 + f.base * scale + 7, f, sub, { scale: 2, spacing: 1, core: 4.5, halo: 1.5, haloRamp: letters });
   });
 }
 

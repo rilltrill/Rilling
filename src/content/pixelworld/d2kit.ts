@@ -1,6 +1,6 @@
 import { bayer, PWF, type PwCanvas, type PwRng } from './canvas';
 import type { PwKit } from './atlas';
-import { drawText, type PixelFont } from './font';
+import { drawText, rasterText, textWidth, type PixelFont, type TextOpts } from './font';
 import { hash2 } from './surfaces';
 
 /**
@@ -312,4 +312,67 @@ export function notice(c: PwCanvas, rng: PwRng, k: PwKit, x: number, y: number, 
     const t = k.ramp(0xc8b878, { light: 0.3 });
     c.hline(x + (w >> 1) - 1, y - 1, 3, t, 3);
   }
+}
+
+/**
+ * Every painted lettering's layout (registered with its tile): the tests check
+ * that no text overflows its board (`tw <= W - 2 * margin`).
+ */
+export const D2_TEXT_FITS: { key: string; text: string; W: number; H: number; tw: number; th: number; margin: number }[] = [];
+
+/** Record a lettering layout (once per tile key). */
+export function recordFit(key: string, text: string, W: number, H: number, tw: number, th: number, margin: number) {
+  if (D2_TEXT_FITS.some((f) => f.key === key)) return;
+  D2_TEXT_FITS.push({ key, text, W, H, tw, th, margin });
+}
+
+/**
+ * Backlit letters (light boxes, lit labels): solid glyph blocks GLOWING at
+ * `core` (the bottom row of every stroke one step down: a lit tube, not a flat
+ * stroke) with a dim glow ring round the word. The ring never bridges the gap
+ * between two letters or fills a narrow counter (it would melt the word into
+ * one blob at a distance); the gaps stay the board's own dark.
+ */
+export function litText(c: PwCanvas, text: string, x: number, y: number, f: PixelFont, ramp: number, o: TextOpts & { core?: number; halo?: number; haloRamp?: number; rings?: number } = {}): number {
+  const m = rasterText(text, f, { ...o, tube: 0 });
+  const on = (a: number, b: number) => a >= 0 && b >= 0 && a < m.w && b < m.h && m.data[b * m.w + a] === 1;
+  const core = o.core ?? 5;
+  const halo = o.halo ?? 1.75;
+  const hr = o.haloRamp ?? ramp;
+  const s = o.scale ?? 1;
+  const R = o.rings ?? 1;
+  const gap = 2 * s + 1;
+  for (let my = -R; my < m.h + R; my++) {
+    for (let mx = -R; mx < m.w + R; mx++) {
+      if (on(mx, my)) continue;
+      // Distance (rings) to the nearest letter texel: 4-neighbour first ring, Chebyshev beyond.
+      let d = 0;
+      if (on(mx + 1, my) || on(mx - 1, my) || on(mx, my + 1) || on(mx, my - 1)) d = 1;
+      else
+        for (let r = 1; r <= R && !d; r++) {
+          for (let k = -r; k <= r && !d; k++) if (on(mx + k, my - r) || on(mx + k, my + r) || on(mx - r, my + k) || on(mx + r, my + k)) d = r + (r === 1 ? 1 : 0);
+        }
+      if (!d || d > R) continue;
+      // Between two strokes (left and right, or above and below, within a gap)? Keep it dark.
+      let l = false;
+      let rr = false;
+      let u = false;
+      let dn = false;
+      for (let k = 1; k <= gap; k++) {
+        l ||= on(mx - k, my);
+        rr ||= on(mx + k, my);
+        u ||= on(mx, my - k);
+        dn ||= on(mx, my + k);
+      }
+      if ((l && rr) || (u && dn)) continue;
+      c.set(x + mx, y + my, hr, Math.max(0.5, halo - (d - 1) * 0.75), PWF.GLOW);
+    }
+  }
+  for (let my = 0; my < m.h; my++) {
+    for (let mx = 0; mx < m.w; mx++) {
+      if (!on(mx, my)) continue;
+      c.set(x + mx, y + my, ramp, on(mx, my + 1) ? core : core - 1, PWF.GLOW);
+    }
+  }
+  return textWidth(text, f, o);
 }

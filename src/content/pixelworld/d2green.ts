@@ -25,16 +25,15 @@ export function soilTile(atlas: PwAtlas): PwTile {
       const moss = k.ramp(0x3a6a2a, { light: 0.5 });
       const sprout = k.ramp(0x5a9a3a, { light: 0.5 });
       c.rect(0, 0, 128, 128, soil, 3);
-      for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) if ((x * 7 + y * 13) % 17 === 0) c.set(x, y, soil, 2);
       // Clods: 2–4 texel lumps lit on top, shadow below.
       for (let i = 0; i < 160; i++) {
         const x = rng.int(0, 127);
         const y = rng.int(0, 127);
         const w = rng.int(2, 4);
         for (let j = 0; j < w; j++) {
-          c.set(wrapI(x + j, 128), y, soil, 4);
-          c.set(wrapI(x + j, 128), wrapI(y + 1, 128), soil, 3);
-          c.set(wrapI(x + j, 128), wrapI(y + 2, 128), soil, 1.5);
+          c.set(wrapI(x + j, 128), y, soil, 3.75);
+          c.set(wrapI(x + j, 128), wrapI(y + 1, 128), soil, 3.25);
+          c.set(wrapI(x + j, 128), wrapI(y + 2, 128), soil, 2.25);
         }
       }
       // Leaf litter: small fallen leaves (2–4 texels) in autumn browns, curled.
@@ -92,24 +91,26 @@ export function flagstoneTile(atlas: PwAtlas): PwTile {
       const rng = k.rng;
       const s = k.ramp(0x958c7a, { light: 0.45, sat: 0.8 });
       const s2 = k.ramp(0x8a7e6a, { light: 0.45, sat: 0.8 });
-      const joint = k.ramp(0x3a3428, { light: 0.4 });
       const moss = k.ramp(0x3a6a2a, { light: 0.5 });
       for (let y = 0; y < 128; y++) {
         for (let x = 0; x < 128; x++) {
           const v = cells(x, y, 128, 128, 5, 5, 31, 0.9);
           const id = v.id;
           const ramp = hash2(id, 1, 3) > 0.55 ? s2 : s;
-          if (v.edge < 1.1) {
-            c.set(x, y, hash2(x >> 1, y >> 1, 5) > 0.6 ? moss : joint, hash2(x, y, 9) > 0.5 ? 2 : 1.5);
+          // Mortar joints 2+ texels wide (a hairline joint crawls in motion), moss in 2×2 clumps.
+          if (v.edge < 2.1) {
+            // (The joint is the stone a step and a half down: dark enough to draw the slabs, never a black hairline.)
+            c.set(x, y, hash2(x >> 1, y >> 1, 5) > 0.62 ? moss : ramp, hash2(x >> 2, y >> 2, 9) > 0.5 ? 1.75 : 1.5);
             continue;
           }
           let t = 3 + (hash2(id, 2, 3) - 0.5) * 0.6;
-          // Bevel: lit where the joint is above / left of the texel (dx, dy point from the seed).
-          if (v.edge < 2.2) t += v.dx + v.dy < 0 ? 1 : -0.75;
+          // Bevel: a 2-texel lit edge where the joint is above / left, a shade below / right.
+          if (v.edge < 4.1) t += v.dx + v.dy < 0 ? 0.75 : -0.5;
           c.set(x, y, ramp, t);
         }
       }
-      c.scatter(rng, 0, 0, 128, 128, 90, 0, -0.75, { shapes: 3 });
+      // Wear: a few larger chips and pits (clusters of 4–5 texels), not per-texel flecks.
+      c.scatter(rng, 0, 0, 128, 128, 26, 0, -0.75, { shapes: 9 });
       crack(c, rng, 70, 30, 18, 1.1, { dt: -1.5, lip: 0.75 });
       scuffs(c, rng, 0, 0, 128, 128, 20, 0.6);
     },

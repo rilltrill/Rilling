@@ -6,6 +6,7 @@ import { pwMaterial } from '../../pixelworld/material';
 import { NEUTRAL_HEX } from '../../pixelworld/retexture';
 import { chequerTile, corrugatedTile, grateTile, hazardTile, tilesTile } from '../../pixelworld/surfaces';
 import { rubbleTile } from '../../pixelworld/d2green';
+import { d2CalmLevels } from '../../pixelworld/d2levels';
 import { d2BoneTile, d2ClothTile, d2ConcreteTile, d2MetalTile, d2PlainTile, d2PlasterTile, d2SteelTile, d2WoodTile } from '../../pixelworld/d2surfaces';
 import { emitMesh, paintGroup, type Face, type MeshRule, type Paint } from './pixelMesh';
 
@@ -227,12 +228,24 @@ export class D2PixelWorld {
     return this.generic;
   }
 
+  /** Every tile registered in the stage atlas. */
+  atlasTiles(): PwTile[] {
+    const m = (this.atlas as unknown as { tiles: Map<string, { tile: PwTile }> }).tiles;
+    return [...m.values()].map((t) => t.tile);
+  }
+
   /** Paint the atlas and build every painted mesh; hide the classic shells (they stay the occluders). */
   finish() {
     if ([...this.rooms.values()].some((r) => r.sky)) this.skyAtlas.build();
-    this.atlas.build();
+    const data = this.atlas.build();
+    // Calm far levels on every tileable surface (no crawling grates / grout / chequer in motion).
+    d2CalmLevels(data, this.atlasTiles());
     const main = pwMaterial(this.atlas, { gain: this.gain });
+    // Tileable surfaces (floors, walls, ceilings) switch to their calm levels a step sooner:
+    // level texels 1–2 pixels (the cast's own chunkiness), nothing crawls in motion.
+    const surf = pwMaterial(this.atlas, { gain: this.gain, bias: D2_SURF_BIAS, tag: 'surf' });
     const card = pwMaterial(this.atlas, { gain: this.gain, side: THREE.DoubleSide, tag: 'card' });
+    this.mats.set('surf', surf);
     const sky = pwMaterial(this.skyAtlas, { fog: false, tag: 'sky' });
     this.mats.set('main', main);
     this.mats.set('card', card);
@@ -242,6 +255,7 @@ export class D2PixelWorld {
       const m = r.main.build(main);
       if (m) {
         m.name = `pw:d2:${id}`;
+        splitSurfaces(m, main, surf);
         r.root.add(m);
       }
       const c = r.card.build(card);
@@ -267,3 +281,33 @@ export class D2PixelWorld {
 }
 
 export { emitMesh };
+
+/** Level bias of the tileable surfaces (the modules keep the toolkit's 0.5: letters stay sharp). */
+export const D2_SURF_BIAS = 1.0;
+
+/**
+ * One painted room mesh, two draws: its triangles re-ordered into modules
+ * (signs, posters, doors: `mods`) then tileable surfaces (`surf`), as two
+ * geometry groups.
+ */
+function splitSurfaces(m: THREE.Mesh, mods: THREE.Material, surf: THREE.Material) {
+  const g = m.geometry;
+  const idx = g.index!;
+  const rect = g.getAttribute('pwRect');
+  const A: number[] = [];
+  const B: number[] = [];
+  for (let t = 0; t < idx.count; t += 3) {
+    const a = idx.getX(t);
+    (rect.getZ(a) > 0 ? B : A).push(a, idx.getX(t + 1), idx.getX(t + 2));
+  }
+  if (!A.length || !B.length) {
+    m.material = A.length ? mods : surf;
+    return;
+  }
+  const all = A.concat(B);
+  g.setIndex(g.getAttribute('position').count > 65535 ? new THREE.Uint32BufferAttribute(all, 1) : new THREE.Uint16BufferAttribute(all, 1));
+  g.clearGroups();
+  g.addGroup(0, A.length, 0);
+  g.addGroup(A.length, B.length, 1);
+  m.material = [mods, surf];
+}

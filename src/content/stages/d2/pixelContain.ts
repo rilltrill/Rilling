@@ -6,7 +6,7 @@ import { dropMeshes, emitMesh, paintGroup, type Paint } from './pixelMesh';
 import { matIs, NX, NZ, paintRailings, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y, Z } from './pixelShared';
 import type { GlassWall } from './setpieces';
 import { baleTile, blastDoorTile, concreteColumnTile, dadoTile, dangerPictoTile, dragTrailTile, drainTile, floorLineTile, floorStencilTile, hallMarkTile, hazardBandTile, slabFloorTile, specimenBoardTile, strawTile, tankWallTile, tankXTile } from '../../pixelworld/d2contain';
-import { d2SignTile } from '../../pixelworld/d2signs';
+import { classicBoard, d2SignTile } from '../../pixelworld/d2signs';
 import { wallMarkTile } from '../../pixelworld/d2service';
 import { crateTile } from '../../pixelworld/d2shop';
 import { gratingTile } from '../../pixelworld/d2lab';
@@ -151,9 +151,9 @@ function convertHall(pw: D2PixelWorld, parts: RoomParts) {
     for (const x of [R.x0 + 0.5, R.x1 - 0.5]) {
       const inward = x < 11 ? 1 : -1;
       // Bay numbers stencilled on the buttress faces.
-      const num = wallMarkTile(a, `0${bay}`, 0xd8d0b8, 3, 0);
-      const nW = num.w / 32;
-      b.rect(_o.set(x + inward * 0.512, 2.9, z + (inward > 0 ? nW / 2 : -nW / 2)), inward > 0 ? NZ : Z, Y, nW, num.h / 32, num);
+      const num = wallMarkTile(a, `0${bay}`, 0xd8d0b8, 4, 0, 44);
+      const nW = num.wM;
+      b.rect(_o.set(x + inward * 0.512, 2.9, z + (inward > 0 ? nW / 2 : -nW / 2)), inward > 0 ? NZ : Z, Y, nW, num.hM, num.tile);
       // Room-facing face and both side faces of the buttress, 1.2 m of stripes.
       b.rect(_o.set(x + inward * 0.51, 0, z + (inward > 0 ? 0.5 : -0.5)), inward > 0 ? NZ : Z, Y, 1.0, 1.2, hazard, { u0: 0, v0: 0 });
       b.rect(_o.set(x - 0.5, 0, z + 0.51), X, Y, 1.0, 1.2, hazard, { u0: 0, v0: 0 });
@@ -161,7 +161,8 @@ function convertHall(pw: D2PixelWorld, parts: RoomParts) {
     }
   }
   // The SPECIMEN X board over the tank, a painted warning X on the tank's back wall.
-  b.rect(_o.set(H.center.x - 3.5, 8.6, H.tankZ + 0.32), X, Y, 7, 2.33, specimenBoardTile(a));
+  const board = specimenBoardTile(a);
+  b.rect(_o.set(H.center.x - board.wM / 2, 9.7 - board.hM * 0.6, H.tankZ + 0.32), X, Y, board.wM, board.hM, board.tile);
   b.rect(_o.set(H.center.x - 3, 1.2, R.z1 + 0.32), X, Y, 6, 6, tankXTile(a));
   // Teal dado round the hall (the gate openings left clear).
   const dado = dadoTile(a, 0x376660);
@@ -181,18 +182,18 @@ function convertHall(pw: D2PixelWorld, parts: RoomParts) {
     b.ribbon([new THREE.Vector3(x0, 0, H.gateZ), new THREE.Vector3(x1, 0, H.gateZ)], 0.3, line, { y: 0.011 });
   }
   // Lit DANGER boxes over the pen gates, numbers stencilled on the pillars.
-  const danger = d2SignTile(a, { text: 'DANGER', px: 0.07, board: 0x1a1a20, ink: 0xff3020, glow: true, w: 1.8, h: 0.6 });
+  const dB = classicBoard('DANGER', 0.06);
+  const danger = d2SignTile(a, { text: 'DANGER', px: 0.06, board: 0x1a1a20, ink: 0xff3020, glow: true, ...dB });
   for (const s of [-1, 1]) {
     const x = s < 0 ? R.x0 + 0.215 : R.x1 - 0.215;
-    b.rect(_o.set(x, 4.95, H.gateZ + (s < 0 ? 0.9 : -0.9)), s < 0 ? NZ : Z, Y, 1.8, 0.6, danger);
+    b.rect(_o.set(x, 4.95, H.gateZ + (s < 0 ? dB.w / 2 : -dB.w / 2)), s < 0 ? NZ : Z, Y, dB.w, dB.h, danger);
   }
   H.pillars.forEach((p, i) => {
-    const t = wallMarkTile(a, ['A1', 'B1', 'A2', 'B2'][i], 0xe0d8c0, 3, 0);
-    const wM = t.w / 32;
-    b.rect(_o.set(p.x - wM / 2, 2.6, p.z + 1.12), X, Y, wM, t.h / 32, t);
+    const t = wallMarkTile(a, ['A1', 'B1', 'A2', 'B2'][i], 0xe0d8c0, 4, 0, 40);
+    b.rect(_o.set(p.x - t.wM / 2, 2.6, p.z + 1.12), X, Y, t.wM, t.hM, t.tile);
   });
   // Stencilled markings on the long walls, pocks and gouges round the arena, gouges on the pillars.
-  const big = hallMarkTile(a, 'HOLDING HALL X', 3);
+  const big = hallMarkTile(a, 'HOLDING HALL X', 4);
   b.rect(_o.set(R.x0 + 0.215, 6.6, -336), NZ, Y, big.wM, big.hM, big.tile);
   b.rect(_o.set(R.x1 - 0.215, 6.6, -336 - big.wM), Z, Y, big.wM, big.hM, big.tile);
   for (const [s, lbl] of [[-1, 'PEN A'], [1, 'PEN B']] as const) {

@@ -399,6 +399,19 @@ describe('d2 RESEARCH LABS in PIXEL WORLD (budgets, gameplay unchanged)', () => 
     Kit.disposeAll();
   });
 
+  it('d2 lettering never overflows its board (every sign, label, banner and the SPECIMEN X board)', { timeout: 180_000 }, async () => {
+    const { D2_TEXT_FITS } = await import('../../src/content/pixelworld/d2kit');
+    D2_TEXT_FITS.length = 0;
+    clearPwCache();
+    const px = buildD2('pixel');
+    expect(D2_TEXT_FITS.length).toBeGreaterThan(20);
+    const bad = D2_TEXT_FITS.filter((f) => f.tw > f.W - 2 * f.margin || f.th > f.H - 2 * f.margin).map((f) => `${f.key}: text ${f.tw}×${f.th} in ${f.W}×${f.H} (margin ${f.margin})`);
+    expect(bad).toEqual([]);
+    expect(D2_TEXT_FITS.some((f) => f.text === 'SPECIMEN X')).toBe(true);
+    px.dispose();
+    Kit.disposeAll();
+  });
+
   it('d2 in PIXEL WORLD plays exactly like PIXEL CAST (stage simulator)', { timeout: 600_000 }, () => {
     const a = simulateStage(stage('d2'), { art: 'sprites', maxTime: 240 });
     const b = simulateStage(stage('d2'), { art: 'pixel', maxTime: 240 });

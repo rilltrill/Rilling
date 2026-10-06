@@ -3,7 +3,7 @@ import type { PwAtlas, PwTile } from './atlas';
 import { drawText, FONT_3x5, FONT_5x7, textWidth } from './font';
 import { NEUTRAL_HEX } from './retexture';
 import { crack, hash2 } from './surfaces';
-import { bloodSplat, clawMarks, plate, rivet, scuffs, shiftW, stencil, waterStain, wrapI } from './d2kit';
+import { bloodSplat, clawMarks, plate, recordFit, rivet, scuffs, shiftW, stencil, waterStain, wrapI } from './d2kit';
 
 /**
  * RESEARCH LABS · the SERVICE LEVEL (maintenance tunnels, pump room): a
@@ -91,8 +91,9 @@ export function tunnelWallTile(atlas: PwAtlas): PwTile {
       for (let y = 0; y < H; y++) {
         for (let x = 0; x < 128; x++) {
           if (y >= cladTop) {
-            const RIB = [3.75, 3, 2, 2.5];
-            let t = RIB[x % 4];
+            // Ribs 8 texels apart in 2-texel bands (a 4-texel rib crawls in motion).
+            const RIB = [3.75, 3.75, 3, 3, 2, 2, 2.5, 2.5];
+            let t = RIB[x % 8];
             if (y === cladTop) t = 4.5;
             else if (y === cladTop + 1) t = 1.5;
             if ((x & 63) === 0) t = 1.25;
@@ -292,27 +293,37 @@ export function tankLabelTile(atlas: PwAtlas, text: string): PwTile {
   });
 }
 
-/** A stencilled wall direction marking (cut out): text + arrow, overspray. */
-export function wallMarkTile(atlas: PwAtlas, text: string, hex: number, scale = 2, arrow: -1 | 0 | 1 = 1): PwTile {
+/**
+ * A stencilled wall marking (cut out): text (+ an arrow), runs, worn in 2-texel
+ * flakes. `scale` (2 or 4 texels a glyph pixel, text on whole glyph cells, so
+ * the levels keep the letters whole) laid at `D` texels a metre.
+ */
+export function wallMarkTile(atlas: PwAtlas, text: string, hex: number, scale: 2 | 4 = 2, arrow: -1 | 0 | 1 = 1, D = 32): { tile: PwTile; wM: number; hM: number; w: number; h: number } {
   const tw = textWidth(text, FONT_5x7, { scale });
-  const W = tw + (arrow ? 7 * scale + 6 : 4);
-  const H = 7 * scale + 4;
-  return atlas.tile(`d2wallmark|${text}|${hex.toString(16)}|${scale}|${arrow}`, W, H, (c, k) => {
+  const m = scale;
+  const aw = arrow ? 7 * scale + 2 * scale : 0;
+  const W = tw + 2 * m + aw;
+  const H = 7 * scale + 2 * m;
+  const key = `d2wallmark|${text}|${hex.toString(16)}|${scale}|${arrow}`;
+  recordFit(key, text, W - aw, H, tw, 7 * scale, m);
+  const tile = atlas.tile(key, W, H, (c, k) => {
     const ink = k.ramp(hex, { light: 0.45 });
-    const x0 = arrow < 0 ? 7 * scale + 4 : 2;
-    stencil(c, text, x0, 2, FONT_5x7, ink, { scale, tone: 3, rng: k.rng, runs: 2, overspray: false });
+    const x0 = arrow < 0 ? aw + m : m;
+    stencil(c, text, x0, m, FONT_5x7, ink, { scale, tone: 3, rng: k.rng, runs: 2, overspray: false });
     if (arrow) {
-      const ax = arrow > 0 ? tw + 4 : 2;
-      const cy = 2 + Math.round(3.5 * scale);
-      const L = 6 * scale;
+      const ax = arrow > 0 ? tw + 2 * m : m;
+      const cy = m + Math.round(3.5 * scale);
+      const L = 7 * scale;
       for (let i = 0; i < L; i++) {
         const x = arrow > 0 ? ax + i : ax + L - 1 - i;
-        const hh = i > L - 3 * scale ? L - i : scale;
-        for (let j = -hh; j <= hh; j++) if (arrow > 0 || true) c.set(x, cy + j, ink, 3);
+        const hh = i > L - 3 * scale ? L - i : scale >> 1;
+        for (let j = -hh; j < hh; j++) c.set(x, cy + j, ink, 3);
       }
     }
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (c.at(x, y) && hash2(x, y, 23) > 0.9) c.set(x, y, 0, 0);
+    // Worn paint: flakes in 2-texel clusters (never per-texel speckle: the marks must read at a distance).
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (c.at(x, y) && hash2(x >> 1, y >> 1, 23) > 0.95) c.set(x, y, 0, 0);
   });
+  return { tile, wM: W / D, hM: H / D, w: W, h: H };
 }
 
 /** Keep the shared helpers referenced. */

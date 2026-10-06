@@ -123,10 +123,11 @@ function convertTunnel(pw: D2PixelWorld, parts: RoomParts) {
     const ux = f.forward.clone().multiplyScalar(side > 0 ? -1 : 1);
     b.rect(_o.set(p.x - ux.x * wM / 2, y, p.z - ux.z * wM / 2), ux, Y, wM, hM, t);
   };
-  const m1 = wallMarkTile(a, 'PUMP ROOM', 0xe8e8e8, 2, 1);
-  mark(dA + 26, -1, 2.0, m1, m1.w / 32, m1.h / 32);
-  const m2 = wallMarkTile(a, 'B-2', 0xe0b020, 3, 0);
-  mark(dA + 40, 1, 1.9, m2, m2.w / 32, m2.h / 32);
+  // (Classic sizes: PUMP ROOM glyph pixel 0.05 m, B-2 0.09 m.)
+  const m1 = wallMarkTile(a, 'PUMP ROOM', 0xe8e8e8, 2, 1, 2 / 0.05);
+  mark(dA + 26, -1, 2.0, m1.tile, m1.wM, m1.hM);
+  const m2 = wallMarkTile(a, 'B-2', 0xe0b020, 4, 0, 4 / 0.09);
+  mark(dA + 40, 1, 1.9, m2.tile, m2.wM, m2.hM);
   const blood = bloodDecal(a, 1, true);
   mark(alcoveD + 2.2, -1, 1.2, blood, 1, 1);
 }
