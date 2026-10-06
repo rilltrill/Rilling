@@ -109,7 +109,7 @@ for (const stage of stages) {
         };
       }, playStart);
       const L = r.load ?? {};
-      const row = { stage, art, run: run === 0 ? 'cold' : `warm${run}`, build: Math.round(L.build ?? -1), paint: Math.round(L.paint ?? 0), paintFrames: L.paintFrames ?? 0, storeWrite: Math.round(L.store ?? 0), warmup: Math.round(L.warm ?? -1), link: Math.round(L.link ?? 0), linkFrames: L.linkFrames ?? 0, render: Math.round(L.render ?? -1), total: Math.round(L.total ?? -1), atlasPaint: r.paint, mb: r.mb, heap: r.heap, maxStep: r.maxStep, atlases: r.atlases, loadGaps: r.loadGaps, playGaps: r.playGaps, loadLong: r.loadLong, playLong: r.playLong, store: r.store, errors: errors.splice(0) };
+      const row = { stage, art, run: run === 0 ? 'cold' : `warm${run}`, build: Math.round(L.build ?? -1), paint: Math.round(L.paint ?? 0), paintFrames: L.paintFrames ?? 0, storeWrite: Math.round(L.store ?? 0), warmup: Math.round(L.warm ?? -1), link: Math.round(L.link ?? 0), linkFrames: L.linkFrames ?? 0, settle: Math.round(L.settle ?? 0), render: Math.round(L.render ?? -1), total: Math.round(L.total ?? -1), atlasPaint: r.paint, mb: r.mb, heap: r.heap, maxStep: r.maxStep, atlases: r.atlases, loadGaps: r.loadGaps, playGaps: r.playGaps, loadLong: r.loadLong, playLong: r.playLong, store: r.store, errors: errors.splice(0) };
       rows.push(row);
       console.log(JSON.stringify(row));
     }

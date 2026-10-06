@@ -1424,7 +1424,8 @@ export class Z2PixelWorld {
       const lm = p.material as THREE.MeshLambertMaterial;
       const face = this.pickFor('brick', 'brick|1.25|0.5', lm.color.getHex(), 'side');
       if (!face) continue;
-      const g = (p.geometry = p.geometry.clone());
+      // (Tracked: once the burst swaps in the chunk, nothing in the scene holds this one.)
+      const g = (p.geometry = Kit.track(p.geometry.clone()));
       const pos = g.getAttribute('position');
       const nrm = g.getAttribute('normal');
       const n = pos.count;

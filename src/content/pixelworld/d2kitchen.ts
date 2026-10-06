@@ -1,4 +1,4 @@
-import { PWF } from './canvas';
+import { bayer, PWF } from './canvas';
 import type { PwAtlas, PwTile } from './atlas';
 import { drawText, FONT_3x5, textWidth } from './font';
 import { NEUTRAL_HEX } from './retexture';
@@ -410,51 +410,67 @@ export function counterClutterTile(atlas: PwAtlas, v: number): PwTile {
 }
 
 /**
- * Stainless counter top (world, wrap 64 × 64, seen from above at a glance): a
- * broad diagonal sheen band in two steps, a few 2-texel brushed streaks along
- * the run, food stains, water spots and knife scratches as small clusters —
- * calm under the moving camera (no per-texel grain). Round 5: the island and
- * wall-counter tops were the generic steel.
+ * Stainless counter top (world, wrap 64 × 64; every counter runs along z, which is the
+ * tile's v): mid steel with two reflected light strips running ALONG the run (8 texels
+ * wide, a hot 4-texel core: one always lands on a 1.1 m wall counter or a 1.6 m island),
+ * brushed grain as broken 1-texel lines along the run, food stains, a smear of sauce,
+ * water spots and short knife scratches. Lines along the run survive the grazing view
+ * (a pattern across it would collapse into one flat value — round 5: the tops read as
+ * flat white slabs).
  */
 export function counterTopTile(atlas: PwAtlas): PwTile {
   return atlas.tile(
-    'd2countertop|2',
+    'd2countertop|3',
     64,
     64,
     (c, k) => {
       const rng = k.rng;
-      const m = k.ramp(0xb8bec4, { light: 0.55, sat: 0.4 });
+      const m = k.ramp(0xa8b0b8, { light: 0.55, sat: 0.4 });
       const stain = k.ramp(0x6a4a2a, { light: 0.45, sat: 0.8 });
       const sauce = k.ramp(0x8a2a10, { light: 0.45 });
-      for (let y = 0; y < 64; y++) {
-        for (let x = 0; x < 64; x++) {
-          const d = (x + y) % 64;
-          c.set(x, y, m, d >= 18 && d < 36 ? (d >= 23 && d < 31 ? 4.25 : 3.5) : 2.75);
-        }
+      for (let x = 0; x < 64; x++) {
+        const b = x % 32;
+        const t = b >= 8 && b < 16 ? (b >= 10 && b < 14 ? 4.5 : 3.5) : b === 7 || b === 16 ? 1.75 : 2.25;
+        for (let y = 0; y < 64; y++) c.set(x, y, m, t);
       }
-      // Brushed streaks (2 texels tall, broken) along the run.
-      for (let i = 0; i < 7; i++) {
-        const y = rng.int(0, 31) * 2;
+      // Brushed grain: broken 1-texel lines along the run (a step either side of the base).
+      for (let i = 0; i < 14; i++) {
         const x = rng.int(0, 63);
-        const len = rng.int(8, 20);
-        for (let j = 0; j < len; j++) if ((j >> 2) % 3 !== 2) c.rect((x + j) % 64, y, 1, 2, m, 2.6);
+        if (x % 32 >= 7 && x % 32 <= 16) continue;
+        const y0 = rng.int(0, 63);
+        const len = rng.int(10, 30);
+        const t = i % 2 ? 2.75 : 1.75;
+        for (let j = 0; j < len; j++) if ((j >> 3) % 4 !== 3) c.set(x, (y0 + j) % 64, m, t);
       }
-      // Food stains, a smear of sauce, water spots, knife scratches.
-      for (let i = 0; i < 5; i++) c.cluster(rng.int(2, 60), rng.int(2, 60), rng.int(2, 8), stain, 2);
-      c.cluster(rng.int(4, 56), rng.int(4, 56), 6, sauce, 2.5);
+      // Food stains, a smear of sauce, water spots (dull rings), knife scratches (short, along the run).
+      for (let i = 0; i < 5; i++) c.cluster(rng.int(2, 60), rng.int(2, 60), rng.int(2, 8), stain, 1.75);
+      c.cluster(rng.int(4, 56), rng.int(4, 56), 7, sauce, 2.25);
+      for (let i = 0; i < 5; i++) c.rect(rng.int(0, 61), rng.int(0, 61), 2, 2, m, 1.5);
       for (let i = 0; i < 6; i++) {
-        const x = rng.int(0, 62);
-        const y = rng.int(0, 62);
-        c.rect(x, y, 2, 2, m, 2.5);
-      }
-      for (let i = 0; i < 5; i++) {
-        const x = rng.int(4, 56);
-        const y = rng.int(4, 56);
-        for (let j = 0; j < 5; j++) c.set(x + j, y + (j >> 1), m, 4.5);
+        const x = rng.int(2, 60);
+        const y = rng.int(2, 56);
+        for (let j = 0; j < 6; j++) c.set(x + (j >> 2), y + j, m, 4.25);
       }
     },
     { wrap: true },
   );
+}
+
+/**
+ * A floor contact shadow beside a counter or island base (cut out, 1.5 × 0.375 m = 48 × 12,
+ * the bottom row against the base): solid dark for 5 texels at the kick plinth, one
+ * 50 % step of 2×2 cells, then nothing — the boxes stand ON the floor instead of floating over an evenly lit chequer.
+ */
+export function floorShadowTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('d2floorshadow|2', 48, 12, (c, k) => {
+    const r = k.ramp(0x161a20, { light: 0.4, sat: 0.6 });
+    // (2×2-texel dither cells: a 1-texel checker crawls under the moving camera.)
+    for (let y = 0; y < 12; y++) {
+      const d = 11 - y; // texels from the base
+      const cover = d < 5 ? 1 : d < 9 ? 0.5 : 0;
+      for (let x = 0; x < 48; x++) if (bayer(x >> 1, y >> 1) < cover) c.set(x, y, r, d < 2 ? 0.75 : 1.25);
+    }
+  });
 }
 
 /** The counter top's front lip (fit across the 7 cm edge, 16 × 4): a lit rolled edge over a dark drip lip. */

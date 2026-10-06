@@ -729,18 +729,50 @@ export class PixelCast {
     this.scene.add(this.quad);
   }
 
-  /** Compile both passes (shader warm-up). */
+  /**
+   * Compile both passes (shader warm-up), then draw each once into a 1 × 1 corner: the
+   * tables upload, the G-buffer's framebuffer is made and the driver builds its draw-time
+   * state now (behind the intro card) instead of on the first figure painted in play (a
+   * 0.2–0.5 s frame on SwiftShader). The corner is overwritten by the first real paint.
+   */
   precompile() {
     const r = this.renderer;
     const prev = r.getRenderTarget();
+    const g = this.gbuf;
+    const vp = g.viewport.clone();
+    const sc = g.scissor.clone();
+    const tmp = new THREE.WebGLRenderTarget(4, 4, { type: THREE.UnsignedByteType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, stencilBuffer: false, generateMipmaps: false });
+    tmp.scissorTest = true;
     try {
-      r.setRenderTarget(this.gbuf);
+      r.setRenderTarget(g);
       this.quad.material = this.paintMat;
       r.compile(this.scene, this.cam);
       this.quad.material = this.resolveMat;
       r.compile(this.scene, this.cam);
+      // (The tables as paint() uploads them: the material table once per version, the prims every paint.)
+      const mt = materialTable();
+      if (mt.version !== this.matVersion) {
+        this.matVersion = mt.version;
+        this.matTex.needsUpdate = true;
+      }
+      this.primTex.needsUpdate = true;
+      this.paintMat.uniforms.uLayers.value = 0;
+      g.viewport.set(0, 0, 1, 1);
+      g.scissor.set(0, 0, 1, 1);
+      r.setRenderTarget(g);
+      this.quad.material = this.paintMat;
+      r.render(this.scene, this.cam);
+      this.resolveMat.uniforms.uG.value = g.texture;
+      tmp.viewport.set(0, 0, 1, 1);
+      tmp.scissor.set(0, 0, 1, 1);
+      r.setRenderTarget(tmp);
+      this.quad.material = this.resolveMat;
+      r.render(this.scene, this.cam);
     } finally {
+      g.viewport.copy(vp);
+      g.scissor.copy(sc);
       r.setRenderTarget(prev);
+      tmp.dispose();
     }
   }
 

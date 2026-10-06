@@ -78,6 +78,8 @@ const LOAD_STORE_WAIT_MS = 1500;
 const LOAD_PAINT_SLICE_MS = 14;
 /** …and once nothing animates any more (the card is done, a RETRY's pressed button): finish sooner. */
 const LOAD_PAINT_RUSH_MS = 45;
+/** The longest a load waits (card still up) for the GPU to finish drawing the stage's first frame (ms). */
+const LOAD_GPU_WAIT_MS = 2000;
 /** Pause-screen note while the GPU has dropped the WebGL context. */
 const GFX_NOTE = 'GRAPHICS RESET - PLEASE WAIT';
 /** CONTINUE? countdown length (s), and the least it reopens with after the app was backgrounded. */
@@ -106,6 +108,8 @@ interface Loading {
   warmed?: boolean;
   /** When the linking started (a driver compiling in parallel gets LOAD_STORE_WAIT_MS before we block on it). */
   linkT0?: number;
+  /** The first frame is drawn (behind the card); play waits for the GPU to finish it (`fence`, WebGL 2). */
+  settle?: { t0: number; fence: WebGLSync | null };
 }
 
 interface Run {
@@ -217,6 +221,8 @@ export class Game implements MenuActions {
     /** Linking the warmed-up shader programs, sliced over `linkFrames` frames behind the card. */
     link: number;
     linkFrames: number;
+    /** Waiting (card up, nothing blocked) for the GPU to finish the first frame. */
+    settle?: number;
     render: number;
     /** Wall-clock from the request to ready (the card may run longer). */
     total: number;
@@ -525,12 +531,61 @@ export class Game implements MenuActions {
       this.lastLoad.linkFrames++;
     }
     if (!linked) return;
+    // The first frame, still behind the card; then wait (without blocking: a fence polled once a
+    // frame) for the GPU to finish it. Its first draw of every material and atlas is the costly one
+    // (on SwiftShader 0.4–0.7 s of GPU-process work that otherwise stalls a frame shortly after,
+    // on the first frames of play when the card has already run out).
+    if (!l.settle) {
+      const t4 = performance.now();
+      if (w && !this.engine.contextLost) this.renderWorld(w);
+      if (this.lastLoad) this.lastLoad.render = performance.now() - t4;
+      l.settle = { t0: performance.now(), fence: this.gpuFence() };
+      return;
+    }
+    if (l.settle.fence && !this.gpuDone(l.settle.fence) && performance.now() - l.settle.t0 < LOAD_GPU_WAIT_MS) return;
+    if (this.lastLoad) this.lastLoad.settle = performance.now() - l.settle.t0;
+    this.dropFence(l.settle.fence);
     this.finishLoading();
     if (this.lastLoad) this.lastLoad.total = performance.now() - l.t0;
   }
 
+  /** A GPU fence after the commands issued so far (null without WebGL 2 or with the context lost). */
+  private gpuFence(): WebGLSync | null {
+    if (this.engine.contextLost) return null;
+    const gl = this.engine.renderer.getContext();
+    if (!('fenceSync' in gl)) return null;
+    try {
+      const f = (gl as WebGL2RenderingContext).fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
+      return f;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The GPU has passed `fence` (never blocks). */
+  private gpuDone(fence: WebGLSync): boolean {
+    if (this.engine.contextLost) return true;
+    const gl = this.engine.renderer.getContext() as WebGL2RenderingContext;
+    try {
+      return gl.getSyncParameter(fence, gl.SYNC_STATUS) === gl.SIGNALED;
+    } catch {
+      return true;
+    }
+  }
+
+  private dropFence(fence: WebGLSync | null) {
+    if (!fence || this.engine.contextLost) return;
+    try {
+      (this.engine.renderer.getContext() as WebGL2RenderingContext).deleteSync(fence);
+    } catch {
+      /* gone with the context */
+    }
+  }
+
   /** Stop a pending load (the player left before it finished). */
   private cancelLoading() {
+    this.dropFence(this.loading?.settle?.fence ?? null);
     this.loading = null;
     pwPaintCancel(pwMenuAtlas);
   }
@@ -618,10 +673,13 @@ export class Game implements MenuActions {
       this.input.enabled = true;
       return;
     }
-    // Render one frame so the intro card has the scene behind it (also uploads the buffers).
-    const t1 = performance.now();
-    this.renderWorld(w);
-    if (this.lastLoad) this.lastLoad.render = performance.now() - t1;
+    // Render one frame so the intro card has the scene behind it (also uploads the buffers);
+    // a normal load drew it already and waited for the GPU to finish it (see loadingTick).
+    if (!l.settle) {
+      const t1 = performance.now();
+      this.renderWorld(w);
+      if (this.lastLoad) this.lastLoad.render = performance.now() - t1;
+    }
     if (l.introDone) this.beginPlay();
     else this.state = 'intro';
   }

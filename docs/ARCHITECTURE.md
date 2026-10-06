@@ -813,29 +813,37 @@ Stage loads, production build, real flow (title → intro card), `scripts/load-b
 the card runs 2.8 s). Total = card start → ready to play; *cold* = first load on the device
 (paints, then stores), *warm* = every later load (atlases from IndexedDB, nothing painted):
 
-| stage | PIXEL WORLD cold (build / paint in frames / total) | PIXEL WORLD warm total | PIXEL CAST total |
+| stage | PIXEL WORLD cold (build / paint in frames / total) | PIXEL WORLD warm total | PIXEL CAST cold / warm total |
 |---|---|---|---|
-| z1 | 401 / 443 ms in 27 / 1610 ms | 979 ms | 1070 ms |
-| z2 | 380 / 320 in 17 / 1208 | 855 | 956 |
-| z3 | 520 / 306 in 18 / 1290 | 1116 | 918 |
-| d1 | 1042 / 316 in 17 / 1803 | 1319 | 1789 |
-| d2 | 622 / 316 in 17 / 1437 | 1357 | 1279 |
-| d3 | 706 / 289 in 15 / 1520 | 1403 | 1285 |
+| z1 | 553 / 496 ms in 30 / 2693 ms | 2124 ms | 2159 / 1795 ms |
+| z2 | 550 / 332 in 16 / 2082 | 1819 | 1553 / 1429 |
+| z3 | 681 / 348 in 19 / 2265 | 1843 | 1750 / 1215 |
+| d1 | 1149 / 327 in 16 / 2542 | 2056 | 2497 / 1958 |
+| d2 | 821 / 317 in 18 / 2098 | 1673 | 1515 / 1372 |
+| d3 | 848 / 278 in 16 / 2195 | 1916 | 1861 / 1646 |
 
-With the CPU throttled 3× (a phone proxy): z1 cold 3.4 s / warm 1.8 s, z3 3.8 / 2.0, d1
-4.9 / 3.4 (d1's world build alone 2.7–2.9 s) — a first-ever load may hold the card on
-LOADING... for up to ~2 s; later loads fit inside the card except d1, whose build is the cost.
-Writes to the store cost 50–75 ms (one atlas a frame); reads 30–65 ms (≈ 15–25 MB, during
-the card). Longest single paint step 40–75 ms (a 2048-wide sky band). The long task left
-under the card is the world build itself (as in PIXEL CAST). **In play: no long task in either
-ART** (round 5): the 0.2–0.55 s frame a few seconds in (the first character's paint, 50 %
-longer in PIXEL WORLD) was the first use of programs compiled at warm-up but never linked —
-they are now linked behind the card (`linkSlice`, step 6 of the load: 200–250 ms over 6–7
-frames in PIXEL WORLD, 45–80 ms in PIXEL CAST, inside the card); measured with
-`scripts/load-bench.mjs --intro --play 6` (z1, d3: `playLong` empty in both ARTs) and a CPU
-profile of the frame (`getProgramInfoLog` / `getUniforms` under `onFirstUse` was 250 of its
-300 ms). Next steps: a Worker for the cold paint (painters are DOM-free and node-safe), and
-splitting the world build itself (d1's 0.9–1.0 s, shared with PIXEL CAST) over frames.
+(Round 5. Totals include the new GPU settle — 0.4–1.0 s on SwiftShader, every ART — which
+runs while the 2.8 s card is still up: every load above is ready before the card ends.)
+With the CPU throttled 3× (a phone proxy, measured at 18e2190, before the settle step): z1 cold
+3.4 s / warm 1.8 s, z3 3.8 / 2.0, d1 4.9 / 3.4 (d1's world build alone 2.7–2.9 s) — a
+first-ever load may hold the card on LOADING... for up to ~2 s; later loads fit inside the card
+except d1, whose build is the cost. Writes to the store cost 50–75 ms (one atlas a frame); reads
+30–65 ms (≈ 15–25 MB, during the card). Longest single paint step 40–75 ms (a 2048-wide sky
+band). The long task left under the card is the world build itself (as in PIXEL CAST).
+
+**In play: no long task in either ART** (round 5, `load-bench.mjs --intro --warm 1 --play 6`,
+all six stages, both ARTs, cold and warm: `playLong` empty in all 24 loads; the longest frame
+gap in play 283 ms in PIXEL WORLD, i.e. ordinary SwiftShader frames). The reviewer's 0.2–0.55 s
+frame a few seconds in, 50 % longer in PIXEL WORLD, had three parts, all now paid behind the card:
+the first use of programs compiled at warm-up but never linked (`linkSlice`: 25–260 ms over a
+few frames; a CPU profile of the old frame had `getProgramInfoLog` / `getUniforms` under
+`onFirstUse` as 250 of its 300 ms), the character painter's first draw (`PixelCast.precompile`
+now draws once), and the GPU's first pass over the new stage — every material and multi-MB atlas
+sampled for the first time — which landed as a 0.4–0.7 s frame gap about a second after the
+first render, on the first frames of play whenever the load finished late (the settle step
+below now waits for it on a fence). Next steps: a Worker for the cold paint (painters are
+DOM-free and node-safe), and splitting the world build itself (d1's 0.9–1.2 s, shared with
+PIXEL CAST) over frames.
 
 ### How to convert a stage
 
@@ -1165,12 +1173,18 @@ splitting the world build itself (d1's 0.9–1.0 s, shared with PIXEL CAST) over
 - **d2 skeleton collapse**: the skull falls as three crossed painted cut-outs in its own frame
   (profile with the hanging jaw, top, back: `d2skull.ts`) — openings cut out, tooth rows,
   fossil-cast bone lit upper left — instead of its box stack (`SkeletonDisplay.skullHolder`).
-- **d2 kitchen**: stainless counter tops (a stepped diagonal sheen band, brushed streaks, food
-  stains, knife scratches) with a lit edge over a dark lip; grimy grout and grease spatter on
-  the splash-back, fallen tiles showing the adhesive comb; utensil rails and shelves of stores
-  over the ovens / sinks; more clutter cards (mixer and plates, mugs) on the islands and wall
-  counters; floor drains, grease trodden out from the ranges; stepped additive light pools
-  under the troffers (the failing one dark).
+- **d2 kitchen** (it read as flat-shaded boxes: white slab tops, an evenly lit chequer, a
+  wall-to-wall white end wall): stainless counter tops in mid steel with two reflected light
+  strips and brushed grain running ALONG the run (a pattern across a counter collapses into
+  one flat value at the grazing view), a lit edge over a dark lip; stepped 2×2-dithered contact
+  shadows on the floor along every island and wall-counter base (`floorShadowTile`); the light
+  pools moved to where the troffers actually throw them — a hot pool on each island top under
+  its light, dimmer ones spilling into the aisles (the failing troffer's stay dark); grimy grout
+  and grease spatter on the splash-back, fallen tiles showing the adhesive comb; utensil rails
+  and shelves of stores over the ovens / sinks; the end wall dressed either side of the
+  server-room door (shelves, canteen notices, a stopped clock, an extinguisher, a rail); more
+  clutter cards (mixer and plates, mugs) on the islands and wall counters; floor drains, grease
+  trodden out from the ranges.
 - **d3 puddles**: calm dark water (two lit tones, no unlit texels), reflection dashes 2 rows in
   12 lit at tone ≤ 2.2 (they brighten with the lightning), ≤ 3 rain rings as 2-texel arcs on
   the near half; their own material with levels a step early (`bias 1`); half the road puddles
@@ -1178,8 +1192,18 @@ splitting the world build itself (d1's 0.9–1.0 s, shared with PIXEL CAST) over
   rings dim to storm blue (opacity 0.26) so the telegraph rings stay the only bright ellipses.
 - **d3 mud-hold truck**: a sun visor, an amber beacon, mirrors out on arms, rubber fender arches
   over every wheel, mud flaps, rounded front corners in the cab front module.
-- **Every ART**: the first-draw hitch fixed by linking programs behind the card (see *Stage
-  loading*); rescued civilians never walk into the lens (see *Civilians*).
+- **Single-file budget** (`scripts/inline-build.mjs`): 3.5 MB is a deliberate raise from 3 MB
+  (PIXEL WORLD's art is painted by code, so it lives in the script; ≈ 1 MB gzipped), and every
+  `build:single` now compares `overrun.html` with the committed baseline
+  (`scripts/single-size.json`, the size at HEAD): growth over 64 KB fails the build until it is
+  accepted with `SINGLE_SIZE_UPDATE=1 npm run build:single`. Round 5 itself: 3271 KB (+27 KB for
+  the skull, bus-interior, wall-chunk and kitchen painters).
+- **Every ART**: the first-draw hitch fixed behind the card — the warmed-up programs are linked
+  (`linkSlice`), the character painter (`PixelCast.precompile`) draws once into a 1 × 1
+  corner, so its tables upload and its framebuffers exist before play, and play waits on a GPU
+  fence for the stage's first frame to finish (see *Stage loading*);
+  rescued civilians never walk into the lens (see *Civilians*). Gameplay identical: humanbot
+  60 fps, seeds 1–12, σ 0.03 / 0.05, six stages — PIXEL WORLD = PIXEL CAST = 18e2190 per seed.
 
 ## Audio
 
@@ -1253,23 +1277,30 @@ pressed RETRY / RESTART screen — never in play):
 4. `pwStoreFlush(1)` hands each freshly painted atlas to the store, one a frame.
 5. Shader warm-up (`warmUp`, its own frame): every program the stage will need is compiled
    and every live PixelWorld texture is uploaded (`renderer.initTexture`) — a set piece's
-   atlas never uploads the first time it comes into view.
+   atlas never uploads the first time it comes into view. The character painter
+   (`PixelCast.precompile`) also draws each of its two passes once into a 1 × 1 corner, so its
+   prim / material tables upload and its G-buffer framebuffer exists before the first figure.
 6. `linkSlice` (every ART): `compile()` only CREATES the programs; the driver finishes one
    (SwiftShader / ANGLE: the link) the first time it is queried, which three.js does on its
    first draw — that was the 0.2–0.5 s freeze when the first character painted a few seconds
    into a stage. Each never-used program is queried here (`getUniforms()`), a slice a frame
    (14 / 45 ms like the paint); with KHR_parallel_shader_compile a program still compiling in
    the background waits for a later frame (up to 1.5 s, then it is forced).
-7. `finishLoading`: the first render, then play (or the card).
-A world still loading is never drawn (in every ART): the card stays over the last frame on the
-canvas (the title's), so no half-painted scenery shows through it and the build's frame does
+7. Settle (every ART): the first frame is drawn behind the card, then a WebGL 2 fence
+   (`gpuFence`, polled once a frame — nothing blocks) holds play until the GPU has finished it,
+   at most 2 s (`LOAD_GPU_WAIT_MS`); without WebGL 2 there is no wait. That first pass over every
+   material and atlas was the 0.4–0.7 s stall (SwiftShader) that otherwise hit the first frames
+   of play when the card had already run out.
+8. `finishLoading`: play (or the rest of the card).
+A world still loading is never drawn before step 7 (in every ART): the card stays over the last
+frame on the canvas (the title's), so no half-painted scenery shows through it and the build's frame does
 not also compile every shader. If the card's 2.8 s run out (or it is tapped) before the load is
 done, it stays up saying LOADING... until play can begin (`showStageIntro`'s `onDone` returns
 false). The title's painted scenery is freed when a stage builds (`MenuBackdrop.release`). The
 attract demo builds at once (the store was read before it started: `startDemo` waits for it;
 the title's atlases stay cached beside the demo stage's) and paints during its opening black
 cut. `Game.lastLoad` records build / paint (+ frames) / store / warm-up / link (+ frames) /
-render / total ms (`scripts/load-bench.mjs`).
+render / settle / total ms (`scripts/load-bench.mjs`).
 
 ## Renderer policy
 

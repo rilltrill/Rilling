@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { ROOMS } from './layout';
+import { ROOMS, railXAtZ } from './layout';
 import { ROOM_CONVERTERS, type D2PixelWorld, type RoomParts } from './pixel';
 import { dropMeshes, paintGroup, type Paint } from './pixelMesh';
-import { centreOf, matIs, NZ, paintDoor, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y, Z } from './pixelShared';
+import { centreOf, matIs, NX, NZ, paintDoor, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y, Z } from './pixelShared';
 import { paintVents } from './pixelShop';
 import type { BurstDoor } from './setpieces';
 import { acousticTile } from '../../pixelworld/d2shop';
@@ -10,9 +10,10 @@ import {
   applianceTile, bulkheadTile, cableDropTile, gratingTile, kitchenChequerTile, kitchenNoticesTile, rackEndTile, rackFrontTile, raisedFloorTile, serverWallTile,
 } from '../../pixelworld/d2lab';
 import {
-  cabinetFrontTile, counterClutterTile, counterLipTile, counterTopTile, floorDrainTile, greaseStainTile, hoodFrontTile, hoodUndersideTile, islandEndTile, kitchenWallTile, panCardTile, sootDecalTile, storesShelfTile, utensilRailTile,
+  cabinetFrontTile, counterClutterTile, counterLipTile, counterTopTile, floorDrainTile, floorShadowTile, greaseStainTile, hoodFrontTile, hoodUndersideTile, islandEndTile, kitchenWallTile, panCardTile, sootDecalTile, storesShelfTile, utensilRailTile,
 } from '../../pixelworld/d2kitchen';
 import { z2PoolMesh, z2PoolTexture } from '../../pixelworld/z2bay';
+import { clockFace, extinguisherMod } from '../../pixelworld/z2modules';
 import { bloodDecal, gougeDecal, splatDecal } from '../../pixelworld/d2decals';
 import { tintFor } from '../../pixelworld/batch';
 
@@ -135,10 +136,38 @@ function convertKitchen(pw: D2PixelWorld, parts: RoomParts) {
   // A floor drain in the aisle, grease trodden out from the ranges.
   for (const z of [-170.5, -184]) b.rect(_o.set(-0.375, 0.011, z + 0.375), X, NZ, 0.75, 0.75, floorDrainTile(a));
   [[-6.4, -165.6, 0], [6.4, -172.4, 1], [-6.5, -179.3, 1], [6.3, -189.5, 0]].forEach(([x, z, v]) => b.rect(_o.set(x - 0.75, 0.009, z + 0.5), X, NZ, 1.5, 1, greaseStainTile(a, v)));
-  // Stepped light pools under the troffers (additive, one draw); the failing one stays dark.
+  // Contact shadows on the floor along every island and wall-counter base (stepped, 2×2 dither):
+  // the runs stand on the floor instead of floating over an evenly lit chequer.
+  const shadow = floorShadowTile(a);
+  const strip = (x: number, dir: 1 | -1, zHi: number, zLo: number) => {
+    for (let z = zHi; z > zLo + 0.05; z -= 1.5) {
+      const w = Math.min(1.5, z - zLo);
+      const sub = { x: 0, y: 0, w: Math.round(48 * (w / 1.5)), h: 12 };
+      // u × v must face up: v = +X runs along +Z (from the low end), v = −X along −Z (from the high end).
+      if (dir > 0) b.rect(_o.set(x, 0.008, z - w), Z, X, w, 0.375, shadow, { sub });
+      else b.rect(_o.set(x, 0.008, z), NZ, NX, w, 0.375, shadow, { sub });
+    }
+  };
+  for (const s of [-1, 1] as const) {
+    for (const [z0, z1] of [[-167, -176], [-178.6, -187.6]] as const) {
+      strip(s * 3.85, (-s) as 1 | -1, z0, z1);
+      strip(s * 5.35, s, z0, z1);
+    }
+    const runs: [number, number][] = s > 0 ? [[-162.4, freezerZ + 1.3], [freezerZ - 1.3, -193.6]] : [[-162.4, -193.6]];
+    for (const [z0, z1] of runs) strip(s * 7.9, (-s) as 1 | -1, z0, z1);
+  }
+  // Stepped light pools under the troffers (additive, one draw): the troffers hang over the
+  // islands, so the hot pool lands on the island top and a dimmer one spills into the aisle
+  // either side; between the lights the tops and the floor stay a step darker. The failing
+  // troffer's pools stay dark.
   const pools: number[][] = [];
   for (let z = R.z0 - 3; z > R.z1 + 1; z -= 6) {
-    for (const x of [-4.5, 4.5]) if (!(z < -180 && x < 0)) pools.push([0xf0f4ff, x, 0.013, z, 3.4, 3.4, 0.16]);
+    for (const s of [-1, 1]) {
+      if (z < -180 && s < 0) continue;
+      const onIsland = (z < -167 && z > -176) || (z < -178.6 && z > -187.6);
+      if (onIsland) pools.push([0xf0f4ff, s * 4.6, 0.958, z, 1.5, 3.2, 0.3]);
+      pools.push([0xf0f4ff, s * 2.95, 0.013, z, 1.7, 3.6, 0.22], [0xf0f4ff, s * 6.6, 0.013, z, 2, 3.6, 0.2]);
+    }
   }
   if (parts.root) parts.root.add(z2PoolMesh(z2PoolTexture(), pools));
   // Clutter stood on the island tops (breaking their flat top line), turned to the aisle.
@@ -161,6 +190,18 @@ function convertKitchen(pw: D2PixelWorld, parts: RoomParts) {
     const h = 0.63;
     cards.rect(_o.set(p.x - u.x * w / 2, 2.55 - h, p.z - u.z * w / 2), u, Y, w, h, panCardTile(a, i));
   });
+  // The end wall either side of the server-room door (it read as wall-to-wall white tile):
+  // shelves of stores, the canteen notices, a stopped clock, an extinguisher, a utensil rail.
+  {
+    const ez = R.z1 + 0.25;
+    const ex = railXAtZ(R.z1);
+    b.rect(_o.set(ex - 7.6, 1.62, ez), X, Y, 2, 0.6, storesShelfTile(a, 3));
+    b.rect(_o.set(ex - 5.2, 1.3, ez), X, Y, 1.5, 0.75, kitchenNoticesTile(a));
+    b.rect(_o.set(ex - 3.15, 2.35, ez), X, Y, 0.42, 0.42, clockFace(a));
+    b.rect(_o.set(ex + 2.6, 0.95, ez), X, Y, 0.375, 1.125, extinguisherMod(a));
+    b.rect(_o.set(ex + 4.0, 1.18, ez), X, Y, 1.5, 0.6, utensilRailTile(a, 1));
+    b.rect(_o.set(ex + 5.7, 1.62, ez), X, Y, 2, 0.6, storesShelfTile(a, 2));
+  }
   // Notices on the upper wall, a gouge by the freezer.
   b.rect(_o.set(R.x0 + 0.215, 2.3, -170), NZ, Y, 1.5, 0.75, kitchenNoticesTile(a));
   const gouge = gougeDecal(a, 1);
