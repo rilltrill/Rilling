@@ -84,7 +84,8 @@ export class Z1FacadeExtras {
     const pick = hash2(index, 31, 7);
     if (pick < 0.85) {
       const p = PEDIMENTS[Math.floor(hash2(index, 32, 7) * PEDIMENTS.length)];
-      const t = z1Pediment(a, p.kind, p.text, { wall: wallKind, stone });
+      // (One coping stone per wall kind: a handful of crowns for the whole stage.)
+      const t = z1Pediment(a, p.kind, p.text, { wall: wallKind, stone: wallKind === 'brick' ? 0x86827a : 0x6a6a70 });
       t.neutral = wallKind === 'brick' ? 0xd8a890 : 0xd8d8d8;
       const tint = wall.tintRGB ? tintRGB(t, wall) : undefined;
       const cw = t.w / PW_TPM;

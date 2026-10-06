@@ -95,7 +95,8 @@ export class Z1Street {
   private wall(b: PwBatch, g: THREE.Object3D): THREE.Object3D[] {
     const a = this.atlas;
     const rec = g.userData.pwWall as { x0: number; x1: number; floors: number; fireEscapes: number[] };
-    const style = { frame: 0x2a2a30, stone: 0x4a4a52 };
+    // (The dark-trim facade style: the alley shares the street's painted windows.)
+    const style = { frame: 0x3a3a42, stone: 0x4a4a52 };
     const drop: THREE.Object3D[] = [];
     b.setMatrix(g.matrixWorld);
     for (const c of g.children) {
@@ -113,7 +114,7 @@ export class Z1Street {
           break;
         }
         case 'door': {
-          const t = doorModule(a, 'metal', { hex: 0x3a3c44, stone: 0x4a4a52 });
+          const t = doorModule(a, 'metal', { hex: 0x45301f, stone: 0x4a4a52 });
           b.rect(_o.set(r.x - DOOR_M.w / 2, 0, 0.02), X, Y, DOOR_M.w, DOOR_M.h, t);
           break;
         }

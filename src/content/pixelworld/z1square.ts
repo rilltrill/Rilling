@@ -67,7 +67,7 @@ export function z1SquareTiles(a: PwAtlas): Z1SquareTiles {
     courtWinDark: a.tile('z1sq|cwin|0', 45, 77, (c, k) => paintCourtWindow(c, k, false)),
     courtDoor: a.tile('z1sq|cdoor', 96, 134, paintCourtDoor),
     frieze: a.tile('z1sq|frieze', 448, 26, paintFrieze),
-    clock: a.tile('z1sq|clock', 109, 109, paintClock),
+    clock: a.tile('z1sq|clock', 64, 64, paintClock),
     statue: a.tile('z1sq|statue', 40, 80, paintStatue),
     booksWindow: a.tile('z1sq|books', 208, 74, (c, k) => paintShopWindow(c, k, 'books')),
     toysWindow: a.tile('z1sq|toys', 208, 74, (c, k) => paintShopWindow(c, k, 'toys')),
@@ -546,25 +546,29 @@ function paintClock(c: PwCanvas, k: PwKit) {
   for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
     const d = Math.hypot(x - cx, y - cx);
     if (d > R) continue;
-    if (d > R - 5) c.set(x, y, bronze, x + y < W ? 4 : 2, F);
+    if (d > R - 3) c.set(x, y, bronze, x + y < W ? 4 : 2, F);
     else c.set(x, y, face, d < R * 0.5 ? 4 : 3, F | PWF.DITHER);
   }
   for (let i = 0; i < 12; i++) {
     const a = (i / 12) * Math.PI * 2;
-    const r0 = R - 14;
-    const r1 = R - 8;
+    const r0 = R - 9;
+    const r1 = R - 4;
     for (let r = r0; r < r1; r++) {
       c.set(Math.round(cx + Math.sin(a) * r), Math.round(cx - Math.cos(a) * r), ink, 1, F);
       if (i % 3 === 0) c.set(Math.round(cx + Math.sin(a) * r) + 1, Math.round(cx - Math.cos(a) * r), ink, 1, F);
     }
   }
-  // Hands at ten to midnight.
-  const hand = (a: number, len: number, w: number) => {
-    for (let r = 0; r < len; r++) for (let j = -w; j <= w; j++) c.set(Math.round(cx + Math.sin(a) * r + Math.cos(a) * j), Math.round(cx - Math.cos(a) * r + Math.sin(a) * j), ink, 1, F);
+  // Hands at ten to midnight: clean stepped strokes (the hour hand doubled).
+  const hand = (a: number, len: number, thick: boolean) => {
+    const x0 = Math.round(cx);
+    const ex = Math.round(cx + Math.sin(a) * len);
+    const ey = Math.round(cx - Math.cos(a) * len);
+    c.line(x0, x0, ex, ey, ink, 1, F);
+    if (thick) c.line(x0 + 1, x0, ex + 1, ey, ink, 1, F);
   };
-  hand(-Math.PI / 3, R * 0.5, 1);
-  hand(0, R * 0.75, 1);
-  c.ellipse(cx, cx, 3, 3, bronze, 4, F);
+  hand(-Math.PI / 36, R * 0.5, true);
+  hand(-Math.PI / 3, R * 0.78, false);
+  c.ellipse(cx, cx, 2, 2, bronze, 4, F);
 }
 
 /** The war memorial's bronze soldier (cut-out, 1.25 × 2.5 m): verdigris, rifle at port, the helmet's brim lit. */

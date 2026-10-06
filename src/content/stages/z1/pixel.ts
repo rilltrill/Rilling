@@ -4,7 +4,7 @@ import { PwBatch, tintFor } from '../../pixelworld/batch';
 import { PwBackdrop } from '../../pixelworld/backdrop';
 import { PW_TPM } from '../../pixelworld/canvas';
 import {
-  acUnitModule, awningTile, corniceTile, doorModule, DOOR_M, drainpipeTile, graffitiDecal, posterDecal, SHOP_BAY_M, SHOPFRONT_H_M, shopfrontModule, valanceTile,
+  acUnitModule, awningTile, corniceTile, doorModule, DOOR_M, drainpipeTile, graffitiDecal, posterDecal, SHOP_BAY_M, SHOPFRONT_H_M, shopfrontModule, shopLightClass, valanceTile,
   wallFoot, wallHead, WINDOW_M, windowModule, type ShopGoods, type WindowKind,
 } from '../../pixelworld/facade';
 import { kitTileRule, neutral, NEUTRAL_BRICK, NEUTRAL_HEX, retexture, type TileRule } from '../../pixelworld/retexture';
@@ -347,7 +347,8 @@ export class Z1PixelWorld {
         frame: frameCol === 0xd8d4c8 ? 0x8a8c90 : 0x34343b,
         shutter: shop.shutter,
         boarded: shop.boarded,
-        variant: index % 2,
+        // (The variant only changes shutters / boards: plain bays share one tile.)
+        variant: shop.shutter || shop.boarded ? index % 2 : 0,
       });
       const x0 = rec.shopX - sw / 2;
       // Bays across the window (u spans whole bays: a mullion every 4 m), stone jambs at both ends.
@@ -356,10 +357,11 @@ export class Z1PixelWorld {
       for (const jx of [x0 - 0.2, x0 + sw]) b.rect(_o.set(jx, 0, 0.03), X, Y, 0.2, SHOPFRONT_H_M, jamb);
     }
     if (shop) {
-      const t = doorModule(a, shop.interior ? 'shop' : shop.shutter ? 'metal' : 'wood', { hex: 0x45301f, stone, wall: color, lit: shop.interior || undefined });
+      // (Lit doors by the light's class: shops of one colour family share a painted door.)
+      const t = doorModule(a, shop.interior ? 'shop' : shop.shutter ? 'metal' : 'wood', { hex: 0x45301f, stone, lit: shop.interior ? shopLightClass(shop.interior) : undefined });
       b.rect(_o.set(rec.doorX - DOOR_M.w / 2, 0, 0.02), X, Y, DOOR_M.w, DOOR_M.h, t);
     } else {
-      const t = doorModule(a, 'wood', { hex: hash2(index, 2, 3) > 0.5 ? 0x45301f : 0x2a3a2a, stone, wall: color, lit: rec.groundLit ? 0xd8914a : undefined });
+      const t = doorModule(a, 'wood', { hex: hash2(index, 2, 3) > 0.5 ? 0x45301f : 0x2a3a2a, stone, lit: rec.groundLit ? 0xd8914a : undefined });
       b.rect(_o.set(rec.doorX - DOOR_M.w / 2, 0, 0.02), X, Y, DOOR_M.w, DOOR_M.h, t);
       for (const sx of [-1, 1]) {
         const t2 = windowModule(a, rec.groundLit ? 'dim' : hash2(index, sx, 5) > 0.7 ? 'boarded' : 'dark', style, (index + sx + 2) % 2);
