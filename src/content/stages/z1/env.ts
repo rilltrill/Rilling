@@ -14,7 +14,6 @@ import { STREET_PROPS } from '../../pixel/floraProps';
 import { pixelWorld } from '../../../core/art';
 import { Z1PixelWorld, pwPoolTexture } from './pixel';
 import { PwBatch } from '../../pixelworld/batch';
-import { asphaltTile } from '../../pixelworld/surfaces';
 
 /** Per-world handles the stage script needs (set pieces, lights). */
 export interface Z1Scene {
@@ -99,7 +98,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     if (pw) {
       baseGround = new PwBatch(pw.atlas);
       // (The road's own painted asphalt, darkened: one tile fewer to paint.)
-      baseGround.rect(new THREE.Vector3(-300, -0.03, 110), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), 520, 520, asphaltTile(pw.atlas, { hex: 0x2c2f37, wet: true, wear: 0.6 }), { tint: 0xd8d8d8 });
+      baseGround.rect(new THREE.Vector3(-300, -0.03, 110), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), 520, 520, pw.asphalt(), { tint: 0xd8d8d8 });
     } else {
       const ground = new THREE.Mesh(Kit.plane(520, 520), Kit.tex('asphalt', 0x1d1f25, 1, 0.6));
       ground.rotation.x = -Math.PI / 2;
@@ -112,6 +111,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   const town = buildTown();
   if (pw) {
     for (const id of Object.keys(town.zones) as ZoneId[]) pw.convertZone(id, town.zones[id]);
+    pw.convertDyn(town);
     pw.finish(town.zones);
     const m = baseGround?.build();
     if (m) root.add(m);
@@ -153,7 +153,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   root.add(veg3D, vegPx);
   const untoggle = floraArtToggle(scene, [vegPx], [veg3D]);
   const pools = pw ? town.pools.build(undefined, pwPoolTexture(), true) : town.pools.build(poolSurface);
-  const beams = town.beams.build();
+  const beams = town.beams.build(!!pw);
   root.add(pools, beams);
   const rain = new Rain(420);
   root.add(rain.mesh);

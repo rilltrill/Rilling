@@ -9,11 +9,18 @@ import {
 } from '../../pixelworld/facade';
 import { kitTileRule, neutral, NEUTRAL_BRICK, NEUTRAL_HEX, retexture, type TileRule } from '../../pixelworld/retexture';
 import { bladeSign as pwBlade, marquee, moviePoster, neonEdge, neonSign } from '../../pixelworld/signs';
-import { nightSkyTile, skylineTile } from '../../pixelworld/sky';
+import { skylineTile } from '../../pixelworld/sky';
+import { z1NightSkyTile, z1TownlineTile } from '../../pixelworld/z1sky';
 import {
-  asphaltTile, brickTile, curbTile, hash2, metalTile, panelTile, plasterTile, roofTile, sidewalkTile, stoneTile,
+  brickTile, curbTile, hash2, metalTile, panelTile, plasterTile, roofTile, sidewalkTile, stoneTile,
 } from '../../pixelworld/surfaces';
 import { texStd } from './bake';
+import { z1AsphaltTile, z1PavingTile } from '../../pixelworld/z1ground';
+import { Z1Ground } from './pwGround';
+import { Z1Cars } from './pwCars';
+import { Z1FacadeExtras } from './pwFacade';
+import { Z1Diner } from './pwDiner';
+import type { Town } from './town';
 import { Kit } from '../../kit/ModelKit';
 import { M, type FacadeRecord } from './props';
 import type { ZoneId } from './town';
@@ -75,7 +82,6 @@ const _o = new THREE.Vector3();
 const X = new THREE.Vector3(1, 0, 0);
 const Y = new THREE.Vector3(0, 1, 0);
 const Z = new THREE.Vector3(0, 0, 1);
-const NX = new THREE.Vector3(-1, 0, 0);
 const NZ = new THREE.Vector3(0, 0, -1);
 
 export class Z1PixelWorld {
@@ -84,6 +90,12 @@ export class Z1PixelWorld {
   private batches = new Map<ZoneId, PwBatch>();
   private rule: TileRule;
   private groundMats: Set<THREE.Material>;
+  readonly ground: Z1Ground;
+  readonly cars: Z1Cars;
+  private extras: Z1FacadeExtras;
+  private diner: Z1Diner;
+  /** PixelWorld meshes for dynamic objects (built in `finish`): batch, parent, world → parent matrix. */
+  private dynBatches: { b: PwBatch; parent: THREE.Object3D }[] = [];
   backdrop: PwBackdrop | null = null;
 
   constructor() {
@@ -99,10 +111,21 @@ export class Z1PixelWorld {
       [M.metal, () => metalTile(a, { hex: 0x3a3c44, rust: 0.6 })],
       [M.metalLight, () => metalTile(a, { hex: 0x6a6e75 })],
     ]);
-    // Road surfaces (texStd wet asphalt): painted asphalt with wet glints.
-    for (const m of roadMaterials()) ov.set(m, () => asphaltTile(a, { hex: 0x2c2f37, wet: true, wear: 0.6 }));
+    // Road surfaces (texStd wet asphalt): the z1 wet night asphalt (designed features, no speckle).
+    for (const m of roadMaterials()) ov.set(m, () => this.asphalt());
+    // The town square's stone flags.
+    ov.set(SQUARE_FLAGS(), () => z1PavingTile(a, { brick: 0x6e4636, granite: 0x6a6862 }));
     this.rule = kitTileRule(a, { overrides: ov, paint: new Set([M.yellowPaint, M.whitePaint]) });
-    this.groundMats = new Set<THREE.Material>([sidewalk, curb, ...roadMaterials()]);
+    this.groundMats = new Set<THREE.Material>([sidewalk, curb, SQUARE_FLAGS(), ...roadMaterials()]);
+    this.ground = new Z1Ground(a);
+    this.cars = new Z1Cars(a);
+    this.extras = new Z1FacadeExtras(a);
+    this.diner = new Z1Diner(a);
+  }
+
+  /** The street asphalt (roads and the base ground under the town). */
+  asphalt(): PwTile {
+    return z1AsphaltTile(this.atlas, { hex: 0x2c2f37, wear: 0.6 });
   }
 
   private batch(id: ZoneId): PwBatch {
@@ -123,8 +146,37 @@ export class Z1PixelWorld {
     });
     buildings.forEach((g, i) => this.facade(b, g, g.userData.pwBuilding as FacadeRecord, i));
     for (const s of signs) this.sign(b, s);
+    // Ground: the tagged classic decals (puddles, manholes, blood, litter, skids) → painted ones, plus the street dressing.
+    for (const m of this.ground.replaceTagged(b, zone)) m.parent?.remove(m);
+    this.ground.dress(b, id);
+    // Cars: painted body / glass / nose / tail / wheel modules.
+    for (const m of this.cars.convert(b, zone)) m.parent?.remove(m);
+    // The chrome diner and its lit interior.
+    for (const m of this.diner.convert(b, zone)) m.parent?.remove(m);
     zone.updateMatrixWorld(true);
     retexture(zone, b, this.rule, { world: (m) => this.groundMats.has(m.material as THREE.Material) });
+  }
+
+  /**
+   * Dynamic objects (they move, flicker or swap): each gets its own small
+   * PixelWorld mesh in place of its classic children, built in `finish`.
+   * Call after every `convertZone`, before `finish`.
+   */
+  convertDyn(town: Town) {
+    // The diner's buzzing 'r' (the classic overlay is a dark block letter).
+    let sign: THREE.Object3D | null = null;
+    town.zones.A.traverse((o) => {
+      if ((o.userData.pwSign as { text?: string } | undefined)?.text === 'Diner') sign = o;
+    });
+    for (const d of Object.values(town.dynZones)) {
+      for (const o of [...d.children]) {
+        if (!o.userData.pwDinerR || !sign) continue;
+        const b = this.diner.rOverlay(this.atlas, sign);
+        if (!b) continue;
+        o.clear();
+        this.dynBatches.push({ b, parent: o });
+      }
+    }
   }
 
   /** Build the atlases and the zone meshes (adds each zone's PixelWorld mesh to its group). */
@@ -133,6 +185,15 @@ export class Z1PixelWorld {
     for (const [id, b] of this.batches) {
       const mesh = b.build(undefined, { gain: 1 });
       if (mesh) zones[id].add(mesh);
+    }
+    // Dynamic pieces: world-space geometry under a moving / toggled parent (undo the parent's transform).
+    for (const { b, parent } of this.dynBatches) {
+      const mesh = b.build(undefined, { gain: 1 });
+      if (!mesh) continue;
+      parent.updateMatrixWorld(true);
+      mesh.matrix.copy(parent.matrixWorld).invert();
+      mesh.matrixWorldNeedsUpdate = true;
+      parent.add(mesh);
     }
   }
 
@@ -154,7 +215,7 @@ export class Z1PixelWorld {
 
   private facade(b: PwBatch, g: THREE.Object3D, rec: FacadeRecord, index: number) {
     const a = this.atlas;
-    const { w, h, d } = rec;
+    const { w, h } = rec;
     const color = rec.spec.color;
     const base = rec.spec.tex === 'brick' ? neutral(brickTile(a, { hex: NEUTRAL_BRICK }), NEUTRAL_BRICK) : this.wallTile(color);
     const foot = wallFoot(a, base);
@@ -176,12 +237,16 @@ export class Z1PixelWorld {
     const vTop = h * PW_TPM;
     const shift = Math.round((Math.ceil(vTop / head.h) * head.h - vTop) / 8) * 8;
     b.rect(_o.set(-w / 2, footH + bodyH, 0), X, Y, w, headH, head, { u0: 0, v0: (h - headH) * PW_TPM + shift, tintRGB });
-    // Sides and back (seen down the cross streets).
-    b.rect(_o.set(w / 2, 0, 0), NZ, Y, d, h, base, { u0: 0, v0: 0, tintRGB });
-    b.rect(_o.set(-w / 2, 0, -d), Z, Y, d, h, base, { u0: 0, v0: 0, tintRGB });
-    b.rect(_o.set(w / 2, 0, -d), NX, Y, w, h, base, { u0: 0, v0: 0, tintRGB });
-    // Upper windows.
     const style = { wall: color, frame: frameCol, stone };
+    const wallSet = { base, foot, head, tintRGB };
+    const wallKind = WALL_KIND[color] === 'brick' || rec.spec.tex === 'brick' || PAINTED[color] !== undefined ? 'brick' : 'plaster';
+    // Sides and back (seen down the cross streets): banded like the front, windows, ghost signs.
+    this.extras.sides(b, rec, index, wallSet, style);
+    // String courses between the upper floors, the parapet and its crown, roof clutter.
+    this.extras.courses(b, rec, stone);
+    this.extras.crown(b, rec, index, wallSet, stone, wallKind);
+    if (rec.fireEscapeX !== null) this.extras.fireEscape(b, rec, rec.fireEscapeX);
+    // Upper windows.
     rec.windows.forEach((wr, i) => {
       const v = Math.floor(hash2(index, i, 7) * 2);
       let kind: WindowKind = wr.kind;
@@ -244,6 +309,11 @@ export class Z1PixelWorld {
     const drop: THREE.Object3D[] = [];
     for (const c of g.children) {
       const tag = c.userData.pwFacade as string | undefined;
+      if (c.userData.pwChimney) this.extras.chimneyPots(b, c as THREE.Mesh);
+      // A rooftop billboard: paint the board, drop the paper blocks.
+      const papers = c.children.filter((k) => k.userData.pwBillboard === 'paper');
+      for (const k of c.children) if (k.userData.pwBillboard === 'board') this.extras.billboard(b, k as THREE.Mesh);
+      for (const k of papers) c.remove(k);
       if (!tag || tag === 'keep') continue;
       if (tag === 'cornice') this.cornice(b, c as THREE.Mesh, stone);
       else if (tag === 'poster') {
@@ -308,8 +378,20 @@ export class Z1PixelWorld {
       b.setMatrix(s.matrixWorld);
       const t = marquee(a, info.text.split('/'), { widthM: info.w ?? 12, heightM: info.size });
       b.rect(_o.set(-t.wM / 2, -t.hM / 2, info.z ?? 0.01), X, Y, t.wM, t.hM, t.tile);
+      // The lit end panels (blank glowing boards in the classic look) carry the cinema's name.
+      const ends = s.children.filter((c) => isGlow((c as THREE.Mesh).material) && ((c as THREE.Mesh).geometry as THREE.BoxGeometry).parameters?.width < 0.1);
+      const end = marquee(a, ['RIALTO'], { widthM: 2.6, heightM: info.size });
+      for (const c of ends) {
+        const m = c as THREE.Mesh;
+        const p = (m.geometry as THREE.BoxGeometry).parameters;
+        const sx = Math.sign(m.position.x);
+        const z0 = m.position.z - p.depth / 2;
+        const z1 = m.position.z + p.depth / 2;
+        if (sx > 0) b.rect(_o.set(m.position.x + 0.035, -end.hM / 2, z1), NZ, Y, p.depth, end.hM, end.tile);
+        else b.rect(_o.set(m.position.x - 0.035, -end.hM / 2, z0), Z, Y, p.depth, end.hM, end.tile);
+      }
       b.setMatrix(null);
-      for (const c of s.children.filter((c) => c.userData.pwFacade === 'signBack' || c.type === 'Group')) s.remove(c);
+      for (const c of s.children.filter((c) => c.userData.pwFacade === 'signBack' || c.type === 'Group' || ends.includes(c))) s.remove(c);
       return;
     }
     s.updateMatrixWorld(true);
@@ -346,17 +428,23 @@ export class Z1PixelWorld {
 
   // ─── Sky ──────────────────────────────────────────────────────────────────
 
-  /** The painted night panorama: sky band (moon, stars, clouds) + far and near skyline layers. */
+  /**
+   * The painted night panorama: the z1 sky band (gibbous moon behind a cloud
+   * wisp, layered cloud banks, the glow and smoke of fires on the horizon), the
+   * far city skyline in the haze and the town's own roofline in front of it
+   * (gables, a steeple, the water tower, a grain elevator, tree clumps, poles).
+   */
   buildBackdrop(moonDir: THREE.Vector3, fog: number): THREE.Group {
     const s = this.skyAtlas;
-    const moonAz = (Math.atan2(moonDir.x, -moonDir.z) * 180) / Math.PI;
-    const moonEl = (Math.asin(moonDir.y / moonDir.length()) * 180) / Math.PI;
-    const sky = nightSkyTile(s, { horizon: fog, top: 0x03050b, moonAz: Math.round(moonAz), moonEl: Math.round(moonEl), el0: -4, el1: 48, clouds: 0.6 });
-    const far = skylineTile(s, { hex: 0x222a3e, fog, el0: -2, el1: 13, lights: 0.45, tall: 0.85, moonAz: Math.round(moonAz), seed: 1 });
-    const near = skylineTile(s, { hex: 0x151a28, fog, el0: -2, el1: 8, lights: 0.3, tall: 0.95, moonAz: Math.round(moonAz), seed: 2 });
-    this.backdrop = new PwBackdrop(s, { tile: sky, el0: -4, el1: 48, radius: 330 }, [
+    const moonAz = Math.round((Math.atan2(moonDir.x, -moonDir.z) * 180) / Math.PI);
+    const moonEl = Math.round((Math.asin(moonDir.y / moonDir.length()) * 180) / Math.PI);
+    const el1 = 36;
+    const sky = z1NightSkyTile(s, { horizon: fog, top: 0x03050b, moonAz, moonEl, el0: -4, el1, fires: [-58, 38, 150] });
+    const far = skylineTile(s, { hex: 0x222a3e, fog, el0: -2, el1: 13, lights: 0.45, tall: 0.85, moonAz, seed: 1 });
+    const near = z1TownlineTile(s, { hex: 0x151a28, fog, el0: -2, el1: 9, moonAz, name: 'MILLBROOK' });
+    this.backdrop = new PwBackdrop(s, { tile: sky, el0: -4, el1, radius: 330 }, [
       { tile: far, radius: 300, el0: -2, el1: 13, follow: 1 },
-      { tile: near, radius: 260, el0: -2, el1: 8, yaw: 120, follow: 0.97 },
+      { tile: near, radius: 260, el0: -2, el1: 9, follow: 0.97 },
     ]);
     this.backdrop.anchor.set(-30, 0, -150);
     return this.backdrop.build();
@@ -371,36 +459,58 @@ function awningHex(m: THREE.Mesh): number {
   return ((m.material as THREE.MeshLambertMaterial).color?.getHex?.() ?? 0x3a2a24) as number;
 }
 
+/** The town square's stone-flag material (Kit.tex is cached: the same instance town.ts uses). */
+function SQUARE_FLAGS(): THREE.Material {
+  return Kit.tex('tiles', 0x4c4943, 0.5, 0.9);
+}
+
 /** The wet asphalt materials town.ts uses (texStd is cached: the same instances). */
 function roadMaterials(): THREE.Material[] {
   return [texStd(0x23262e, 0.42, 0.1, 'asphalt', 1, 0.85), texStd(0x272a31, 0.5, 0.05, 'asphalt', 1.3, 0.9)];
 }
 
-/** Light pools in PIXEL WORLD: stepped pixel rings with Bayer-dithered step edges (screened over the surface by `LightPools.build(…, light)`). */
+/**
+ * Light pools in PIXEL WORLD: a pixel artist's light pool — five flat steps
+ * falling off from a bright core to a faint skirt, the step edges hand-wobbly
+ * (painted, not compass-drawn) with a narrow ordered-dither seam, never a dither
+ * field. Hand-made mip levels keep distant pools from sparkling. Screened over
+ * the surface by `LightPools.build(…, light)`.
+ */
 export function pwPoolTexture(): THREE.DataTexture {
   const n = 256;
   const data = new Uint8Array(n * n * 4);
   const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-  const STEPS = 7;
+  const edges = [0.24, 0.42, 0.6, 0.8, 1.0];
+  const level = [1.0, 0.74, 0.5, 0.3, 0.13, 0];
+  const SEAM = 0.045;
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {
       const dx = (x + 0.5) / n - 0.5;
       const dy = (y + 0.5) / n - 0.5;
-      const r = Math.min(1, Math.sqrt(dx * dx + dy * dy) * 2);
-      // A pixel artist's light pool: a few flat steps, the edge between two steps an
-      // ordered (Bayer) dither — no smooth gradient, no hard paper disc.
-      const a = Math.pow(1 - r, 1.5) * STEPS;
-      const lo = Math.floor(a);
-      const step = Math.min(STEPS, lo + (a - lo > (bayer[(y & 3) * 4 + (x & 3)] + 0.5) / 16 ? 1 : 0));
+      // Wobbly rings: the radius pushed in and out a little round the pool (low-frequency, per ring).
+      const a = Math.atan2(dy, dx);
+      const r0 = Math.sqrt(dx * dx + dy * dy) * 2;
+      let k = 0;
+      while (k < edges.length) {
+        const wob = 1 + Math.sin(a * 3 + k * 1.7) * 0.035 + Math.sin(a * 5 + k * 2.9) * 0.025;
+        if (r0 <= edges[k] * wob) break;
+        k++;
+      }
+      if (k < edges.length) {
+        const wob = 1 + Math.sin(a * 3 + k * 1.7) * 0.035 + Math.sin(a * 5 + k * 2.9) * 0.025;
+        const d = edges[k] * wob - r0;
+        if (d < SEAM && (d / SEAM) * 16 < bayer[(y & 3) * 4 + (x & 3)] + 0.5) k++;
+      }
       const i = (y * n + x) * 4;
       data[i] = data[i + 1] = data[i + 2] = 255;
-      // Screened over the surface (see LightPools.build): ~3/4 strength at the centre.
-      data[i + 3] = Math.round((step / STEPS) * 190);
+      // Screened over the surface (see LightPools.build): ~2/3 strength at the core.
+      data[i + 3] = Math.round(level[k] * 165);
     }
   }
   const t = new THREE.DataTexture(data, n, n, THREE.RGBAFormat);
   t.magFilter = THREE.NearestFilter;
-  t.minFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestMipmapLinearFilter;
+  t.generateMipmaps = true;
   t.needsUpdate = true;
   return Kit.track(t);
 }

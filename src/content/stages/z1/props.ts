@@ -278,7 +278,7 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
   // Fire escape on the facade.
   if (s.fireEscape && floors >= 3) {
     const fx = rng.chance(0.5) ? -w / 4 : w / 4;
-    addFireEscape(g, floors, fx);
+    pwTagNew(g, () => addFireEscape(g, floors, fx), 'fireEscape');
     rec.fireEscapeX = fx;
   }
 
@@ -346,17 +346,18 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
     Kit.add(g, Kit.cone(1.15, 0.8, 10), M.roof, tx, h + 4.05, tz);
   } else if (roof === 'ac') {
     box(g, 1.4, 0.9, 1.1, M.metalLight, rng.spread(w * 0.3), h + 0.5, -d * 0.4);
-    box(g, 0.7, 1.6, 0.7, Kit.tex('brick', 0x5a3a30, 1.2), rng.spread(w * 0.35), h + 0.8, -d * 0.75);
+    pwTag(box(g, 0.7, 1.6, 0.7, Kit.tex('brick', 0x5a3a30, 1.2), rng.spread(w * 0.35), h + 0.8, -d * 0.75), 'keep').userData.pwChimney = true;
   } else if (roof === 'billboard') {
     const bb = new THREE.Group();
     box(bb, 0.15, 3, 0.15, M.metal, -2.4, 1.5, -0.4);
     box(bb, 0.15, 3, 0.15, M.metal, 2.4, 1.5, -0.4);
     const paper = (c: number) => Kit.tex('stucco', c, 1.5, 0.6);
-    box(bb, 6.2, 3, 0.15, paper(0x8a7f62), 0, 4, 0);
-    box(bb, 2.6, 2.4, 0.04, paper(0x9a3a2a), -1.5, 4, 0.1);
-    box(bb, 2.6, 0.5, 0.04, paper(0x2a3a5a), 1.5, 4.7, 0.1);
-    box(bb, 2.6, 0.3, 0.04, paper(0x2a3a5a), 1.5, 4.0, 0.1);
-    box(bb, 2.6, 0.3, 0.04, paper(0x2a3a5a), 1.5, 3.4, 0.1);
+    // ART: PIXEL WORLD paints an advertisement on the board (z1/pixel.ts) in place of the paper blocks.
+    box(bb, 6.2, 3, 0.15, paper(0x8a7f62), 0, 4, 0).userData.pwBillboard = 'board';
+    box(bb, 2.6, 2.4, 0.04, paper(0x9a3a2a), -1.5, 4, 0.1).userData.pwBillboard = 'paper';
+    box(bb, 2.6, 0.5, 0.04, paper(0x2a3a5a), 1.5, 4.7, 0.1).userData.pwBillboard = 'paper';
+    box(bb, 2.6, 0.3, 0.04, paper(0x2a3a5a), 1.5, 4.0, 0.1).userData.pwBillboard = 'paper';
+    box(bb, 2.6, 0.3, 0.04, paper(0x2a3a5a), 1.5, 3.4, 0.1).userData.pwBillboard = 'paper';
     bb.position.set(0, h, -d * 0.3);
     g.add(bb);
   }
@@ -593,20 +594,26 @@ export interface CarOptions {
  */
 export function car(o: CarOptions): THREE.Group {
   const g = new THREE.Group();
+  // ART: PIXEL WORLD paints every tagged part with car modules (z1/pwCars.ts); the record says how.
+  g.userData.pwCar = o;
+  const t = <T extends THREE.Object3D>(m: T, part: string) => {
+    m.userData.pwPart = part;
+    return m;
+  };
   // Painted sheet metal: faint panel lines + rust; burnt wrecks are all rust and scorch.
   const paint = o.burnt ? Kit.tex('metal', 0x2e2622, 1) : o.police ? Kit.tex('metal', 0x18191f, 1, 0.5) : Kit.tex('metal', o.color, 1, 0.55);
   const glass = o.burnt ? Kit.mat(0x050505) : M.carGlass;
-  box(g, 1.82, 0.62, 4.5, paint, 0, 0.62, 0);
-  box(g, 1.8, 0.1, 1.25, paint, 0, 0.96, 1.55, o.wrecked ? 0.22 : 0.05);
-  box(g, 1.62, 0.5, 2.15, glass, 0, 1.17, -0.25);
-  box(g, 1.66, 0.08, 1.85, paint, 0, 1.45, -0.3);
+  t(box(g, 1.82, 0.62, 4.5, paint, 0, 0.62, 0), 'body');
+  t(box(g, 1.8, 0.1, 1.25, paint, 0, 0.96, 1.55, o.wrecked ? 0.22 : 0.05), 'hood');
+  t(box(g, 1.62, 0.5, 2.15, glass, 0, 1.17, -0.25), 'glass');
+  t(box(g, 1.66, 0.08, 1.85, paint, 0, 1.45, -0.3), 'roof');
   // Pillars.
-  box(g, 1.66, 0.5, 0.12, paint, 0, 1.17, 0.78, -0.4);
-  box(g, 1.66, 0.5, 0.12, paint, 0, 1.17, -1.33, 0.35);
+  t(box(g, 1.66, 0.5, 0.12, paint, 0, 1.17, 0.78, -0.4), 'pillar');
+  t(box(g, 1.66, 0.5, 0.12, paint, 0, 1.17, -1.33, 0.35), 'pillar');
   if (o.police) {
     // White door panels + lightbar.
-    for (const sx of [1, -1]) box(g, 0.04, 0.5, 2.0, M.white, sx * 0.92, 0.66, -0.15);
-    box(g, 1.3, 0.12, 0.34, M.metal, 0, 1.55, -0.3);
+    for (const sx of [1, -1]) t(box(g, 0.04, 0.5, 2.0, M.white, sx * 0.92, 0.66, -0.15), 'police');
+    t(box(g, 1.3, 0.12, 0.34, M.metal, 0, 1.55, -0.3), 'lightbase');
     const red = box(g, 0.6, 0.14, 0.3, Kit.glow(0xff2020, 1.6), 0.32, 1.58, -0.3);
     const blue = box(g, 0.6, 0.14, 0.3, Kit.glow(0x2050ff, 1.6), -0.32, 1.58, -0.3);
     red.userData.noMerge = true;
@@ -614,21 +621,21 @@ export function car(o: CarOptions): THREE.Group {
     g.userData.lightbar = [red, blue];
   }
   const bumper = o.burnt ? Kit.tex('metal', 0x2a2522, 1.5) : M.chrome;
-  box(g, 1.86, 0.2, 0.16, bumper, 0, 0.42, 2.27);
-  box(g, 1.86, 0.2, 0.16, bumper, 0, 0.42, -2.27);
-  box(g, 1.0, 0.22, 0.04, M.winFrame, 0, 0.66, 2.26);
+  t(box(g, 1.86, 0.2, 0.16, bumper, 0, 0.42, 2.27), 'bumper');
+  t(box(g, 1.86, 0.2, 0.16, bumper, 0, 0.42, -2.27), 'bumper');
+  t(box(g, 1.0, 0.22, 0.04, M.winFrame, 0, 0.66, 2.26), 'grille');
   const wheel = Kit.cyl(0.35, 0.35, 0.26, 10);
   for (const [x, z] of [[0.86, 1.4], [-0.86, 1.4], [0.86, -1.4], [-0.86, -1.4]]) {
-    Kit.add(g, wheel, M.tire, x, 0.35, z, 0, 0, Math.PI / 2);
-    if (!o.burnt) Kit.add(g, Kit.cyl(0.18, 0.18, 0.28, 8), M.metalLight, x, 0.35, z, 0, 0, Math.PI / 2);
+    t(Kit.add(g, wheel, M.tire, x, 0.35, z, 0, 0, Math.PI / 2), 'wheel');
+    if (!o.burnt) t(Kit.add(g, Kit.cyl(0.18, 0.18, 0.28, 8), M.metalLight, x, 0.35, z, 0, 0, Math.PI / 2), 'hub');
   }
   if (!o.burnt) {
     const hl = o.headlights ? M.headlight : Kit.mat(0xb8b4a0);
-    box(g, 0.36, 0.15, 0.05, hl, 0.62, 0.68, 2.26);
-    box(g, 0.36, 0.15, 0.05, hl, -0.62, 0.68, 2.26);
+    t(box(g, 0.36, 0.15, 0.05, hl, 0.62, 0.68, 2.26), 'head');
+    t(box(g, 0.36, 0.15, 0.05, hl, -0.62, 0.68, 2.26), 'head');
     const tl = o.taillights ? M.taillight : Kit.mat(0x5a1410);
-    box(g, 0.4, 0.14, 0.05, tl, 0.6, 0.72, -2.26);
-    box(g, 0.4, 0.14, 0.05, tl, -0.6, 0.72, -2.26);
+    t(box(g, 0.4, 0.14, 0.05, tl, 0.6, 0.72, -2.26), 'tail');
+    t(box(g, 0.4, 0.14, 0.05, tl, -0.6, 0.72, -2.26), 'tail');
   }
   for (const d of o.open ?? []) {
     const side = d[1] === 'l' ? 1 : -1;
@@ -636,8 +643,8 @@ export function car(o: CarOptions): THREE.Group {
     const hingeZ = front ? 0.95 : -0.25;
     const pivot = Kit.pivot(g, side * 0.91, 0, hingeZ);
     pivot.rotation.y = side * (front ? 1.0 : 0.85);
-    box(pivot, 0.07, 0.6, 1.05, paint, 0, 0.66, -0.52);
-    box(pivot, 0.04, 0.42, 0.9, glass, 0, 1.18, -0.5);
+    t(box(pivot, 0.07, 0.6, 1.05, paint, 0, 0.66, -0.52), 'door');
+    t(box(pivot, 0.04, 0.42, 0.9, glass, 0, 1.18, -0.5), 'doorGlass');
   }
   return g;
 }

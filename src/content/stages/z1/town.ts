@@ -200,24 +200,30 @@ export function buildTown(): Town {
     const p = put(Kit.mesh(Kit.cyl(r, r, 0.012, 12), puddle), x, z, 0, 0.018);
     p.scale.set(1, 1, rng.range(0.5, 0.8));
     p.rotation.y = rng.next() * 3;
+    // ART: PIXEL WORLD lays painted ground decals in place of the tagged meshes (z1/pixel.ts).
+    p.userData.pwGround = 'puddle';
   }
   for (const [x, z] of [[1.8, -15], [-1.5, -70], [1.5, -120], [SECOND_X + 1.5, -205]] as const) {
-    put(Kit.mesh(Kit.cyl(0.4, 0.4, 0.02, 10), Kit.tex('grate', 0x34353b, 2, 0.8)), x, z, 0, 0.02);
+    put(Kit.mesh(Kit.cyl(0.4, 0.4, 0.02, 10), Kit.tex('grate', 0x34353b, 2, 0.8)), x, z, 0, 0.02).userData.pwGround = 'manhole';
   }
 
   // ─── Blood, debris and signs of panic ────────────────────────────────────
   const bloodPool = (x: number, z: number, s: number) => {
     const p = put(Kit.mesh(Kit.cyl(s, s, 0.012, 9), M.bloodWet), x, z, rng.next() * 3, 0.025);
     p.scale.set(1, 1, rng.range(0.5, 0.9));
+    p.userData.pwGround = 'blood';
     for (let i = 0; i < 4; i++) {
       const a = rng.next() * Math.PI * 2;
       const d = s * rng.range(1.1, 2.4);
-      boxAt(rng.range(0.1, 0.25), 0.01, rng.range(0.1, 0.3), M.blood, x + Math.cos(a) * d, 0.026, z + Math.sin(a) * d, a);
+      boxAt(rng.range(0.1, 0.25), 0.01, rng.range(0.1, 0.3), M.blood, x + Math.cos(a) * d, 0.026, z + Math.sin(a) * d, a).userData.pwGround = 'drop';
     }
   };
   const bloodTrail = (x: number, z: number, len: number, ry: number) => {
+    const trail = { x, z, len, ry };
     for (let i = 0; i < len; i++) {
-      boxAt(rng.range(0.25, 0.45), 0.01, 0.6, M.blood, x + Math.sin(ry) * i * 0.7 + rng.spread(0.1), 0.026, z + Math.cos(ry) * i * 0.7, ry + rng.spread(0.3));
+      const b = boxAt(rng.range(0.25, 0.45), 0.01, 0.6, M.blood, x + Math.sin(ry) * i * 0.7 + rng.spread(0.1), 0.026, z + Math.cos(ry) * i * 0.7, ry + rng.spread(0.3));
+      b.userData.pwGround = 'trail';
+      b.userData.pwTrail = trail;
     }
   };
   for (const [x, z, s] of [[-1.5, -24, 0.7], [4.5, -47, 0.5], [-5, -60, 0.6], [2, -92, 0.8], [-7.5, -115, 0.5], [-36, -154, 0.6], [-55, -182, 0.7], [-62, -226, 0.6], [-52, -268, 0.9]] as const) bloodPool(x, z, s);
@@ -228,7 +234,7 @@ export function buildTown(): Town {
   for (let i = 0; i < 60; i++) {
     const zz = rng.range(30, -300);
     const xx = zz > -150 ? rng.range(-8, 8) : rng.range(SECOND_X - 7, SECOND_X + 7);
-    boxAt(rng.range(0.2, 0.35), 0.01, rng.range(0.25, 0.4), paper, xx, 0.03, zz, rng.next() * 3);
+    boxAt(rng.range(0.2, 0.35), 0.01, rng.range(0.25, 0.4), paper, xx, 0.03, zz, rng.next() * 3).userData.pwGround = 'paper';
   }
 
   // ─── Main Street buildings ────────────────────────────────────────────────
@@ -872,7 +878,7 @@ export function buildTown(): Town {
         const t = i / 8;
         const x = SECOND_X - 2.5 + t * 6 + off * 0.3;
         const z = -226 - t * 18 + off;
-        boxAt(0.22, 0.008, 2.2, skid, x, 0.022, z, -0.32 - t * 0.25);
+        boxAt(0.22, 0.008, 2.2, skid, x, 0.022, z, -0.32 - t * 0.25).userData.pwGround = 'skid';
       }
     }
     for (let i = 0; i < 12; i++) boxAt(rng.range(0.15, 0.5), rng.range(0.05, 0.2), rng.range(0.15, 0.5), i % 3 ? M.carGlass : Kit.tex('metal', 0xd29a16, 1.5, 0.6), BUS_POS[0] + rng.spread(6), 0.08, BUS_POS[2] + rng.range(1.5, 4.5), rng.next() * 3);
@@ -1169,6 +1175,12 @@ export function buildTown(): Town {
  */
 function buildDiner(zone: THREE.Group, pools: LightPools, addDyn: (o: THREE.Object3D) => THREE.Object3D, anim: TownAnim) {
   const g = new THREE.Group();
+  // ART: PIXEL WORLD paints every part tagged `pwDiner` (z1/pwDiner.ts); the record holds the layout.
+  g.userData.pwDinerRoot = true;
+  const T = <O extends THREE.Object3D>(o: O, part: string) => {
+    o.userData.pwDiner = part;
+    return o;
+  };
   const W = 18;
   const D = 11;
   const H = 4.4;
@@ -1177,54 +1189,54 @@ function buildDiner(zone: THREE.Group, pools: LightPools, addDyn: (o: THREE.Obje
   const redStripe = Kit.mat(0xa82230);
   const shell = Kit.tex('metal', 0x8a8f96, 1, 0.6);
   // Shell: back wall, side walls, roof, floor (open front).
-  Kit.add(g, Kit.box(W, H, 0.3), shell, 0, H / 2, -D);
-  Kit.add(g, Kit.box(0.3, H, D), shell, -W / 2, H / 2, -D / 2);
-  Kit.add(g, Kit.box(0.3, H, D), shell, W / 2, H / 2, -D / 2);
-  Kit.add(g, Kit.box(W + 0.4, 0.4, D + 0.6), Kit.tex('metal', 0x5a5e66, 1, 0.7), 0, H + 0.2, -D / 2 + 0.2);
+  T(Kit.add(g, Kit.box(W, H, 0.3), shell, 0, H / 2, -D), 'shell');
+  T(Kit.add(g, Kit.box(0.3, H, D), shell, -W / 2, H / 2, -D / 2), 'shell');
+  T(Kit.add(g, Kit.box(0.3, H, D), shell, W / 2, H / 2, -D / 2), 'shell');
+  T(Kit.add(g, Kit.box(W + 0.4, 0.4, D + 0.6), Kit.tex('metal', 0x5a5e66, 1, 0.7), 0, H + 0.2, -D / 2 + 0.2), 'roof');
   // Front: kick panel and header with steel/red bands.
-  Kit.add(g, Kit.box(W, 1.0, 0.3), steel, 0, 0.5, 0);
-  Kit.add(g, Kit.box(W + 0.05, 0.18, 0.34), redStripe, 0, 0.75, 0);
-  Kit.add(g, Kit.box(W, 1.15, 0.3), steel, 0, H - 0.58, 0);
-  Kit.add(g, Kit.box(W + 0.05, 0.2, 0.34), redStripe, 0, H - 0.5, 0);
+  T(Kit.add(g, Kit.box(W, 1.0, 0.3), steel, 0, 0.5, 0), 'kick');
+  T(Kit.add(g, Kit.box(W + 0.05, 0.18, 0.34), redStripe, 0, 0.75, 0), 'stripe');
+  T(Kit.add(g, Kit.box(W, 1.15, 0.3), steel, 0, H - 0.58, 0), 'header');
+  T(Kit.add(g, Kit.box(W + 0.05, 0.2, 0.34), redStripe, 0, H - 0.5, 0), 'stripe');
   // Black-and-white checker bands (0.25 m squares, aligned to the texture rows).
   const checker = Kit.tex('checker', 0x9a9a9a, 1.2);
-  Kit.add(g, Kit.box(W + 0.06, 0.25, 0.33), checker, 0, 0.375, 0);
-  Kit.add(g, Kit.box(W + 0.06, 0.25, 0.33), checker, 0, 4.125, 0);
+  T(Kit.add(g, Kit.box(W + 0.06, 0.25, 0.33), checker, 0, 0.375, 0), 'checker');
+  T(Kit.add(g, Kit.box(W + 0.06, 0.25, 0.33), checker, 0, 4.125, 0), 'checker');
   // Interior (unlit glow surfaces = warm fluorescent light).
   const wall = texGlow(0xe8c890, 0.4, 'tiles', 1, 0.45);
-  Kit.add(g, Kit.box(W - 0.6, H - 0.4, 0.05), wall, 0, H / 2, -D + 0.2);
-  Kit.add(g, Kit.box(0.05, H - 0.4, D - 0.4), wall, -W / 2 + 0.2, H / 2, -D / 2);
-  Kit.add(g, Kit.box(0.05, H - 0.4, D - 0.4), wall, W / 2 - 0.2, H / 2, -D / 2);
-  Kit.add(g, Kit.box(W - 0.4, 0.05, D - 0.4), texGlow(0x6a5a48, 0.45, 'tiles', 0.6, 0.5), 0, H - 0.05, -D / 2);
+  T(Kit.add(g, Kit.box(W - 0.6, H - 0.4, 0.05), wall, 0, H / 2, -D + 0.2), 'backWall');
+  T(Kit.add(g, Kit.box(0.05, H - 0.4, D - 0.4), wall, -W / 2 + 0.2, H / 2, -D / 2), 'sideWall');
+  T(Kit.add(g, Kit.box(0.05, H - 0.4, D - 0.4), wall, W / 2 - 0.2, H / 2, -D / 2), 'sideWall');
+  T(Kit.add(g, Kit.box(W - 0.4, 0.05, D - 0.4), texGlow(0x6a5a48, 0.45, 'tiles', 0.6, 0.5), 0, H - 0.05, -D / 2), 'ceiling');
   // Black-and-white checker floor (one self-lit textured slab; texture gain ≈ 1.9 on the light squares).
-  Kit.add(g, Kit.box(W - 0.3, 0.04, D - 0.3), texGlow(0xd8d0c0, 0.19, 'checker', 0.5, 1), 0, 0.03, -D / 2);
+  T(Kit.add(g, Kit.box(W - 0.3, 0.04, D - 0.3), texGlow(0xd8d0c0, 0.19, 'checker', 0.5, 1), 0, 0.03, -D / 2), 'floor');
   // Counter, stools, booths, pendant lamps.
-  Kit.add(g, Kit.box(12, 1.1, 0.8), texGlow(0x8a2a2a, 0.45, 'corrugated', 2, 0.35), -1, 0.55, -7);
-  Kit.add(g, Kit.box(12.2, 0.08, 1.0), steel, -1, 1.12, -7);
+  T(Kit.add(g, Kit.box(12, 1.1, 0.8), texGlow(0x8a2a2a, 0.45, 'corrugated', 2, 0.35), -1, 0.55, -7), 'counter');
+  T(Kit.add(g, Kit.box(12.2, 0.08, 1.0), steel, -1, 1.12, -7), 'counterTop');
   for (let i = 0; i < 8; i++) {
-    Kit.add(g, Kit.cyl(0.25, 0.25, 0.1, 8), Kit.glow(0xc83030, 0.6), -6.2 + i * 1.5, 0.75, -5.9);
-    Kit.add(g, Kit.cyl(0.04, 0.04, 0.7, 5), steel, -6.2 + i * 1.5, 0.35, -5.9);
+    T(Kit.add(g, Kit.cyl(0.25, 0.25, 0.1, 8), Kit.glow(0xc83030, 0.6), -6.2 + i * 1.5, 0.75, -5.9), 'stoolSeat');
+    T(Kit.add(g, Kit.cyl(0.04, 0.04, 0.7, 5), steel, -6.2 + i * 1.5, 0.35, -5.9), 'stoolPole');
   }
   for (const bx of [-6.5, -2.5, 1.5, 5.5]) {
     const vinyl = texGlow(0xb02a2a, 0.5, 'hide', 1.5, 0.45);
-    Kit.add(g, Kit.box(2.6, 0.5, 0.7), vinyl, bx, 0.45, -1.2);
-    Kit.add(g, Kit.box(2.6, 1.0, 0.2), vinyl, bx, 0.95, -1.6);
-    Kit.add(g, Kit.box(1.2, 0.06, 0.7), Kit.glow(0xe8e0d0, 0.4), bx, 0.75, -0.6);
+    T(Kit.add(g, Kit.box(2.6, 0.5, 0.7), vinyl, bx, 0.45, -1.2), 'boothSeat');
+    T(Kit.add(g, Kit.box(2.6, 1.0, 0.2), vinyl, bx, 0.95, -1.6), 'boothBack');
+    T(Kit.add(g, Kit.box(1.2, 0.06, 0.7), Kit.glow(0xe8e0d0, 0.4), bx, 0.75, -0.6), 'table');
   }
   for (let i = 0; i < 6; i++) Kit.add(g, Kit.sphere(0.22, 8, 6), Kit.glow(0xffe0a0, 1.5), -7 + i * 2.8, H - 0.9, -3.5);
   // Pie case / coffee machine silhouettes on the back counter.
-  Kit.add(g, Kit.box(10, 1.4, 0.5), Kit.tex('metal', 0x3a3a3e, 2, 0.6), -1, 1.6, -10.4);
+  T(Kit.add(g, Kit.box(10, 1.4, 0.5), Kit.tex('metal', 0x3a3a3e, 2, 0.6), -1, 1.6, -10.4), 'backBar');
   // Window mullions and static glass (two panes are destructible, placed by the stage).
   const glass = Kit.mat(0x9fc8e8, { transparent: true, opacity: 0.22, smooth: true });
   const paneXs = [-6.6, -3.3, 0, 3.3];
-  for (let i = 0; i <= 4; i++) Kit.add(g, Kit.box(0.14, 2.3, 0.2), steel, -8.25 + i * 3.3, 2.15, 0);
+  for (let i = 0; i <= 4; i++) T(Kit.add(g, Kit.box(0.14, 2.3, 0.2), steel, -8.25 + i * 3.3, 2.15, 0), 'mullion');
   for (let i = 0; i < paneXs.length; i++) {
     if (i === 1 || i === 3) continue;
     Kit.add(g, Kit.box(3.15, 2.3, 0.05), glass, paneXs[i], 2.15, 0);
   }
   // Door (glass) at the north end.
-  Kit.add(g, Kit.box(1.4, 2.5, 0.08), Kit.glow(0xffe8c0, 0.3), 6.6, 1.25, 0.02);
-  Kit.add(g, Kit.box(1.6, 0.1, 0.16), steel, 6.6, 2.55, 0.02);
+  T(Kit.add(g, Kit.box(1.4, 2.5, 0.08), Kit.glow(0xffe8c0, 0.3), 6.6, 1.25, 0.02), 'door');
+  T(Kit.add(g, Kit.box(1.6, 0.1, 0.16), steel, 6.6, 2.55, 0.02), 'doorHead');
   // "OPEN 24 HRS" sign in the window.
   const open = boardSign('OPEN', C.neonRed, 0.3, { pad: 0.3 });
   open.position.set(-6.6, 2.6, -0.2);
@@ -1267,6 +1279,8 @@ function buildDiner(zone: THREE.Group, pools: LightPools, addDyn: (o: THREE.Obje
     mergedGroup(rr);
     addDyn(rr);
     anim.buzz.push({ obj: rr, seed: 7.7 });
+    // ART: PIXEL WORLD swaps its block letter for the script sign's dark 'r' (z1/pwDiner.ts).
+    rr.userData.pwDinerR = true;
   }
   pools.add(-MAIN_FACADE + 3, zc, 7, C.neonPink, 0.45);
   pools.add(-MAIN_FACADE + 2, zc - 3, 5, 0xffd8a0, 0.4);

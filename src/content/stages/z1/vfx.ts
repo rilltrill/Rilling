@@ -177,7 +177,12 @@ export class LightBeams {
     return this.defs[i];
   }
 
-  build(): THREE.InstancedMesh {
+  /**
+   * `pixel` (ART: PIXEL WORLD): the shaft's falloff is drawn in three flat
+   * steps with an ordered (Bayer) dither between them on the retro pixel grid —
+   * a painted light cone, not a smooth gradient.
+   */
+  build(pixel = false): THREE.InstancedMesh {
     const mat = Kit.track(
       new THREE.MeshBasicMaterial({
         vertexColors: true,
@@ -190,6 +195,31 @@ export class LightBeams {
         fog: true,
       }),
     );
+    if (pixel) {
+      mat.onBeforeCompile = (sh) => {
+        sh.vertexShader = sh.vertexShader
+          .replace('#include <common>', '#include <common>\nvarying float vPwGrad;')
+          .replace('#include <color_vertex>', '#include <color_vertex>\n  vPwGrad = color.r;');
+        sh.fragmentShader = sh.fragmentShader
+          .replace('#include <common>', '#include <common>\nvarying float vPwGrad;')
+          .replace(
+            '#include <color_fragment>',
+            `#include <color_fragment>
+  {
+    ivec2 bp = ivec2(mod(gl_FragCoord.xy, 4.0));
+    int bi = bp.y * 4 + bp.x;
+    float bt = float(bi == 0 ? 0 : bi == 1 ? 8 : bi == 2 ? 2 : bi == 3 ? 10 : bi == 4 ? 12 : bi == 5 ? 4 : bi == 6 ? 14 : bi == 7 ? 6 : bi == 8 ? 3 : bi == 9 ? 11 : bi == 10 ? 1 : bi == 11 ? 9 : bi == 12 ? 15 : bi == 13 ? 7 : bi == 14 ? 13 : 5);
+    float g = max(vPwGrad, 1e-3);
+    // Three flat steps, dithered only in a narrow seam between them.
+    float s = g * 3.0;
+    float f = fract(s);
+    float q = floor(s) + (f > 0.65 ? step((bt + 0.5) / 16.0, (f - 0.65) / 0.35) : 0.0);
+    diffuseColor.rgb *= (q / 3.0) / g;
+  }`,
+          );
+      };
+      mat.customProgramCacheKey = () => 'z1PixelBeam';
+    }
     const mesh = new THREE.InstancedMesh(beamGeometry(), mat, Math.max(1, this.defs.length));
     this.defs.forEach((d, i) => {
       _e.set(d.rx, d.ry, 0, 'YXZ');
