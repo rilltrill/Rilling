@@ -1005,41 +1005,72 @@ load skips painting), paint the one-level sky atlas after the first frame.
   greenhouse (glass roof grid, planters), hatchery, containment wing (hazard stripes,
   `grateTile` floors, warning signs), tunnels (`pipesTile`, concrete, steam vents
   classic). Convert per room before `bake()`.
-- **d3 TYRANT CHASE** (converted end to end; `stages/d3/pixel.ts` = `D3PixelWorld`, the
+- **d3 TYRANT CHASE** (converted end to end, R2; `stages/d3/pixel.ts` = `D3PixelWorld`, the
   jeep `stages/d3/jeepPixel.ts`; painters `pixelworld/d3Ground.ts`, `d3Sky.ts`, `d3Park.ts`,
   `d3Visitor.ts`, `d3Vehicles.ts`, `d3Bridge.ts`, `d3Jeep.ts`). env.ts hooks (`this.pw?.…`)
   paint each piece before its `Baker.bake` and strip the classic meshes they replace; the
   Baker keeps its packed 20 B vertices (`baker.pixel` only tells the jeep to paint). Ground:
-  terrain as ONE planar batch (floor sward / mud / gorge rock / river bed, tinted per vertex
-  from the classic colours), the road per 60 m chunk (`d3RoadTile` 8 × 10 m: worn patches on
-  a 4-texel grid, tar snakes, pothole, chipped dashes; `d3VergeTile` mud verges with ruts,
-  gravel and grass clumps; `d3MudRoadTile` for the mud stretch), animated puddles / pools /
-  river (`d3WaterTile`, `d3PuddleDecal`, `d3FoamModule`: 4 frames, one anim material),
-  footprints, skids; boulders as FLORA-style billboards (`stones`). Sky: `PwBackdrop` storm
-  panorama (moon behind silver-rimmed billows, scud, rain shafts) + two ranges (ridges
-  crowded with palms; no volcano glow: through the canopy it read as a stray blob), gain
-  following the lightning; the bolts are painted glow forks from the
-  world atlas (`Storm.usePixelSky`). Pylons (rust-streaked faces, insulators, hazard feet,
-  vines), wire spans as cut-outs, DANGER boards, utility poles, signs with painted arrows,
-  lamp posts, the visitor centre (stucco, painted wing windows lit / dark / broken /
-  flickering, atrium with the rex skeleton, thatch and fringe, marquee bulbs, banners
-  swinging, gouged doors, plaza pavers and mosaic, kiosk), the roadblock (tour car,
-  sawhorses, palm log, drums), the mud truck, the trestle bridge (deck, creosoted timbers,
-  pieces that fall), helipad (pad, ring, H, PARK RESCUE, hut, floodlight mast, windsock),
-  the helicopter livery, the fuel tank, flame cards for the fires (`Fire` takes a `card`
-  factory), and the boss road dressing (print trails, flares, an overturned tour car, a
-  fallen lamp, a leaning pole, EVACUATE boards). Occluders (visitor-centre shell, roadblock
-  car) stay the classic meshes, hidden and out of the fog-cull list; drums and the tank keep
-  their classic hit meshes with an invisible material (raycast, never drawn) under the
-  painted ones. Budgets: world atlas 1024×976 (5.1 MB with mips) + sky 2048×400 (3.1 MB) +
-  jeep 256×192 (0.25 MB), 8.5 MB in all; paint ≈ 85–98 ms world + ≈ 20–26 ms sky (node CPU
-  time, best of 5, on a shared box at load 20+) + a few ms jeep; draw calls 18–64 a beat
-  (PIXEL CAST 16–70). Checks:
-  `tests/unit/pixel-world-d3.test.ts` (occluders, hit proxies, entities, ground, RNG,
-  painted props not hit boxes, budget, full-stage simulator), `D1_SIG=1 D1_SIG_STAGE=d3 …
+  terrain as ONE planar batch (floor sward / mud / gorge strata `d3RockTile` / river bed,
+  tinted per vertex from the classic colours), the road per 60 m chunk (`d3RoadTile` 8 × 10 m:
+  wear patches with lobed outlines, tar snakes, pothole, chipped dashes; `d3VergeTile`;
+  `d3MudRoadTile`), animated puddles / pools / river (`d3PuddleDecal`: deep water darker than
+  the ground, a wet rim, the sky caught in broken unlit reflection streaks, rain rings),
+  footprints, skids; boulders as FLORA-style billboards (`stones`). Panorama (`d3Sky.ts`): the
+  sky band is the FOG colour up to 7° then the classic dome's darker steps, every seam a Bayer
+  transition; storm heaps built from overlapping lobes + cauliflower bumps (each texel owned
+  by its front-most part), shaded as a whole heap (lit up and toward the moon, shadowed below)
+  with lobe crests and a shadow step above each, thick moonlit rims only on exposed tops,
+  rain-fed ragged bases, rain shafts, torn scud; heaps above 10° stay mid-toned (no dark
+  contours: pteros keep their silhouette). Two jungle ridges (`d3RangeTile`: back row of big
+  crowns a haze step lighter, the hill, a front row of ragged crowns, palms with drooping
+  feathered fronds; ramps capped so nothing is lighter than the fog, the foot dithered into
+  it). Flash: the ranges' material colour = live fog / base fog per channel, the sky band's
+  material (`d3SkyMaterial`) blends that ratio (below 7°) to the clouds' flash gain (above
+  15°) — the horizon brightens exactly as the fogged scenery does. Bolts: painted glow forks
+  (`Storm.usePixelSky`). Pylons (rust-streaked faces, insulators, hazard feet, vines); snapped
+  stumps (`d3StumpFaceModule`: darker concrete, jagged cut-out break with rebar, cracks, spall,
+  the hazard band square on the foot, scorch, rubble billboards); wire spans as cut-outs,
+  DANGER boards, utility poles, lamp posts. Signs (`d3SignBoardModule`, `d3DangerBoardModule`)
+  are painted at the CLASSIC letter size with 4-texel strokes on a 4-texel grid from the tile's
+  bottom (whole letters at levels 1–2), cream on calmed grain with a drop shadow, on their own
+  per-chunk batches with the sign material (level bias −0.25); `D3_SIGN_FITS` records every
+  layout (the identity test checks the fit). The visitor centre: stucco with rain-stain bands
+  under the cornices and a damp splashed foot, lit windows as rooms (half-drawn blind,
+  lamp-lit back wall in dithered steps, shelf / toppled stand / hanging sign in silhouette, a
+  warm sill and a dim pool on the floor), the atrium's gallery seen through two panes (small
+  dim lamp pools, balustrade, GIFTS board), the park map and an EVACUATION notice, claw
+  gouges, ragged 1 m thatch fringe, fronds over the eaves, the bulb marquee (dead bulbs only
+  inside words, on wide letters; it stays on the default level bias: its bulbs merge into
+  strokes at level 1), floodheads with lens glow, the kiosk's recessed lit booth under a
+  2-texel TICKETS board; plaza pavers and the bridge deck get calm far levels (`d2CalmLevels`).
+  Roadblock (tour car, sawhorses, palm log, drums), flame cards (`d3FireModule`, two variants
+  alternating so neighbouring tongues never match: teardrop tongues varying per frame, yellow
+  tips, an ember foot). Mud truck (windscreen with a sky band, wiper fans and rain beads, mud
+  fanned over the arch, a bent bumper card). Bridge: wide single-tone planks with soft 2-texel
+  seams on the calm-level material (bias 1.5, deck faces split into their own batch). Helipad,
+  helicopter (clean livery `d3LiveryTile` with oil runs — no rust confetti —, the nose in
+  profile `d3HeliNoseModule`, exhaust soot, a rotor blur disc shown above a spin rate), fuel
+  tank. Jeep: tubes (roll hoop, bull bars) painted round as tubes (`d3TubeTile`), the cabin's
+  door frame / struts as bevelled bars (`d3BarTile`, laid 16 texels across each face), the
+  sill's 8-texel hazard bands, the hood's one marking RANGER 12 in 2- / 4-texel strokes (no
+  emblem on the hood; the emblem is on the doors). Boss road: crossing print trails, skids,
+  four flares in the verges (a stick, an upright plume, a 2-step dim pool; one dying orange),
+  the old paddock fence along both treelines (`d3TornFenceModule`, torn spans), an
+  overturned tour car in the verge, a fallen lamp, a leaning pole with sagging wires, EVACUATE
+  boards facing the reverse camera. Occluders (visitor-centre shell, roadblock car) stay the
+  classic meshes, hidden and out of the fog-cull list; drums and the tank keep their classic
+  hit meshes with an invisible material under the painted ones. Budgets: world atlas 1024×1056
+  (5.5 MB with mips) + sky 2048×352 (2.75 MB, one level) + jeep 256×256 (0.33 MB), 8.6 MB in
+  all; paint ≈ 76–90 ms world + ≈ 29–37 ms sky + ≈ 4 ms jeep (node CPU time, best of 5, the
+  minimum over runs on a shared 4-core box at load 5–10: ≈ 109–120 ms all three; single runs
+  beside other agents' captures 138–226 ms; the world's tile painters ≈ 55 ms of it, the rest
+  the shared resolve / pack / mip pass); draw calls 31–79 a beat (PIXEL CAST 31–73). Checks:
+  `tests/unit/pixel-world-d3.test.ts` (occluders, hit proxies, entities, ground, RNG, painted
+  props not hit boxes, sign fits, budget, full-stage simulator), `D1_SIG=1 D1_SIG_STAGE=d3 …
   d1-sig.test.ts` (CLASSIC / PIXEL CAST scene signature), `d3-lab.test.ts` (atlas dumps,
-  paint benches). Still classic: swaying vegetation (the FLORA billboards of PIXEL CAST),
-  the helipad edge lights, the jeep's glass / lamps, FX.
+  `D3_CPU=1` CPU time of all three atlases best of 5, `D3_BENCH=1` per tile). Still classic:
+  swaying vegetation (the FLORA billboards of PIXEL CAST), the helipad edge lights, the jeep's
+  glass / lamps, FX.
 
 ## Audio
 
