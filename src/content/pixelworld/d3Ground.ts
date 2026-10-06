@@ -626,7 +626,7 @@ export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; s
 export function d3FootprintDecal(atlas: PwAtlas, o: { mud: number; water: number }, asphalt = false): PwTile {
   const W = 64;
   const H = 80;
-  return atlas.tile(`d3print|${h6(o.mud)}|${h6(o.water)}|${asphalt ? 1 : 0}`, W, H, (c, k) => {
+  return atlas.tile(`d3print|${h6(o.mud)}|${h6(o.water)}|${asphalt ? 1 : 0}|2`, W, H, (c, k) => {
     const m = k.ramp(o.mud, { light: 0.42 });
     const w = k.ramp(o.water, { light: 0.4, sat: 0.85 });
     // Distance field of the print: heel ellipse + three toe capsules.
@@ -652,8 +652,10 @@ export function d3FootprintDecal(atlas: PwAtlas, o: { mud: number; water: number
         }
         d += (hash2(x, y, 161) - 0.5) * 1.2;
         if (asphalt) {
-          // In asphalt: the surface cracked and stoved in round the print.
-          if (d < 0) c.set(x, y, m, d > -1.5 ? 1 : 1.8);
+          // In asphalt: the surface cracked and stoved in round the print, rain lying in it
+          // (the sky in the water, brighter toward the toes: it reads as a print-shaped pool, not a blot).
+          if (d < -1.5) c.set(x, y, w, py < 34 ? (bayer(x, y) < 0.5 ? 3.4 : 3) : bayer(x, y) < 0.3 ? 3 : 2.5);
+          else if (d < 0) c.set(x, y, m, 1);
           else if (d < 2.5 && hash2(x >> 1, y >> 1, 162) > 0.4) c.set(x, y, m, 3.8);
           continue;
         }
