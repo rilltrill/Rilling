@@ -4,9 +4,9 @@ import { PwBatch } from '../../pixelworld/batch';
 import { d2CalmLevels } from '../../pixelworld/d2levels';
 import { PwBackdrop } from '../../pixelworld/backdrop';
 import { pwBackdropMaterial, pwMaterial, pwTick } from '../../pixelworld/material';
-import { hash2, rockTile } from '../../pixelworld/surfaces';
+import { hash2 } from '../../pixelworld/surfaces';
 import {
-  D3_ANIM_FRAMES, D3_ROAD_W, d3FloorTile, d3FootprintDecal, d3GravelTile, d3MudRoadTile, d3MudTile, d3PuddleDecal, d3RoadTile, d3SkidDecal, d3VergeTile, d3WaterTile,
+  D3_ANIM_FRAMES, D3_ROAD_W, d3FloorTile, d3RockTile, d3FootprintDecal, d3GravelTile, d3MudRoadTile, d3MudTile, d3PuddleDecal, d3RoadTile, d3SkidDecal, d3VergeTile, d3WaterTile,
 } from '../../pixelworld/d3Ground';
 import { d3BoltModule, d3RangeTile, d3SkyTile } from '../../pixelworld/d3Sky';
 import {
@@ -40,7 +40,7 @@ const D3_STONE_BIOME: FloraBiome = {
 import { kitTile, repaintable, retexture, type TileRule } from '../../pixelworld/retexture';
 import { corrugatedTile, hazardTile } from '../../pixelworld/surfaces';
 import {
-  d3CapModule, d3CraneTile, d3EnamelTile, d3HeliSideModule, d3LiveryTile, d3SootModule, d3RotorDiscModule, d3BumperModule, d3HutWindowModule, d3PadLettersModule, d3PadTile, d3PaintStripeTile, d3TankPlateModule, d3TruckDoorModule, d3TruckFrontModule,
+  d3CapModule, d3CraneTile, d3EnamelTile, d3HeliSideModule, d3HeliNoseModule, d3LiveryTile, d3SootModule, d3RotorDiscModule, d3BumperModule, d3HutWindowModule, d3PadLettersModule, d3PadTile, d3PaintStripeTile, d3TankPlateModule, d3TruckDoorModule, d3TruckFrontModule,
 } from '../../pixelworld/d3Vehicles';
 import { d3DeckTile, d3FoamModule, d3TimberTile } from '../../pixelworld/d3Bridge';
 import { pwCylinder, pwDecal, pwPanel } from '../d1/pwShapes';
@@ -223,7 +223,7 @@ export class D3PixelWorld {
     this.anim = new PwBatch(a);
     this.floorT = d3FloorTile(a, { hex: D3C.grass, dark: D3C.loam, leaf: D3C.leaf, water: D3C.sky, stone: D3C.stone });
     this.mudT = d3MudTile(a, { hex: D3C.mud, water: D3C.water });
-    this.rockT = rockTile(a, { hex: 0x5c5a52, moss: 0x34492d, band: 18, size: 96 });
+    this.rockT = d3RockTile(a, { hex: 0x5c5a52, moss: 0x34492d });
     this.bedT = d3GravelTile(a, { hex: 0x5a5e58, silt: D3C.bed });
     // Bolts: painted forks (cut-out, glowing), in the world atlas (its levels keep the glow far away).
     for (let i = 0; i < 2; i++) d3BoltModule(a, i);
@@ -353,9 +353,14 @@ export class D3PixelWorld {
         b.rect(V(-0.45, h - 0.5, 0.45), X, NZ, 0.9, 0.9, d3RubbleTopModule(a, { hex: 0x56544e }));
         b.box(0, 0.25, 0, 1.2, 0.5, 1.2, { px: conc, nx: conc, pz: conc, nz: conc, py: conc, ny: null });
       });
-      // Soot on the ground round its foot.
+      // Soot on the ground round its foot, chunks of the snapped column lying about.
       _p.setFromMatrixPosition(g.matrixWorld);
-      pwDecal(b, _p.x, 0.03, _p.z, 3, 3, variant, d3ScorchDecal(a));
+      pwDecal(b, _p.x, _p.y + 0.03, _p.z, 3, 3, variant, d3ScorchDecal(a));
+      for (let i = 0; i < 3; i++) {
+        const ang = variant * 1.7 + i * 2.1;
+        const r = 1.1 + (i % 2) * 0.6;
+        this.stones.fit('boulder', _p.x + Math.cos(ang) * r, _p.y, _p.z + Math.sin(ang) * r, 0.5 + (i % 2) * 0.25, 0.35 + (i === 0 ? 0.2 : 0), { aspectTol: 1.6 });
+      }
       return;
     }
     b.withMatrix(g.matrixWorld, () => {
@@ -999,6 +1004,10 @@ export class D3PixelWorld {
     this.paintIn(h.body, h.body, b, rule);
     pwPanel(b, V(1.172, 1.8, 0), NZ, Y, 3.6, 2.0, d3HeliSideModule(a, true), { flipU: true });
     pwPanel(b, V(-1.172, 1.8, 0), Z, Y, 3.6, 2.0, d3HeliSideModule(a, false));
+    // The nose in profile on both flanks (over the classic ellipsoid: the bubble canopy's curve).
+    const nose = d3HeliNoseModule(a);
+    pwPanel(b, V(1.185, 1.85, 1.75), NZ, Y, 3.1, 2.1, nose, { flipU: true });
+    pwPanel(b, V(-1.185, 1.85, 1.75), Z, Y, 3.1, 2.1, nose);
     // Exhaust soot down both flanks of the engine housing (1.5 × 0.7 × 2.6 at y 3.1, z −0.6), from its stacks aft.
     const soot = d3SootModule(a);
     pwPanel(b, V(0.752, 3.12, -1.3), NZ, Y, 1.5, 0.75, soot, { flipU: true });
@@ -1200,10 +1209,10 @@ export class D3PixelWorld {
     const s = this.skyAtlas;
     const moonAz = 300;
     const sky = d3SkyTile(s, { fog: STORM.fog, top: 0x0b0f18, cloud: 0x2c354c, rim: 0x6a78a0, el0: -4, el1: 33, moonAz, moonEl: 26 });
-    const far = d3RangeTile(s, { hex: 0x080c12, fog: STORM.fog, haze: 0.62, el0: -2, el1: 12, seed: 3, moonAz, yaw: 0, hill: [0.22, 0.5], palm: [14, 26], palms: 0.35, crown: 6, fogRows: 14 });
+    const far = d3RangeTile(s, { hex: 0x080c12, fog: STORM.fog, haze: 0.62, el0: -2, el1: 9.5, seed: 3, moonAz, yaw: 0, hill: [0.24, 0.52], palm: [12, 22], palms: 0.35, crown: 5, fogRows: 12 });
     const near = d3RangeTile(s, { hex: 0x080c12, fog: STORM.fog, haze: 0.36, el0: -2, el1: 13, seed: 8, moonAz, yaw: 140, hill: [0.14, 0.3], palm: [26, 50], palms: 0.62, crown: 9, fogRows: 16 });
     this.backdrop = new PwBackdrop(s, { tile: sky, el0: -4, el1: 33, radius: 330 }, [
-      { tile: far, radius: 300, el0: -2, el1: 12, follow: 1 },
+      { tile: far, radius: 300, el0: -2, el1: 9.5, follow: 1 },
       { tile: near, radius: 240, el0: -2, el1: 13, yaw: 140, follow: 0.94 },
     ]);
     this.backdrop.anchor.copy(anchor);

@@ -116,11 +116,11 @@ export function d3SkyTile(atlas: PwAtlas, o: D3SkyOpts): PwTile {
     }
     // Storm heaps, far (high) to near (low).
     const heaps: [number, number, number, number][] = [];
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < 9; i++) {
       const el = rng.range(8, 15);
-      heaps.push([rng.int(0, TW - 1), el, rng.int(180, 400), Math.min(rng.range(40, 80), (30 - el) * rpd)]);
+      heaps.push([rng.int(0, TW - 1), el, rng.int(180, 380), Math.min(rng.range(38, 72), (30 - el) * rpd)]);
     }
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 6; i++) {
       const el = rng.range(15, 24);
       heaps.push([rng.int(0, TW - 1), el, rng.int(90, 200), Math.min(rng.range(18, 36), (31 - el) * rpd)]);
     }
@@ -209,33 +209,33 @@ function heap(c: PwCanvas, cl: number, rimR: number, bands: number[], cx: number
   const bw = x1 - x0 + 1;
   const bh = y1 - y0 + 1;
   if (bh <= 0 || base - 1 < y0) return;
-  // Owner lobe per texel (1-based; 0 = sky) and the lobe's own side shading.
-  const own = new Uint8Array(bw * bh);
-  const side = new Float32Array(bw * bh);
-  // Cauliflower: small bumps on each lobe's upper rim (same owner as their lobe).
-  const parts: [number, number, number, number, number][] = [];
+  // Cauliflower: small bumps on each lobe's upper rim (each its own part, in front of its lobe).
+  const parts: [number, number, number, number][] = [];
   lobes.forEach(([px, py, r, sx], li) => {
-    parts.push([px, py, r, sx, li]);
+    parts.push([px, py, r, sx]);
     const nb = 3 + Math.floor(hash2(li, 11, seed) * 3);
     for (let q = 0; q < nb; q++) {
       const a = Math.PI * (0.12 + (0.76 * (q + hash2(li, q, seed + 1) * 0.6)) / nb);
       const rr = r * (0.3 + hash2(q, li, seed + 2) * 0.18);
-      parts.push([px + Math.cos(a) * r * sx * 0.82, py - Math.sin(a) * r * 0.85 * 0.82, rr, 1.1, li]);
+      parts.push([px + Math.cos(a) * r * sx * 0.82, py - Math.sin(a) * r * 0.85 * 0.82, rr, 1.1]);
     }
   });
-  for (const [px, py, r, sx, li] of parts) {
+  // Owner part per texel (1-based; 0 = sky): parts laid front to back, each texel written once
+  // (the front-most part owns it); the part's own shading is worked out when the texel is shaded.
+  const own = new Uint16Array(bw * bh);
+  for (let pi = parts.length - 1; pi >= 0; pi--) {
+    const [px, py, r, sx] = parts[pi];
     const ry = r * 0.85;
-    const irx = 1 / (r * sx);
     const ya = Math.max(y0, Math.floor(py - ry));
     const yb = Math.min(base - 1, Math.ceil(py + ry));
+    const id = pi + 1;
     for (let y = ya; y <= yb; y++) {
       const ny = (y + 0.5 - py) / ry;
       const span = r * sx * Math.sqrt(Math.max(0, 1 - ny * ny));
       const row = (y - y0) * bw - x0;
-      for (let x = Math.ceil(px - span); x <= Math.floor(px + span); x++) {
-        own[row + x] = li + 1;
-        side[row + x] = (x + 0.5 - px) * irx * toward - ny * 0.5;
-      }
+      const xa = Math.max(x0, Math.ceil(px - span));
+      const xb = Math.min(x1, Math.floor(px + span));
+      for (let x = xa; x <= xb; x++) if (!own[row + x]) own[row + x] = id;
     }
   }
   const top = Math.min(...parts.map(([, y, r]) => y - r * 0.85));
@@ -253,7 +253,8 @@ function heap(c: PwCanvas, cl: number, rimR: number, bands: number[], cx: number
       if (!o) continue;
       const above = y > y0 ? own[i - bw] : 0;
       const above2 = y > y0 + 1 ? own[i - 2 * bw] : 0;
-      const sd = side[i];
+      const pp = parts[o - 1];
+      const sd = ((x + 0.5 - pp[0]) / (pp[2] * pp[3])) * toward - ((y + 0.5 - pp[1]) / (pp[2] * 0.85)) * 0.5;
       // The heap's form: lit up top toward the moon, shadowed below; the lobe tilts it a little.
       const l = 0.62 - hy * 1.15 + sd * 0.3 + (bay(x, y) - 0.5) * 0.14;
       let t = l > 0.45 ? 3.8 : l > -0.05 ? 3 : l > -0.42 ? 2.4 : lo;
@@ -373,14 +374,20 @@ export function d3RangeTile(atlas: PwAtlas, o: D3RangeOpts): PwTile {
     const crown = (cx: number, cy: number, r: number, ramp: number, lit: number) => {
       const tw = towardOf(wrapX(Math.round(cx)));
       const ri = Math.ceil(r * 1.1);
+      // The jittered radius lies in [0.86 r, 1.04 r]: the hash is only needed in that ring.
+      const inR = r * r * 0.86 * 0.86;
+      const outR = r * r * 1.04 * 1.04;
       for (let dy = -ri; dy <= Math.ceil(r * 0.7); dy++) {
         const y = Math.round(cy) + dy;
         if (y < 0 || y >= H) continue;
         for (let dx = -ri; dx <= ri; dx++) {
-          // A ragged leafy edge: the radius jittered per 2 × 2 leaf clump.
-          const edge = r * (0.86 + 0.18 * hash2((dx + 64) >> 1, (dy + 64) >> 1, Math.round(cx) + seed));
           const dd = dx * dx + (dy < 0 ? dy * dy : dy * dy * 0.36);
-          if (dd > edge * edge) continue;
+          if (dd > outR) continue;
+          if (dd > inR) {
+            // A ragged leafy edge: the radius jittered per 2 × 2 leaf clump.
+            const edge = r * (0.86 + 0.18 * hash2((dx + 64) >> 1, (dy + 64) >> 1, Math.round(cx) + seed));
+            if (dd > edge * edge) continue;
+          }
           const s = (dx * tw * 0.55 - dy * 0.8) / r + (bay(dx, dy) - 0.5) * 0.3;
           put(Math.round(cx) + dx, y, ramp, s > 0.55 ? lit : s > -0.25 ? 3 : 2);
         }

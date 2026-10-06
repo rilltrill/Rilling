@@ -114,7 +114,7 @@ export class D3JeepPixel {
     const a = this.atlas;
     // The hood marking: on the raised bonnet panel (1.7 × 0.16 × 1.5 at y 0.98, z −2.35, tilted 0.04), between the stripes.
     const hood = new THREE.Matrix4().makeTranslation(0, 0.98, -2.35).multiply(new THREE.Matrix4().makeRotationX(0.04)).multiply(new THREE.Matrix4().makeTranslation(0, 0.0815, 0));
-    batch.withMatrix(hood, () => pwDecal(batch, 0, 0, -0.38, 0.66, 0.68, 0, d3HoodMarking(a, { ink: 0xc8c0a0 })));
+    batch.withMatrix(hood, () => pwDecal(batch, 0, 0, -0.38, 0.66, 0.68, 0, d3HoodMarking(a, { ink: 0x9a9478 })));
     // The park emblem on both doors (the side walls' outer faces, x = ±0.975).
     const em = d3EmblemDecal(a);
     for (const sx of [-1, 1]) pwPanel(batch, new THREE.Vector3(sx * 0.977, 1.1, -0.2), new THREE.Vector3(0, 0, sx), new THREE.Vector3(0, 1, 0), 0.36, 0.36, em);

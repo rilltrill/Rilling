@@ -541,6 +541,51 @@ export function d3MudTile(atlas: PwAtlas, o: { hex: number; water: number }): Pw
   }, { wrap: true });
 }
 
+/**
+ * Gorge rock (wrap 64 × 64 = 2 m): wet basalt in strata — beds 6–11 texels thick, each its own
+ * tone, a lit ledge on top and a shadowed undercut below, joints splitting the beds into blocks
+ * (lit left edge / dark right), a few chips, moss clumps on the ledges. Placed by rule per bed
+ * (cheap: no per-texel cell search).
+ */
+export function d3RockTile(atlas: PwAtlas, o: { hex: number; moss: number }): PwTile {
+  return atlas.tile(`d3rock|${h6(o.hex)}|${h6(o.moss)}`, 64, 64, (c, k) => {
+    const rng = k.rng;
+    const r = k.ramp(o.hex, { light: 0.45, sat: 0.85 });
+    const moss = k.ramp(o.moss, { light: 0.42, sat: 1.05 });
+    const R = c.ramp;
+    const T = c.tone;
+    let y0 = 0;
+    let bed = 0;
+    while (y0 < 64) {
+      const h = Math.min(64 - y0, 6 + Math.floor(hash2(bed, 1, 81) * 6));
+      const base = hash2(bed, 2, 81) > 0.6 ? 3.2 : hash2(bed, 3, 81) > 0.5 ? 2.6 : 3;
+      // Joints across the bed (block edges), offset bed to bed.
+      const j0 = Math.floor(hash2(bed, 4, 81) * 16);
+      const step = 12 + Math.floor(hash2(bed, 5, 81) * 10);
+      for (let y = y0; y < y0 + h; y++) {
+        const ly = y - y0;
+        const row = y * 64;
+        for (let x = 0; x < 64; x++) {
+          const jx = (x - j0 + 64) % step;
+          let t = base;
+          if (ly === 0) t = base + 1;
+          else if (ly === h - 1) t = 1;
+          else if (jx === 0) t = 1.4;
+          else if (jx === 1) t = base + 0.8;
+          else if (jx === step - 1) t = base - 0.7;
+          R[row + x] = r;
+          T[row + x] = t;
+        }
+      }
+      // Moss on the ledge (clumps).
+      for (let x = 0; x < 64; x++) if (smooth(x, bed * 7, 64, 64, 6, 82) > 0.6) c.set(x, y0, moss, hash2(x, bed, 83) > 0.5 ? 3.6 : 2.8);
+      y0 += h;
+      bed++;
+    }
+    for (let i = 0; i < 22; i++) c.cluster(rng.int(0, 63), rng.int(0, 63), i, 0, i % 3 ? -0.8 : 0.8);
+  }, { wrap: true });
+}
+
 /** River gravel of the gorge bed (wrap 64 × 64): rounded stones lit top-left in silt, wet. */
 export function d3GravelTile(atlas: PwAtlas, o: { hex: number; silt: number }): PwTile {
   return atlas.tile(`d3gravel|${h6(o.hex)}|${h6(o.silt)}`, 64, 64, (c, k) => {
@@ -576,7 +621,7 @@ export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; s
   const F = D3_ANIM_FRAMES;
   const W = 64;
   const FH = 48;
-  return atlas.tile(`d3puddle2|${h6(o.rim)}|${h6(o.water)}|${h6(o.sky)}|${variant}|${F}`, W, FH * F, (c, k) => {
+  return atlas.tile(`d3puddle3|${h6(o.rim)}|${h6(o.water)}|${h6(o.sky)}|${variant}|${F}`, W, FH * F, (c, k) => {
     const rim = k.ramp(o.rim, { light: 0.42 });
     const wat = k.ramp(o.water, { light: 0.45, sat: 0.9 });
     const sky = k.ramp(o.sky, { light: 0.4, sat: 0.8 });
@@ -605,7 +650,7 @@ export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; s
       // Streaks: 2-texel bands, broken into dashes that shift a texel or two per frame (the wind).
       const band = (ly >> 1) % 5;
       const dash = hash2((x + f * (band & 1 ? 1 : -1) * 2) >> 3, ly >> 1, 152 + variant);
-      if ((band === 0 && dash > 0.35) || (band === 3 && dash > 0.7)) c.set(x, y, sky, band === 0 ? 2.8 : 2.2, PWF.GLOW);
+      if ((band === 0 && dash > 0.3) || (band === 2 && dash > 0.55) || (band === 4 && dash > 0.7)) c.set(x, y, sky, band === 0 ? 2.8 : 2.4, PWF.GLOW);
       else c.set(x, y, wat, d > 0.72 ? 1.6 : 2.2);
     });
     // Rain rings: drawn as outlines per frame (each ring opens over the frames, fading at the last).

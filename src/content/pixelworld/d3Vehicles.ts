@@ -87,6 +87,62 @@ export function d3RotorDiscModule(atlas: PwAtlas): PwTile {
   });
 }
 
+/**
+ * The helicopter's nose in profile (module 100 × 68 = 3.1 × 2.1 m, cut out, the tip on the RIGHT):
+ * the bubble canopy's curve — tinted glass with the storm in a sweeping highlight, its frame
+ * struts, the instrument glow low inside, the pilot's empty seat — over the white chin and the
+ * navy belly, the orange cheat line running into the tip; it breaks the box body's silhouette.
+ */
+export function d3HeliNoseModule(atlas: PwAtlas): PwTile {
+  const W = 100;
+  const H = 68;
+  return atlas.tile(`d3helinose`, W, H, (c, k) => {
+    const wh = k.ramp(0xccd0d4, { light: 0.35, sat: 0.6 });
+    const navy = k.ramp(0x22304e, { light: 0.45, sat: 1.0 });
+    const or = k.ramp(0xe06a1a, { light: 0.45, sat: 1.05 });
+    const glass = k.ramp(0x223858, { light: 0.55, sat: 0.9 });
+    const ink = k.ramp(0x14161c, { light: 0.4 });
+    const panel = k.ramp(0x60f080, { light: 0.5 });
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        // The profile: an ellipse whose back half (left) stays full height, the tip rounding off.
+        const u = (x + 0.5) / W;
+        const v = (y + 0.5) / H;
+        const nx = u < 0.4 ? 0 : (u - 0.4) / 0.6;
+        const top = 0.5 - 0.5 * Math.sqrt(Math.max(0, 1 - nx * nx * 1.02));
+        const bot = 0.5 + 0.48 * Math.sqrt(Math.max(0, 1 - Math.pow(nx, 2.4)));
+        if (v < top || v > bot) continue;
+        let r = wh;
+        let t = 3;
+        if (v < 0.5 && u > 0.18) {
+          // Canopy glass: dark, a sweeping highlight band, the frame struts.
+          r = glass;
+          const band = Math.abs(v - (0.22 + (u - 0.18) * 0.25)) < 0.05;
+          t = band ? 3.6 : v < 0.2 ? 2.6 : 2;
+          if (Math.abs(u - 0.46) < 0.015 || Math.abs(u - 0.72) < 0.015 || Math.abs(v - 0.47) < 0.02) {
+            r = ink;
+            t = 1.6;
+          }
+        } else if (v > 0.66) {
+          r = navy;
+          t = v > 0.92 ? 2 : 3;
+        } else if (v > 0.58) {
+          r = or;
+          t = v < 0.6 ? 4 : 3;
+        }
+        // Rim: lit top edge, dark lower edge.
+        if (v - top < 0.03) t = r === glass ? 4.2 : 4;
+        if (bot - v < 0.03) t = 1.6;
+        c.set(x, y, r, t);
+      }
+    }
+    // The instrument panel glowing low in the cockpit, the seat's dark back.
+    c.rect(40, 26, 18, 3, panel, 2.6, PWF.GLOW);
+    for (const x of [42, 47, 52]) c.set(x, 27, k.ramp(0xffd060, { light: 0.5 }), 4, PWF.GLOW);
+    c.rect(24, 14, 6, 18, ink, 1.2);
+  });
+}
+
 /** The truck's bent front bumper (module 72 × 10 = 2.25 × 0.3 m, cut out): galvanised steel, dented, one end buckled down, mud on the lower lip. */
 export function d3BumperModule(atlas: PwAtlas): PwTile {
   return atlas.tile(`d3bumper`, 72, 10, (c, k) => {
