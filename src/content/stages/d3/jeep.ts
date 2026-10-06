@@ -5,6 +5,8 @@ import { angleDelta } from '../../../core/math';
 import { Baker } from './bake';
 import { D } from './layout';
 import { clean, tx } from './retro';
+import { pixelWorld } from '../../../core/art';
+import { D3JeepPixel } from './jeepPixel';
 
 const _v = new THREE.Vector3();
 const _m = new THREE.Matrix4();
@@ -17,8 +19,11 @@ const SAND = 0x8a7a50;
 const METAL = 0x4e5256;
 const DARK = 0x1e2022;
 
-/** Ranger jeep body (ground at y = 0, gunner at the origin, nose toward −Z). */
-export function buildJeepBody(baker: Baker): THREE.Group {
+/**
+ * Ranger jeep body (ground at y = 0, gunner at the origin, nose toward −Z). ART: PIXEL WORLD
+ * (`jp`, or a baker of a PIXEL WORLD stage): the body is painted instead (same geometry).
+ */
+export function buildJeepBody(baker: Baker, jp?: D3JeepPixel): THREE.Group {
   const b = new THREE.Group();
   // Olive-drab sheet steel: panel seams, rivets and rust blotches at a scale that
   // reads on the hood right under the camera.
@@ -76,7 +81,11 @@ export function buildJeepBody(baker: Baker): THREE.Group {
   Kit.add(b, Kit.box(0.24, 0.42, 0.42), tx('metal', 0x7a3020, 3, 0.6), -0.55, 1.12, 0.9);
   Kit.add(b, Kit.box(0.24, 0.42, 0.42), tx('metal', 0x7a3020, 3, 0.6), -0.25, 1.12, 0.9);
   Kit.add(b, Kit.box(0.5, 0.32, 0.32), tx('cloth', 0x4a5a34, 2.5, 0.8), 0.55, 1.08, 0.85);
+  const own = !jp && baker.pixel ? new D3JeepPixel() : null;
+  const pj = jp ?? own;
+  pj?.paintBody(b);
   baker.bake(b);
+  own?.finish();
   return b;
 }
 
@@ -120,9 +129,12 @@ export class JeepViewModel {
   constructor(private world: World, baker: Baker) {
     this.root.name = 'jeep-viewmodel';
     this.root.add(this.body, this.gun, this.cabin);
-    this.body.add(buildJeepBody(baker));
-    this.buildGun(baker);
-    this.buildCabin(baker);
+    // ART: PIXEL WORLD: body, gun and cabin painted on the jeep's own atlas (same geometry, same framing).
+    const jp = pixelWorld(world) ? new D3JeepPixel() : null;
+    this.body.add(buildJeepBody(baker, jp ?? undefined));
+    this.buildGun(baker, jp);
+    this.buildCabin(baker, jp);
+    jp?.finish();
     this.cabin.visible = false;
     this.coolMat = tx('metal', 0x34383c, 4, 0.5);
     this.heatMats = [Kit.glow(0x8a2010, 1), Kit.glow(0xd04a14, 1.2), Kit.glow(0xff8a2a, 1.4), Kit.glow(0xffd070, 1.6)];
@@ -145,7 +157,7 @@ export class JeepViewModel {
     this.offShot = world.events.on('shot', () => this.onShot());
   }
 
-  private buildGun(baker: Baker) {
+  private buildGun(baker: Baker, jp: D3JeepPixel | null) {
     const mount = this.gun;
     const metal = tx('metal', 0x34383c, 4, 0.5);
     const dark = tx('metal', 0x222326, 4, 0.5);
@@ -164,6 +176,11 @@ export class JeepViewModel {
     Kit.add(body, Kit.cyl(0.065, 0.065, 0.6, 10), metal, 0, 0.03, -0.88, Math.PI / 2, 0, 0);
     for (let i = 0; i < 3; i++) Kit.add(body, Kit.cyl(0.072, 0.072, 0.035, 10), dark, 0, 0.03, -0.66 - i * 0.18, Math.PI / 2, 0, 0);
     Kit.add(body, Kit.box(0.025, 0.07, 0.025), dark, 0, 0.1, -1.56);
+    if (jp) {
+      jp.paint(body);
+      // The pedestal (the mount's own mesh; the kick group's parts are painted above / stay classic).
+      jp.paint(mount, (m) => m.parent !== mount);
+    }
     baker.bake(body);
     const barrel = Kit.add(k, Kit.cyl(0.036, 0.036, 0.42, 8), metal, 0, 0.03, -1.38, Math.PI / 2, 0, 0);
     const brake = Kit.add(k, Kit.cyl(0.05, 0.05, 0.14, 8), metal, 0, 0.03, -1.64, Math.PI / 2, 0, 0);
@@ -181,7 +198,7 @@ export class JeepViewModel {
   }
 
   /** Helicopter cabin seen from the open side door (shown after boarding). */
-  private buildCabin(baker: Baker) {
+  private buildCabin(baker: Baker, jp: D3JeepPixel | null) {
     const c = new THREE.Group();
     const frame = tx('metal', 0x22262c, 3, 0.6);
     const white = tx('metal', 0xc8ccd0, 2, 0.5);
@@ -199,6 +216,7 @@ export class JeepViewModel {
     // Grab handle + warm cabin light.
     Kit.add(c, Kit.cyl(0.025, 0.025, 0.7, 6), tx('metal', 0xd0b020, 4, 0.4), 1.1, 0.25, -1.05);
     Kit.add(c, Kit.box(0.5, 0.06, 0.2), Kit.glow(0xffd090, 0.9), -0.6, 0.72, -0.7);
+    jp?.paint(c);
     baker.bake(c);
     this.cabin.add(c);
   }

@@ -18,6 +18,8 @@ import { D, GORGE_DEPTH, ROAD_HALF, railHeading, railLength, railPoint } from '.
 import { FloraField, floraArtToggle, floraAtlas, floraReach } from '../../pixel/floraField';
 import { D3_BIOME } from '../../pixel/floraBiomes';
 import { BUSH, BUSH_WIDE, EAR, FERN, FERN_WIDE, JUNGLE_TREE, PALM } from '../../pixel/floraSpecies';
+import { pixelWorld } from '../../../core/art';
+import { D3PixelWorld, type TerrainKind } from './pixel';
 
 /**
  * TYRANT CHASE environment — the park at night in a violent thunderstorm.
@@ -55,6 +57,8 @@ interface FloraTag {
   variants?: number[];
 }
 const floraTags = new WeakMap<Prefab, FloraTag>();
+/** PIXEL WORLD: the size of a rock prefab (its boulder billboard). */
+const rockTags = new WeakMap<Prefab, { w: number; h: number; y0: number }>();
 const _box = new THREE.Box3();
 const _origin = new THREE.Vector3();
 
@@ -147,7 +151,7 @@ export class ParkEnv {
   /** Lamp light-pool disc with the radial `aR` attribute (dithered falloff). */
   private poolGeo: THREE.BufferGeometry;
   private blinkers: Blinker[] = [];
-  private flickers: { obj: THREE.Mesh; seed: number }[] = [];
+  private flickers: { obj: THREE.Object3D; seed: number }[] = [];
   // Paddock.
   private sparkPts: THREE.Vector3[] = [];
   private sparkGlows: THREE.Mesh[] = [];
@@ -208,6 +212,8 @@ export class ParkEnv {
   private plazaPalms: Prefab[] = [];
   /** Optional per-frame hook for the jeep view model (set by the stage). */
   onUpdate: ((dt: number) => void) | null = null;
+  /** ART: PIXEL WORLD painter (null in CLASSIC / PIXEL CAST: those build exactly as before). */
+  private pw: D3PixelWorld | null = null;
   /** Night readability: the accent light trails the compy pack in the fence / plaza fights. */
   private packPos = new THREE.Vector3();
   private packBlend = 0;
@@ -234,6 +240,12 @@ export class ParkEnv {
     this.storm = new Storm(this.hemi, this.moon, this.fog, q);
     this.storm.groundAt = (x, z) => this.groundAt(x, z);
     this.root.add(this.storm.group);
+    if (pixelWorld(world)) {
+      // PIXEL WORLD: the painted storm panorama replaces the sky dome; the strikes draw painted forks.
+      const pw = (this.pw = new D3PixelWorld());
+      this.baker.pixel = true;
+      this.root.add(pw.buildBackdrop(railPoint(this.len / 2, new THREE.Vector3())));
+    }
     this.flora2d = new FloraField(floraAtlas(D3_FLORA, D3_BIOME, 'd3'), {
       far: FOG_FAR + 8,
       rim: 0x8aa4d8,
@@ -282,6 +294,8 @@ export class ParkEnv {
     this.buildMud();
     this.buildBridge();
     this.buildHelipad();
+    // PIXEL WORLD: the boss stretch's set dressing (painted only).
+    this.pw?.bossDressing((d, lat) => this.at(d, lat, 0), (d) => this.heading(d));
     this.spawnTank(world);
     for (const g of this.groups.values()) this.commit(g);
     for (const sink of this.sinks.values()) {
@@ -298,6 +312,11 @@ export class ParkEnv {
     }
     this.vegPx.add(this.flora2d.build());
     this.untoggle = floraArtToggle(scene, [this.vegPx], [this.veg3D]);
+    if (this.pw) {
+      const pw = this.pw;
+      pw.finish(this.root, this.culled, this.vegPx);
+      this.storm.usePixelSky(pw.boltMat, (i) => pw.boltGeometry(i));
+    }
 
     scene.add(this.root);
     // Per-occluder bullet-impact surfaces.
@@ -430,6 +449,12 @@ export class ParkEnv {
    */
   private floraPut(p: Prefab, d: number, pos: THREE.Vector3, scale: number) {
     const tag = floraTags.get(p);
+    const rock = !tag && this.pw ? rockTags.get(p) : undefined;
+    if (rock) {
+      // PIXEL WORLD: a rock is a boulder billboard of its size.
+      this.pw!.stone(pos.x, pos.y, pos.z, rock.w * scale, rock.h * scale);
+      return;
+    }
     if (!tag) {
       const key = `r${Math.floor(d / CHUNK)}`;
       let sk = this.pxSinks.get(key);
@@ -562,6 +587,11 @@ export class ParkEnv {
           tw.push(dirt, rockW);
         }
       }
+      if (this.pw) {
+        // PIXEL WORLD: the same grid, painted (a tile per cell from its coverage, the classic colour as a tint).
+        this.pixelTerrain(pos, col, tw, rows, cols, r0, r1);
+        continue;
+      }
       for (let r = 0; r < r1 - r0; r++) {
         for (let c = 0; c < nc - 1; c++) {
           const a = r * nc + c;
@@ -596,6 +626,46 @@ export class ParkEnv {
       m.matrixAutoUpdate = false;
       this.root.add(m);
       this.culled.push(m);
+    }
+  }
+
+  /** PIXEL WORLD terrain: each grid cell painted with the tile its coverage calls for, tinted by the classic colours. */
+  private pixelTerrain(pos: number[], col: number[], tw: number[], rows: number[], cols: number[], r0: number, r1: number) {
+    const pw = this.pw!;
+    const nc = cols.length;
+    const P = (i: number) => new THREE.Vector3(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+    const grass = new THREE.Color(0x34492d);
+    const mudC = new THREE.Color(0x433426);
+    const rockC = new THREE.Color(0x5c5a52);
+    const tint = (i: number, base: THREE.Color) =>
+      _c.setRGB(clamp(col[i * 3] / base.r, 0.45, 1), clamp(col[i * 3 + 1] / base.g, 0.45, 1), clamp(col[i * 3 + 2] / base.b, 0.45, 1)).getHex();
+    for (let r = 0; r < r1 - r0; r++) {
+      const d = (rows[r0 + r] + rows[r0 + r + 1]) / 2;
+      for (let c = 0; c < nc - 1; c++) {
+        const a = r * nc + c;
+        const b = a + 1;
+        const cc = a + nc;
+        const dd = cc + 1;
+        const ys = [pos[a * 3 + 1], pos[b * 3 + 1], pos[cc * 3 + 1], pos[dd * 3 + 1]];
+        const yAvg = (ys[0] + ys[1] + ys[2] + ys[3]) / 4;
+        const steep = Math.max(...ys) - Math.min(...ys);
+        const lat = (cols[c] + cols[c + 1]) / 2;
+        const rockW = (tw[a * 2 + 1] + tw[b * 2 + 1] + tw[cc * 2 + 1] + tw[dd * 2 + 1]) / 4;
+        let kind: TerrainKind = 'floor';
+        if (yAvg < -GORGE_DEPTH + 2.5) kind = 'bed';
+        else if (yAvg < -0.8 || steep > 2.6 || rockW > 0.55) kind = 'rock';
+        else if (d > D.MUD_FROM - 6 && d < D.MUD_TO + 6 && Math.abs(lat) < 13) kind = 'mud';
+        const base = kind === 'mud' ? mudC : kind === 'rock' || kind === 'bed' ? rockC : grass;
+        const A = P(a);
+        const B = P(b);
+        const C = P(cc);
+        const Dd = P(dd);
+        // Upward winding (counter-clockwise from above), the classic diagonal b–cc.
+        _v.subVectors(B, A);
+        _w.subVectors(C, A);
+        if (_v.cross(_w).y >= 0) pw.terrainCell(C, A, B, Dd, kind, [tint(cc, base), tint(a, base), tint(b, base), tint(dd, base)]);
+        else pw.terrainCell(B, A, C, Dd, kind, [tint(b, base), tint(a, base), tint(cc, base), tint(dd, base)]);
+      }
     }
   }
 
@@ -647,6 +717,11 @@ export class ParkEnv {
     pushRange(D.MUD_TO, D.BRIDGE_FROM - 1.5);
     pushRange(D.BRIDGE_TO + 1.5, D.PAD - D.PAD_HALF + 0.5);
     for (const [a, b, mat] of segs) {
+      if (this.pw) {
+        // PIXEL WORLD: the painted road (or the mud stretch) and its muddy verges.
+        this.pw.road(a, b, (d) => this.at(d, 0, 0), mat === mudMat);
+        continue;
+      }
       const m = new THREE.Mesh(this.strip(a, b, -ROAD_HALF, ROAD_HALF, 0.02), mat);
       this.root.add(m);
       this.culled.push(m);
@@ -666,6 +741,26 @@ export class ParkEnv {
         if (!roadOk(d)) continue;
         const g = this.propChunk(d);
         const h = this.heading(d);
+        if (this.pw) {
+          // PIXEL WORLD: dashes, edge lines and patches are painted into the road; puddles become animated decals
+          // (the same draws, so they lie where the classic ones do).
+          if (d % 6 === 0) rng.chance(0.85);
+          if (d % 3 === 0) for (let s = 0; s < 2; s++) rng.chance(0.3);
+          if (rng.chance(0.06)) {
+            rng.range(0.8, 2);
+            rng.range(0.6, 2.4);
+            rng.spread(2.5);
+            rng.spread(0.4);
+          }
+          if (rng.chance(0.12)) {
+            const r = rng.range(0.5, 1.4);
+            const lat = rng.spread(3);
+            const yaw = h + rng.range(0, 3);
+            const sz = rng.range(1.2, 2.2);
+            this.pw.puddle(this.at(d, lat, 0.045), yaw, r, r * sz, d);
+          }
+          continue;
+        }
         if (d % 6 === 0 && rng.chance(0.85)) {
           const m = Kit.add(g, Kit.box(0.14, 0.02, 2.6), line);
           this.place(m, d, 0, 0, 0.035);
@@ -729,8 +824,15 @@ export class ParkEnv {
           // Width: rotation-independent reach from the foot (the prefab is placed turned).
           tag = { ...flora, h: _box.max.y, w: floraReach(holder, _origin) };
         }
+        let rock: { w: number; h: number; y0: number } | null = null;
+        if (!flora && this.pw) {
+          holder.updateMatrixWorld(true);
+          _box.setFromObject(holder);
+          rock = { w: floraReach(holder, _origin), h: _box.max.y - Math.max(0, _box.min.y), y0: Math.max(0, _box.min.y) };
+        }
         const p = this.baker.prefab(holder);
         if (tag) floraTags.set(p, tag);
+        if (rock) rockTags.set(p, rock);
         return p;
       });
     const palms = V(10, () => f.palm(vr), { key: 'palm', sway: 0.75, variants: [0, 1, 2] });
@@ -810,6 +912,7 @@ export class ParkEnv {
     const step = 6;
     const pylonAt: THREE.Vector3[] = [];
     const inGap = (d: number) => d > D.GAP_FROM && d < D.GAP_TO;
+    const pw = this.pw;
     for (let d = D.FENCE_FROM; d <= D.FENCE_TO; d += step) {
       const p = this.at(d, S, 0);
       pylonAt.push(p);
@@ -820,12 +923,19 @@ export class ParkEnv {
         this.place(stump, d, S, ParkEnv.faceRoad(S));
         stump.rotation.x = -0.35;
         g.add(stump);
-        for (let i = 0; i < 4; i++) P.beam(g, new THREE.Vector3(p.x + (i - 1.5) * 0.2, 3.1, p.z), new THREE.Vector3(p.x + (i - 1.5) * 0.4, 4.1 + i * 0.2, p.z + 0.5), 0.03, cableMat, 3);
+        if (pw) pw.pylon(stump, 3.2, false, pylonAt.length, d);
+        for (let i = 0; i < 4; i++) {
+          const ra = new THREE.Vector3(p.x + (i - 1.5) * 0.2, 3.1, p.z);
+          const rb = new THREE.Vector3(p.x + (i - 1.5) * 0.4, 4.1 + i * 0.2, p.z + 0.5);
+          if (pw) pw.rebar(ra, rb, d);
+          else P.beam(g, ra, rb, 0.03, cableMat, 3);
+        }
         continue;
       }
       const py = P.pylon(9.5);
       this.place(py, d, S, ParkEnv.faceRoad(S));
       g.add(py);
+      if (pw) pw.pylon(py, 9.5, true, pylonAt.length, d);
     }
     const hs = [1.3, 2.8, 4.3, 5.8, 7.3, 8.6];
     for (let i = 0; i < pylonAt.length - 1; i++) {
@@ -834,6 +944,11 @@ export class ParkEnv {
       const a = pylonAt[i];
       const b = pylonAt[i + 1];
       if (inGap(d0) || inGap(d1)) continue;
+      if (pw) {
+        // PIXEL WORLD: the six wires of the span as one painted cut-out panel.
+        pw.wireSpan(a, b, i, d0);
+        continue;
+      }
       for (const h of hs) P.cable(g, _v.set(a.x, h, a.z).clone(), _w.set(b.x, h, b.z).clone(), 0.18, 0.03, cableMat, 2);
     }
     // Torn cables hanging from the pylons either side of the gap, live ends sparking on the road verge.
@@ -843,7 +958,8 @@ export class ParkEnv {
       for (let i = 0; i < hs.length; i++) {
         if (i % 2 === 1 && dir < 0) continue;
         const end = this.at(dp + dir * (2.5 + i * 0.9), S - 1.2 - (i % 3) * 1.2, 0.15);
-        P.cable(g, new THREE.Vector3(base.x, hs[i], base.z), end, 0.35 + i * 0.12, 0.03, cableMat, 3);
+        if (pw) pw.cable(new THREE.Vector3(base.x, hs[i], base.z), end, 0.35 + i * 0.12, this.at(dp, S - 1, 0).sub(base).setY(0).normalize(), dp);
+        else P.cable(g, new THREE.Vector3(base.x, hs[i], base.z), end, 0.35 + i * 0.12, 0.03, cableMat, 3);
         if (i % 2 === 0) {
           this.sparkPts.push(end.clone().setY(0.25));
           const s = Kit.add(this.root, Kit.sphere(0.12, 6, 4), spark, end.x, 0.2, end.z);
@@ -857,12 +973,14 @@ export class ParkEnv {
       this.place(s, d, S - 1.0, ParkEnv.faceRoad(S), 2.6);
       if (d === D.GAP_TO + 4) s.rotation.z = -0.3;
       g.add(s);
+      pw?.dangerBoard(s, d, d);
     }
     // Crushed tour car by the gap (foreshadowing) and a goat-tether post.
     const car = P.tourCar(true);
     this.place(car, D.GAP_TO + 8, 6.6, 0.55);
     car.rotation.z = 0.08;
     g.add(car);
+    pw?.staticCar(car, true, D.GAP_TO + 8);
     // Giant footprints from the gap across the road into the jungle on the left.
     const prints = new THREE.Group();
     const steps = 7;
@@ -874,7 +992,8 @@ export class ParkEnv {
       const p2 = this.at(d + 2, lat - 3, 0);
       const yaw = Math.atan2(p2.x - p.x, p2.z - p.z);
       const off = (i % 2 ? 1 : -1) * 0.7;
-      P.footprint(prints, this.puddleMat, p.x + Math.cos(yaw) * off, p.z - Math.sin(yaw) * off, yaw, 1.45);
+      if (pw) pw.footprint(p.x + Math.cos(yaw) * off, p.y + 0.05, p.z - Math.sin(yaw) * off, yaw, 1.45, Math.abs(lat) < ROAD_HALF + 0.3, d);
+      else P.footprint(prints, this.puddleMat, p.x + Math.cos(yaw) * off, p.z - Math.sin(yaw) * off, yaw, 1.45);
     }
     this.commitMerged(prints);
   }
@@ -901,6 +1020,7 @@ export class ParkEnv {
           this.flickers.push({ obj: lp.bulb, seed: rng.range(0, 100) });
         }
         g.add(lp.root);
+        this.pw?.lampPost(lp.root, lp.bulb, kind, d);
         if (kind !== 'off') {
           const pool = Kit.add(pools, this.poolGeo, this.poolMat);
           this.at(d, lat - Math.sign(lat) * 1.5, 0.06, pool.position);
@@ -919,12 +1039,15 @@ export class ParkEnv {
     const s1 = P.roadSign('< VISITOR CENTER');
     this.place(s1, D.HOLD_VISITOR - 30, -(ROAD_HALF + 2.2), ParkEnv.faceRoad(-1) - 0.5);
     this.propChunk(D.HOLD_VISITOR - 30).add(s1);
+    this.pw?.roadSign(s1, '< VISITOR CENTER', 0.09, D.HOLD_VISITOR - 30);
     const s2 = P.roadSign('HELIPAD >');
     this.place(s2, D.BOSS_START + 60, ROAD_HALF + 2.3, ParkEnv.faceRoad(1) + 0.4);
     this.propChunk(D.BOSS_START + 60).add(s2);
+    this.pw?.roadSign(s2, 'HELIPAD >', 0.09, D.BOSS_START + 60);
     const s3 = P.roadSign('BRIDGE');
     this.place(s3, D.MUD_TO + 8, -(ROAD_HALF + 2.2), ParkEnv.faceRoad(-1) - 0.45);
     this.propChunk(D.MUD_TO + 8).add(s3);
+    this.pw?.roadSign(s3, 'BRIDGE', 0.09, D.MUD_TO + 8);
   }
 
   private buildVisitorCentre() {
@@ -953,17 +1076,25 @@ export class ParkEnv {
     Kit.add(kiosk, Kit.box(1.6, 0.8, 0.06), Kit.glow(0xffc070, 0.6), 0, 1.6, 1.22);
     plaza.add(v.plaza);
     v.root.add(plaza);
+    // PIXEL WORLD: the lodge, plaza and doors painted (the roofs read from the classic shell first).
+    const pw = this.pw;
+    const flick = pw ? pw.visitorCentre(v, plaza) : null;
     // Bake the shell (+ plaza, incl. the fountain — not an occluder: compys
     // land in it); doors / flickering windows / beacon stay live.
     const shellMeshes = this.baker.bake(v.shell);
-    for (const m of shellMeshes) this.culled.push(m);
+    if (pw) {
+      // PIXEL WORLD: the baked shell stays the bullet occluder, hidden (and out of the fog culling, which shows meshes).
+      for (const m of v.shell.children) m.visible = false;
+    } else for (const m of shellMeshes) this.culled.push(m);
     this.baker.bake(plaza).forEach((m) => this.culled.push(m));
-    for (const m of v.flicker) this.flickers.push({ obj: m, seed: 13 });
+    if (flick) this.flickers.push({ obj: flick, seed: 13 });
+    else for (const m of v.flicker) this.flickers.push({ obj: m, seed: 13 });
     this.blinkers.push({ obj: v.beacon, period: 1.1, duty: 0.5, phase: 0 });
-    for (const d of [v.doorL, v.doorR]) {
+    for (const [side, d] of [[-1, v.doorL], [1, v.doorR]] as [number, THREE.Group][]) {
       for (const c of d.children) {
         // Bake each door into a single mesh (it animates as a whole).
         const grp = c as THREE.Group;
+        pw?.door(grp, side);
         this.baker.bake(grp);
       }
     }
@@ -999,18 +1130,23 @@ export class ParkEnv {
     car.position.set(0, 1.76, 0);
     this.car.add(car);
     this.baker.bake(car);
+    // PIXEL WORLD: the baked car stays the (hidden) occluder; a painted one follows it when it flies.
+    this.pw?.followCar(car, true);
+    this.pw?.drumTiles();
     this.place(this.car, d, 1.7, Math.PI / 2 - 0.2);
     this.root.add(this.car);
     // Fallen palm across the left lane.
     const log = this.flora.brokenPalm(new Rng(8), 8);
     log.position.y = 0.25;
     this.palmLog.add(log);
+    this.pw?.palmLog(log, 8);
     this.baker.bake(log);
     this.place(this.palmLog, d + 1.5, -2.6, Math.PI / 2 + 0.25);
     this.root.add(this.palmLog);
     // Sawhorses with blinking amber lamps.
     for (const [lat, yaw] of [[-2.4, 0.1], [3.4, -0.15]] as const) {
       const s = P.sawhorse();
+      this.pw?.sawhorse(s.root, s.lamp);
       this.baker.bake(s.root); // the blinking lamp is flagged noMerge and stays live
       this.place(s.root, d - 2.4, lat, yaw);
       this.horses.push(s.root);
@@ -1033,6 +1169,7 @@ export class ParkEnv {
         onDestroy: (w) => this.blastRoadblock(w, p),
       });
       this.drums.push(world.add(drum));
+      this.pw?.drum(drum.root, false);
     }
   }
 
@@ -1075,7 +1212,8 @@ export class ParkEnv {
   private buildMud() {
     const g = this.propChunk(D.HOLD_MUD);
     const rut = tx('dirt', 0x2a1e12, 2, 1);
-    for (let d = D.MUD_FROM + 1; d < D.MUD_TO - 1; d += 1.5) {
+    // (PIXEL WORLD: the ruts are painted into the mud road.)
+    for (let d = D.MUD_FROM + 1; d < D.MUD_TO - 1 && !this.pw; d += 1.5) {
       for (const lat of [-1.0, 1.0]) {
         const m = Kit.add(g, Kit.box(0.42, 0.02, 1.7), rut);
         this.place(m, d, lat + Math.sin(d * 0.4) * 0.12, Math.sin(d * 0.3) * 0.05, 0.035);
@@ -1092,11 +1230,20 @@ export class ParkEnv {
     this.mudPerch.set(-0.55, 1.76, -2.2).applyMatrix4(t.root.matrix);
     for (const h of t.hazards) this.blinkers.push({ obj: h, period: 0.8, duty: 0.5, phase: h.position.x > 0 ? 0.4 : 0 });
     g.add(t.root);
+    this.pw?.truck(t.root, D.HOLD_MUD);
     // Muddy pools.
     const pools = new THREE.Group();
     const rng = new Rng(31);
     for (let i = 0; i < 9; i++) {
       const r = rng.range(0.8, 1.8);
+      if (this.pw) {
+        // PIXEL WORLD: muddy rain pools (animated), where the classic ones lie.
+        const d = rng.range(D.MUD_FROM + 2, D.MUD_TO - 2);
+        const lat = rng.spread(4.5);
+        const yaw = this.heading(d) + rng.range(0, 3);
+        this.pw.puddle(this.at(d, lat, 0.05), yaw, r, r * rng.range(1.3, 2.4), i, true);
+        continue;
+      }
       const m = Kit.add(pools, Kit.cyl(r, r, 0.02, 10), this.puddleMat);
       this.place(m, rng.range(D.MUD_FROM + 2, D.MUD_TO - 2), rng.spread(4.5), rng.range(0, 3), 0.045);
       m.scale.z = rng.range(1.3, 2.4);
@@ -1112,6 +1259,7 @@ export class ParkEnv {
     const whole = this.bridgeWhole;
     const piece = (make: () => THREE.Group, d: number, list: THREE.Group[]) => {
       const g = make();
+      this.pw?.bridgePiece(g);
       this.baker.bake(g).forEach((m) => this.culled.push(m));
       const holder = new THREE.Group();
       holder.add(g);
@@ -1127,6 +1275,7 @@ export class ParkEnv {
     };
     for (let i = 0; i < n; i++) piece(() => P.bridgeSegment(segLen, width, i === 4), D.BRIDGE_FROM + segLen * (i + 0.5), this.bridgeSegs);
     for (let i = 1; i < n; i += 2) piece(() => P.trestle(GORGE_DEPTH, width), D.BRIDGE_FROM + segLen * i, this.towers);
+    this.pw?.bridgeWhole(whole);
     this.commit(whole);
     // Concrete abutments + river.
     const g = new THREE.Group();
@@ -1148,6 +1297,7 @@ export class ParkEnv {
     river.position.y = -GORGE_DEPTH + 1.0;
     river.rotation.y = this.heading(mid);
     const foam = tx('water', 0x8a9aa8, 2.2, 0.6, { emissive: 0x1a2028, emissiveIntensity: 1 });
+    const foams: THREE.Mesh[] = [];
     const rng = new Rng(17);
     for (let i = 0; i < 22; i++) {
       const lat = rng.spread(80);
@@ -1159,8 +1309,10 @@ export class ParkEnv {
         const f = Kit.add(g, Kit.box(rng.range(1.5, 3), 0.05, 0.5), foam);
         f.position.copy(rock.position).setY(-GORGE_DEPTH + 1.08);
         f.rotation.y = this.heading(mid) + Math.PI / 2 + rng.spread(0.3);
+        foams.push(f);
       }
     }
+    this.pw?.gorge(g, river, foams, mid);
     this.commit(g, false);
   }
 
@@ -1213,6 +1365,7 @@ export class ParkEnv {
       this.pad.root.remove(e);
       e.position.set(0, 0, 0);
     }
+    this.pw?.helipad(this.pad, D.PAD_HALF);
     this.baker.bake(this.pad.root).forEach((m) => this.culled.push(m));
     for (const e of [this.pad.edgeA, this.pad.edgeB]) {
       this.pad.root.add(e);
@@ -1225,6 +1378,7 @@ export class ParkEnv {
     this.heli = P.helicopter();
     this.place(this.heli.root, D.HELI, 0, -Math.PI / 2, 0);
     this.heli.root.position.y = 0.28;
+    this.pw?.helicopter(this.heli);
     this.baker.bake(this.heli.body);
     this.baker.bake(this.heli.rotor);
     this.baker.bake(this.heli.tailRotor);
@@ -1236,6 +1390,7 @@ export class ParkEnv {
     const s = P.roadSign('HELIPAD', 0.11);
     this.place(s, D.PAD - D.PAD_HALF - 4, -(ROAD_HALF + 2.5), ParkEnv.faceRoad(-1) - 0.6);
     this.propChunk(D.PAD - D.PAD_HALF - 4).add(s);
+    this.pw?.roadSign(s, 'HELIPAD', 0.11, D.PAD - D.PAD_HALF - 4);
   }
 
   /** Create the (initially sturdy) finale fuel tank entity. */
@@ -1256,6 +1411,7 @@ export class ParkEnv {
     });
     tank.root.rotation.y = this.heading(D.FUEL) + 0.15;
     this.tank = world.add(tank);
+    this.pw?.fuelTank(tank.root, ft.warn);
     this.blinkers.push({ obj: ft.warn, period: 0.5, duty: 0.5, phase: 0 });
   }
 
@@ -1265,7 +1421,9 @@ export class ParkEnv {
     if (this.padBarrels.length) return;
     for (const [dd, lat] of [[-21, 4.6], [-12, -5.2], [-8, 5.4]] as const) {
       const p = this.at(D.HELI_STOP + dd, lat, 0);
-      this.padBarrels.push(world.add(new Destructible(world, { model: this.bakedDrum(true), pos: p, hp: 1, points: 200, explode: { radius: 5, damage: 8 } })));
+      const barrel = world.add(new Destructible(world, { model: this.bakedDrum(true), pos: p, hp: 1, points: 200, explode: { radius: 5, damage: 8 } }));
+      this.padBarrels.push(barrel);
+      this.pw?.drum(barrel.root, true);
     }
   }
 
@@ -1345,6 +1503,7 @@ export class ParkEnv {
     const t = this.time;
     const rd = w.rig.d;
     this.storm.update(dt, w);
+    this.pw?.update(dt, w.camera.position, this.storm.flash, this.storm.gust);
     this.baker.wind(dt, this.storm.gust);
     const flash = this.storm.flash;
     this.puddleMat.emissive.setRGB(0.03 + flash * 0.3, 0.052 + flash * 0.34, 0.105 + flash * 0.42);
@@ -1444,6 +1603,9 @@ export class ParkEnv {
         }
       }
     }
+
+    // PIXEL WORLD: the painted car rides on the flying (hidden) classic one.
+    if (this.pw && this.blastT >= 0 && this.blastT < 4.5) this.pw.follow();
 
     // Mud: wheel spin spray + engine revs while bogged.
     if (this.mud) {

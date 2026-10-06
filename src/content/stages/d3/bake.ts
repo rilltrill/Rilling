@@ -70,6 +70,8 @@ export class Baker {
   };
   private mats = new Map<string, THREE.Material>();
   private glowMat: THREE.MeshBasicMaterial | null = null;
+  /** The stage was built in ART: PIXEL WORLD (builders that only get the baker paint their props). */
+  pixel = false;
 
   /** Advance the wind (call every frame). `gust` is an extra push in metres-ish. */
   wind(dt: number, gust: number) {

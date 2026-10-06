@@ -179,6 +179,20 @@ export class Storm {
     this.group.add(this.splash);
   }
 
+  /**
+   * ART: PIXEL WORLD — a painted panorama replaces the dome (hidden here; the environment flashes it
+   * with `flash`) and the strikes draw painted forks: the bolts keep their placement / timing, only
+   * their card and material change.
+   */
+  usePixelSky(boltMat: THREE.MeshBasicMaterial, boltGeometry: (i: number) => THREE.BufferGeometry) {
+    this.sky.visible = false;
+    this.boltMat = boltMat;
+    this.bolts.forEach((b, i) => {
+      b.geometry = boltGeometry(i);
+      b.material = boltMat;
+    });
+  }
+
   /** Jagged bolt from the clouds down to the horizon (local space, ~120 m tall). */
   private boltGeometry(seed: number): THREE.BufferGeometry {
     const r = new Rng(seed * 31 + 5);
