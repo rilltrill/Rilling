@@ -3,7 +3,7 @@ import { ROOM_CONVERTERS, type D2PixelWorld, type RoomParts } from './pixel';
 import { dropMeshes, paintGroup, type Paint } from './pixelMesh';
 import { centreOf, matIs, paintDoor, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y } from './pixelShared';
 import type { BurstDoor } from './setpieces';
-import { acousticTile, counterFrontTile, crateTile, mascotTile, merchShelfTile, plushCardTile, postcardTile, shirtEdgeTile, shirtTopTile, shopCarpetTile, ventGrilleTile, wallpaperTile } from '../../pixelworld/d2shop';
+import { acousticTile, counterFrontTile, crateTile, mascotTile, merchShelfTile, plushCardTile, postcardTile, shirtEdgeTile, shirtTopTile, shopCarpetTile, tableclothTile, ventGrilleTile, wallpaperTile } from '../../pixelworld/d2shop';
 import { terrazzoTile } from '../../pixelworld/interior';
 import { bloodDecal } from '../../pixelworld/d2decals';
 import { hash2 } from '../../pixelworld/surfaces';
@@ -40,6 +40,7 @@ function convertShop(pw: D2PixelWorld, parts: RoomParts) {
   const terrazzo = terrazzoTile(a, { hex: 0xc8c0b0, chips: [0x5a4a3a, 0xe8e0d0, 0xa05a30] });
   const shirtTop = shirtTopTile(a);
   const shirtEdge = shirtEdgeTile(a);
+  const cloth = tableclothTile(a);
 
   pw.copyShell(shell, b, (m, _f, _c, wface) => {
     if (texOf(m) === 'tiles') return wface === 'ny' ? { tile: ceil, map: 'world' } : wface === 'py' ? null : { tile: g.plaster, map: 'world', tint: 0xb4b0a4 };
@@ -84,6 +85,8 @@ function convertShop(pw: D2PixelWorld, parts: RoomParts) {
         return { tile: terrazzo, map: 'world' };
       case 'table':
         return { tile: g.woodH, map: 'local', tint: 0x8a6038 };
+      case 'tablecloth':
+        return wface === 'py' ? { tile: cloth, map: 'fit' } : { tile: g.cloth, map: 'local', tint: 0x2a6a3a };
       case 'shirts':
         return face === 'py' ? { tile: shirtTop, map: 'fit' } : { tile: shirtEdge, map: 'fit' };
       case 'postcard': {

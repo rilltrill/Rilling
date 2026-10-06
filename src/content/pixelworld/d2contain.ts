@@ -171,6 +171,45 @@ export function hazardBandTile(atlas: PwAtlas): PwTile {
   );
 }
 
+/**
+ * The arena's painted floor ring (ribbon, 0.4 m across: u 0…13 texels, v along): fresh-ish
+ * safety-yellow floor paint with ragged edges, worn-through patches where the floor shows
+ * (cut out), boot / claw scuffs and a tyre streak. 16 × 64.
+ */
+export function floorLineTile(atlas: PwAtlas, hex = 0xf0c428): PwTile {
+  return atlas.tile(
+    `d2floorline|${hex.toString(16)}`,
+    16,
+    64,
+    (c, k) => {
+      const rng = k.rng;
+      const yel = k.ramp(hex, { light: 0.5, sat: 1.0 });
+      const grime = k.ramp(0x3a3428, { light: 0.4 });
+      for (let y = 0; y < 64; y++) {
+        // Ragged brushed edges: the line wanders by a texel.
+        const l = 1 + (hash2(0, y >> 1, 3) > 0.7 ? 1 : 0);
+        const r = 12 - (hash2(1, y >> 1, 3) > 0.75 ? 1 : 0);
+        for (let x = l; x < r; x++) c.set(x, y, yel, x === l ? 2.75 : x === r - 1 ? 3.25 : 3.5);
+      }
+      // Grime, a tyre streak, scuffs; then worn-through patches (the floor shows).
+      for (let i = 0; i < 6; i++) c.cluster(rng.int(1, 11), rng.int(0, 63), rng.int(2, 7), grime, 2.5);
+      for (let y = 20; y < 30; y++) for (let x = 1; x < 12; x++) if (bayer(x, y) < 0.35 && c.at(x, y)) c.tint(x, y, grime, -0.5);
+      scuffs(c, rng, 1, 0, 11, 64, 8, -1);
+      for (let i = 0; i < 5; i++) {
+        const cx = rng.int(2, 10);
+        const cy = rng.int(0, 63);
+        const n = rng.int(3, 10);
+        for (let j = 0; j < n; j++) {
+          const x = cx + rng.int(-2, 2);
+          const y = (cy + rng.int(-3, 3) + 64) % 64;
+          c.set(x, y, 0, 0);
+        }
+      }
+    },
+    { wrap: true },
+  );
+}
+
 /** The specimen tank's back wall (world): dark teal tiles, algae streaks, slime at the waterline, scratches. 128 × 128. */
 export function tankWallTile(atlas: PwAtlas): PwTile {
   return atlas.tile(

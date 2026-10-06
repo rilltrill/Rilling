@@ -474,3 +474,39 @@ export function shirtEdgeTile(atlas: PwAtlas): PwTile {
   t.neutral = NEUTRAL_HEX;
   return t;
 }
+
+/**
+ * Display-table cloth (fit to the top): cream weave, a park-green hem with yellow
+ * footprints, fold creases, a coffee ring and the dust shadow of a toy that was
+ * knocked off. 48 × 96.
+ */
+export function tableclothTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('d2tablecloth', 48, 96, (c, k) => {
+    const rng = k.rng;
+    const cloth = k.ramp(0xe8dcc0, { light: 0.5, sat: 0.6 });
+    const hem = k.ramp(0x2a6a3a, { light: 0.45 });
+    const yel = k.ramp(0xe0c030, { light: 0.45 });
+    const stain = k.ramp(0x8a6a44, { light: 0.4 });
+    for (let y = 0; y < 96; y++) for (let x = 0; x < 48; x++) c.set(x, y, cloth, (x + y) & 1 ? 3 : 3.25);
+    // Hem band with footprints.
+    for (let y = 0; y < 96; y++) for (let x = 0; x < 48; x++) {
+      const e = Math.min(x, y, 47 - x, 95 - y);
+      if (e < 5) c.set(x, y, hem, e === 0 ? 2 : e === 4 ? 2.5 : 3);
+    }
+    for (let i = 4; i < 92; i += 8) {
+      for (const x of [2, 45]) c.cluster(x - 1, i, 0, yel, 3.5);
+    }
+    for (let i = 4; i < 44; i += 8) for (const y of [2, 93]) c.cluster(i, y - 1, 0, yel, 3.5);
+    // Fold creases (a light ridge with a shadow beside it).
+    for (const y of [32, 64]) for (let x = 5; x < 43; x++) { c.shift(x, y, 0.75); c.shift(x, y + 1, -0.5); }
+    c.vline(24, 5, 86, cloth, 3.75);
+    for (let y = 5; y < 91; y++) c.shift(25, y, -0.5);
+    // Coffee ring, crumbs, a dust shadow where a toy stood.
+    for (let a = 0; a < 24; a++) {
+      const t = (a / 24) * Math.PI * 2;
+      c.tint(Math.round(34 + Math.cos(t) * 4), Math.round(76 + Math.sin(t) * 4), stain, -0.5);
+    }
+    c.rect(10, 14, 8, 6, cloth, 3.75);
+    c.scatter(rng, 6, 6, 36, 84, 14, 0, -1, { shapes: 2 });
+  });
+}

@@ -5,7 +5,7 @@ import { ROOM_CONVERTERS, type D2PixelWorld, type RoomParts } from './pixel';
 import { dropMeshes, emitMesh, paintGroup, type Paint } from './pixelMesh';
 import { matIs, NX, NZ, paintRailings, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y, Z } from './pixelShared';
 import type { GlassWall } from './setpieces';
-import { baleTile, blastDoorTile, concreteColumnTile, dadoTile, dangerPictoTile, dragTrailTile, drainTile, floorStencilTile, hallMarkTile, hazardBandTile, slabFloorTile, specimenBoardTile, strawTile, tankWallTile, tankXTile } from '../../pixelworld/d2contain';
+import { baleTile, blastDoorTile, concreteColumnTile, dadoTile, dangerPictoTile, dragTrailTile, drainTile, floorLineTile, floorStencilTile, hallMarkTile, hazardBandTile, slabFloorTile, specimenBoardTile, strawTile, tankWallTile, tankXTile } from '../../pixelworld/d2contain';
 import { d2SignTile } from '../../pixelworld/d2signs';
 import { wallMarkTile } from '../../pixelworld/d2service';
 import { crateTile } from '../../pixelworld/d2shop';
@@ -82,7 +82,7 @@ function convertWing(pw: D2PixelWorld, parts: RoomParts) {
     b.rect(_o.set(gx + s * 0.36, 3.2, z + (s > 0 ? 0.5 : -0.5)), s > 0 ? NZ : Z, Y, 1, 1, dangerPictoTile(a));
   }
   // Teal dado along the corridor walls (between the cell piers there is glass).
-  const dado = dadoTile(a);
+  const dado = dadoTile(a, 0x376660);
   for (const x of [R.x0 + 0.205, R.x1 - 0.205]) {
     b.rect(_o.set(x, 0, x < 11 ? R.z0 : R.z1), x < 11 ? NZ : Z, Y, R.z0 - R.z1, 2.5, dado, { u0: 0, v0: 0 });
   }
@@ -144,10 +144,16 @@ function convertHall(pw: D2PixelWorld, parts: RoomParts) {
     const t = (i / 96) * Math.PI * 2;
     ring.push(new THREE.Vector3(H.center.x + Math.cos(t) * 7.5, 0, H.center.z + Math.sin(t) * 7.5));
   }
-  b.ribbon(ring, 0.5, hazard, { y: 0.011 });
+  b.ribbon(ring, 0.4, floorLineTile(a), { y: 0.011 });
+  let bay = 0;
   for (let z = R.z0 - 3; z > H.tankZ; z -= 6) {
+    bay++;
     for (const x of [R.x0 + 0.5, R.x1 - 0.5]) {
       const inward = x < 11 ? 1 : -1;
+      // Bay numbers stencilled on the buttress faces.
+      const num = wallMarkTile(a, `0${bay}`, 0xd8d0b8, 3, 0);
+      const nW = num.w / 32;
+      b.rect(_o.set(x + inward * 0.512, 2.9, z + (inward > 0 ? nW / 2 : -nW / 2)), inward > 0 ? NZ : Z, Y, nW, num.h / 32, num);
       // Room-facing face and both side faces of the buttress, 1.2 m of stripes.
       b.rect(_o.set(x + inward * 0.51, 0, z + (inward > 0 ? 0.5 : -0.5)), inward > 0 ? NZ : Z, Y, 1.0, 1.2, hazard, { u0: 0, v0: 0 });
       b.rect(_o.set(x - 0.5, 0, z + 0.51), X, Y, 1.0, 1.2, hazard, { u0: 0, v0: 0 });
@@ -158,7 +164,7 @@ function convertHall(pw: D2PixelWorld, parts: RoomParts) {
   b.rect(_o.set(H.center.x - 3.5, 8.6, H.tankZ + 0.32), X, Y, 7, 2.33, specimenBoardTile(a));
   b.rect(_o.set(H.center.x - 3, 1.2, R.z1 + 0.32), X, Y, 6, 6, tankXTile(a));
   // Teal dado round the hall (the gate openings left clear).
-  const dado = dadoTile(a);
+  const dado = dadoTile(a, 0x376660);
   for (const x of [R.x0 + 0.205, R.x1 - 0.205]) {
     const ux = x < 11 ? NZ : Z;
     const runs: [number, number][] = [[R.z0, H.gateZ + 1.8], [H.gateZ - 1.8, H.tankZ + 0.3]];
