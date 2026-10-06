@@ -209,7 +209,7 @@ describe('PixelWorld painting', () => {
 
 describe('PixelWorld stages (budgets, gameplay unchanged)', () => {
   /** Build a stage's environment headless in an ART style; returns the world (dispose it). */
-  function build(id: string, art: 'sprites' | 'pixel') {
+  function build(id: string, art: 'sprites' | 'pixel' | '3d') {
     const w = new World(new THREE.PerspectiveCamera(60, 844 / 390, 0.05, 400), new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS }, 7);
     w.art = art;
     const runner = new StageRunner(w, stage(id));
@@ -303,6 +303,45 @@ describe('PixelWorld stages (budgets, gameplay unchanged)', () => {
     const b = simulateStage(stage('z1'), { art: 'pixel', maxTime: 120 });
     expect(b.errors).toEqual([]);
     expect({ ...b, errors: [] }).toEqual({ ...a, errors: [] });
+  });
+
+  it('z1: hit proxies, spawned props and walkable ground (kiosk roofs, bandstand, bus) match in all three ARTs; painted scenery never takes a hit', { timeout: 180_000 }, () => {
+    const sig = (w: World) => {
+      const box = (o: THREE.Object3D) => {
+        o.updateMatrixWorld(true);
+        const b = new THREE.Box3().setFromObject(o);
+        return [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].map((v) => Math.round(v * 100));
+      };
+      const ground: number[] = [];
+      for (let x = -72; x <= 12; x += 3) for (let z = -312; z <= 20; z += 4) ground.push(Math.round((w.env!.groundAt?.(x, z) ?? 0) * 1000));
+      return {
+        shootables: w.shootables.objects.map((o) => [String((o.userData.shot as { part?: string } | undefined)?.part), ...box(o)]),
+        entities: w.entities.map((e) => [e.constructor.name, ...e.root.position.toArray().map((v) => Math.round(v * 1000))]),
+        ground,
+        rng: w.rng.state,
+      };
+    };
+    const sp = build('z1', 'sprites');
+    const px = build('z1', 'pixel');
+    const cl = build('z1', '3d');
+    expect(sig(px)).toEqual(sig(sp));
+    expect(sig(cl)).toEqual(sig(sp));
+    expect(pwMeshes(cl)).toEqual([]);
+    // Painted scenery is never a target: a ray straight at each PixelWorld mesh hits nothing.
+    const ray = new THREE.Raycaster();
+    const c = new THREE.Vector3();
+    for (const m of pwMeshes(px)) {
+      // (Animated classic meshes re-skinned in place keep their classic box and raycast, as in PIXEL CAST.)
+      if (m.userData.pwSwap) continue;
+      new THREE.Box3().setFromObject(m).getCenter(c);
+      ray.set(c.clone().add(new THREE.Vector3(0, 2, 6)), new THREE.Vector3(0, -2, -6).normalize());
+      expect(ray.intersectObject(m, false)).toEqual([]);
+      expect(px.shootables.objects.includes(m)).toBe(false);
+    }
+    sp.dispose();
+    px.dispose();
+    cl.dispose();
+    Kit.disposeAll();
   });
 });
 

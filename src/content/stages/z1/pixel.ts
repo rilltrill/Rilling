@@ -261,6 +261,8 @@ export class Z1PixelWorld {
         target.geometry = mesh.geometry;
         target.material = mesh.material;
         target.userData.pixelWorld = true;
+        // (Still the classic object, same box: it keeps its own raycast footprint like PIXEL CAST's.)
+        target.userData.pwSwap = true;
         continue;
       }
       parent.updateMatrixWorld(true);
@@ -457,10 +459,11 @@ export class Z1PixelWorld {
       b.rect(_o.set(-t.wM / 2, -t.hM / 2, info.z ?? 0.01), X, Y, t.wM, t.hM, t.tile);
       // The lit end panels (blank glowing boards in the classic look) carry the cinema's name.
       const ends = s.children.filter((c) => isGlow((c as THREE.Mesh).material) && ((c as THREE.Mesh).geometry as THREE.BoxGeometry).parameters?.width < 0.1);
-      const end = marquee(a, ['RIALTO'], { widthM: 2.6, heightM: info.size });
       for (const c of ends) {
         const m = c as THREE.Mesh;
         const p = (m.geometry as THREE.BoxGeometry).parameters;
+        // (Painted at the panel's own width: the name is never squeezed.)
+        const end = marquee(a, ['RIALTO'], { widthM: p.depth, heightM: info.size });
         const sx = Math.sign(m.position.x);
         const z0 = m.position.z - p.depth / 2;
         const z1 = m.position.z + p.depth / 2;
