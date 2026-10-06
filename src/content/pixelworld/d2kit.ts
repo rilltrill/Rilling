@@ -181,6 +181,30 @@ export function rivet(c: PwCanvas, x: number, y: number, ramp: number, base = 3)
   c.set(x + 1, y + 1, ramp, Math.max(0, base - 2));
 }
 
+/**
+ * Make a tile CHUNKY: every 2×2 block takes its top-left texel. Level 1 of a
+ * chunky tile is then the very same picture at half size, so a floor never
+ * "pops" where the GPU switches level 0 → 1 under a moving camera — and its
+ * texels land at the cast's own 2-pixel scale.
+ */
+export function chunky2(c: PwCanvas) {
+  const { w, h } = c;
+  for (let y = 0; y < h; y += 2) {
+    for (let x = 0; x < w; x += 2) {
+      const i = y * w + x;
+      const r = c.ramp[i];
+      const t = c.tone[i];
+      const f = c.flag[i];
+      for (let k = 1; k < 4; k++) {
+        const j = i + (k & 1) + (k >> 1) * w;
+        c.ramp[j] = r;
+        c.tone[j] = t;
+        c.flag[j] = f;
+      }
+    }
+  }
+}
+
 /** Grime toward the floor: the bottom `h` rows of the tile darken in dithered steps (`amount` steps at the floor). */
 export function grimeFoot(c: PwCanvas, h: number, amount = 1) {
   const y0 = c.h - h;

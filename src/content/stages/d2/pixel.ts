@@ -258,8 +258,10 @@ export class D2PixelWorld {
     // Tileable surfaces (floors, walls, ceilings) switch to their calm levels a step sooner:
     // level texels 1–2 pixels (the cast's own chunkiness), nothing crawls in motion.
     const surf = pwMaterial(this.atlas, { gain: this.gain, bias: D2_SURF_BIAS, tag: 'surf' });
+    const floor = pwMaterial(this.atlas, { gain: this.gain, bias: D2_FLOOR_BIAS, tag: 'floor' });
     const card = pwMaterial(this.atlas, { gain: this.gain, side: THREE.DoubleSide, tag: 'card' });
     this.mats.set('surf', surf);
+    this.mats.set('floor', floor);
     const sky = pwMaterial(this.skyAtlas, { fog: false, tag: 'sky' });
     this.mats.set('main', main);
     this.mats.set('card', card);
@@ -269,7 +271,7 @@ export class D2PixelWorld {
       const m = r.main.build(main);
       if (m) {
         m.name = `pw:d2:${id}`;
-        splitSurfaces(m, main, surf);
+        splitSurfaces(m, main, surf, floor);
         r.root.add(m);
       }
       const c = r.card.build(card);
@@ -297,32 +299,56 @@ export class D2PixelWorld {
 
 export { emitMesh };
 
-/** Level bias of the tileable surfaces (the modules keep the toolkit's 0.5: letters stay sharp). */
+/** Level bias of the tileable walls / ceilings (the modules keep the toolkit's 0.5: letters stay sharp). */
 export const D2_SURF_BIAS = 1.0;
+/** Level bias of the tileable FLOORS (right under the moving camera: level texels 1.4–2.8 pixels, the cast's own chunkiness). */
+export const D2_FLOOR_BIAS = 1.5;
 
 /**
- * One painted room mesh, two draws: its triangles re-ordered into modules
- * (signs, posters, doors: `mods`) then tileable surfaces (`surf`), as two
- * geometry groups.
+ * One painted room mesh, up to three draws: its triangles re-ordered into
+ * modules (signs, posters, doors: `mods`), tileable walls / ceilings (`surf`)
+ * and tileable floors (`floor`), as geometry groups.
  */
-function splitSurfaces(m: THREE.Mesh, mods: THREE.Material, surf: THREE.Material) {
+function splitSurfaces(m: THREE.Mesh, mods: THREE.Material, surf: THREE.Material, floor: THREE.Material) {
   const g = m.geometry;
   const idx = g.index!;
   const rect = g.getAttribute('pwRect');
+  const pos = g.getAttribute('position');
   const A: number[] = [];
   const B: number[] = [];
+  const C: number[] = [];
+  const pa = new THREE.Vector3();
+  const pb = new THREE.Vector3();
+  const pc = new THREE.Vector3();
   for (let t = 0; t < idx.count; t += 3) {
     const a = idx.getX(t);
-    (rect.getZ(a) > 0 ? B : A).push(a, idx.getX(t + 1), idx.getX(t + 2));
+    const b = idx.getX(t + 1);
+    const c = idx.getX(t + 2);
+    if (rect.getZ(a) <= 0) {
+      A.push(a, b, c);
+      continue;
+    }
+    // Up-facing (world) tileable triangles are floors.
+    pa.fromBufferAttribute(pos, a);
+    pb.fromBufferAttribute(pos, b).sub(pa);
+    pc.fromBufferAttribute(pos, c).sub(pa);
+    const n = pb.cross(pc);
+    (n.y > 0.7 * n.length() ? C : B).push(a, b, c);
   }
-  if (!A.length || !B.length) {
-    m.material = A.length ? mods : surf;
+  const groups = [A, B, C];
+  const mats = [mods, surf, floor];
+  const used = groups.map((x, i) => [x, mats[i]] as const).filter(([x]) => x.length);
+  if (used.length === 1) {
+    m.material = used[0][1];
     return;
   }
-  const all = A.concat(B);
-  g.setIndex(g.getAttribute('position').count > 65535 ? new THREE.Uint32BufferAttribute(all, 1) : new THREE.Uint16BufferAttribute(all, 1));
+  const all = ([] as number[]).concat(...used.map(([x]) => x));
+  g.setIndex(pos.count > 65535 ? new THREE.Uint32BufferAttribute(all, 1) : new THREE.Uint16BufferAttribute(all, 1));
   g.clearGroups();
-  g.addGroup(0, A.length, 0);
-  g.addGroup(A.length, B.length, 1);
-  m.material = [mods, surf];
+  let start = 0;
+  used.forEach(([x], i) => {
+    g.addGroup(start, x.length, i);
+    start += x.length;
+  });
+  m.material = used.map(([, mt]) => mt);
 }

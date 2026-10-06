@@ -2,7 +2,7 @@ import { bayer, PWF } from './canvas';
 import type { PwAtlas, PwTile } from './atlas';
 import { cells, crack, hash2 } from './surfaces';
 import { BRACHIO, frond, palmShape, silhouette } from './d2art';
-import { scuffs, shiftW, wrapI } from './d2kit';
+import { chunky2, scuffs, shiftW, wrapI } from './d2kit';
 
 /**
  * RESEARCH LABS · the BOTANICAL ATRIUM: dark planting-bed loam with clods,
@@ -102,11 +102,12 @@ export function flagstoneTile(atlas: PwAtlas): PwTile {
           let r = ramp;
           // Mortar joints (the stone a step and a half down, moss in clumps), a lit / shaded bevel band.
           if (v.edge < 1.05) {
-            if (hash2(hx, hy, 5) > 0.62) r = moss;
-            t = hash2(hx >> 1, hy >> 1, 9) > 0.5 ? 1.75 : 1.5;
+            // (Soft contrast: the path is right under the camera, a hard joint flickers as it slides past.)
+            if (hash2(hx, hy, 5) > 0.7) r = moss;
+            t = r === moss ? 2.25 : 2;
           } else {
-            t = 3 + (hash2(id, 2, 3) - 0.5) * 0.6;
-            if (v.edge < 2.05) t += v.dx + v.dy < 0 ? 0.75 : -0.5;
+            t = 3 + (hash2(id, 2, 3) - 0.5) * 0.5;
+            if (v.edge < 2.05) t += v.dx + v.dy < 0 ? 0.5 : -0.25;
           }
           c.rect(hx * 2, hy * 2, 2, 2, r, t);
         }
@@ -115,6 +116,7 @@ export function flagstoneTile(atlas: PwAtlas): PwTile {
       c.scatter(rng, 0, 0, 128, 128, 26, 0, -0.75, { shapes: 9 });
       crack(c, rng, 70, 30, 18, 1.1, { dt: -1.5, lip: 0.75 });
       scuffs(c, rng, 0, 0, 128, 128, 20, 0.6);
+      chunky2(c);
     },
     { wrap: true },
   );

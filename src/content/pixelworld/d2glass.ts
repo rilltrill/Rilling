@@ -22,15 +22,21 @@ export function glassSheenTile(atlas: PwAtlas, hex = 0xb8e0e8): PwTile {
     (c, k) => {
       const g = k.ramp(hex, { light: 0.45, sat: 0.7 });
       const smudge = k.ramp(0x8a9a9c, { light: 0.4, sat: 0.4 });
+      // One broad streak (4 texels, soft: a step over the glass) and a thin echo — wide enough not to
+      // flicker when the pane is seen edge-on from the aisle.
       for (let i = 0; i < 64; i++) {
         const x = 70 + Math.round(i * 0.7);
         const y = 63 - i;
         if (i % 13 < 9) {
-          c.set(x, y, g, 3);
-          c.set(x + 1, y, g, 3.5);
+          c.set(x, y, g, 2.75);
+          c.set(x + 1, y, g, 3);
           c.set(x + 2, y, g, 3);
+          c.set(x + 3, y, g, 2.75);
         }
-        if (i % 9 < 4 && i > 10) c.set(x + 9, y, g, 2.75);
+        if (i % 9 < 5 && i > 10) {
+          c.set(x + 10, y, g, 2.5);
+          c.set(x + 11, y, g, 2.5);
+        }
       }
       for (let i = 0; i < 5; i++) {
         const cx = 6 + i * 23;
@@ -58,10 +64,11 @@ export function condensationTile(atlas: PwAtlas, hex = 0xc8e8f0): PwTile {
     16,
     (c, k) => {
       const g = k.ramp(hex, { light: 0.5, sat: 0.6 });
-      for (let x = 0; x < 64; x += 2) {
-        const h = 2 + Math.floor(hash2(x >> 1, 1, 3) * 4);
-        for (let y = 16 - h; y < 16; y++) if (hash2(x >> 1, y >> 1, 5) > 0.35) c.rect(x, y, 2, 1, g, y === 16 - h ? 4 : 3);
-        if (hash2(x, 2, 7) > 0.8) for (let y = 6; y < 16 - h; y++) c.set(x, y, g, 3.25);
+      // Beads in 4×2 clumps along the foot (sparse, soft), a run or two above.
+      for (let x = 0; x < 64; x += 4) {
+        const h = 2 + Math.floor(hash2(x >> 2, 1, 3) * 3) * 2;
+        for (let y = 16 - h; y < 16; y += 2) if (hash2(x >> 2, y >> 1, 5) > 0.45) c.rect(x, y, 4, 2, g, y === 16 - h ? 3.25 : 2.75);
+        if (hash2(x, 2, 7) > 0.85) for (let y = 6; y < 16 - h; y++) c.rect(x + 1, y, 2, 1, g, 2.75);
       }
     },
     { wrap: true },
