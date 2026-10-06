@@ -153,7 +153,7 @@ export interface PaintOpts {
  * pits, a scuff or two. 128 × 96.
  */
 export function z2PaintTile(atlas: PwAtlas, o: PaintOpts): PwTile {
-  const key = `z2paint|${h6(o.hex)}|${h6(o.under ?? 0)}|${o.grime ?? 0.5}`;
+  const key = `z2paint2|${h6(o.hex)}|${h6(o.under ?? 0)}|${o.grime ?? 0.5}`;
   return atlas.tile(key, 128, 96, (c, k) => paintPaint(c, k, o), { wrap: true });
 }
 
@@ -164,9 +164,21 @@ function paintPaint(c: PwCanvas, k: PwKit, o: PaintOpts) {
   const under = k.ramp(o.under ?? shiftHue(mixHex(o.hex, 0xd8d0b8, 0.5), 0.03, 0.8), { light: 0.35 });
   const W = c.w;
   const H = c.h;
-  // Old paint: broad areas mottled a step darker (clusters, no dither), a touched-up rectangle or two (hard edge).
+  // Old paint: large soft tonal clusters in a near twin of the paint (low contrast: the stains,
+  // which would repeat with the tile, are placed decals), a touched-up rectangle or two (hard edge).
   c.rect(0, 0, W, H, p, 3);
-  mottle(c, 4, 31, 0.24, -1, 0, 0.45);
+  const p2 = k.ramp(darken(o.hex, 0.95), { light: 0.4, sat: 0.95 });
+  for (let y = 0; y < H; y += 2) {
+    for (let x = 0; x < W; x += 2) {
+      const n = smooth(x, y, W, H, 8, 31) * 0.75 + smooth(x, y, W, H, 16, 32) * 0.25;
+      if (n > 0.38) continue;
+      const cl = (hash2(x, y, 33) * 4) | 0;
+      c.tint(x, y, p2);
+      if (cl & 1) c.tint(x + 1, y, p2);
+      if (cl & 2) c.tint(x, y + 1, p2);
+      if (n < 0.33) c.tint(x + 1, y + 1, p2);
+    }
+  }
   for (let i = 0; i < 2; i++) {
     const x0 = rng.int(0, W - 40);
     const y0 = rng.int(0, H - 30);
@@ -437,35 +449,30 @@ export function z2SheetVinylTile(atlas: PwAtlas, o: { hex: number; bead?: number
 }
 
 /**
- * Small square ceramic floor tiles (morgue): 8-texel tiles, dark sunk grout,
- * a wet sheen on some, rust / stain rings are decals. 64 × 64.
+ * Square quarry tiles (morgue): 16-texel (50 cm) tiles, the grout a single
+ * row / column one step under the tile (never the outline step: from across
+ * the room a dark grout grid breaks into dashes and colour fringes), a lit
+ * lip on some tiles, a tile or two of a slightly different firing, traffic
+ * wear in broad clusters. Rust / stain rings are decals. 64 × 64.
  */
 export function z2FloorTileTile(atlas: PwAtlas, o: { hex: number; grout?: number }): PwTile {
-  return atlas.tile(`z2ftile|${h6(o.hex)}|${h6(o.grout ?? 0)}`, 64, 64, (c, k) => {
-    const t = k.ramp(o.hex, { light: 0.45, sat: 0.9 });
-    const t2 = k.ramp(shiftHue(o.hex, 0.02, 1.05), { light: 0.45, sat: 0.9 });
-    const gr = k.ramp(o.grout ?? darken(o.hex, 0.55), { light: 0.35, sat: 0.7 });
+  return atlas.tile(`z2ftile2|${h6(o.hex)}|${h6(o.grout ?? 0)}`, 64, 64, (c, k) => {
+    const t = k.ramp(o.hex, { light: 0.32, dark: 0.55, sat: 0.9 });
+    const t2 = k.ramp(shiftHue(o.hex, 0.02, 1.05), { light: 0.32, dark: 0.55, sat: 0.9 });
     for (let y = 0; y < c.h; y++) {
       for (let x = 0; x < c.w; x++) {
-        const lx = x & 7;
-        const ly = y & 7;
-        const tx = x >> 3;
-        const ty = y >> 3;
-        // Flat quarry tiles: a soft grout line (dirtier on some joints), no pillow bevel — a
-        // floor of raised squares reads as a uniform grid from across the room.
-        if (lx === 0 || ly === 0) {
-          c.set(x, y, gr, hash2(tx, ty, 2) > 0.8 ? 2 : 3);
-          continue;
-        }
-        const r = hash2(tx, ty, 6) > 0.88 ? t2 : t;
+        const lx = x & 15;
+        const ly = y & 15;
+        const tx = x >> 4;
+        const ty = y >> 4;
+        const r = hash2(tx, ty, 6) > 0.8 ? t2 : t;
         let tone = 3;
-        if (ly === 1 && lx > 1 && lx < 6 && hash2(tx, ty, 4) > 0.7) tone = 4;
-        if (hash2(tx, ty, 9) > 0.85 && lx === 3 && ly === 2) tone = 5;
+        if (lx === 0 || ly === 0) tone = 2;
+        else if (ly === 1 && lx > 2 && lx < 12 && hash2(tx, ty, 4) > 0.6) tone = 4;
         c.set(x, y, r, tone);
       }
     }
-    // Traffic wear and mop marks: broad darker clusters over tiles and grout alike.
-    mottle(c, 4, 57, 0.3, -1, 0, 0.6);
+    mottle(c, 4, 57, 0.28, -1, 0, 0.6);
   }, { wrap: true });
 }
 
@@ -505,56 +512,52 @@ export function z2ConcreteTile(atlas: PwAtlas, o: { hex: number; joints?: boolea
 }
 
 /**
- * Lobby marble (atrium floor): 1 m slabs in a two-stone checker, veined, with
- * polished glints and sunk joints. 128 × 128.
+ * Lobby marble (atrium floor): 1 m slabs in a two-stone checker, the joint a
+ * single texel one step under the stone (never a dark grid: it crawls), the
+ * figure in soft two-step clouds with dithered seams, veins as soft 2-texel
+ * dithered drifts (not pale 1-texel scratches), a dull polish. Stains, cracks
+ * and blood are placed decals. 128 × 128.
  */
 export function z2MarbleTile(atlas: PwAtlas, o: { a: number; b: number; vein?: number }): PwTile {
-  return atlas.tile(`z2marble|${h6(o.a)}|${h6(o.b)}|${h6(o.vein ?? 0)}`, 128, 128, (c, k) => {
+  return atlas.tile(`z2marble2|${h6(o.a)}|${h6(o.b)}|${h6(o.vein ?? 0)}`, 128, 128, (c, k) => {
     const rng = k.rng;
-    const A = k.ramp(o.a, { light: 0.45, sat: 0.9 });
-    const Bm = k.ramp(o.b, { light: 0.42, sat: 0.9 });
-    const vein = k.ramp(o.vein ?? mixHex(o.a, 0xe8e0d0, 0.5), { light: 0.35, sat: 0.6 });
-    const veinD = k.ramp(mixHex(o.b, 0xb8b0a0, 0.35), { light: 0.4 });
+    const A = k.ramp(o.a, { light: 0.32, dark: 0.55, sat: 0.9 });
+    const Bm = k.ramp(o.b, { light: 0.32, dark: 0.55, sat: 0.9 });
     for (let y = 0; y < c.h; y++) {
       for (let x = 0; x < c.w; x++) {
         const lx = x & 31;
         const ly = y & 31;
-        const r = ((x >> 5) + (y >> 5)) % 2 ? Bm : A;
-        let t = 3;
-        if (lx === 0 || ly === 0) t = 1;
-        else if (lx === 1 || ly === 1) t = 4;
-        c.set(x, y, r, t);
+        const dark = ((x >> 5) + (y >> 5)) % 2 === 1;
+        // Clouds in the stone: a soft two-step figure, its seam dithered.
+        const n = smooth(x, y, c.w, c.h, 8, dark ? 53 : 51) * 0.7 + smooth(x, y, c.w, c.h, 24, 52) * 0.3;
+        let t = n > 0.6 ? 3.5 : n < 0.36 ? 2.5 : 3;
+        let f = t % 1 ? PWF.DITHER : 0;
+        if (lx === 0 || ly === 0) {
+          t = 2;
+          f = 0;
+        }
+        c.set(x, y, dark ? Bm : A, t, f);
       }
     }
-    // Cloudy figure in the stone (clusters a step down), then the veins: long gently wavering lines
-    // crossing each slab on a diagonal, a branch now and then.
-    mottle(c, 8, 51, 0.3, -1);
-    const veinRun = (x: number, y: number, a: number, len: number, tx: number, ty: number, dark: boolean, depth: number) => {
-      for (let j = 0; j < len; j++) {
-        const lx = Math.round(x) - tx * 32;
-        const ly = Math.round(y) - ty * 32;
-        if (lx < 2 || lx > 30 || ly < 2 || ly > 30) return;
-        c.set(Math.round(x), Math.round(y), dark ? veinD : vein, dark ? (j % 6 === 0 ? 4 : 3) : j % 5 === 0 ? 4 : 3);
-        a += rng.spread(0.22);
-        x += Math.cos(a);
-        y += Math.sin(a);
-        if (depth < 1 && rng.chance(0.06)) veinRun(x, y, a + rng.spread(1.2), Math.floor(len * 0.4), tx, ty, dark, depth + 1);
-      }
-    };
+    // Veins: soft drifts across each slab on a diagonal (2 texels, dithered half a step up).
     for (let ty = 0; ty < 4; ty++) {
       for (let tx = 0; tx < 4; tx++) {
         const dark = (tx + ty) % 2 === 1;
-        const base = rng.chance(0.5) ? 0.7 : 2.3;
-        for (let n = 0; n < 2; n++) veinRun(tx * 32 + rng.int(2, 10), ty * 32 + rng.int(2, 28), base + rng.spread(0.3) - (base > 1.5 ? 0 : 0), rng.int(24, 44), tx, ty, dark, 0);
+        const r = dark ? Bm : A;
+        let x = tx * 32 + rng.int(2, 10);
+        let y = ty * 32 + rng.int(2, 28);
+        let a = rng.chance(0.5) ? 0.7 : -0.7;
+        for (let j = 0; j < 40; j++) {
+          const lx = Math.round(x) - tx * 32;
+          const ly = Math.round(y) - ty * 32;
+          if (lx < 2 || lx > 29 || ly < 2 || ly > 29) break;
+          c.set(Math.round(x), Math.round(y), r, 4, j % 4 === 0 ? 0 : PWF.DITHER);
+          c.set(Math.round(x) + 1, Math.round(y), r, 3.5, PWF.DITHER);
+          a += rng.spread(0.25);
+          x += Math.cos(a);
+          y += Math.sin(a);
+        }
       }
-    }
-    // Polish glints.
-    for (let i = 0; i < 14; i++) {
-      const x = rng.int(2, c.w - 4);
-      const y = rng.int(2, c.h - 2);
-      if ((x & 31) < 3 || (y & 31) < 3) continue;
-      c.shift(x, y, 2);
-      c.shift(x + 1, y, 1);
     }
   }, { wrap: true });
 }
@@ -564,7 +567,7 @@ export function z2MarbleTile(atlas: PwAtlas, o: { a: number; b: number; vein?: n
  * or two off it (a few coloured), zinc divider strips every 2 m, a sheen. 128 × 128.
  */
 export function z2TerrazzoTile(atlas: PwAtlas, o: { hex: number; chips?: number[] }): PwTile {
-  return atlas.tile(`z2terrazzo|${h6(o.hex)}|${(o.chips ?? []).map(h6).join('.')}`, 128, 128, (c, k) => {
+  return atlas.tile(`z2terrazzo2|${h6(o.hex)}|${(o.chips ?? []).map(h6).join('.')}`, 128, 128, (c, k) => {
     const rng = k.rng;
     const b = k.ramp(o.hex, { light: 0.42, sat: 0.8 });
     const chips = (o.chips ?? []).map((h) => k.ramp(h, { light: 0.4, sat: 0.8 }));
@@ -576,8 +579,9 @@ export function z2TerrazzoTile(atlas: PwAtlas, o: { hex: number; chips?: number[
       if (r < 0.08 && chips.length) c.cluster(x, y, rng.int(0, 3), chips[i % chips.length], 3);
       else c.cluster(x, y, rng.int(0, 3), 0, r < 0.55 ? 1 : -1);
     }
-    for (let x = 0; x < c.w; x += 64) c.vline(x, 0, c.h, b, 4);
-    for (let y = 0; y < c.h; y += 64) c.hline(0, y, c.w, b, 4);
+    // Zinc divider strips: a step under the ground (bright strips read as graph paper).
+    for (let x = 0; x < c.w; x += 64) c.vline(x, 0, c.h, b, 2);
+    for (let y = 0; y < c.h; y += 64) c.hline(0, y, c.w, b, 2);
   }, { wrap: true });
 }
 
@@ -866,25 +870,21 @@ export function z2BloodTile(atlas: PwAtlas, o: { hex: number }): PwTile {
  * anti-slip nosing — a grooved strip with chipped yellow paint.
  */
 export function z2TreadTile(atlas: PwAtlas, o: { hex: number }): PwTile {
-  return atlas.tile(`z2tread|${h6(o.hex)}`, 64, 16, (c, k) => {
+  return atlas.tile(`z2tread2|${h6(o.hex)}`, 64, 16, (c, k) => {
     const rng = k.rng;
-    const s = k.ramp(o.hex, { light: 0.4, sat: 0.8 });
-    const metal = k.ramp(0x5a5c58, { light: 0.5, sat: 0.4 });
-    const yel = k.ramp(0xa88a2a, { light: 0.35, sat: 0.8 });
+    const s = k.ramp(o.hex, { light: 0.32, dark: 0.55, sat: 0.8 });
+    const alu = k.ramp(mixHex(o.hex, 0x8a8e8c, 0.4), { light: 0.3, dark: 0.6, sat: 0.4 });
     for (let v = 0; v < 16; v++) {
       const y = c.h - 1 - v;
       for (let x = 0; x < c.w; x++) {
-        if (v < 7) {
-          // Trodden middle a step darker (feet keep to the centre of each 1 m), pits.
+        if (v < 8) {
+          // Trodden middle a step darker (feet keep to the centre of each 1 m).
           const mid = Math.abs(((x + 16) % 32) - 16) < 9;
           c.set(x, y, s, mid && hash2(x >> 1, v, 3) > 0.35 ? 2 : 3);
         } else if (v < 10) {
-          // Nosing: a groove along the edge, the front lip a step lighter; yellow paint mostly
-          // worn off. (Low contrast on purpose: seen from the head of the flight every tread is
-          // a few pixels tall, and hard light/dark bands per step shimmer.)
-          const groove = v === 8;
-          const paint = !groove && v === 9 && hash2(x >> 2, v, 9) > 0.55;
-          c.set(x, y, paint ? yel : metal, groove ? 2 : 3);
+          // Nosing: a 2-texel worn aluminium strip close in value to the concrete (seen from the head
+          // of the flight every tread is a few pixels tall: no hard bands to shimmer).
+          c.set(x, y, alu, v === 8 ? 2 : 3);
         } else c.set(x, y, s, 3);
       }
     }

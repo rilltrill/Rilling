@@ -569,3 +569,45 @@ export function trayDecal(atlas: PwAtlas): PwTile {
     c.ellipse(11, 4, 1.6, 1.6, k.ramp(0x9a6a3a, { light: 0.4 }), 3);
   });
 }
+
+/**
+ * Grime at the ceiling line (NEUTRAL, tinted to the wall; cut out): a ragged
+ * dark band under the ceiling with dribbles running down from it, the ends
+ * dithered off. Placed by rule along walls (never in the wall's repeat). 64 × 14.
+ */
+export function ceilingGrimeDecal(atlas: PwAtlas, variant = 0): PwTile {
+  const t = atlas.tile(`z2cgrime|${variant}`, 64, 14, (c, k) => {
+    const g = k.ramp(darken(STAIN_BASE, 0.78), { light: 0.35, sat: 0.7 });
+    for (let x = 0; x < 64; x++) {
+      const edge = Math.min(x, 63 - x) / 10;
+      const band = Math.round(1 + hash2(x >> 2, variant, 3) * 2);
+      for (let y = 0; y < band; y++) if (bayer(x, y) < Math.min(1, edge)) c.set(x, y, g, y === 0 ? 2 : 3);
+      if (hash2(x, variant, 5) > 0.82 && edge > 0.5) {
+        const len = 3 + Math.floor(hash2(x, variant, 6) * 10);
+        for (let y = band; y < band + len; y++) if (!(y > band + len * 0.6 && bayer(x, y) < 0.5)) c.set(x, y, g, 3);
+      }
+    }
+  });
+  t.neutral = STAIN_BASE;
+  return t;
+}
+
+/** Mop splash above the skirting (NEUTRAL, cut out): grey arcs and dots a hand high. 64 × 10. */
+export function mopSplashDecal(atlas: PwAtlas, variant = 0): PwTile {
+  const t = atlas.tile(`z2mop|${variant}`, 64, 10, (c, k) => {
+    const rng = k.rng;
+    const g = k.ramp(darken(STAIN_BASE, 0.8), { light: 0.35, sat: 0.6 });
+    for (let i = 0; i < 9; i++) {
+      const x0 = rng.int(4, 54);
+      const w = rng.int(4, 10);
+      for (let j = 0; j < w; j++) {
+        const y = 9 - Math.round(Math.sin((j / w) * Math.PI) * rng.range(2, 5));
+        c.set(x0 + j, y, g, 3);
+      }
+    }
+    for (let i = 0; i < 24; i++) c.set(rng.int(2, 61), rng.int(1, 9), g, 3);
+    for (let x = 0; x < 64; x++) if (hash2(x >> 1, variant, 8) > 0.5) c.set(x, 9, g, 2);
+  });
+  t.neutral = STAIN_BASE;
+  return t;
+}

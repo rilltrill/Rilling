@@ -645,7 +645,7 @@ export function buildHub(ctx: ZoneCtx): THREE.Group {
   }
   // Fire doors to the stairwell (swung open) + signs.
   for (const sx of [-1, 1]) {
-    const dg = grp(g, 79 + sx * 1.75, 0, -51.0, -sx * 0.25);
+    const dg = pwTag(grp(g, 79 + sx * 1.75, 0, -51.0, -sx * 0.25), 'fireDoor', { w: 1.7, h: 2.75 });
     blk(dg, 0.06, 2.75, 1.7, T(0x9a2a22, TX.paint), 0, 0, 0.88);
     box(dg, 0.08, 0.5, 0.3, M(0x101414), 0, 1.9, 0.88);
   }

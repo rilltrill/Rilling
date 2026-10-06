@@ -90,6 +90,27 @@ describe('z2 ST. MERCY HOSPITAL in PIXEL WORLD', () => {
     const dest = (w: World) => w.entities.filter((e) => e instanceof Destructible).map((e) => boxOf(e.root));
     expect(dest(px).length).toBeGreaterThan(4);
     expect(dest(px)).toEqual(dest(sp));
+    // The painted cylinders and doors keep their classic triangles: a ray into each destructible hits
+    // at the same distance in both styles (it is the hit box).
+    const rays = (w: World) =>
+      w.entities
+        .filter((e) => e instanceof Destructible)
+        .map((e) => {
+          e.root.updateMatrixWorld(true);
+          const c = new THREE.Box3().setFromObject(e.root).getCenter(new THREE.Vector3());
+          const hits: number[] = [];
+          for (const d of [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(-1, 0.2, 0)]) {
+            const rc = new THREE.Raycaster(c.clone().addScaledVector(d, -4), d);
+            const h = rc.intersectObject(e.root, true)[0];
+            hits.push(h ? r3(h.distance) : -1);
+          }
+          return hits;
+        });
+    expect(rays(px)).toEqual(rays(sp));
+    // The boiler wall's blocks (painted in place in PIXEL WORLD): same blocks, same places.
+    const wallOf = (w: World) => (z2Scene(w)!.wall?.pieces ?? []).map((p) => boxOf(p));
+    expect(wallOf(px).length).toBeGreaterThan(0);
+    expect(wallOf(px)).toEqual(wallOf(sp));
     // The world RNG is untouched by the scenery.
     expect(px.rng.state).toBe(sp.rng.state);
     px.dispose();

@@ -531,19 +531,46 @@ export function hospitalWindow(atlas: PwAtlas, kind: HospWindowKind, lit: number
       for (const hx of [cx - 11, cx + 7]) c.rect(hx, gy + 7, 5, 4, sil, 1);
     }
     if (kind === 'broken') {
-      // Star crack: shards fallen out show the dark room; the edges catch light.
-      const cx = gx + 14 + variant * 8;
-      const cy = gy + 22;
-      for (let y = gy; y < gy + gh; y++) for (let x = gx; x < gx + gw; x++) {
-        const d = Math.hypot(x - cx, (y - cy) * 0.8);
-        const a = Math.atan2(y - cy, x - cx);
-        const ragged = 9 + Math.sin(a * 5 + variant) * 3 + Math.sin(a * 11) * 1.5;
-        if (d < ragged) c.set(x, y, dark, 1);
-        else if (d < ragged + 1) c.set(x, y, alu, 5);
+      // Most of the lower pane gone: jagged shards left standing in the frame (lit edges), the dark
+      // room behind, a long crack across what is left above.
+      const top = gy + 20;
+      for (let x = gx; x < gx + gw; x++) {
+        const fromL = x - gx;
+        const fromR = gx + gw - 1 - x;
+        const shardL = Math.max(0, 14 - fromL * 1.6 + (fromL % 5) * 2);
+        const shardR = Math.max(0, 10 - fromR * 1.2 + (fromR % 4) * 3);
+        const shardB = 4 + ((x * 7) % 9 < 4 ? (x * 3) % 7 : 0);
+        for (let y = top + Math.max(shardL, shardR, 0) * 0.4; y < gy + gh - shardB; y++) {
+          const yy = Math.round(y);
+          if (fromL < shardL * 0.5 || fromR < shardR * 0.5) continue;
+          c.set(x, yy, dark, 1);
+        }
       }
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * 6.28 + 0.3;
-        c.line(cx + Math.cos(a) * 11, cy + Math.sin(a) * 9, cx + Math.cos(a) * 30, cy + Math.sin(a) * 26, alu, 4);
+      // Shard edges catch the light.
+      for (let y = top; y < gy + gh; y++) {
+        for (let x = gx + 1; x < gx + gw - 1; x++) {
+          const i = y * W + x;
+          if (c.ramp[i] === night && (c.ramp[i + 1] === dark || c.ramp[i - 1] === dark || c.ramp[i + W] === dark)) c.set(x, y, alu, 5);
+        }
+      }
+      c.line(gx + 3, gy + 15, gx + gw - 6, gy + 4, alu, 4);
+      c.line(gx + 20, gy + 11, gx + 26, gy + 19, alu, 4);
+    }
+    if (kind === 'dark') {
+      // A glimpse of the room: a ceiling tube dim behind the glass, a bed (0) or a door ajar on a lit
+      // corridor (1) in silhouette against the back wall.
+      const back = k.ramp(0x1e2a36, { light: 0.4 });
+      const sil = k.ramp(0x0a0e14, { light: 0.3 });
+      for (let x = gx + 6; x < gx + gw - 8; x++) c.set(x, gy + 3, back, 4);
+      if (variant === 0) {
+        c.rect(gx + 6, gy + 40, 30, 6, sil, 1);
+        c.rect(gx + 6, gy + 34, 3, 12, sil, 1);
+        c.vline(gx + 38, gy + 22, 24, sil, 1);
+        c.rect(gx + 36, gy + 22, 4, 5, back, 3);
+      } else {
+        const lit = k.ramp(0x8a9a88, { light: 0.4 });
+        c.rect(gx + 26, gy + 14, 9, 32, lit, 3, G);
+        c.rect(gx + 26, gy + 14, 3, 32, sil, 1);
       }
     }
     if (kind === 'boarded') {
@@ -558,6 +585,8 @@ export function hospitalWindow(atlas: PwAtlas, kind: HospWindowKind, lit: number
         }
       }
     }
+    // Reveal shadow: the head and the left jamb cast a step of shadow on the glass (depth).
+    for (let y = gy; y < gy + gh; y++) for (let x = gx; x < gx + gw; x++) if (y < gy + 3 || x < gx + 3) c.shift(x, y, -1);
     // Frame: outer aluminium frame, a transom bar at a third, a central mullion; lit top-left edges.
     c.frame(gx, gy, gw, gh, alu, 3);
     c.hline(gx, gy, gw, alu, 4);

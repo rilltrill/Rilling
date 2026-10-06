@@ -1,4 +1,4 @@
-import { PW_TPM, PWF, type PwCanvas } from './canvas';
+import { bayer, PW_TPM, PWF, type PwCanvas } from './canvas';
 import type { PwAtlas } from './atlas';
 import { drawText, FONT_3x5, FONT_5x7, FONT_BOLD, neonText, rasterText, textWidth, type PixelFont } from './font';
 import type { SignTile } from './signs';
@@ -454,3 +454,154 @@ export function z2Poster(atlas: PwAtlas, kind: PosterKind): SignTile {
   );
 }
 
+
+/**
+ * A big lit sign (EMERGENCY over the bay, ST MERCY HOSPITAL, OUTPATIENTS,
+ * ER, the atrium's ST MERCY) on a 4-texel grid: every font pixel is a 4 × 4
+ * cell, so the hand-made levels keep whole letters (2 × 2, then 1 texel a
+ * pixel) — no glyph crawl at a distance. Laid at the classic letter size
+ * (`px` metres a font pixel: `wM` / `hM`).
+ *  - neon (`neon`): a 2-texel tube following the glyph skeleton with a
+ *    1-texel hot core on its upper / left side, a halo ring and a dithered
+ *    spill round it (cut out beyond); dead letters are dark glass tubes;
+ *  - channel letters: lit faces (hot top row), a dark return down-right, a
+ *    glow spill washing the sign box round the lit letters.
+ * Fixed 6-pixel advance like the classic block letters (dead indices match).
+ */
+export function z2BigSign(atlas: PwAtlas, text: string, color: number, o: { px: number; plate: number | null; broken?: number[]; neon?: boolean }): SignTile {
+  const S = 4;
+  const chars = [...text];
+  const cols = chars.length * 6 - 1;
+  const pad = 1;
+  const W = (cols + pad * 2) * S;
+  const H = (7 + pad * 2) * S;
+  const broken = o.broken ?? [];
+  const key = `z2big|${text}|${h6(color)}|${o.plate === null ? 'n' : h6(o.plate)}|${broken.join('.')}|${o.neon ? 1 : 0}`;
+  const tile = atlas.tile(key, W, H, (c, k) => {
+    const lit = k.ramp(color, { light: 0.6, sat: 1.1 });
+    const dead = k.ramp(mixHex(color, 0x2a2a2e, 0.75), { light: 0.4 });
+    // Font-pixel mask (+ which letter each pixel belongs to).
+    const MW = cols + pad * 2;
+    const MH = 7 + pad * 2;
+    const mask = new Int16Array(MW * MH).fill(-1);
+    chars.forEach((ch, i) => {
+      const g = FONT_5x7.glyphs.get(ch) ?? FONT_5x7.glyphs.get(ch.toUpperCase());
+      if (!g || ch === ' ') return;
+      for (let r = 0; r < 7; r++) for (let q = 0; q < 5; q++) if (g[r]?.[q] === '#') mask[(pad + r) * MW + pad + i * 6 + q] = i;
+    });
+    const at = (x: number, y: number) => (x < 0 || y < 0 || x >= MW || y >= MH ? -1 : mask[y * MW + x]);
+    const isLit = (i: number) => i >= 0 && !broken.includes(i);
+    if (o.plate !== null) {
+      const p = k.ramp(o.plate, { light: 0.5, sat: 0.8 });
+      c.rect(0, 0, W, H, p, 2);
+      c.hline(0, 0, W, p, 4);
+      c.vline(0, 0, H, p, 3);
+      c.hline(0, H - 1, W, p, 0);
+      c.vline(W - 1, 0, H, p, 1);
+      screws(c, W, H, p);
+      // The lit letters wash the box round them (a cell's worth of glow spill).
+      for (let y = 1; y < MH - 1; y++) {
+        for (let x = 1; x < MW - 1; x++) {
+          if (at(x, y) >= 0) continue;
+          let near = false;
+          for (let dy = -1; dy <= 1 && !near; dy++) for (let dx = -1; dx <= 1 && !near; dx++) near = isLit(at(x + dx, y + dy));
+          if (near) c.rect(x * S, y * S, S, S, p, 3, PWF.GLOW);
+        }
+      }
+    }
+    if (o.neon) {
+      // Tube texels per cell: the middle 2 × 2, reaching out to on-neighbours (4- and 8-connected).
+      const tube = new Uint8Array(W * H);
+      const own = new Int16Array(W * H).fill(-1);
+      const put = (x: number, y: number, i: number) => {
+        if (x < 0 || y < 0 || x >= W || y >= H) return;
+        tube[y * W + x] = 1;
+        own[y * W + x] = i;
+      };
+      for (let y = 0; y < MH; y++) {
+        for (let x = 0; x < MW; x++) {
+          const i = at(x, y);
+          if (i < 0) continue;
+          const bx = x * S;
+          const by = y * S;
+          for (let ty = 1; ty <= 2; ty++) for (let tx = 1; tx <= 2; tx++) put(bx + tx, by + ty, i);
+          if (at(x + 1, y) === i) for (let ty = 1; ty <= 2; ty++) for (let tx = 3; tx <= 5; tx++) put(bx + tx, by + ty, i);
+          if (at(x, y + 1) === i) for (let ty = 3; ty <= 5; ty++) for (let tx = 1; tx <= 2; tx++) put(bx + tx, by + ty, i);
+          for (const dx of [-1, 1]) {
+            if (at(x + dx, y + 1) !== i || at(x + dx, y) === i || at(x, y + 1) === i) continue;
+            for (let s = 0; s < 4; s++) {
+              put(bx + 1 + (dx > 0 ? 2 + s : -s), by + 2 + s, i);
+              put(bx + 2 + (dx > 0 ? 2 + s : -s), by + 2 + s, i);
+            }
+          }
+        }
+      }
+      // Halo and spill round the lit tubes (glow, cut out beyond).
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          if (tube[y * W + x]) continue;
+          let d = 9;
+          let li = false;
+          for (let dy = -3; dy <= 3; dy++) {
+            for (let dx = -3; dx <= 3; dx++) {
+              const xx = x + dx;
+              const yy = y + dy;
+              if (xx < 0 || yy < 0 || xx >= W || yy >= H || !tube[yy * W + xx] || !isLit(own[yy * W + xx])) continue;
+              const dd = Math.max(Math.abs(dx), Math.abs(dy));
+              if (dd < d) {
+                d = dd;
+                li = true;
+              }
+            }
+          }
+          if (!li) continue;
+          if (d === 1) c.set(x, y, lit, 2, PWF.GLOW);
+          else if (d === 2 && bayer(x, y) < 0.5) c.set(x, y, lit, 1, PWF.GLOW);
+          else if (d === 3 && bayer(x, y) < 0.2) c.set(x, y, lit, 1, PWF.GLOW);
+        }
+      }
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const j = y * W + x;
+          if (!tube[j]) continue;
+          if (!isLit(own[j])) {
+            c.set(x, y, dead, (y % 4) === 1 ? 3 : 1);
+            continue;
+          }
+          // Hot core on the upper / left side of the tube, the body a step under.
+          const core = (!tube[j - W] || !tube[j - 1]) && (tube[j + W] || tube[j + 1]);
+          c.set(x, y, lit, core ? 5 : 4, PWF.GLOW);
+        }
+      }
+    } else {
+      for (let y = 0; y < MH; y++) {
+        for (let x = 0; x < MW; x++) {
+          const i = at(x, y);
+          if (i < 0) continue;
+          const bx = x * S;
+          const by = y * S;
+          // Return: the dark side below-right of the face.
+          if (at(x + 1, y) !== i) c.rect(bx + S, by + 1, 1, S, dead, 0);
+          if (at(x, y + 1) !== i) c.rect(bx + 1, by + S, S, 1, dead, 0);
+        }
+      }
+      for (let y = 0; y < MH; y++) {
+        for (let x = 0; x < MW; x++) {
+          const i = at(x, y);
+          if (i < 0) continue;
+          const top = at(x, y - 1) !== i;
+          const bot = at(x, y + 1) !== i;
+          if (!isLit(i)) {
+            c.rect(x * S, y * S, S, S, dead, top ? 3 : 2);
+            continue;
+          }
+          c.rect(x * S, y * S, S, S, lit, 4, PWF.GLOW);
+          if (top) c.hline(x * S, y * S, S, lit, 5, PWF.GLOW);
+          if (bot) c.hline(x * S, y * S + S - 1, S, lit, 3, PWF.GLOW);
+        }
+      }
+    }
+  });
+  const m = o.px / S;
+  return { tile, wM: W * m, hM: H * m };
+}

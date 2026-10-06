@@ -174,7 +174,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   // Night sky over the bay (follows the camera on XZ); PIXEL WORLD: a painted storm panorama instead.
   const sky = EnvKit.sky(0x05070d, 0x1a2436, 0x121b27, 300);
   root.add(sky);
-  const pwSky = pw ? pw.buildBackdrop(FOGS[0].color, FOGS[0].color) : null;
+  const pwSky = pw ? pw.buildBackdrop(FOGS[0].color) : null;
   if (pwSky) {
     sky.visible = false;
     root.add(pwSky);
@@ -239,12 +239,15 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   addZone(buildCorrC(ctx), D.corrB + 4, Infinity);
   addZone(buildAtrium(ctx), D.or + 2, Infinity);
   buildCrashAmbulance(ctx);
-  zones.push({ g: buildShafts(ctx), from: D.or, to: Infinity });
+  const shafts = buildShafts(ctx);
+  pw?.paintShafts(shafts);
+  zones.push({ g: shafts, from: D.or, to: Infinity });
   buildCocoon(ctx);
   if (pw) {
     setBakeHook(null);
     pw.registerDynamic(sc.flickers, sc.vents.map((v) => v.grate), sc.doorSlots.map((d) => d.color));
     pw.finish(1, sc.flickers);
+    pw.paintWall(sc.wall);
   }
   const vegPx = new THREE.Group();
   vegPx.name = 'z2-vegPx';
@@ -341,8 +344,9 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     sky.visible = !pwSky && d < D.corrA;
     if (pwSky) {
       pwSky.visible = d < D.corrA;
-      pw!.backdrop!.update(_cam);
+      pw!.updateSky(_cam);
     }
+    pw?.tick(dt);
 
     // Flashlight from just below/right of the eye, aimed where the camera looks.
     _right.set(-_dir.z, 0, _dir.x).normalize();

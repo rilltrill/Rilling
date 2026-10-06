@@ -21,20 +21,6 @@ function cyl(c: PwCanvas, x0: number, y0: number, x1: number, y1: number, ramp: 
   }
 }
 
-/** A wheel seen at an angle: tyre ring, hub, spokes. */
-function wheel(c: PwCanvas, cx: number, cy: number, rx: number, ry: number, tyre: number, rim: number, spokes = 6) {
-  c.ellipse(cx, cy, rx, ry, tyre, 1);
-  c.ellipse(cx, cy, rx - 1.2, ry - 1.2, rim, 2);
-  c.ellipse(cx, cy, rx - 2.2, ry - 2.2, tyre, 0);
-  for (let i = 0; i < spokes; i++) {
-    const a = (i / spokes) * Math.PI * 2;
-    c.line(cx, cy, cx + Math.cos(a) * (rx - 2), cy + Math.sin(a) * (ry - 2), rim, i % 2 ? 3 : 4);
-  }
-  c.ellipse(cx, cy, 1.2, 1.2, rim, 4);
-  // Lit upper-left arc of the tyre.
-  for (let a = 3.6; a < 5.2; a += 0.15) c.set(Math.round(cx + Math.cos(a) * rx * 0.95), Math.round(cy + Math.sin(a) * ry * 0.95), tyre, 3);
-}
-
 function sprite(atlas: PwAtlas, key: string, w: number, h: number, paint: (c: PwCanvas, k: PwKit) => void): PwTile {
   return atlas.tile(`z2spr|${key}`, w, h, (c, k) => {
     paint(c, k);
@@ -45,66 +31,94 @@ function sprite(atlas: PwAtlas, key: string, w: number, h: number, paint: (c: Pw
 /** Wheelchair, three-quarter view (0.75 × 0.95 m). */
 export function wheelchairSprite(atlas: PwAtlas, tipped = false): PwTile {
   if (tipped) {
-    return sprite(atlas, 'wheelchairTipped', 34, 22, (c, k) => {
-      const steel = k.ramp(0xa8b0b4, { light: 0.55, sat: 0.4 });
-      const tyre = k.ramp(0x1c1e1e, { light: 0.45 });
-      const seat = k.ramp(0x24323a, { light: 0.45 });
-      // On its side: the big wheel up like a disc, the seat sideways, a caster in the air.
-      c.ellipse(16, 18, 15, 3, k.ramp(0x101010, { light: 0.2 }), 1);
-      c.rect(6, 9, 14, 6, seat, 3);
-      c.hline(6, 9, 14, seat, 4);
-      c.rect(20, 4, 4, 12, seat, 2);
-      c.line(4, 14, 26, 14, steel, 4);
-      c.line(24, 3, 30, 3, steel, 4);
-      wheel(c, 11, 12, 9, 6, tyre, steel, 6);
-      wheel(c, 28, 8, 3, 3, tyre, steel, 3);
+    return sprite(atlas, 'wheelchairTipped2', 36, 20, (c, k) => {
+      const steel = k.ramp(0x8a9296, { light: 0.45, sat: 0.4 });
+      const tyre = k.ramp(0x1c1e1e, { light: 0.4 });
+      const seat = k.ramp(0x2a3a46, { light: 0.45 });
+      // On its side: the lower big wheel flat on the floor (a squashed ellipse), the seat and back
+      // standing sideways, the upper wheel seen edge-on in the air, a caster sticking up.
+      c.ellipse(17, 18, 16, 2, k.ramp(0x101010, { light: 0.2 }), 1);
+      c.ellipse(13, 15, 10, 3.2, tyre, 1);
+      c.ellipse(13, 15, 8.4, 2.2, steel, 2);
+      c.ellipse(13, 15, 7, 1.4, tyre, 0);
+      c.poly([6, 12, 20, 11, 21, 6, 8, 7], seat, 3);
+      c.hline(8, 7, 13, seat, 4);
+      c.poly([20, 3, 26, 2, 27, 12, 21, 12], seat, 2);
+      c.vline(20, 3, 9, seat, 3);
+      c.line(4, 11, 24, 10, steel, 4);
+      c.line(26, 2, 33, 1, steel, 3);
+      c.ellipse(15, 5, 1.6, 4.5, tyre, 1);
+      c.ellipse(15, 5, 0.8, 3.4, steel, 3);
+      c.vline(31, 3, 4, steel, 3);
+      c.ellipse(31, 2, 1.3, 1.3, tyre, 1);
     });
   }
-  return sprite(atlas, 'wheelchair', 26, 32, (c, k) => {
-    const steel = k.ramp(0xa8b0b4, { light: 0.55, sat: 0.4 });
-    const tyre = k.ramp(0x1c1e1e, { light: 0.45 });
-    const seat = k.ramp(0x24323a, { light: 0.45 });
-    // Contact shadow.
-    c.ellipse(13, 31, 12, 1.5, k.ramp(0x101010, { light: 0.2 }), 1);
-    // Back wheel (far), frame, seat, back rest, handles, near wheel, caster, footplate.
-    wheel(c, 16, 19, 8, 10, tyre, steel, 6);
-    c.rect(5, 15, 15, 4, seat, 3);
-    c.hline(5, 15, 15, seat, 4);
-    c.rect(15, 3, 5, 13, seat, 3);
-    c.vline(15, 3, 13, seat, 4);
-    c.line(19, 3, 21, 0, steel, 4);
-    c.line(5, 19, 3, 28, steel, 3);
-    c.hline(1, 28, 5, steel, 4);
-    c.line(5, 13, 15, 13, steel, 4);
-    wheel(c, 11, 21, 9, 10, tyre, steel, 8);
-    c.ellipse(3, 30, 1.5, 1.5, tyre, 1);
+  return sprite(atlas, 'wheelchair2', 28, 32, (c, k) => {
+    const steel = k.ramp(0x8a9296, { light: 0.45, sat: 0.4 });
+    const tyre = k.ramp(0x1c1e1e, { light: 0.4 });
+    const seat = k.ramp(0x2a3a46, { light: 0.45 });
+    const shadow = k.ramp(0x101010, { light: 0.2 });
+    // Seen three-quarter from the front left: the big wheels are tall narrow ellipses.
+    c.ellipse(14, 31, 13, 1.5, shadow, 1);
+    // Far wheel (behind the seat, half hidden), its hand-rim a thin inner ring.
+    c.ellipse(19, 19, 3.5, 10, tyre, 1);
+    c.ellipse(19, 19, 2.2, 8.6, steel, 2);
+    c.ellipse(19, 19, 1.2, 7.5, tyre, 0);
+    // Back rest (sling, leaning back) with the push handles, the seat sling, armrests.
+    c.poly([14, 4, 19, 3, 20, 16, 14, 17], seat, 3);
+    c.vline(14, 4, 13, seat, 4);
+    c.vline(19, 3, 13, seat, 2);
+    c.hline(19, 2, 4, steel, 3);
+    c.hline(13, 3, 2, steel, 4);
+    c.poly([5, 15, 16, 15, 18, 19, 7, 19], seat, 3);
+    c.hline(5, 15, 11, seat, 4);
+    c.hline(4, 12, 12, steel, 4);
+    c.hline(4, 13, 12, steel, 2);
+    c.vline(5, 13, 3, steel, 3);
+    // Front: footrests angled forward, the caster forks and small wheels.
+    c.line(7, 19, 4, 26, steel, 3);
+    c.line(11, 19, 9, 26, steel, 3);
+    c.hline(2, 27, 5, steel, 4);
+    c.hline(7, 27, 5, steel, 4);
+    c.hline(2, 28, 10, steel, 2);
+    c.ellipse(3, 30, 1.4, 1.4, tyre, 1);
+    c.ellipse(10, 30, 1.4, 1.4, tyre, 1);
+    // Near wheel: tyre, rim, hub and a few spokes as thin lines, the lit upper-left of the tyre.
+    c.ellipse(9, 20, 4.2, 10.5, tyre, 1);
+    c.ellipse(9, 20, 3, 9.2, steel, 3);
+    c.ellipse(9, 20, 2, 8, tyre, 0);
+    for (const dy of [-6, 0, 6]) c.line(9, 20, 9 + (dy ? 1 : 2), 20 + dy, steel, 3);
+    c.ellipse(9, 20, 1, 1.2, steel, 4);
+    for (let a = 3.4; a < 5.0; a += 0.12) c.set(Math.round(9 + Math.cos(a) * 4), Math.round(20 + Math.sin(a) * 10.3), tyre, 3);
   });
 }
 
-/** IV drip stand with a bag (0.4 × 2.0 m). `liquid` tints the bag. */
+/** IV drip stand with a bag (0.4 × 2.0 m). `liquid` tints the bag. Steel-grey, not a bright pole. */
 export function ivSprite(atlas: PwAtlas, red = false): PwTile {
-  return sprite(atlas, `iv|${red ? 1 : 0}`, 14, 64, (c, k) => {
-    const steel = k.ramp(0xb8c0c4, { light: 0.55, sat: 0.4 });
-    const bag = k.ramp(0xd8e8d0, { light: 0.4, sat: 0.5 });
-    const liquid = k.ramp(red ? 0x9a1a1a : 0xc8d8a0, { light: 0.45 });
+  return sprite(atlas, `iv2|${red ? 1 : 0}`, 14, 64, (c, k) => {
+    const steel = k.ramp(0x7a8286, { light: 0.4, sat: 0.35 });
+    const bag = k.ramp(0xb8c8bc, { light: 0.3, sat: 0.5 });
+    const liquid = k.ramp(red ? 0x8a1a1a : 0xa8b890, { light: 0.35 });
     const tyre = k.ramp(0x1c1e1e, { light: 0.4 });
-    // Pole, hook bar, five-leg base with casters.
-    c.vline(7, 4, 58, steel, 4);
+    // Pole (a lit left texel, a shaded right), the hook bar, a five-leg base with casters.
+    c.vline(7, 4, 58, steel, 3);
     c.vline(8, 4, 58, steel, 2);
-    c.hline(2, 4, 11, steel, 4);
-    c.set(2, 5, steel, 3);
-    c.set(12, 5, steel, 3);
-    c.line(1, 62, 7, 59, steel, 3);
-    c.line(13, 62, 8, 59, steel, 3);
-    c.line(4, 63, 7, 60, steel, 2);
-    c.line(11, 63, 8, 60, steel, 2);
+    c.hline(3, 4, 9, steel, 3);
+    c.set(3, 5, steel, 2);
+    c.set(11, 5, steel, 2);
+    c.line(1, 62, 7, 59, steel, 2);
+    c.line(13, 62, 8, 59, steel, 2);
+    c.line(4, 63, 7, 60, steel, 1);
+    c.line(11, 63, 8, 60, steel, 1);
     for (const x of [1, 4, 11, 13]) c.set(x, 63, tyre, 1);
-    // Bag: a soft rounded pouch with a meniscus and a highlight; the drip line.
-    c.rect(9, 7, 4, 9, bag, 3);
-    c.rect(9, 11, 4, 5, liquid, 3);
-    c.vline(9, 7, 9, bag, 4);
-    c.set(10, 8, bag, 5);
-    c.vline(11, 16, 20, k.ramp(0xd0d8d0, { light: 0.3 }), 3);
+    // The bag hanging off the hook: a soft pouch (the liquid inside), the tube looping down.
+    c.rect(9, 6, 4, 9, bag, 3);
+    c.rect(9, 10, 4, 5, liquid, 3);
+    c.vline(9, 6, 9, bag, 4);
+    c.set(12, 14, bag, 2);
+    c.vline(11, 15, 3, bag, 2);
+    c.line(11, 18, 12, 30, k.ramp(0xa8b0a8, { light: 0.25 }), 2);
+    c.line(12, 30, 10, 38, k.ramp(0xa8b0a8, { light: 0.25 }), 2);
   });
 }
 

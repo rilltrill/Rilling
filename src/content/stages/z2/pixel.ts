@@ -3,7 +3,7 @@ import type { TexName } from '../../kit/Textures';
 import { PwAtlas, type PwTile } from '../../pixelworld/atlas';
 import { PwBatch, planarUv } from '../../pixelworld/batch';
 import { NEUTRAL_BRICK, NEUTRAL_HEX } from '../../pixelworld/retexture';
-import { asphaltTile, brickTile, curbTile, grateTile, hazardTile, roadPaintTile } from '../../pixelworld/surfaces';
+import { brickTile, curbTile, grateTile, hazardTile, roadPaintTile } from '../../pixelworld/surfaces';
 import { chainFenceTile } from '../../pixelworld/props';
 import {
   z2BlockTile, z2BloodTile, z2CeilingTile, z2ConcreteTile, z2CurtainTile, z2EnamelTile, z2FleshTile, z2FloorTileTile, z2GlazedTile, z2LinenTile, z2MarbleTile, z2PaintTile,
@@ -11,26 +11,30 @@ import {
 } from '../../pixelworld/z2surfaces';
 import { B } from './layout';
 import { PW_TPM } from '../../pixelworld/canvas';
-import { pwMaterial } from '../../pixelworld/material';
+import { pwMaterial, pwTick } from '../../pixelworld/material';
+import { d2CalmLevels } from '../../pixelworld/d2levels';
+import { CYL_SIZE, z2CopingTile, z2CylTile, z2FireDoorLeaf, z2FleshDrape, z2PedestalFace, z2PlankModule, z2RubbleTile, z2VineModule, z2DangleCard, z2VentModule, type CylKind } from '../../pixelworld/z2objects';
+import { drainpipeTile } from '../../pixelworld/facade';
+import { Z2_PUDDLE_FRAMES, z2InstrumentsDecal, z2LightPool, z2PoolMesh, z2SterileField, z2ManholeDecal, z2OilDecal, z2PatchDecal, z2PoolTexture, z2PuddleTile, z2ReflectDecal, z2RoadStencil, z2SkidTile, z2WetAsphaltTile, type PuddleLight } from '../../pixelworld/z2bay';
 import { hash2 } from '../../pixelworld/surfaces';
-import { ventModule } from '../../pixelworld/interior';
 import {
   bloodPoolDecal, bloodWipeDecal, brokenTilesDecal, bloodWordsDecal, ceilingHoleDecal, ceilingStainDecal, dragTrailTile, drainDecal, floorCrackDecal, floorStainDecal, handprintDecal,
-  papersDecal, pictureGhostDecal, pillsDecal, puddleDecal, spatterDecal, trayDecal, wallCrackDecal, waterStainDecal,
+  papersDecal, pictureGhostDecal, pillsDecal, puddleDecal, spatterDecal, trayDecal, wallCrackDecal, waterStainDecal, ceilingGrimeDecal, mopSplashDecal,
 } from '../../pixelworld/z2decals';
 import {
   bedBoard, bedHeadUnit, clockFace, drawerFace, shelfFront, emergencyLampFace, extinguisherMod, fixture, hospitalWindow, monitorFace, nightWindow, redCross, troffer, tvBroadcast, vendingFront,
   whiteboardFace, xrayFace, copingTile, doorLeaf, roofUnit, type FixtureKind, type HospWindowKind, type RoofKind,
 } from '../../pixelworld/z2modules';
 import { Z2Billboards } from '../../pixelworld/z2billboard';
-import { columnTile, doorwayModule, fasciaTile, dripTile, glassRailTile, membraneTile, officeWindow, pustuleDecal, skylightTile, veinTile } from '../../pixelworld/z2atrium';
+import { bannerModule, bigClock, cafeFront, sconceModule, columnTile, directoryBoard, doorwayModule, elevatorBank, fasciaTile, dripTile, glassRailTile, membraneTile, officeWindow, pustuleDecal, skylightTile, veinTile } from '../../pixelworld/z2atrium';
+import { d1ShaftMaterial } from '../../pixelworld/d1Shafts';
 import { ambulanceCabSide, ambulanceDoor, ambulanceFront, ambulanceSide, carCabin, carEnd, carSide } from '../../pixelworld/z2vehicles';
 import type { Ambulance } from './props';
 import { PwBackdrop } from '../../pixelworld/backdrop';
-import { z2CityTile, z2StormSkyTile } from '../../pixelworld/z2sky';
+import { z2CityTile, z2RoofsTile, z2SkyDome, z2StormSkyTile } from '../../pixelworld/z2sky';
 import { bedsideSprite, binSprite, bodyBagSprite, coneSprite, drumSprite, filingSprite, corpseSprite, crashCartSprite, ivSprite, laundrySprite, potSprite, trolleySprite, wheelchairSprite } from '../../pixelworld/z2props';
 import { anesthesiaFront, autopsyTop, chairBack, chairEdge, chairSeat, chairShell, counterFront, deadArmSprite, drapeTop, hemTile, openCavity, sheetTile, toeTag } from '../../pixelworld/z2furniture';
-import { z2ExitSign, z2LitSign, z2PlateSign, z2Poster, z2Stencil, type PosterKind } from '../../pixelworld/z2signs';
+import { z2BigSign, z2ExitSign, z2LitSign, z2PlateSign, z2Poster, z2Stencil, type PosterKind } from '../../pixelworld/z2signs';
 
 /**
  * ST. MERCY HOSPITAL in ART: PIXEL WORLD.
@@ -76,6 +80,14 @@ interface Job {
   parent: THREE.Object3D;
   batch: PwBatch;
   bills: Z2Billboards;
+  /** Animated strips (puddles), one material plays them. */
+  anim: PwBatch | null;
+  /** Additive light pools laid on the ground: [colour, x, y, z, w, d, strength]. */
+  pools: number[][];
+  /** Brightness of its painted surfaces (× the stage gain). */
+  gain?: number;
+  /** Floor height of a zone (troffer light pools land on it); undefined for set pieces. */
+  floor?: number;
 }
 
 /** A wall / floor / ceiling piece seen by the converter (world-axis box), for the decal scatter. */
@@ -121,6 +133,8 @@ export class Z2PixelWorld {
   /** Flicker diffusers / vent grates painted after the atlas is built. */
   private dynFlickers: { mesh: THREE.Mesh; warm: boolean }[] = [];
   private dynGrates: THREE.Mesh[] = [];
+  /** The animated puddles' material (its clock advances in `tick`). */
+  private animMat: THREE.Material | null = null;
   /** Decal counter (staggers coplanar decal offsets). */
   private nDecal = 0;
   /** Billboards of the group being converted. */
@@ -132,48 +146,265 @@ export class Z2PixelWorld {
   convertZone(g: THREE.Group) {
     const b = new PwBatch(this.atlas);
     this.bills = new Z2Billboards();
-    this.jobs.push({ parent: g, batch: b, bills: this.bills });
-    g.updateMatrixWorld(true);
+    // (The boss arena is on screen longest and its lights are low: its paint a step brighter.)
     const floor = ZONE_FLOOR[g.name] ?? 0;
+    this.job = { parent: g, batch: b, bills: this.bills, anim: null, pools: [], gain: g.name === 'atrium' ? 1.3 : 1, floor: g.name.startsWith('bay') ? undefined : floor };
+    this.jobs.push(this.job);
+    g.updateMatrixWorld(true);
     const pieces: Piece[] = [];
     this.handleTagged(g, b);
     this.emitAll(g, b, floor, true, pieces);
     this.scatter(b, pieces, g.name, floor);
-    if (g.name === 'bay') this.roofline(b, -34, 34, 16, -25.85, 'z');
-    if (g.name === 'bayField') this.roofline(b, -26, 12, 12, -18, 'x');
+    if (g.name === 'bay') {
+      this.roofline(b, -34, 34, 16, -25.85, 'z');
+      this.facadeDetail(b);
+      this.bayLights(b);
+    }
+    if (g.name === 'atrium') this.atriumDressing(b);
+    if (g.name === 'bayField') {
+      this.roofline(b, -26, 12, 12, -18, 'x');
+      this.bayGround(b);
+    }
+  }
+
+  /** The job being converted (its animated batch on demand). */
+  private job: Job | null = null;
+  private animOf(): PwBatch {
+    const j = this.job!;
+    if (!j.anim) j.anim = new PwBatch(this.atlas);
+    return j.anim;
+  }
+
+  /** An animated puddle (frame 0's rect: the material steps through the strip) flat at (x, y, z). */
+  private puddle(x: number, y: number, z: number, light: PuddleLight, v: number, w = 2, d = 1.25) {
+    const t = z2PuddleTile(this.atlas, light, v);
+    this.animOf().rect(_o.set(x - w / 2, y + 0.004 + (this.nDecal++ % 3) * 0.001, z + d / 2), X, NZ, w, d, t, { sub: { x: 0, y: 0, w: t.w, h: t.h / Z2_PUDDLE_FRAMES } });
+  }
+
+  /** Which light a bay puddle mirrors (by where it lies: the canopy's red, the wing's cyan sign, windows, sky). */
+  private puddleLight(x: number, z: number, h: number): PuddleLight {
+    if (Math.abs(x) < 11 && z < -6 && z > -26) return 'red';
+    if (x < -9 && z < 2) return 'cyan';
+    return h > 0.5 ? 'warm' : 'sky';
+  }
+
+  /**
+   * The bay's wet ground by rule: puddles along the canopy's drip line and the
+   * kerb, round the drains; the long broken reflections of the EMERGENCY and
+   * OUTPATIENTS neon on the wet asphalt.
+   */
+  private bayGround(b: PwBatch) {
+    const a = this.atlas;
+    // Drip line under the canopy's front edge, and the kerb's gutter.
+    for (const [x, z, w, d] of [[-7.2, -9.4, 2.2, 1.1], [-1.5, -9.2, 1.6, 0.9], [4.4, -9.5, 2.4, 1.2], [8.9, -9.1, 1.4, 0.8], [-12.5, -21.3, 2.4, 1.0], [12.8, -21.2, 1.8, 0.8], [-6.6, -21.3, 1.4, 0.7]] as const) {
+      this.puddle(x, 0, z, this.puddleLight(x, z, 0), 0, w, d);
+    }
+    // Drains (grates in the gutter / the apron), each in its puddle.
+    for (const [x, z] of [[-9.5, -21.5], [9.6, -21.5], [-2, 6]] as const) {
+      const t = drainDecal(a);
+      b.rect(_o.set(x - 0.3, 0.007, z + 0.3), X, NZ, 0.6, 0.6, t);
+      this.puddle(x + 0.2, 0, z + 0.2, this.puddleLight(x, z, 0.8), 0, 2.4, 1.4);
+    }
+    // Neon reflections on the wet ground: long narrow streaks from under the signs toward the eye.
+    // (Half density: chunky shimmer dashes, a quarter of the texels.)
+    b.rect(_o.set(-3.4, 0.009, -10.2 + 2.4), X, NZ, 6.8, 2.4, z2ReflectDecal(a, 0xff3a2a, 109, 38));
+    b.rect(_o.set(-17.7 + 2.2, 0.009, -8 + 2.2), NZ, NX, 4.4, 2.2, z2ReflectDecal(a, 0x8ad8ff, 70, 35));
+    // Asphalt with a history (placed, never in the repeat): cut patches, oil where vehicles stood,
+    // manholes, a skid curving down the drive.
+    const flat = (x: number, z: number, t: PwTile, ang = 0, y = 0.005) => {
+      const w = t.w / PW_TPM;
+      const h = t.h / PW_TPM;
+      const c = Math.cos(ang);
+      const sn = Math.sin(ang);
+      _u.set(c, 0, sn);
+      _v.set(sn, 0, -c);
+      _o.set(x, y + (this.nDecal++ % 4) * 0.0008, z).addScaledVector(_u, -w / 2).addScaledVector(_v, -h / 2);
+      b.rect(_o, _u, _v, w, h, t);
+    };
+    for (const [x, z, v] of [[-9, 4, 0], [7, 14, 1], [-14, -12, 1], [13.5, -4, 0], [-2.5, 19, 1]] as const) flat(x, z, z2PatchDecal(a, 0x3a3e46, 0), v ? Math.PI / 2 : 0, 0.003);
+    [[-5.5, -16.5], [6.2, -13.8], [-12, -2], [10, 9], [-8.5, 12], [4.5, -3.5]].forEach(([x, z], i) => flat(x, z, z2OilDecal(a, i % 3), i * 0.9));
+    for (const [x, z] of [[8, -1], [-6, 9]]) flat(x, z, z2ManholeDecal(a));
+    const skid: THREE.Vector3[] = [];
+    for (let i = 0; i <= 12; i++) {
+      const t = i / 12;
+      skid.push(new THREE.Vector3(2.5 - t * 6 + Math.sin(t * 3.1) * 2.2, 0.006, 17 - t * 15));
+    }
+    b.ribbon(skid, 1.5, z2SkidTile(a, 0x3a3e46));
+  }
+
+  /**
+   * The Patient Zero atrium, composed and lit: the elevator bank and the
+   * directory on the back wall, a café on the right, a stopped clock and lit
+   * office windows above, anniversary banners hanging from the top balconies,
+   * the pool's red glow on the marble.
+   */
+  private atriumDressing(b: PwBatch) {
+    const a = this.atlas;
+    const Bf = B;
+    // Back wall (x = 22, facing +x): elevators, the directory, a stopped clock, office windows.
+    this.lay(b, _mm.identity(), _o.set(22.17, Bf, -128 + 1.875), NZ, Y, 3.75, 3.25, elevatorBank(a));
+    this.lay(b, _mm, _o.set(22.17, Bf + 1.0, -116.5 + 0.625), NZ, Y, 1.25, 1.6, directoryBoard(a));
+    this.lay(b, _mm, _o.set(22.16, 4.5 + 1.35, -127 + 0.75), NZ, Y, 1.5, 1.5, bigClock(a));
+    for (const [y, z, k] of [[4.5, -115, 0], [4.5, -132, 1], [9, -113.5, 2], [9, -129, 3]] as const) {
+      const lit = hash2(k, 5, 23) > 0.35;
+      this.lay(b, _mm, _o.set(22.165, y + 1.4, z + 0.7), NZ, Y, 1.4, 0.8, officeWindow(a, lit ? 0xd8c890 : 0x2a3434, k & 1));
+    }
+    // Sconces along the balcony walls (a rhythm of warm lights on every level; a few dead).
+    for (const ly of [0, 4.5, 9]) {
+      for (let x = 26; x < 49; x += 6.5) {
+        for (const [z, f, dx] of [[-106 - 0.17, -1, 1.3], [-136 + 0.17, 1, 3.3]] as const) {
+          const lit = hash2(Math.round(x * 2), Math.round(ly * 2) + f, 29) > 0.3;
+          const sx = x + dx;
+          if (f < 0) this.lay(b, _mm, _o.set(sx + 0.15, ly + 2.0, z - 0.01), NX, Y, 0.3, 0.44, sconceModule(a, lit));
+          else this.lay(b, _mm, _o.set(sx - 0.15, ly + 2.0, z + 0.01), X, Y, 0.3, 0.44, sconceModule(a, lit));
+        }
+      }
+    }
+    // Right wall (z = -136, facing +z): the café, its shutter half down.
+    this.lay(b, _mm, _o.set(45, Bf, -135.82), X, Y, 5, 3, cafeFront(a));
+    // Banners from the top balconies' fascias (both faces).
+    let k = 0;
+    for (const x of [29.5, 43]) {
+      for (const [z, f] of [[-109.62, -1], [-132.38, 1]] as const) {
+        const t = bannerModule(a, k++ & 1);
+        if (f < 0) {
+          this.lay(b, _mm, _o.set(x + 0.5, 5.0, z), NX, Y, 1, 3.5, t);
+          this.lay(b, _mm, _o.set(x - 0.5, 5.0, z + 0.02), X, Y, 1, 3.5, t);
+        } else {
+          this.lay(b, _mm, _o.set(x - 0.5, 5.0, z), X, Y, 1, 3.5, t);
+          this.lay(b, _mm, _o.set(x + 0.5, 5.0, z - 0.02), NX, Y, 1, 3.5, t);
+        }
+      }
+    }
+    // The pool's red glow on the marble round the fountain.
+    this.job!.pools.push([0xff3a1a, 35, Bf + 0.013, -121, 20, 20, 0.42]);
+  }
+
+  /**
+   * The moonlight shafts under the skylight (additive cylinders): hard-edged
+   * rays in stepped strengths instead of pale slabs, and a cold stepped pool
+   * where each meets the floor.
+   */
+  paintShafts(g: THREE.Object3D) {
+    const mat = d1ShaftMaterial(0x7a98d8, 0.16);
+    const tex = z2PoolTexture();
+    const pools: THREE.Mesh[] = [];
+    g.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.material = mat;
+      const h = (m.geometry as THREE.CylinderGeometry).parameters?.height ?? 18;
+      const x = m.position.x + Math.sin(m.rotation.z) * (h / 2);
+      pools.push(z2LightPool(tex, 0x6a88c8, x, B + 0.014, m.position.z, 6.5, 6.5, 0.32));
+    });
+    for (const p of pools) g.add(p);
+  }
+
+  /**
+   * The facade's depth: stone string courses at the floor lines, downpipes
+   * between the bays, dead creeper climbing the corners.
+   */
+  private facadeDetail(b: PwBatch) {
+    const a = this.atlas;
+    const course = copingTile(a);
+    for (const y of [4.95, 8.0, 11.3]) b.rect(_o.set(-34, y, -25.79), X, Y, 68, 0.25, course, { u0: 0, v0: 8 });
+    const pipe = drainpipeTile(a, { hex: 0x4a5054 });
+    for (const x of [-17.6, 17.6, -33.3, 33.3]) b.rect(_o.set(x - 0.25, 0.1, -25.78), X, Y, 0.5, 15.8, pipe);
+    b.rect(_o.set(-31.5, 0, -25.77), X, Y, 2, 4, z2VineModule(a, 0));
+    b.rect(_o.set(26.5, 0, -25.77), X, Y, 2, 4, z2VineModule(a, 0), { flipU: true });
+  }
+
+  /** Red neon spilling on the ground: under the canopy's EMERGENCY and at the entrance (additive stepped pools). */
+  private bayLights(_b: PwBatch) {
+    this.job!.pools.push([0xff2a1a, 0, 0.011, -11.6, 15, 7, 0.5], [0xff3020, 0, 0.152, -24.4, 7, 3, 0.4]);
   }
 
   /** `bakeInto` hook: re-paint a set piece's meshes into a batch in its parent's frame (call before its bake). */
   convertInto(g: THREE.Group, parent: THREE.Object3D) {
     const b = new PwBatch(this.atlas);
     this.bills = new Z2Billboards();
-    this.jobs.push({ parent, batch: b, bills: this.bills });
+    this.job = { parent, batch: b, bills: this.bills, anim: null, pools: [] };
+    this.jobs.push(this.job);
     g.updateMatrixWorld(true);
+    this.boards(g, b);
     this.handleTagged(g, b);
     this.emitAll(g, b, 0, false, null);
+  }
+
+  /**
+   * The boiler wall's KEEP OUT: its classic crack strokes become boards nailed
+   * across the blocks (grain, nail heads, a cast shadow), at their angles.
+   */
+  private boards(g: THREE.Group, b: PwBatch) {
+    let keep = false;
+    g.traverse((o) => {
+      if (o.userData.pw?.kind === 'text' && o.userData.pw.text === 'KEEP OUT') keep = true;
+    });
+    if (!keep) return;
+    _inv.copy(g.matrixWorld).invert();
+    let k = 0;
+    for (const c of [...g.children]) {
+      const m = c as THREE.Mesh;
+      if (!m.isMesh || (m.material as THREE.MeshLambertMaterial).color?.getHex() !== 0x1a1a18) continue;
+      const len = (m.geometry as THREE.BoxGeometry).parameters.width;
+      _rel.multiplyMatrices(_inv, m.matrixWorld);
+      const L = Math.min(1.6, Math.max(1.1, len * 1.4));
+      const t = z2PlankModule(this.atlas, k++ % 2);
+      this.lay(b, _rel, _o.set(-L / 2, -0.17, 0.014 + k * 0.002), X, Y, L, 10 / PW_TPM, t, { sub: { x: 0, y: 0, w: Math.round(L * PW_TPM), h: 10 } });
+      g.remove(m);
+    }
   }
 
   /** Register the dynamic panels / grates (their painted look is set in `finish`) and the breakable doors' leaves. */
   registerDynamic(flickers: { mesh: THREE.Mesh }[], grates: THREE.Object3D[], doorColors: number[] = []) {
     for (const c of doorColors) doorLeaf(this.atlas, c);
+    // The cylinders (painted when they spawn) and the boiler wall's broken cores.
+    z2CylTile(this.atlas, 'gas', 0xc22a1e);
+    z2CylTile(this.atlas, 'oxygen', 0x1f8a3c);
+    z2RubbleTile(this.atlas);
     z2EnamelTile(this.atlas, { hex: NEUTRAL_HEX }).neutral = NEUTRAL_HEX;
     // Registers the tiles now (before the atlas is built).
     troffer(this.atlas, 'on');
     troffer(this.atlas, 'warm');
-    ventModule(this.atlas, { hex: 0x9aa09c });
+    z2VentModule(this.atlas, 0x9aa09c);
     for (const f of flickers) this.dynFlickers.push({ mesh: f.mesh, warm: (f.mesh.material as THREE.MeshBasicMaterial).color?.getHex?.() === 0xfff1d0 });
     for (const g of grates) this.dynGrates.push(g as THREE.Mesh);
   }
 
   /** Paint the atlas and build every batch (each mesh joins the group it was made for). */
   finish(gain = 1, flickers?: { mesh: THREE.Mesh; on: THREE.Material; off: THREE.Material }[]) {
-    this.atlas.build();
+    const data = this.atlas.build();
+    const tiles = this.atlasTiles();
+    // Calm far levels on the tileable surfaces (grout, chequer, bricks collapse into their mid-tone
+    // instead of crawling into dashes), and signs kept at level 0 a step longer (letters stay whole).
+    d2CalmLevels(data, tiles);
+    const signs = new Set<number>();
+    for (const t of tiles) if (/^z2(lit|plate|exit|stencil|road)\|/.test(t.key)) signs.add(t.x * 65536 + t.y);
+    let anim: THREE.Material | null = null;
+    let poolTex: THREE.Texture | null = null;
     for (const j of this.jobs) {
-      const mesh = j.batch.build(undefined, { gain });
-      if (mesh) j.parent.add(mesh);
-      const bm = j.bills.build(this.atlas, gain);
+      const jg = gain * (j.gain ?? 1);
+      const mods = pwMaterial(this.atlas, { gain: jg });
+      const surf = pwMaterial(this.atlas, { gain: jg, bias: Z2_SURF_BIAS, tag: 'surf' });
+      const sign = pwMaterial(this.atlas, { gain: jg, bias: Z2_SIGN_BIAS, tag: 'sign' });
+      const mesh = j.batch.build(mods);
+      if (mesh) {
+        splitMaterials(mesh, mods, surf, sign, signs);
+        j.parent.add(mesh);
+      }
+      const bm = j.bills.build(this.atlas, jg);
       if (bm) j.parent.add(bm);
+      if (j.anim) {
+        anim ??= pwMaterial(this.atlas, { gain, anim: { frames: Z2_PUDDLE_FRAMES, fps: 7 }, tag: 'puddle' });
+        const am = j.anim.build(anim);
+        if (am) j.parent.add(am);
+      }
+      if (j.pools.length) {
+        poolTex ??= z2PoolTexture();
+        j.parent.add(z2PoolMesh(poolTex, j.pools));
+      }
     }
+    this.animMat = anim;
     this.jobs.length = 0;
     // Flickering troffers: one painted quad geometry (mesh-local), lit / unlit by material.
     if (flickers?.length) {
@@ -199,7 +430,7 @@ export class Z2PixelWorld {
     // Vent grates: a painted louvre quad seen from below and above (they tumble when they drop).
     if (this.dynGrates.length) {
       const b = new PwBatch(this.atlas);
-      const t = ventModule(this.atlas, { hex: 0x9aa09c });
+      const t = z2VentModule(this.atlas, 0x9aa09c);
       b.rect(_o.set(-0.35, -0.016, -0.35), X, Z, 0.7, 0.7, t);
       b.rect(_o.set(-0.35, 0.016, 0.35), X, NZ, 0.7, 0.7, t);
       const geo = b.build()!.geometry;
@@ -209,6 +440,17 @@ export class Z2PixelWorld {
         m.material = mat;
       }
     }
+  }
+
+  /** Every tile registered in the stage atlas. */
+  private atlasTiles(): PwTile[] {
+    const m = (this.atlas as unknown as { tiles: Map<string, { tile: PwTile }> }).tiles;
+    return [...m.values()].map((t) => t.tile);
+  }
+
+  /** Advance the animated puddles (every frame; allocation-free). */
+  tick(dt: number) {
+    if (this.animMat) pwTick(this.animMat, dt);
   }
 
   // ─── Breakable doors (Destructibles: re-painted in place, hit boxes untouched) ──
@@ -277,14 +519,14 @@ export class Z2PixelWorld {
   paintAmbulance(amb: Ambulance) {
     const body = new PwBatch(this.atlas);
     this.bills = new Z2Billboards();
-    this.jobs.push({ parent: amb.body, batch: body, bills: this.bills });
+    this.jobs.push({ parent: amb.body, batch: body, bills: this.bills, anim: null, pools: [] });
     amb.body.updateMatrixWorld(true);
     for (const c of [...amb.body.children]) if (c.userData.pw?.kind === 'ambGrille') amb.body.remove(c);
     this.layAmbulanceBody(body, new THREE.Matrix4());
     this.emitAll(amb.body, body, 0, false, null);
     for (const [door, side] of [[amb.doorL, 1], [amb.doorR, -1]] as [THREE.Group, number][]) {
       const b = new PwBatch(this.atlas);
-      this.jobs.push({ parent: door, batch: b, bills: new Z2Billboards() });
+      this.jobs.push({ parent: door, batch: b, bills: new Z2Billboards(), anim: null, pools: [] });
       this.layAmbulanceDoor(b, new THREE.Matrix4(), side);
       this.emitAll(door, b, 0, false, null);
     }
@@ -308,18 +550,36 @@ export class Z2PixelWorld {
   // ─── Sky ──────────────────────────────────────────────────────────────────
 
   backdrop: PwBackdrop | null = null;
+  private dome: THREE.Group | null = null;
 
-  /** The painted storm night over the bay (sky band dissolving into `top`, the city beyond the fence). */
-  buildBackdrop(fog: number, top: number): THREE.Group {
+  /**
+   * The painted storm night over the bay: a sphere band of storm clouds up to
+   * 50° (capped by the overcast deck's top row: the camera looks up at the
+   * hospital), the far city (fires, smoke into the cloud base) and a nearer
+   * roof layer drifting against it.
+   */
+  buildBackdrop(fog: number): THREE.Group {
     const s = this.skyAtlas;
-    const sky = z2StormSkyTile(s, { fog, top, glow: 0x8a4a22, el0: -3, el1: 24 });
-    const city = z2CityTile(s, { hex: 0x161c26, fog, fire: 0xff7a2a, el0: -2, el1: 8 });
+    const sky = z2StormSkyTile(s, { fog, el0: -3, el1: 50 });
+    const city = z2CityTile(s, { hex: 0x141a24, fog, el0: -2, el1: 9 });
+    const roofs = z2RoofsTile(s, { hex: 0x0c1016, fog, el0: -2, el1: 6 });
     this.backdrop = new PwBackdrop(s, null, [
-      { tile: sky, radius: 330, el0: -3, el1: 24, repeat: 2, follow: 1 },
-      { tile: city, radius: 290, el0: -2, el1: 8, repeat: 2, yaw: 40, follow: 0.97 },
+      { tile: city, radius: 300, el0: -2, el1: 9, repeat: 2, follow: 1 },
+      { tile: roofs, radius: 240, el0: -2, el1: 6, repeat: 2, yaw: 33, follow: 0.9 },
     ]);
-    this.backdrop.anchor.set(0, 0, 0);
-    return this.backdrop.build();
+    this.backdrop.anchor.set(0, 0, -10);
+    const g = this.backdrop.build();
+    // The dome shares the layers' (unlit) material: the lightning gain lights all of it.
+    const mat = (g.children[0] as THREE.Mesh).material as THREE.Material;
+    this.dome = z2SkyDome(sky, mat, { radius: 330, el0: -3, el1: 50, repeat: 2 });
+    g.add(this.dome);
+    return g;
+  }
+
+  /** Follow the camera (every frame; allocation-free). */
+  updateSky(cam: THREE.Vector3) {
+    this.backdrop?.update(cam);
+    this.dome?.position.set(cam.x, 0, cam.z);
   }
 
   /** Lightning lights the painted clouds (0 = none). Allocation-free. */
@@ -396,8 +656,19 @@ export class Z2PixelWorld {
     b.setMatrix(null);
   }
 
+  /** Insulation and cables hanging out of a ceiling hole (two crossed cut-out cards, both faces), in frame `m`. */
+  private dangle(b: PwBatch, m: THREE.Matrix4, v: number) {
+    const t = z2DangleCard(this.atlas, v);
+    const w = 0.6;
+    const h = 1.0;
+    this.lay(b, m, _o.set(-w / 2, -h - 0.01, 0), X, Y, w, h, t);
+    this.lay(b, m, _o.set(w / 2, -h - 0.01, 0.002), NX, Y, w, h, t);
+    this.lay(b, m, _o.set(0, -h - 0.01, w / 2), NZ, Y, w, h, t, { flipU: true });
+    this.lay(b, m, _o.set(0.002, -h - 0.01, -w / 2), Z, Y, w, h, t, { flipU: true });
+  }
+
   /** Lay a module rect in an object's frame. */
-  private lay(b: PwBatch, m: THREE.Matrix4, o: THREE.Vector3, ux: THREE.Vector3, vy: THREE.Vector3, w: number, h: number, t: PwTile, opts: { tint?: number; flipU?: boolean } = {}) {
+  private lay(b: PwBatch, m: THREE.Matrix4, o: THREE.Vector3, ux: THREE.Vector3, vy: THREE.Vector3, w: number, h: number, t: PwTile, opts: { tint?: number; flipU?: boolean; u0?: number; sub?: { x: number; y: number; w: number; h: number } } = {}) {
     b.setMatrix(m);
     b.rect(o, ux, vy, w, h, t, opts);
     b.setMatrix(null);
@@ -410,6 +681,12 @@ export class Z2PixelWorld {
     const hsh = hash2(Math.round(m.elements[12] * 7), Math.round(m.elements[14] * 7), 5);
     switch (info.kind) {
       case 'lit': {
+        if ((info.px as number) >= 0.08) {
+          // Big signs on a 4-texel grid (whole letters at every level), at the classic letter size.
+          const t = z2BigSign(a, info.text as string, info.color as number, { px: info.px as number, plate: info.plate as number | null, broken: info.broken as number[] | undefined, neon: (info.text as string).startsWith('EMERGENCY') });
+          this.lay(b, m, _o.set(-t.wM / 2, -t.hM / 2, info.plate === null ? 0.004 : 0.012), X, Y, t.wM, t.hM, t.tile);
+          return true;
+        }
         const t = z2LitSign(a, info.text as string, info.color as number, {
           px: info.px as number,
           plate: info.plate as number | null,
@@ -429,8 +706,14 @@ export class Z2PixelWorld {
         if (info.glow) {
           const t = z2LitSign(a, text, info.color as number, { px: info.px as number, plate: null });
           this.lay(b, m, _o.set(-t.wM / 2, -t.hM / 2, 0.004), X, Y, t.wM, t.hM, t.tile);
+        } else if (text === 'AMBULANCE') {
+          // Road lettering: worn white paint, drawn tall (it is read at a grazing angle).
+          const t = z2RoadStencil(a, text, 0xd0d0c0, 3);
+          const w = t.w / PW_TPM;
+          const h = t.h / PW_TPM;
+          this.lay(b, m, _o.set(-w / 2, -h / 2, 0.004), X, Y, w, h, t);
         } else {
-          const t = z2Stencil(a, text, info.color as number, info.px as number, text === 'AMBULANCE' ? 0.45 : 0.25);
+          const t = z2Stencil(a, text, info.color as number, info.px as number, 0.25);
           this.lay(b, m, _o.set(-t.wM / 2, -t.hM / 2, 0.004), X, Y, t.wM, t.hM, t.tile);
         }
         return true;
@@ -445,6 +728,12 @@ export class Z2PixelWorld {
       case 'panel': {
         const t = troffer(a, info.on ? (info.warm ? 'warm' : 'on') : 'off');
         this.lay(b, m, _o.set(-0.345, -0.052, -0.625), X, Z, 22 / PW_TPM, 40 / PW_TPM, t);
+        // A lit panel's stepped pool on the floor below (the polish catches it).
+        const fl = this.job?.floor;
+        if (info.on && fl !== undefined) {
+          _p.setFromMatrixPosition(m);
+          this.job!.pools.push([info.warm ? 0xffe8c0 : 0xd8f0e8, _p.x, fl + 0.012, _p.z, 2.8, 3.4, 0.11]);
+        }
         return true;
       }
       case 'flickerFrame':
@@ -453,6 +742,7 @@ export class Z2PixelWorld {
       case 'panelHole': {
         const t = ceilingHoleDecal(a, hsh > 0.5 ? 1 : 0);
         this.lay(b, m, _o.set(-0.35, -0.012, -0.65), X, Z, 0.7, 1.3, t);
+        this.dangle(b, m, hsh > 0.5 ? 1 : 0);
         return true;
       }
       case 'ventHole': {
@@ -637,6 +927,15 @@ export class Z2PixelWorld {
       }
       case 'coneBase':
         return true;
+      case 'fireDoor': {
+        // Leaf 0.06 × 2.75 × 1.7 from z 0.03 (hinge at z 0): painted on both faces (hinges on the hinge
+        // side); the classic vision panel box goes (the wired glass is in the leaf).
+        for (const c of [...o.children]) if (((c as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined)?.color?.getHex() === 0x101414) o.remove(c);
+        const t = z2FireDoorLeaf(a, 0x9a2a22);
+        this.lay(b, m, _o.set(0.032, 0, 1.73), NZ, Y, 1.7, 2.75, t);
+        this.lay(b, m, _o.set(-0.032, 0, 0.03), Z, Y, 1.7, 2.75, t, { flipU: true });
+        return false;
+      }
       case 'tray': {
         b.setMatrix(m);
         b.rect(_o.set(-0.25, 0.006, 0.19), X, NZ, 0.5, 0.375, trayDecal(a));
@@ -645,8 +944,13 @@ export class Z2PixelWorld {
       }
       case 'puddle': {
         _p.setFromMatrixPosition(m);
-        const t = puddleDecal(a, info.indoor ? 2 : hsh > 0.5 ? 1 : 0);
-        b.rect(_o.set(_p.x - 1, _p.y + 0.004 + (this.nDecal++ % 3) * 0.001, _p.z + 0.625), X, NZ, 2, 1.25, t);
+        if (info.indoor) {
+          b.rect(_o.set(_p.x - 1, _p.y + 0.004 + (this.nDecal++ % 3) * 0.001, _p.z + 0.625), X, NZ, 2, 1.25, puddleDecal(a, 2));
+          return true;
+        }
+        // Outdoors: an animated mirror of the nearest light (rain rings spreading).
+        const r = (info.r as number | undefined) ?? 1;
+        this.puddle(_p.x, _p.y, _p.z, this.puddleLight(_p.x, _p.z, hsh), 0, Math.max(1.4, r * 2.2), Math.max(0.8, r * 1.3));
         return true;
       }
       case 'fence': {
@@ -721,21 +1025,26 @@ export class Z2PixelWorld {
         return false;
       }
       case 'glassRail': {
+        // Bay by bay (posts every 2.5 m): most panes clean, the odd crack, smear or empty frame.
         const len = info.len as number;
-        const t = glassRailTile(a);
-        const u0 = Math.floor(hsh * 64);
-        if (info.along) {
-          this.lay(b, m, _o.set(-len / 2, -0.5, 0.017), X, Y, len, 1.0, t);
-          this.lay(b, m, _o.set(len / 2, -0.5, -0.017), NX, Y, len, 1.0, t);
-        } else {
-          this.lay(b, m, _o.set(0.017, -0.5, len / 2), NZ, Y, len, 1.0, t);
-          this.lay(b, m, _o.set(-0.017, -0.5, -len / 2), Z, Y, len, 1.0, t);
+        const n = Math.max(1, Math.round(len / 2.5));
+        const bw = len / n;
+        for (let i = 0; i < n; i++) {
+          const h = hash2(i, Math.round(m.elements[12] * 3 + m.elements[13] * 5), Math.round(m.elements[14] * 3));
+          const t = glassRailTile(a, h < 0.32 ? 0 : h < 0.62 ? 1 : h < 0.76 ? 2 : h < 0.9 ? 3 : 4);
+          const s0 = -len / 2 + i * bw;
+          if (info.along) {
+            this.lay(b, m, _o.set(s0, -0.5, 0.017), X, Y, bw, 1.0, t);
+            this.lay(b, m, _o.set(-s0, -0.5, -0.017), NX, Y, bw, 1.0, t);
+          } else {
+            this.lay(b, m, _o.set(0.017, -0.5, -s0), NZ, Y, bw, 1.0, t);
+            this.lay(b, m, _o.set(-0.017, -0.5, s0), Z, Y, bw, 1.0, t);
+          }
         }
-        void u0;
         return true;
       }
       case 'doorway': {
-        const t = doorwayModule(a, hsh > 0.7 ? 1 : 0);
+        const t = doorwayModule(a, hsh > 0.82 ? 1 : hsh > 0.55 ? 2 : 0);
         if ((info.face as number) < 0) this.lay(b, m, _o.set(0.8, -1.2, -0.026), NX, Y, 1.6, 2.4, t);
         else this.lay(b, m, _o.set(-0.8, -1.2, 0.026), X, Y, 1.6, 2.4, t);
         return true;
@@ -751,18 +1060,19 @@ export class Z2PixelWorld {
         return true;
       }
       case 'vein': {
+        // Bold ribbons radiating from the pool (0.6–1 m wide: the arena's framing lines), u stretched once across.
         const len = info.len as number;
-        const w = Math.max(0.35, (info.w as number) * 2.2);
+        const w = Math.max(0.6, (info.w as number) * 3.2);
         const hexV = ((o as THREE.Mesh).material as THREE.MeshLambertMaterial).color.getHex();
         b.setMatrix(m);
-        b.rect(_o.set(-w / 2, 0.041, len / 2), X, NZ, w, len, veinTile(a, hexV), { u0: 0, v0: Math.floor(hsh * 64) });
+        b.rect(_o.set(-w / 2, 0.041 + (this.nDecal++ % 3) * 0.002, len / 2 + 0.15), X, NZ, w, len + 0.3, veinTile(a, hexV === 0x4a1212 ? 0x6a1a1a : 0x8a2a26), { u0: 0, v0: Math.floor(hsh * 64), uScale: 1 / w });
         b.setMatrix(null);
         return true;
       }
       case 'veinNode': {
         _p.setFromMatrixPosition(m);
-        const r = (info.r as number) * 1.1;
-        b.rect(_o.set(_p.x - r, _p.y + 0.035, _p.z + r), X, NZ, r * 2, r * 2, pustuleDecal(a));
+        const r = Math.max(0.35, (info.r as number) * 1.9);
+        b.rect(_o.set(_p.x - r, _p.y + 0.05, _p.z + r), X, NZ, r * 2, r * 2, pustuleDecal(a));
         return true;
       }
       case 'drip': {
@@ -808,7 +1118,7 @@ export class Z2PixelWorld {
           // Back rest: painted front and shell, cut-out rounded shoulders; thin sides and top.
           _mm.copy(m).multiply(_t4.makeTranslation(cx, 0.72, -0.22)).multiply(_r4.makeRotationX(-0.12));
           b.setMatrix(_mm);
-          b.rect(_o.set(-0.25, -0.24, 0.026), X, Y, 0.5, 0.48, chairBack(a, hex, v % 3));
+          b.rect(_o.set(-0.25, -0.24, 0.026), X, Y, 0.5, 0.48, chairBack(a, hex, v % 3), { flipU: hash2(i, Math.round(m.elements[12] * 3), 73) > 0.5 });
           b.rect(_o.set(0.25, -0.24, -0.026), NX, Y, 0.5, 0.48, shell);
           b.rect(_o.set(0.25, -0.24, 0.026), NZ, Y, 0.052, 0.42, side);
           b.rect(_o.set(-0.25, -0.24, -0.026), Z, Y, 0.052, 0.42, side);
@@ -859,6 +1169,11 @@ export class Z2PixelWorld {
           }
         }
         this.lay(b, m, _o.set(-0.44, 0.8805, 1.0), X, NZ, 0.88, 2.0, autopsyTop(a));
+        // The pedestal: brushed steel faces (seam, drain valve, rust ring, blood runs).
+        this.lay(b, m, _o.set(-0.16, 0, 0.163), X, Y, 0.32, 0.8, z2PedestalFace(a, 0));
+        this.lay(b, m, _o.set(0.16, 0, -0.163), NX, Y, 0.32, 0.8, z2PedestalFace(a, 1));
+        this.lay(b, m, _o.set(0.163, 0, 0.16), NZ, Y, 0.32, 0.8, z2PedestalFace(a, 2));
+        this.lay(b, m, _o.set(-0.163, 0, -0.16), Z, Y, 0.32, 0.8, z2PedestalFace(a, 1));
         if (info.body) {
           // Head at z −0.72, feet at 0.82 on the table (top 0.88, inside the rims).
           const zf = (z: number) => -0.72 + (z + 0.52) * (1.54 / 1.38);
@@ -886,6 +1201,10 @@ export class Z2PixelWorld {
       }
       case 'opTable': {
         const drape = 0x6a9a8a;
+        // The sterile field taped round the table, instruments dropped by it.
+        this.lay(b, m, _o.set(-1.5, 0.006, 2), X, NZ, 3, 4, z2SterileField(a));
+        this.lay(b, m, _o.set(0.6, 0.008, 1.4), X, NZ, 0.75, 0.5, z2InstrumentsDecal(a));
+        this.lay(b, m, _o.set(-1.2, 0.008, -0.6), X, NZ, 0.6, 0.6, drainDecal(a));
         for (const c of [...o.children]) {
           const hx = ((c as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined)?.color?.getHex();
           if (hx !== undefined && BLOOD_HEX.has(hx)) o.remove(c);
@@ -904,7 +1223,8 @@ export class Z2PixelWorld {
         return false;
       case 'counter': {
         const w = info.w as number;
-        this.lay(b, m, _o.set(-w / 2, 0, 0.462), X, Y, w, 1.1, counterFront(a, 0x5c7a74));
+        // (Each counter starts the 4 m front at its own place: the stickers and dents never line up.)
+        this.lay(b, m, _o.set(-w / 2, 0, 0.462), X, Y, w, 1.1, counterFront(a, 0x5c7a74), { u0: Math.floor(hsh * 128) });
         return false;
       }
       case 'corpse':
@@ -950,8 +1270,21 @@ export class Z2PixelWorld {
       const flip = mat.side === THREE.BackSide;
       const both = mat.side === THREE.DoubleSide;
       const pick = (nx: number, ny: number, nz: number) => this.rule(mat, nx, ny, nz);
+      // Round things painted round: pillars, collars, bollards, posts (u round the turn, v up).
+      const ck = m.geometry.type === 'CylinderGeometry' ? cylKind(mat) : null;
+      if (ck) {
+        emitCylinder(b, m.geometry as THREE.CylinderGeometry, rel, z2CylTile(this.atlas, ck, mat.color.getHex()), pick);
+        m.parent?.remove(m);
+        continue;
+      }
+      if (m.geometry.type === 'TorusGeometry' && mat.color.getHex() === 0x8a867a) {
+        this.coping(b, m, rel);
+        m.parent?.remove(m);
+        continue;
+      }
       emitMesh(b, m.geometry, rel, pick, { world, flip, floorY });
       if (both) emitMesh(b, m.geometry, rel, pick, { world, flip: true, floorY });
+      if (flip && m.geometry.type === 'BoxGeometry' && pieces) this.roomGlimpse(b, m, rel, mat);
       if (pieces && m.parent === root && m.geometry.type === 'BoxGeometry') {
         const kind = pieceKind(mat);
         if (kind) {
@@ -960,6 +1293,187 @@ export class Z2PixelWorld {
         }
       }
       m.parent?.remove(m);
+    }
+  }
+
+  /**
+   * The fountain's coping (a torus): the stone tile laid round the ring with
+   * the geometry's own (u round the ring, v round the tube) coordinates, and
+   * flesh spilling over the rim in a few places.
+   */
+  private coping(b: PwBatch, m: THREE.Mesh, rel: THREE.Matrix4) {
+    const geo = m.geometry as THREE.TorusGeometry;
+    const { radius: R, tube: r } = geo.parameters;
+    const t = z2CopingTile(this.atlas, 0x8a867a);
+    const reps = Math.max(1, Math.round((2 * Math.PI * R * PW_TPM) / t.w));
+    const pos = geo.getAttribute('position');
+    const uv = geo.getAttribute('uv');
+    const idx = geo.index!;
+    b.setMatrix(null);
+    for (let i = 0; i + 2 < idx.count; i += 3) {
+      const ia = idx.getX(i);
+      const ib = idx.getX(i + 1);
+      const ic = idx.getX(i + 2);
+      _a.fromBufferAttribute(pos, ia).applyMatrix4(rel);
+      _b.fromBufferAttribute(pos, ib).applyMatrix4(rel);
+      _c.fromBufferAttribute(pos, ic).applyMatrix4(rel);
+      b.tri(_a, _b, _c, t, [uv.getX(ia) * reps * t.w, uv.getY(ia) * t.h, uv.getX(ib) * reps * t.w, uv.getY(ib) * t.h, uv.getX(ic) * reps * t.w, uv.getY(ic) * t.h]);
+    }
+    // Flesh spilling over the rim: slanted flaps from the top of the coping down its outer side.
+    _p.setFromMatrixPosition(rel);
+    const top = _p.y + r;
+    for (let k = 0; k < 7; k++) {
+      const ang = 0.4 + k * 0.93 + hash2(k, 3, 17) * 0.4;
+      const c = Math.cos(ang);
+      const sn = Math.sin(ang);
+      const tx = -sn;
+      const tz = c;
+      const w = 0.7 + hash2(k, 4, 17) * 0.5;
+      const ri = R - 0.05;
+      const ro = R + r + 0.06;
+      _q[0].set(_p.x + c * ro + tx * (w / 2), _p.y - 0.24, _p.z + sn * ro + tz * (w / 2));
+      _q[1].set(_p.x + c * ro - tx * (w / 2), _p.y - 0.24, _p.z + sn * ro - tz * (w / 2));
+      _q[2].set(_p.x + c * ri - tx * (w / 2), top + 0.02, _p.z + sn * ri - tz * (w / 2));
+      _q[3].set(_p.x + c * ri + tx * (w / 2), top + 0.02, _p.z + sn * ri + tz * (w / 2));
+      const d = z2FleshDrape(this.atlas, k % 3);
+      b.quad(_q[0], _q[1], _q[2], _q[3], d, [0, 0, d.w, 0, d.w, d.h, 0, d.h]);
+    }
+  }
+
+  /**
+   * The gas / oxygen cylinders (Destructibles: every mesh is a hit box) painted
+   * on their own triangles: the body wrapped in its cylinder tile (u round the
+   * turn, v up), the shoulder / valve / base an enamel in their baked colour.
+   */
+  paintTank(root: THREE.Object3D, kind: 'gas' | 'oxygen') {
+    if (!this.atlas.built) return;
+    const body = z2CylTile(this.atlas, kind, kind === 'gas' ? 0xc22a1e : 0x1f8a3c);
+    const enamel = z2EnamelTile(this.atlas, { hex: NEUTRAL_HEX });
+    const y0 = kind === 'gas' ? 0.02 : 0.025;
+    const y1 = kind === 'gas' ? 1.22 : 1.175;
+    const mat = pwMaterial(this.atlas);
+    _base.setHex(NEUTRAL_HEX);
+    root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || !(m.material as THREE.MeshLambertMaterial).isMeshLambertMaterial || (m.material as THREE.Material).userData.pixelWorld) return;
+      const g = m.geometry;
+      const pos = g.getAttribute('position');
+      const col0 = g.getAttribute('color');
+      const n = pos.count;
+      const uv = new Float32Array(n * 2);
+      const rect = new Int16Array(n * 4);
+      const col = new Uint8Array(n * 3);
+      const index = g.index;
+      const tris = index ? index.count : n;
+      for (let i = 0; i + 2 < tris; i += 3) {
+        const v = [index ? index.getX(i) : i, index ? index.getX(i + 1) : i + 1, index ? index.getX(i + 2) : i + 2];
+        _a.fromBufferAttribute(pos, v[0]);
+        _b.fromBufferAttribute(pos, v[1]);
+        _c.fromBufferAttribute(pos, v[2]);
+        _e1.subVectors(_b, _a);
+        _e2.subVectors(_c, _a);
+        _n.crossVectors(_e1, _e2).normalize();
+        const cy = (_a.y + _b.y + _c.y) / 3;
+        const side = Math.abs(_n.y) < 0.5 && cy > y0 && cy < y1;
+        const us = [0, 0, 0];
+        for (let kk = 0; kk < 3; kk++) {
+          const p = kk === 0 ? _a : kk === 1 ? _b : _c;
+          us[kk] = ((Math.atan2(p.x, p.z) / (Math.PI * 2)) + 1) % 1 * body.w;
+        }
+        if (Math.max(...us) - Math.min(...us) > body.w / 2) for (let kk = 0; kk < 3; kk++) if (us[kk] < body.w / 2) us[kk] += body.w;
+        for (let kk = 0; kk < 3; kk++) {
+          const vi = v[kk];
+          const p = kk === 0 ? _a : kk === 1 ? _b : _c;
+          if (side) {
+            uv[vi * 2] = us[kk];
+            uv[vi * 2 + 1] = (p.y - y0) * PW_TPM;
+            rect.set([body.x, body.y, body.w, body.h], vi * 4);
+            col.set([255, 255, 255], vi * 3);
+          } else {
+            const [pu, pv] = planarUv(p, _n, PW_TPM);
+            uv[vi * 2] = pu;
+            uv[vi * 2 + 1] = pv;
+            rect.set([enamel.x, enamel.y, enamel.w, enamel.h], vi * 4);
+            if (col0) _col.setRGB(col0.getX(vi), col0.getY(vi), col0.getZ(vi));
+            else _col.copy((m.material as THREE.MeshLambertMaterial).color);
+            col.set([Math.round(Math.min(1, _col.r / _base.r) * 255), Math.round(Math.min(1, _col.g / _base.g) * 255), Math.round(Math.min(1, _col.b / _base.b) * 255)], vi * 3);
+          }
+        }
+      }
+      g.setAttribute('pwUv', new THREE.BufferAttribute(uv, 2));
+      g.setAttribute('pwRect', new THREE.BufferAttribute(rect, 4));
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
+      m.material = mat;
+    });
+  }
+
+  /**
+   * The boiler wall's blocks (flyers when the brute bursts it; never hit
+   * boxes): each block's faces painted on its own triangles — the wall's
+   * painted block face across the front and back (continuous over the wall:
+   * u / v from the block's place in it), the broken core on its edges.
+   */
+  paintWall(w: { pieces: THREE.Mesh[] } | null) {
+    if (!w || !this.atlas.built) return;
+    const mat = pwMaterial(this.atlas);
+    const core = z2RubbleTile(this.atlas);
+    for (const p of w.pieces) {
+      const lm = p.material as THREE.MeshLambertMaterial;
+      const face = this.pickFor('brick', 'brick|1.25|0.5', lm.color.getHex(), 'side');
+      if (!face) continue;
+      const g = (p.geometry = p.geometry.clone());
+      const pos = g.getAttribute('position');
+      const nrm = g.getAttribute('normal');
+      const n = pos.count;
+      const uv = new Float32Array(n * 2);
+      const rect = new Int16Array(n * 4);
+      const col = new Uint8Array(n * 3);
+      _col.setHex(face.tint);
+      for (let i = 0; i < n; i++) {
+        _a.fromBufferAttribute(pos, i);
+        const front = Math.abs(nrm.getZ(i)) > 0.7;
+        const t = front ? face.tile : core;
+        // Wall coordinates: the block's place in the wall (holder frame) + its own offset.
+        const wx = _a.x + p.position.x;
+        const wy = _a.y + p.position.y;
+        uv[i * 2] = (front ? (nrm.getZ(i) > 0 ? wx : -wx) : nrm.getX(i) !== 0 ? _a.z * Math.sign(nrm.getX(i)) : wx) * PW_TPM;
+        uv[i * 2 + 1] = (Math.abs(nrm.getY(i)) > 0.7 ? _a.z : wy) * PW_TPM;
+        rect.set([t.x, t.y, t.w, t.h], i * 4);
+        if (front) col.set([Math.round(_col.r * 255), Math.round(_col.g * 255), Math.round(_col.b * 255)], i * 3);
+        else col.set([255, 255, 255], i * 3);
+      }
+      g.setAttribute('pwUv', new THREE.BufferAttribute(uv, 2));
+      g.setAttribute('pwRect', new THREE.BufferAttribute(rect, 4));
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
+      p.material = mat;
+    }
+  }
+
+  /**
+   * A dark side room seen through a doorway (a BackSide box): a moonlit window
+   * on each of its long inner walls, so the doorway shows a room, not a void.
+   */
+  private roomGlimpse(b: PwBatch, m: THREE.Mesh, rel: THREE.Matrix4, mat: THREE.MeshLambertMaterial) {
+    _col.setHex(mat.color.getHex());
+    if (_col.r + _col.g + _col.b > 0.12 * 3) return;
+    if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+    const bx = _box.copy(m.geometry.boundingBox!).applyMatrix4(rel);
+    const sx = bx.max.x - bx.min.x;
+    const sz = bx.max.z - bx.min.z;
+    const sy = bx.max.y - bx.min.y;
+    if (sy < 2 || Math.max(sx, sz) < 2.4) return;
+    const t = nightWindow(this.atlas, Math.round(bx.min.x + bx.min.z) & 1);
+    const w = Math.min(1.8, Math.max(sx, sz) - 0.8);
+    const h = w * (38 / 58);
+    const y = bx.min.y + Math.min(1.2, sy - h - 0.3);
+    if (sx >= sz) {
+      const cx = (bx.min.x + bx.max.x) / 2;
+      b.rect(_o.set(cx - w / 2, y, bx.min.z + 0.02), X, Y, w, h, t);
+      b.rect(_o.set(cx + w / 2, y, bx.max.z - 0.02), NX, Y, w, h, t);
+    } else {
+      const cz = (bx.min.z + bx.max.z) / 2;
+      b.rect(_o.set(bx.min.x + 0.02, y, cz + w / 2), NZ, Y, w, h, t);
+      b.rect(_o.set(bx.max.x - 0.02, y, cz - w / 2), Z, Y, w, h, t);
     }
   }
 
@@ -984,6 +1498,7 @@ export class Z2PixelWorld {
               if (h > 0.06) continue;
               const t = h < 0.018 ? ceilingHoleDecal(a, gx & 1) : ceilingStainDecal(a, (gx + gz) & 1);
               b.rect(_o.set(gx, y - 0.004, gz), X, Z, 1, 1, t, { tint: decalTint(t, p.hex) });
+              if (h < 0.018) this.dangle(b, _mm.makeTranslation(gx + 0.5, y, gz + 0.5), gx & 1);
               continue;
             }
             if (h > 0.05) continue;
@@ -1007,6 +1522,7 @@ export class Z2PixelWorld {
       const len = alongX ? sx : sz;
       if (len < 1.0 || sy < 0.5) continue;
       if (p.kind === 'wallLo' && !ext) this.brokenTiles(b, p, alongX, len, floorY);
+      if (!ext && (p.kind === 'wallHi' || p.kind === 'wallLo')) this.bandDecals(b, p, alongX, len);
       for (const side of [1, -1]) {
         const fc = alongX ? (side > 0 ? bx.max.z : bx.min.z) : side > 0 ? bx.max.x : bx.min.x;
         // ux runs left → right seen from the face's side.
@@ -1063,6 +1579,36 @@ export class Z2PixelWorld {
       b.rect(at(u, top + 0.2, -0.6 - hash2(i, 2, 9) * 1.5), ux, Y, w, h, t);
       u += w + 1.5 + hash2(i, 7, 5) * 5;
       i++;
+    }
+  }
+
+  /**
+   * Grime by rule along a wall: under the ceiling line (upper walls) and mop
+   * splash above the skirting (wainscots), in 3 m slots, each with its own hash
+   * and flip — the dirt never repeats with the wall's tile.
+   */
+  private bandDecals(b: PwBatch, p: Piece, alongX: boolean, len: number) {
+    const bx = p.box;
+    const hi = p.kind === 'wallHi';
+    const slots = Math.floor(len / 3);
+    for (let i = 0; i < slots; i++) {
+      for (const side of [1, -1]) {
+        const h = hash2(Math.round((alongX ? bx.min.x : bx.min.z) * 3) + i * 11, side + Math.round((alongX ? bx.min.z : bx.min.x) * 3), hi ? 81 : 83);
+        if (h > (hi ? 0.5 : 0.4)) continue;
+        const t = hi ? ceilingGrimeDecal(this.atlas, i & 1) : mopSplashDecal(this.atlas, i & 1);
+        const w = t.w / PW_TPM;
+        const hh = t.h / PW_TPM;
+        if (w > len - 0.2) continue;
+        const along = 0.1 + hash2(i, side, 85) * (len - w - 0.2);
+        const y0 = hi ? bx.max.y - hh - 0.01 : bx.min.y + 0.15;
+        const fc = alongX ? (side > 0 ? bx.max.z : bx.min.z) : side > 0 ? bx.max.x : bx.min.x;
+        const off = 0.007 + (this.nDecal++ % 3) * 0.002;
+        const ux = alongX ? (side > 0 ? X : NX) : side > 0 ? NZ : Z;
+        const start = alongX ? (side > 0 ? bx.min.x : bx.max.x) : side > 0 ? bx.max.z : bx.min.z;
+        if (alongX) _o.set(start + (side > 0 ? along : -along), y0, fc + side * off);
+        else _o.set(fc + side * off, y0, start + (side > 0 ? -along : along));
+        b.rect(_o, ux, Y, w, hh, t, { tint: decalTint(t, p.hex), flipU: h < 0.2 });
+      }
     }
   }
 
@@ -1152,7 +1698,7 @@ export class Z2PixelWorld {
     return p;
   }
 
-  private pickFor(tex: TexName | undefined, preset: string, hex: number, face: 'up' | 'down' | 'side'): Pick | null {
+  pickFor(tex: TexName | undefined, preset: string, hex: number, face: 'up' | 'down' | 'side'): Pick | null {
     const a = this.atlas;
     const own = (tile: PwTile): Pick => ({ tile, tint: 0xffffff });
     const neutral = (tile: PwTile, base = NEUTRAL_HEX): Pick => {
@@ -1198,7 +1744,7 @@ export class Z2PixelWorld {
       case 'tiles|0.5|0.8':
         return neutral(z2CeilingTile(a, { hex: NEUTRAL_HEX }));
       case 'asphalt|1|0.9':
-        return own(asphaltTile(a, { hex: 0x3a3e46, wet: true, wear: 0.7 }));
+        return own(z2WetAsphaltTile(a, 0x3a3e46));
       case 'asphalt|1.6|0.6':
         return own(z2TerrazzoTile(a, { hex, chips: [0x3a6a5a, 0xd8dcd0] }));
       // ── Props ──
@@ -1236,6 +1782,43 @@ export class Z2PixelWorld {
     if (tex === 'water') return own(z2PlainTile(a, { hex }));
     return neutral(z2PlainTile(a, { hex: NEUTRAL_HEX }));
   }
+}
+
+/** Level bias of the tileable surfaces: their calm levels a step sooner (nothing crawls in motion). */
+const Z2_SURF_BIAS = 1.0;
+/** Level bias of signs: level 0 a little longer (letters stay whole at a distance). */
+const Z2_SIGN_BIAS = -0.25;
+
+/**
+ * One painted zone mesh, up to three draws: its triangles re-ordered into
+ * modules (`mods`), tileable surfaces (`surf`) and signs (`sign`), as
+ * geometry groups.
+ */
+function splitMaterials(m: THREE.Mesh, mods: THREE.Material, surf: THREE.Material, sign: THREE.Material, signs: Set<number>) {
+  const g = m.geometry;
+  const idx = g.index!;
+  const rect = g.getAttribute('pwRect');
+  const parts: number[][] = [[], [], []];
+  for (let t = 0; t < idx.count; t += 3) {
+    const v = idx.getX(t);
+    const k = rect.getZ(v) > 0 ? 1 : signs.has(rect.getX(v) * 65536 + rect.getY(v)) ? 2 : 0;
+    parts[k].push(v, idx.getX(t + 1), idx.getX(t + 2));
+  }
+  const mats = [mods, surf, sign];
+  const used = [0, 1, 2].filter((k) => parts[k].length);
+  if (used.length === 1) {
+    m.material = mats[used[0]];
+    return;
+  }
+  const all = used.flatMap((k) => parts[k]);
+  g.setIndex(g.getAttribute('position').count > 65535 ? new THREE.Uint32BufferAttribute(all, 1) : new THREE.Uint16BufferAttribute(all, 1));
+  g.clearGroups();
+  let start = 0;
+  used.forEach((k, gi) => {
+    g.addGroup(start, parts[k].length, gi);
+    start += parts[k].length;
+  });
+  m.material = used.map((k) => mats[k]);
 }
 
 /** Which decal family a shell piece belongs to (by its material preset). */
@@ -1379,3 +1962,64 @@ function emitMesh(b: PwBatch, geo: THREE.BufferGeometry, m: THREE.Matrix4, pick:
   }
   b.setMatrix(prev);
 }
+
+/** Which painted cylinder a classic cylinder is (by its material preset and colour), or null. */
+function cylKind(m: THREE.MeshLambertMaterial): CylKind | null {
+  const k = `${m.userData.retroTex}|${m.userData.retroScale}|${m.userData.retroStrength}`;
+  const hex = m.color.getHex();
+  if (k === 'concrete|1|0.8' && hex === 0x7a7870) return 'pillar';
+  if (k === 'hazard|1|0.7' && hex === 0xd0a82a) return 'collar';
+  if (k === 'metal|1.5|0.32' && hex === 0xc9a227) return 'bollard';
+  if (k === 'metal|1.5|0.32' && hex === 0x3a3e40) return 'post';
+  return null;
+}
+
+/**
+ * A cylinder (placed by `m`) with `tile` wrapped round it: u once round the
+ * turn (the seam fixed), v up from its foot at the tile's density; the caps
+ * from `pick` by their world normal (planar).
+ */
+function emitCylinder(b: PwBatch, geo: THREE.CylinderGeometry, m: THREE.Matrix4, tile: PwTile, pick: (nx: number, ny: number, nz: number) => Pick | null) {
+  const p = geo.getAttribute('position');
+  const index = geo.index!;
+  const h = geo.parameters.height;
+  const sy = Math.hypot(m.elements[4], m.elements[5], m.elements[6]);
+  const prev = b.matrix.clone();
+  b.setMatrix(null);
+  const us = [0, 0, 0];
+  for (let i = 0; i + 2 < index.count; i += 3) {
+    const v = [index.getX(i), index.getX(i + 1), index.getX(i + 2)];
+    _la.fromBufferAttribute(p, v[0]);
+    _lb.fromBufferAttribute(p, v[1]);
+    _lc.fromBufferAttribute(p, v[2]);
+    _e1.subVectors(_lb, _la);
+    _e2.subVectors(_lc, _la);
+    _n.crossVectors(_e1, _e2);
+    if (_n.lengthSq() < 1e-12) continue;
+    _n.normalize();
+    _a.copy(_la).applyMatrix4(m);
+    _b.copy(_lb).applyMatrix4(m);
+    _c.copy(_lc).applyMatrix4(m);
+    if (Math.abs(_n.y) > 0.7) {
+      // Caps: the material's own painted tile, planar in world space.
+      _e1.subVectors(_b, _a);
+      _e2.subVectors(_c, _a);
+      _n.crossVectors(_e1, _e2).normalize();
+      const pk = pick(_n.x, _n.y, _n.z);
+      if (!pk) continue;
+      const [ua, va] = planarUv(_a, _n, PW_TPM);
+      const [ub, vb] = planarUv(_b, _n, PW_TPM);
+      const [uc, vc] = planarUv(_c, _n, PW_TPM);
+      const su = Math.floor(Math.min(ua, ub, uc) / pk.tile.w) * pk.tile.w;
+      const sv = Math.floor(Math.min(va, vb, vc) / pk.tile.h) * pk.tile.h;
+      b.tri(_a, _b, _c, pk.tile, [ua - su, va - sv, ub - su, vb - sv, uc - su, vc - sv], pk.tint);
+      continue;
+    }
+    const L = [_la, _lb, _lc];
+    for (let k = 0; k < 3; k++) us[k] = ((Math.atan2(L[k].x, L[k].z) / (Math.PI * 2) + 1) % 1) * tile.w;
+    if (Math.max(us[0], us[1], us[2]) - Math.min(us[0], us[1], us[2]) > tile.w / 2) for (let k = 0; k < 3; k++) if (us[k] < tile.w / 2) us[k] += tile.w;
+    b.tri(_a, _b, _c, tile, [us[0], (_la.y + h / 2) * sy * tile.density, us[1], (_lb.y + h / 2) * sy * tile.density, us[2], (_lc.y + h / 2) * sy * tile.density]);
+  }
+  b.setMatrix(prev);
+}
+void CYL_SIZE;

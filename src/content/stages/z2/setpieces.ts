@@ -68,6 +68,8 @@ function spawnTank(world: World, pos: THREE.Vector3, kind: 'oxygen' | 'gas') {
   const sc = z2Scene(world)!;
   const model = kind === 'oxygen' ? oxygenModel() : gasModel();
   bake(model);
+  // PIXEL WORLD: the same triangles (same hit boxes), painted.
+  sc.pw?.paintTank(model, kind);
   const d = new Destructible(world, {
     model,
     pos,
