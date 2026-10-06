@@ -14,6 +14,76 @@ export function z1LaundryBay(atlas: PwAtlas): PwTile {
   return atlas.tile('z1shop|laundry', 128, 112, paintLaundry, { wrap: true });
 }
 
+/** The police station lobby bay: the front desk behind its glass, WANTED bills on a cork board, a bench, the flag, blinds half down. */
+export function z1PoliceBay(atlas: PwAtlas): PwTile {
+  return atlas.tile('z1shop|police', 128, 112, paintPolice, { wrap: true });
+}
+
+function paintPolice(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const H = c.h;
+  const F = PWF.GLOW;
+  const frame = k.ramp(0x34343b, { light: 0.45, sat: 0.5 });
+  const riser = k.ramp(0x2a3a4a, { light: 0.42, sat: 0.9 });
+  const wall = k.ramp(0xa8c0d8, { light: 0.45, sat: 0.6 });
+  const tube = k.ramp(0xe8f4ff, { light: 0.3 });
+  const desk = k.ramp(0x5a4a3a, { light: 0.42 });
+  const cork = k.ramp(0x9a7448, { light: 0.4 });
+  const paper = k.ramp(0xe8e0c8, { light: 0.35, sat: 0.5 });
+  const ink = k.ramp(0x1a1c22, { light: 0.4 });
+  const blue = k.ramp(0x2a4a8a, { light: 0.45 });
+  const red = k.ramp(0xc8382a, { light: 0.45 });
+  const blind = k.ramp(0xc8c4b8, { light: 0.4, sat: 0.4 });
+  const steel = k.ramp(0x8a8c90, { light: 0.5, sat: 0.4 });
+  const transomH = 14;
+  const gy0 = transomH + 1;
+  const riserH = 21;
+  const gy1 = H - riserH - 3;
+  c.rect(0, 0, W, transomH + 1, frame, 2);
+  c.hline(0, 0, W, frame, 4);
+  c.rect(0, transomH - 3, W, 3, frame, 3);
+  c.hline(0, transomH, W, frame, 1);
+  c.rect(0, gy1 + 1, W, H - gy1 - 1, riser, 3);
+  c.hline(0, gy1 + 1, W, frame, 4);
+  for (let x = 6; x < W; x += 32) c.rect(x, gy1 + 7, 24, riserH - 9, riser, 2);
+  // Lobby wall (GLOW at mid tones), tubes.
+  for (let y = gy0; y <= gy1; y++) for (let x = 2; x < W; x++) c.set(x, y, wall, y < gy0 + 6 ? 4 : y > gy1 - 14 ? 2 : 3, F | PWF.DITHER);
+  for (let x = 10; x < W - 20; x += 44) c.rect(x, gy0 + 1, 26, 1, tube, 5, F);
+  // Cork board with WANTED bills.
+  c.rect(8, gy0 + 10, 40, 24, cork, 3, F);
+  c.frame(8, gy0 + 10, 40, 24, desk, 2, F);
+  for (let i = 0; i < 3; i++) {
+    const x0 = 11 + i * 12;
+    c.rect(x0, gy0 + 13, 10, 13, paper, 3, F);
+    c.ellipse(x0 + 5, gy0 + 18, 2.5, 3, ink, 2, F);
+    c.hline(x0 + 1, gy0 + 23, 8, ink, 1, F);
+    c.set(x0 + 5, gy0 + 13, red, 4, F);
+  }
+  drawText(c, 'WANTED', 13, gy0 + 27, FONT_3x5, ink, 1, { flag: F });
+  // The flag on its pole.
+  c.vline(56, gy0 + 6, 40, steel, 4, F);
+  c.rect(57, gy0 + 7, 14, 9, red, 3, F);
+  for (let y = gy0 + 8; y < gy0 + 16; y += 2) c.hline(57, y, 14, paper, 3, F);
+  c.rect(57, gy0 + 7, 6, 5, blue, 3, F);
+  // Front desk behind its glass screen, a monitor, the duty officer's lamp.
+  c.rect(76, gy1 - 22, 48, 22, desk, 3, F);
+  c.hline(76, gy1 - 22, 48, desk, 4, F);
+  c.rect(78, gy0 + 16, 44, gy1 - 22 - gy0 - 16, k.ramp(0xc8dce8, { light: 0.35 }), 4, F);
+  c.frame(78, gy0 + 16, 44, gy1 - 22 - gy0 - 16, steel, 3, F);
+  c.rect(90, gy1 - 30, 12, 8, ink, 1, F);
+  c.rect(91, gy1 - 29, 10, 5, k.ramp(0x4aa8ff, { light: 0.4 }), 3, F);
+  // A bench by the wall.
+  c.rect(10, gy1 - 8, 36, 2, desk, 3, F);
+  c.vline(12, gy1 - 6, 6, desk, 2, F);
+  c.vline(43, gy1 - 6, 6, desk, 2, F);
+  // Blinds half down over the right of the glass (lit, not glowing: the street side).
+  for (let y = gy0; y < gy0 + 14; y++) c.hline(76, y, W - 76, blind, (y - gy0) % 3 === 2 ? 2 : 3);
+  // Mullion.
+  c.rect(0, gy0, 3, gy1 - gy0 + 1, frame, 3);
+  c.vline(0, gy0, gy1 - gy0 + 1, frame, 4);
+  c.vline(2, gy0, gy1 - gy0 + 1, frame, 2);
+}
+
 function paintLaundry(c: PwCanvas, k: PwKit) {
   const W = c.w;
   const H = c.h;

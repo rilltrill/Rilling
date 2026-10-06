@@ -32,7 +32,7 @@ import type { ZoneId } from './town';
 import { pwMaterial, pwTick } from '../../pixelworld/material';
 import { z1FlameTile, Z1_FLAME_FRAMES, Z1_FLAME_H, Z1_FLAME_W } from '../../pixelworld/z1fire';
 import { pwPuffTexture } from './vfx';
-import { z1LaundryBay } from '../../pixelworld/z1shops';
+import { z1LaundryBay, z1PoliceBay } from '../../pixelworld/z1shops';
 import { Destructible } from '../../../gameplay/Props';
 import type { World } from '../../../gameplay/World';
 
@@ -426,7 +426,7 @@ export class Z1PixelWorld {
       const bays = Math.max(1, Math.round(sw / SHOP_BAY_M));
       const goods = GOODS[shop.board?.text ?? shop.blade?.text ?? ''] ?? 'generic';
       // (The GAS & GO store gets its own night-lit convenience store bay.)
-      const t = shop.board?.text === 'GAS & GO' ? this.street.gas.store : goods === 'laundry' ? z1LaundryBay(a) : shopfrontModule(a, {
+      const t = shop.board?.text === 'GAS & GO' ? this.street.gas.store : goods === 'laundry' ? z1LaundryBay(a) : shop.board?.text === 'POLICE' ? z1PoliceBay(a) : shopfrontModule(a, {
         widthM: SHOP_BAY_M,
         goods,
         lit: shop.interior,
