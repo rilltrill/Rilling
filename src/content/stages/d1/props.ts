@@ -323,6 +323,8 @@ export interface FallenTree {
   /** The root ball + roots (ART: 3D; a child of `left`, merged on its own) and its billboard foot / size (local to `left`). */
   roots3D: THREE.Group;
   rootSpot: { x: number; y: number; z: number; w: number; h: number };
+  /** The branch limbs' transforms (local to `right`; recorded for ART: PIXEL WORLD, which paints the limbs itself). */
+  branches: THREE.Matrix4[];
 }
 
 export function buildFallenTree(flora: Flora, rng: Rng): FallenTree {
@@ -358,12 +360,15 @@ export function buildFallenTree(flora: Flora, rng: Rng): FallenTree {
   const crown3D = new THREE.Group();
   crown3D.position.copy(right.position);
   const crownSpots: FallenTree['crownSpots'] = [];
+  const branches: THREE.Matrix4[] = [];
   const tip = new THREE.Vector3();
   for (let i = 0; i < 5; i++) {
     const b = new THREE.Group();
     b.position.set(7 + i * 0.9, 1.2, rng.spread(1));
     b.rotation.set(rng.spread(1.2), rng.next() * 6, 0.6 + rng.spread(0.5));
     right.add(b);
+    b.updateMatrix();
+    branches.push(b.matrix.clone());
     Kit.add(b, Kit.cyl(0.14, 0.25, 3.2, 5), bark, 0, 1.6, 0);
     const s = rng.range(1.6, 2.4);
     const bc = new THREE.Group();
@@ -384,7 +389,7 @@ export function buildFallenTree(flora: Flora, rng: Rng): FallenTree {
   left.add(roots3D);
   // The root plate as seen from the road: ≈ 4.4 m across (the ball + roots), standing on the ground.
   const rootSpot = { x: -10.3, y: 0, z: 0, w: 4.4, h: 4.6 };
-  return { root, left, right, crown3D, crownSpots, roots3D, rootSpot };
+  return { root, left, right, crown3D, crownSpots, roots3D, rootSpot, branches };
 }
 
 // ─── Tour vehicle ────────────────────────────────────────────────────────────
@@ -446,11 +451,15 @@ export function signpost(rng: Rng): THREE.Group {
   const wood = tm(0x7a5a38, 'planks', 1.6);
   Kit.add(g, Kit.box(0.16, 2.6, 0.16), wood, 0, 1.3, 0);
   const n = rng.int(1, 3);
+  // (Recorded for ART: PIXEL WORLD, which paints the boards as arrow signs.)
+  const boards: { dir: number; y: number; green: boolean }[] = [];
   for (let i = 0; i < n; i++) {
     const dir = rng.chance(0.5) ? 1 : -1;
     Kit.add(g, Kit.box(1.3, 0.3, 0.06), tm(i === 0 ? 0x2f5a2a : 0x6a4a2a, 'planks', 1.6, 0.8), dir * 0.55, 2.2 - i * 0.42, 0.08);
     Kit.add(g, Kit.cone(0.2, 0.3, 3), tm(0xe8d8a0, 'none'), dir * 1.25, 2.2 - i * 0.42, 0.1, 0, 0, -dir * Math.PI / 2);
+    boards.push({ dir, y: 2.2 - i * 0.42, green: i === 0 });
   }
+  g.userData.pwSignpost = boards;
   return g;
 }
 

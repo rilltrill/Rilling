@@ -9,6 +9,7 @@ import { clamp, easeInOutSine } from '../../../core/math';
 import { Flora, COL } from './flora';
 import { pixelWorld } from '../../../core/art';
 import { D1PixelWorld } from './pixel';
+import { d1ShaftMaterial, mergeShafts } from '../../pixelworld/d1Shafts';
 import { Herd } from './herd';
 import {
   buildBarricade,
@@ -120,6 +121,8 @@ export class JungleEnv {
     }),
   );
   private backdrop = new THREE.Group();
+  /** ART: PIXEL WORLD: the stippled sun-shaft material (made on first use). */
+  private pwShaftMat: THREE.Material | null = null;
   /** ART: PIXEL WORLD (painted road, meadow, rocks, sky panorama; d1/pixel.ts) — null in CLASSIC / PIXEL CAST. */
   private pw: D1PixelWorld | null = null;
   private time = 0;
@@ -432,44 +435,60 @@ export class JungleEnv {
     }
     // Puddles + embedded stones.
     const rng = new Rng(5);
+    let k = 0;
     for (let d = 8; d < this.len; d += rng.range(10, 22)) {
       const lat = rng.spread(2.5);
       const p = this.P(d, lat, 0.045);
       if (Math.abs(d - D.FORD) < 14) continue;
       if (rng.chance(0.45)) {
-        Kit.add(g, Kit.cyl(1, 1, 0.02, 9), tm(0x6b7f78, 'water', 2.5, 0.7, { emissive: 0x1a2a2a, emissiveIntensity: 0.5 }), p.x, 0.06, p.z, 0, rng.next() * 6, 0, rng.range(0.6, 1.3), 1, rng.range(0.4, 0.8));
+        const yaw = rng.next() * 6;
+        const rx = rng.range(0.6, 1.3);
+        const rz = rng.range(0.4, 0.8);
+        // PIXEL WORLD: a painted puddle decal (mud rim, the sky mirrored) on the same footprint.
+        if (this.pw) this.pw.puddle(p, yaw, rx, rz, k++);
+        else Kit.add(g, Kit.cyl(1, 1, 0.02, 9), tm(0x6b7f78, 'water', 2.5, 0.7, { emissive: 0x1a2a2a, emissiveIntensity: 0.5 }), p.x, 0.06, p.z, 0, yaw, 0, rx, 1, rz);
       } else {
-        Kit.add(g, this.flora.rockGeo(rng), tm(0x8c8270, 'rock', 2), p.x, 0.02, p.z, 0, rng.next() * 6, 0, 0.25, 0.1, 0.2);
+        const geo = this.flora.rockGeo(rng);
+        const yaw = rng.next() * 6;
+        if (this.pw) this.pw.roadStone(p, 0.16);
+        else Kit.add(g, geo, tm(0x8c8270, 'rock', 2), p.x, 0.02, p.z, 0, yaw, 0, 0.25, 0.1, 0.2);
       }
     }
-    merged(g);
-    this.root.add(g);
+    if (g.children.length) {
+      merged(g);
+      this.root.add(g);
+    }
   }
 
   private buildRiver() {
     const rc = this.riverCurve;
-    const g = new THREE.Group();
-    g.add(EnvKit.ribbon(rc, RIVER_WIDTH + 4, tm(0x5e4e36, 'dirt', 0.8), { y: 0.03, step: 2 }));
-    g.add(EnvKit.ribbon(rc, RIVER_WIDTH + 1.2, tm(0x7a8a70, 'sand', 0.9), { y: 0.045, step: 2 }));
-    merged(g);
-    this.root.add(g);
-    // Ripples are laid along the river (the curve runs from the waterfall pool
-    // downstream) and drift downstream with the foam flecks, around every bend.
-    // Big calm texels and a mid-teal floor: the darkest ripple stays teal after
-    // the CRT's 15-bit quantise instead of crawling as near-black dashes.
-    const water = flowRibbon(
-      rc,
-      RIVER_WIDTH,
-      flowMat({ color: 0x2690ae, emissive: 0x0e3e4c, emissiveIntensity: 0.6, along: true, flow: [0, 1.25], scale: 0.48, strength: 1.3 }),
-      { y: 0.075, step: 2 },
-    );
-    this.root.add(water);
-    const foamEdge = new THREE.Group();
-    for (const off of [-RIVER_WIDTH / 2 + 0.35, RIVER_WIDTH / 2 - 0.35]) {
-      foamEdge.add(EnvKit.ribbon(rc, 0.45, tm(0xd8eef2, 'water', 3, 0.5), { y: 0.085, step: 2, offset: off }));
+    if (this.pw) {
+      // PIXEL WORLD: painted banks, animated water riding the current, white water at the edges.
+      this.pw.river(rc);
+    } else {
+      const g = new THREE.Group();
+      g.add(EnvKit.ribbon(rc, RIVER_WIDTH + 4, tm(0x5e4e36, 'dirt', 0.8), { y: 0.03, step: 2 }));
+      g.add(EnvKit.ribbon(rc, RIVER_WIDTH + 1.2, tm(0x7a8a70, 'sand', 0.9), { y: 0.045, step: 2 }));
+      merged(g);
+      this.root.add(g);
+      // Ripples are laid along the river (the curve runs from the waterfall pool
+      // downstream) and drift downstream with the foam flecks, around every bend.
+      // Big calm texels and a mid-teal floor: the darkest ripple stays teal after
+      // the CRT's 15-bit quantise instead of crawling as near-black dashes.
+      const water = flowRibbon(
+        rc,
+        RIVER_WIDTH,
+        flowMat({ color: 0x2690ae, emissive: 0x0e3e4c, emissiveIntensity: 0.6, along: true, flow: [0, 1.25], scale: 0.48, strength: 1.3 }),
+        { y: 0.075, step: 2 },
+      );
+      this.root.add(water);
+      const foamEdge = new THREE.Group();
+      for (const off of [-RIVER_WIDTH / 2 + 0.35, RIVER_WIDTH / 2 - 0.35]) {
+        foamEdge.add(EnvKit.ribbon(rc, 0.45, tm(0xd8eef2, 'water', 3, 0.5), { y: 0.085, step: 2, offset: off }));
+      }
+      merged(foamEdge);
+      this.root.add(foamEdge);
     }
-    merged(foamEdge);
-    this.root.add(foamEdge);
     // Bank rocks + reeds, and stepping stones at the ford.
     const rocks = new THREE.Group();
     const rng = new Rng(31);
@@ -520,14 +539,17 @@ export class JungleEnv {
     this.fallNormal.copy(toward);
     this.fallRight.set(-toward.z, 0, toward.x);
     // Vertical water streaks pouring down the sheet.
-    const fall = new THREE.Mesh(
-      Kit.plane(8, 22),
-      flowMat({ color: 0xcfeef6, emissive: 0x4a7a8a, emissiveIntensity: 0.6, side: THREE.DoubleSide, opacity: 0.9, flow: [0, -3.2], swap: true, scale: 1.1, strength: 2 }),
-    );
-    fall.position.set(top.x, 10.6, top.z).addScaledVector(toward, 0.6);
-    fall.rotation.y = Math.atan2(toward.x, toward.z);
-    fall.rotation.x = -0.08;
-    this.root.add(fall);
+    if (this.pw) this.pw.waterfall(top, toward, pool);
+    else {
+      const fall = new THREE.Mesh(
+        Kit.plane(8, 22),
+        flowMat({ color: 0xcfeef6, emissive: 0x4a7a8a, emissiveIntensity: 0.6, side: THREE.DoubleSide, opacity: 0.9, flow: [0, -3.2], swap: true, scale: 1.1, strength: 2 }),
+      );
+      fall.position.set(top.x, 10.6, top.z).addScaledVector(toward, 0.6);
+      fall.rotation.y = Math.atan2(toward.x, toward.z);
+      fall.rotation.x = -0.08;
+      this.root.add(fall);
+    }
     this.streaks = new THREE.InstancedMesh(Kit.box(0.35, 2.6, 0.08), tm(0xffffff, 'none', 1, 1, { emissive: 0x9ab8c4, emissiveIntensity: 0.8 }), 18);
     this.streaks.frustumCulled = false;
     this.streaks.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -538,6 +560,8 @@ export class JungleEnv {
     const mistMat = tm(0xf2fafc, 'none', 1, 1, { transparent: true, opacity: 0.55, emissive: 0x8aa0a8, emissiveIntensity: 0.6 });
     for (let i = 0; i < 3; i++) {
       const m = Kit.add(this.root, this.flora.blob(rng), mistMat, pool.x + rng.spread(2.5), 1.2, pool.z + rng.spread(2), 0, rng.next() * 6, 0, 3.4, 1.8, 3.0);
+      // (PIXEL WORLD: the painted splash replaces the mist blobs.)
+      if (this.pw) m.visible = false;
       this.mist.push(m);
     }
     // Drifting foam flecks on the river.
@@ -639,7 +663,9 @@ export class JungleEnv {
         shafts.add(sg);
       }
       if (shafts.children.length) {
-        for (const m of EnvKit.mergeStatic(shafts)) {
+        // PIXEL WORLD: the same planes drawn as stippled rays (dithered in screen pixels) instead of pale slabs.
+        const meshes = this.pw ? [mergeShafts(shafts, this.pwShaftMat ??= d1ShaftMaterial())].filter((m): m is THREE.Mesh => !!m) : EnvKit.mergeStatic(shafts);
+        for (const m of meshes) {
           m.renderOrder = 3;
           m.geometry.computeBoundingSphere();
           this.chunks.push(m);
@@ -713,6 +739,8 @@ export class JungleEnv {
     Kit.add(g, Kit.box(1.6, 0.9, 0.05), tm(0x2a2a26, 'none'), -9, 1.6, 12.68);
     merged(g);
     this.place(g, D.GATE, 0);
+    // PIXEL WORLD: log pillars, palisade, doors, the carved sign, kiosk and flags painted (the classic pillars stay the occluder, hidden).
+    this.pw?.gate(this.gate, g);
   }
 
   private buildFence() {
@@ -732,34 +760,45 @@ export class JungleEnv {
     this.root.add(this.fenceBreak);
     this.fenceBreak.updateMatrixWorld(true);
     const brk = new THREE.Group();
+    // PIXEL WORLD: the same pieces as painted posts, cut-out wire spans and DANGER plates (the breakable section in its pivot's frame).
+    const art = this.pw?.fence(this.fenceBreak) ?? null;
     posts.forEach((p, i) => {
-      const target = i === bi || i === bi + 1 ? brk : s;
+      const inBrk = i === bi || i === bi + 1;
+      const target = inBrk ? brk : s;
       const tilt = i === oldGap ? 0.35 : i === oldGap + 1 ? -0.25 : 0;
-      fencePost(target, p, yaws[i], tilt);
+      if (art) art.post(inBrk ? 'brk' : 's', p, yaws[i], tilt);
+      else fencePost(target, p, yaws[i], tilt);
       if (i % 3 === 1 && i !== bi && i !== bi + 1) {
         const f = this.F(D.FENCE_FROM + i * 5 + 0.4);
         const sp = f.pos.clone().addScaledVector(f.right, D.FENCE_SIDE + 0.3);
-        warningSign(s, sp.x, 2.1, sp.z, f.heading + Math.PI / 2, i === oldGap + 3 ? 0.3 : 0);
+        if (art) art.sign('s', sp.x, 2.1, sp.z, f.heading + Math.PI / 2, i === oldGap + 3 ? 0.3 : 0);
+        else warningSign(s, sp.x, 2.1, sp.z, f.heading + Math.PI / 2, i === oldGap + 3 ? 0.3 : 0);
       }
     });
     for (let i = 0; i < posts.length - 1; i++) {
       if (i === oldGap) {
         // Old damage: dangling wires in a gap.
         const a = posts[i];
-        for (let k = 0; k < 3; k++) {
-          const m = Kit.add(s, Kit.box(0.05, 2.4 - k * 0.5, 0.05), tm(0xa8aeb2, 'none'), a.x, 3.6 - k * 0.9, a.z);
-          m.rotation.set(0.5 + k * 0.2, yaws[i], 0.3);
+        if (art) art.span('s', a, posts[i + 1], 2);
+        else {
+          for (let k = 0; k < 3; k++) {
+            const m = Kit.add(s, Kit.box(0.05, 2.4 - k * 0.5, 0.05), tm(0xa8aeb2, 'none'), a.x, 3.6 - k * 0.9, a.z);
+            m.rotation.set(0.5 + k * 0.2, yaws[i], 0.3);
+          }
         }
         this.oldBreakSpark.copy(a).setY(2.4);
         continue;
       }
-      const target = i >= bi - 1 && i <= bi + 1 ? brk : s;
-      fenceSpan(target, posts[i], posts[i + 1]);
+      const inBrk = i >= bi - 1 && i <= bi + 1;
+      const target = inBrk ? brk : s;
+      if (art) art.span(inBrk ? 'brk' : 's', posts[i], posts[i + 1], (i * 7) % 5 === 1 ? 1 : 0);
+      else fenceSpan(target, posts[i], posts[i + 1]);
     }
     const mid = Math.floor(bi);
     const f = this.F(D.FENCE_FROM + mid * 5 + 2.5);
     const sp = f.pos.clone().addScaledVector(f.right, D.FENCE_SIDE + 0.3);
-    warningSign(brk, sp.x, 2.2, sp.z, f.heading + Math.PI / 2);
+    if (art) art.sign('brk', sp.x, 2.2, sp.z, f.heading + Math.PI / 2, 0);
+    else warningSign(brk, sp.x, 2.2, sp.z, f.heading + Math.PI / 2);
     // Re-parent the breakable bits under the pivot (keeps world transforms).
     this.root.add(brk);
     brk.updateMatrixWorld(true);
@@ -812,6 +851,8 @@ export class JungleEnv {
     Kit.add(g, Kit.cyl(0.08, 0.08, 6, 6), tm(0x7a7a76, 'metal', 4, 0.6), 4.5, 0.2, 2.4, 0, 0.6, Math.PI / 2 - 0.05);
     merged(g);
     this.place(g, D.TREE, 0);
+    // PIXEL WORLD: bark round the trunk halves (they still fly apart), a splintered break, moss, branch stubs; the supplies.
+    this.pw?.tree(this.tree, g);
   }
 
   /** Move billboard mesh `m` by how far point `ref` (local to `half`) has moved from `at0` (world). */
@@ -830,6 +871,8 @@ export class JungleEnv {
     body.position.y = 1.0;
     this.car.add(body);
     this.place(this.car, D.CAR, D.CAR_SIDE, 0, 0.5);
+    // PIXEL WORLD: the painted tour car follows the (hidden) classic body, which stays the occluder.
+    this.pw?.tourCar(body);
     // A lone giant tree and a ranger watchtower out in the meadow.
     const g = new THREE.Group();
     const rng = new Rng(8);
@@ -937,6 +980,13 @@ export class JungleEnv {
   private buildEnd() {
     const rng = new Rng(4);
     const b = buildBarricade(this.flora, rng);
+    if (this.pw) {
+      // PIXEL WORLD: the ROAD CLOSED boards as one painted module, the landslide as stone billboards.
+      this.place(b, D.END + 6, 0);
+      this.pw.barricade(b);
+      merged(b);
+      return;
+    }
     merged(b);
     this.place(b, D.END + 6, 0);
   }
@@ -1043,6 +1093,7 @@ export class JungleEnv {
     const d = w.rig.d;
     this.backdrop.position.set(w.camera.position.x, 0, w.camera.position.z);
     this.pw?.backdrop?.update(w.camera.position);
+    this.pw?.update(dt);
     if (this.heatTip && (w.weapons.heat > 0.5 || w.weapons.overheated)) {
       this.heatTip = false;
       this.heatTipShown = true;
@@ -1145,6 +1196,7 @@ export class JungleEnv {
           this.carT = 99;
         }
       }
+      this.pw?.followCar();
     }
 
     // Stampede trigger (as the jeep rolls up to the meadow).
@@ -1152,7 +1204,8 @@ export class JungleEnv {
     this.herd.update(dt, w);
 
     // Waterfall streaks + mist + river foam (only when nearby).
-    const nearWater = d > 380 && d < this.len;
+    // (PIXEL WORLD: the painted, animated water carries its own streaks and foam.)
+    const nearWater = !this.pw && d > 380 && d < this.len;
     this.streaks.visible = nearWater && d < 520;
     this.foam.visible = nearWater;
     if (this.streaks.visible) {

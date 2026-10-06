@@ -4,6 +4,8 @@ import type { World } from '../../../gameplay/World';
 import { angleDelta } from '../../../core/math';
 import { merged } from './props';
 import { tm } from './retro';
+import { pixelWorld } from '../../../core/art';
+import { D1JeepPixel } from './jeepPixel';
 
 const _v = new THREE.Vector3();
 
@@ -44,12 +46,19 @@ export class JeepViewModel {
   private time = 0;
   private pitch = 0;
   private offShot: (() => void) | null = null;
+  private px: D1JeepPixel | null = null;
 
   constructor(private world: World) {
     this.root.name = 'jeep-viewmodel';
     this.root.add(this.body, this.gun);
+    // ART: PIXEL WORLD: the jeep is re-painted (its own small atlas; the same geometry).
+    this.px = pixelWorld(world) ? new D1JeepPixel() : null;
     this.buildBody();
     this.flash = this.buildGun();
+    if (this.px) {
+      this.px.paintGun(this.gun, this.gunKick, this.heatParts);
+      this.px.finish(this.body, this.gun, this.gunKick);
+    }
     this.coolMat = tm(0x2e3134, 'metal', 5, 0.6);
     this.heatMats = [Kit.glow(0x8a2010, 1), Kit.glow(0xd04a14, 1.2), Kit.glow(0xff8a2a, 1.4), Kit.glow(0xffd070, 1.6)];
     this.offShot = world.events.on('shot', () => this.onShot());
@@ -124,6 +133,7 @@ export class JeepViewModel {
     // Floor of the rear bed + ammo crate.
     Kit.add(b, Kit.box(1.76, 0.06, 2.4), tm(0x4a4a40, 'corrugated', 2.5, 0.8), 0, 0.88, 0.05);
     Kit.add(b, Kit.box(0.5, 0.35, 0.35), tm(0x4a5a34, 'planks', 4), -0.55, 1.08, 0.8);
+    this.px?.paintBody(b);
     merged(b);
     this.body.add(b);
   }
