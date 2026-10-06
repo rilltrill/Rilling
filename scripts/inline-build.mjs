@@ -14,7 +14,10 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist-single');
 const OUT = path.join(DIST, 'overrun.html');
-const LIMIT = 3 * 1024 * 1024;
+// Size budget for the one file (it is ≈ 1 MB gzipped). Raised from 3 MB when the six
+// PIXEL WORLD stages landed: their environments are painted by code at load (no image
+// assets), so the art lives in the script. A claude.ai artifact page takes up to 16 MB.
+const LIMIT = 3.5 * 1024 * 1024;
 
 if (!fs.existsSync(path.join(DIST, 'index.html'))) {
   console.error('dist-single/index.html not found — run `vite build --mode single` first.');

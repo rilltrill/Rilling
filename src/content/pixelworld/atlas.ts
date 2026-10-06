@@ -8,9 +8,15 @@ import { PW_ALIGN, PW_LEVELS, PW_TPM, PwCanvas, PwPalette, PwRng } from './canva
  * texture with hand-made mip levels.
  *
  *  - Tiles are REGISTERED while the stage builds (`tile(key, w, h, paint)` →
- *    a handle; the same key returns the same tile), PAINTED once in `build()`
- *    (deterministic: the painter's RNG is seeded by the tile key), and the
- *    painted atlas is cached by its tile list, so a RETRY / RESTART reuses it.
+ *    a handle; the same key returns the same tile), LAID OUT in `build()` (the
+ *    rects are known at once, so meshes can be built) and PAINTED — at once, or,
+ *    while a stage loads behind its intro card (`pwDeferPaint`), as a job that
+ *    `pwPaintStep` runs a few milliseconds a frame (deterministic either way: the
+ *    painter's RNG is seeded by the tile key). Code that rewrites painted levels
+ *    registers with `post()` (it runs once the paint is done).
+ *  - Painted atlases are cached by their tile list (a RETRY / RESTART reuses
+ *    them) and persisted (`store.ts`: IndexedDB, keyed by atlas name + build
+ *    version + tile list), so a stage loaded before skips painting altogether.
  *  - Rects are aligned to PW_ALIGN (16) texels, so every one of the PW_LEVELS
  *    (5) levels of every tile stays inside its own rect: no bleeding, and
  *    tileable surfaces wrap inside their rect in the shader.
@@ -54,6 +60,9 @@ export interface PwKit {
 export type PwPainter = (c: PwCanvas, k: PwKit) => void;
 
 export interface PwAtlasData {
+  /** Atlas name and tile-list signature (the cache / store key). */
+  name: string;
+  sig: string;
   w: number;
   h: number;
   /** RGBA8 levels (rows bottom-up), level 0 first, down to 1×1 (levels ≥ PW_LEVELS blank). */
@@ -66,6 +75,10 @@ export interface PwAtlasData {
   bytes: number;
   /** Texels painted (level 0, tiles only). */
   texels: number;
+  /** False while its paint job is pending (a deferred load): levels hold zeros until then. */
+  painted: boolean;
+  /** Came back from the persistent store: painted AND post-processed (`post()` callbacks are skipped). */
+  restored?: boolean;
 }
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -81,6 +94,152 @@ const alignUp = (v: number, a: number) => Math.ceil(v / a) * a;
 /** Painted atlases by signature (CPU data survives stage restarts; GPU textures are per stage). */
 const cache = new Map<string, PwAtlasData>();
 
+/** A pending paint job (deferred loads): steps of a few ms each, then the post passes and texture refresh. */
+interface PaintJob {
+  data: PwAtlasData;
+  steps: Generator<void, void, void>;
+  /** CPU ms spent in the job's steps (the idle frames between them excluded). */
+  active: number;
+  /** Run once painted, in order: `post()` passes, then texture refreshes. */
+  after: ((d: PwAtlasData) => void)[];
+}
+const jobs: PaintJob[] = [];
+let deferPaint = false;
+
+/** Bench hook: the longest single deferred paint step this session (one tile, or one tile's mip chain). */
+export const PW_PAINT_STATS = { maxStep: 0, maxStepAtlas: '' };
+
+/**
+ * Defer painting (Game, around a stage build behind its intro card / loading screen):
+ * `build()` lays atlases out and queues their painting for `pwPaintStep`.
+ * Off (the default: tests, tools, the attract demo) `build()` paints at once.
+ */
+export function pwDeferPaint(on: boolean) {
+  deferPaint = on;
+}
+
+/** Paint jobs still pending. */
+export function pwPaintPending(): number {
+  return jobs.length;
+}
+
+/**
+ * Run pending paint jobs for about `budgetMs` (a step is one tile painted or one
+ * tile's mip chain: well under a frame). Returns true when nothing is pending.
+ */
+export function pwPaintStep(budgetMs = Infinity): boolean {
+  const end = now() + budgetMs;
+  while (jobs.length) {
+    const j = jobs[0];
+    const t = now();
+    const r = j.steps.next();
+    const dt = now() - t;
+    j.active += dt;
+    if (dt > PW_PAINT_STATS.maxStep) {
+      PW_PAINT_STATS.maxStep = dt;
+      PW_PAINT_STATS.maxStepAtlas = j.data.name;
+    }
+    if (r.done) {
+      jobs.shift();
+      j.data.ms = j.active;
+      j.data.painted = true;
+      const st = PW_STATS.get(j.data.name);
+      if (st && st.sig === pwSigHash(j.data.sig)) st.ms = j.active;
+      publishStats();
+      for (const f of j.after) f(j.data);
+      j.after.length = 0;
+    }
+    if (now() >= end) break;
+  }
+  return jobs.length === 0;
+}
+
+/**
+ * Drop pending paint jobs (the load was abandoned): their half-painted atlases leave the cache.
+ * `keep` spares some (the title backdrop's, still painting behind the menus).
+ */
+export function pwPaintCancel(keep?: (d: PwAtlasData) => boolean) {
+  for (let i = jobs.length - 1; i >= 0; i--) {
+    const j = jobs[i];
+    if (keep?.(j.data)) continue;
+    if (cache.get(j.data.sig) === j.data) cache.delete(j.data.sig);
+    jobs.splice(i, 1);
+  }
+}
+
+/** Is this atlas the title backdrop's (names `menu-…`: they live for the session)? */
+export function pwMenuAtlas(d: { name: string }): boolean {
+  return d.name === 'menu' || d.name.startsWith('menu-');
+}
+
+/** A painted atlas the persistent store handed back (painted and post-processed). */
+export function pwCacheRestored(d: PwAtlasData) {
+  if (!cache.has(d.sig)) cache.set(d.sig, d);
+}
+
+/** Is an atlas with this signature in the session cache (painted or pending)? */
+export function pwCached(sig: string): boolean {
+  return cache.has(sig);
+}
+
+/**
+ * Keep the session cache to the atlases whose name starts with one of `prefixes`
+ * (the stage being loaded, the title screen): the others go (the persistent store
+ * still has them), so a session's CPU copies stay one stage's worth.
+ */
+export function pwCacheKeep(prefixes: readonly string[]) {
+  for (const [sig, d] of cache) {
+    if (!d.painted) continue;
+    if (!prefixes.some((p) => pwPrefixOf(d, p))) cache.delete(sig);
+  }
+}
+
+/** Whether the session cache holds a painted atlas of `prefix` (its name is `prefix` or starts with `prefix-`). */
+export function pwCacheHas(prefix: string): boolean {
+  for (const d of cache.values()) if (d.painted && pwPrefixOf(d, prefix)) return true;
+  return false;
+}
+
+const pwPrefixOf = (d: PwAtlasData, p: string) => d.name === p || d.name.startsWith(`${p}-`);
+
+/** Atlases painted (not restored) this session and not yet handed to the store: the store's write queue. */
+const unsaved: PwAtlasData[] = [];
+let collectUnsaved = false;
+
+/** Collect freshly painted atlases for the persistent store (on while a store is open). */
+export function pwCollectUnsaved(on: boolean) {
+  collectUnsaved = on;
+  if (!on) unsaved.length = 0;
+}
+
+/** Take the painted atlases waiting to be persisted (finished jobs only). */
+export function pwTakeUnsaved(): PwAtlasData[] {
+  const out: PwAtlasData[] = [];
+  for (let i = unsaved.length - 1; i >= 0; i--) {
+    if (!unsaved[i].painted) continue;
+    out.push(unsaved[i]);
+    unsaved.splice(i, 1);
+  }
+  return out;
+}
+
+/** Put back atlases taken but not written yet (the next flush takes them). */
+export function pwReturnUnsaved(list: PwAtlasData[]) {
+  if (collectUnsaved) unsaved.push(...list);
+}
+
+function publishStats() {
+  // (Captures / bench read the stats from the page.)
+  if (typeof window !== 'undefined') {
+    const w = window as unknown as { __pixelWorld?: unknown; __pwPaint?: unknown };
+    w.__pixelWorld = Object.fromEntries(PW_STATS);
+    w.__pwPaint = PW_PAINT_STATS;
+  }
+}
+
+/** PixelWorld textures alive now (Game uploads them while a stage loads: no upload hitch in play). */
+export const PW_LIVE_TEXTURES = new Set<THREE.Texture>();
+
 /** Debug: the tiles of the last atlas painted, largest first ("key w×h"). */
 let lastTiles: string[] = [];
 let lastTileMs: string[] = [];
@@ -92,8 +251,24 @@ export function PW_DEBUG_TILE_MS(): string[] {
   return lastTileMs;
 }
 
-/** Debug / bench hook: the last atlases built (name → stats). */
-export const PW_STATS = new Map<string, { w: number; h: number; tiles: number; bytes: number; ms: number; texels: number; cached: boolean }>();
+/**
+ * Debug / bench hook: the last atlases built (name → stats). `ms` = CPU paint time
+ * (0 when reused), `cached` = reused from the session cache or the store, `stored`
+ * = came back from the persistent store, `sig` = a hash of the tile list.
+ */
+export const PW_STATS = new Map<string, { w: number; h: number; tiles: number; bytes: number; ms: number; texels: number; cached: boolean; stored: boolean; sig: string }>();
+
+/** A short hash of a signature (stats, store keys). */
+export function pwSigHash(sig: string): string {
+  let a = 2166136261;
+  let b = 5381;
+  for (let i = 0; i < sig.length; i++) {
+    const c = sig.charCodeAt(i);
+    a = Math.imul(a ^ c, 16777619);
+    b = (Math.imul(b, 33) + c) | 0;
+  }
+  return `${(a >>> 0).toString(36)}${(b >>> 0).toString(36)}${sig.length.toString(36)}`;
+}
 
 export class PwAtlas {
   private tiles = new Map<string, { tile: PwTile; paint: PwPainter }>();
@@ -155,16 +330,34 @@ export class PwAtlas {
     return !!this.data;
   }
 
-  /** Paint and pack every registered tile (or reuse the cached atlas with the same tiles). */
+  /** The signature of the registered tile list (the cache / store key). */
+  signature(): string {
+    return `${this.name}|${this.levels}|${[...this.tiles.values()].map((t) => `${t.tile.key}:${t.tile.w}x${t.tile.h}${t.tile.wrap ? 'w' : ''}`).join(',')}`;
+  }
+
+  /**
+   * Lay out every registered tile (rects known on return) and paint them — now, or
+   * as a deferred job (`pwDeferPaint`) — or reuse the cached / stored atlas with
+   * the same tiles. Rewrites of the painted levels go through `post()`.
+   */
   build(): PwAtlasData {
     if (this.data) return this.data;
     const list = [...this.tiles.values()];
-    const sig = `${this.name}|${this.levels}|${list.map((t) => `${t.tile.key}:${t.tile.w}x${t.tile.h}${t.tile.wrap ? 'w' : ''}`).join(',')}`;
+    const sig = this.signature();
     let d = cache.get(sig);
     const cached = !!d;
     if (!d) {
-      d = paintAtlas(list, this.levels, this.o.maxSize ?? 4096);
+      const job = layoutAtlas(this.name, sig, list, this.levels, this.o.maxSize ?? 4096);
+      d = job.data;
       cache.set(sig, d);
+      if (collectUnsaved) unsaved.push(d);
+      if (deferPaint) jobs.push(job);
+      else {
+        const t0 = now();
+        while (!job.steps.next().done);
+        d.ms = now() - t0;
+        d.painted = true;
+      }
     }
     for (const t of list) {
       const r = d.rects.get(t.tile.key)!;
@@ -172,17 +365,31 @@ export class PwAtlas {
       t.tile.y = r.y;
     }
     this.data = d;
-    PW_STATS.set(this.name, { w: d.w, h: d.h, tiles: list.length, bytes: d.bytes, ms: cached ? 0 : d.ms, texels: d.texels, cached });
-    // (Captures / bench read the stats from the page.)
-    if (typeof window !== 'undefined') (window as unknown as { __pixelWorld?: unknown }).__pixelWorld = Object.fromEntries(PW_STATS);
+    PW_STATS.set(this.name, { w: d.w, h: d.h, tiles: list.length, bytes: d.bytes, ms: cached ? 0 : d.ms, texels: d.texels, cached, stored: !!d.restored, sig: pwSigHash(sig) });
+    publishStats();
     return d;
   }
 
-  /** The GPU texture (nearest, hand-made mips; Kit-tracked). */
+  /**
+   * Run `fn` on the painted levels (a pass that re-makes levels: calm far levels, ink,
+   * flame coverage) — at once when painted, else when the deferred paint job ends.
+   * Skipped for an atlas the persistent store handed back (stored after its passes).
+   * Register right after `build()`, before the stage build returns.
+   */
+  post(fn: (d: PwAtlasData) => void) {
+    const d = this.build();
+    if (d.restored) return;
+    if (d.painted) fn(d);
+    else jobs.find((j) => j.data === d)!.after.push(fn);
+  }
+
+  /** The GPU texture (nearest, hand-made mips; Kit-tracked). Uploaded once painted. */
   texture(): THREE.DataTexture {
     if (this.tex) return this.tex;
     const d = this.build();
     const tex = new THREE.DataTexture(d.levels[0].data, d.w, d.h, THREE.RGBAFormat, THREE.UnsignedByteType);
+    // A deferred paint fills the same arrays in place: upload again once it is done (nothing renders before).
+    if (!d.painted) jobs.find((j) => j.data === d)?.after.push(() => (tex.needsUpdate = true));
     // One level (backdrops: painted at the screen's own density, never minified much): no mip chain at all.
     if (d.levels.length > 1) tex.mipmaps = d.levels.map((l) => ({ data: l.data, width: l.width, height: l.height })) as unknown as typeof tex.mipmaps;
     tex.generateMipmaps = false;
@@ -193,7 +400,9 @@ export class PwAtlas {
     tex.needsUpdate = true;
     tex.name = `pw:${this.name}`;
     this.tex = Kit.track(tex);
+    PW_LIVE_TEXTURES.add(tex);
     tex.addEventListener('dispose', () => {
+      PW_LIVE_TEXTURES.delete(tex);
       if (this.tex === tex) this.tex = null;
     });
     return tex;
@@ -208,9 +417,12 @@ export function paintTile(key: string, w: number, h: number, paint: PwPainter, p
   return c;
 }
 
-function paintAtlas(list: { tile: PwTile; paint: PwPainter }[], levels: number, maxSize: number): PwAtlasData {
-  const t0 = now();
-  const pal = new PwPalette();
+/**
+ * Lay out an atlas (shelf packing: rects known at once, levels allocated) and return
+ * the job that paints it: one step per tile (paint, resolve, copy into level 0),
+ * then one per tile and level (the palette-faithful reduction).
+ */
+function layoutAtlas(name: string, sig: string, list: { tile: PwTile; paint: PwPainter }[], levels: number, maxSize: number): PaintJob {
   const A = Math.max(1, 1 << (levels - 1));
   // Shelf packing, tallest first, into a power-of-two width.
   const items = list.map((t) => ({ t, aw: alignUp(t.tile.w, A), ah: alignUp(t.tile.h, A), x: 0, y: 0 }));
@@ -237,9 +449,30 @@ function paintAtlas(list: { tile: PwTile; paint: PwPainter }[], levels: number, 
   // Height: only aligned (WebGL2 mips any size; a power of two would waste up to half the atlas).
   const H = Math.max(A, alignUp(sy + shelf, Math.max(A, 16)));
   if (H > maxSize) throw new Error(`pixelworld atlas overflow: ${W}×${sy + shelf} > ${maxSize}`);
-  const L0 = new Uint8Array(W * H * 4);
-  let texels = 0;
+  const out: PwAtlasData['levels'] = [{ data: new Uint8Array(W * H * 4), width: W, height: H }];
+  // Levels: down to 1×1 (those past `levels` stay blank); one level only for backdrops.
+  if (levels > 1) {
+    for (let l = 1; ; l++) {
+      const lw = Math.max(1, W >> l);
+      const lh = Math.max(1, H >> l);
+      out.push({ data: new Uint8Array(lw * lh * 4), width: lw, height: lh });
+      if (lw === 1 && lh === 1) break;
+    }
+  }
   const rects = new Map<string, { x: number; y: number }>();
+  let texels = 0;
+  for (const it of items) {
+    rects.set(it.t.tile.key, { x: it.x, y: it.y });
+    texels += it.t.tile.w * it.t.tile.h;
+  }
+  const bytes = out.reduce((s, l) => s + l.data.length, 0);
+  const data: PwAtlasData = { name, sig, w: W, h: H, levels: out, rects, ms: 0, bytes, texels, painted: false };
+  return { data, steps: paintSteps(items, out, W, levels), active: 0, after: [] };
+}
+
+function* paintSteps(items: { t: { tile: PwTile; paint: PwPainter }; aw: number; ah: number; x: number; y: number }[], out: PwAtlasData['levels'], W: number, levels: number): Generator<void, void, void> {
+  const pal = new PwPalette();
+  const L0 = out[0].data;
   const tms: [string, number][] = [];
   for (const it of items) {
     const { tile, paint } = it.t;
@@ -247,7 +480,6 @@ function paintAtlas(list: { tile: PwTile; paint: PwPainter }[], levels: number, 
     const c = paintTile(tile.key, tile.w, tile.h, paint, pal);
     tms.push([tile.key, now() - tp]);
     const rgba = c.resolve(pal);
-    texels += tile.w * tile.h;
     // Copy rows flipped (texture row 0 = the tile's bottom row); clamp tiles extend their last row /
     // column into the alignment gutter (coarse levels never fetch an empty texel).
     const rowBytes = tile.w * 4;
@@ -261,28 +493,15 @@ function paintAtlas(list: { tile: PwTile; paint: PwPainter }[], levels: number, 
         for (let tx = tile.w; tx < it.aw; tx++) L0.set(rgba.subarray(last, last + 4), di + tx * 4);
       }
     }
-    rects.set(tile.key, { x: it.x, y: it.y });
+    yield;
   }
   lastTileMs = tms.sort((a, b) => b[1] - a[1]).map(([k, ms]) => `${ms.toFixed(1)} ms  ${k}`);
-  // Levels: per tile rect, palette-faithful 2×2 reduction.
-  const out: PwAtlasData['levels'] = [{ data: L0, width: W, height: H }];
-  if (levels <= 1) return { w: W, h: H, levels: out, rects, ms: now() - t0, bytes: L0.length, texels };
-  let prev = L0;
-  let pw = W;
-  for (let l = 1; ; l++) {
-    const lw = Math.max(1, W >> l);
-    const lh = Math.max(1, H >> l);
-    const data = new Uint8Array(lw * lh * 4);
-    if (l < levels) {
-      for (const it of items) reduceRect(prev, pw, data, lw, it.x >> l, it.y >> l, it.aw >> l, it.ah >> l);
-    }
-    out.push({ data, width: lw, height: lh });
-    prev = data;
-    pw = lw;
-    if (lw === 1 && lh === 1) break;
+  // Levels: per tile rect, palette-faithful 2×2 reduction (a tile's chain at a time).
+  if (levels <= 1) return;
+  for (const it of items) {
+    for (let l = 1; l < levels && l < out.length; l++) reduceRect(out[l - 1].data, out[l - 1].width, out[l].data, out[l].width, it.x >> l, it.y >> l, it.aw >> l, it.ah >> l);
+    yield;
   }
-  const bytes = out.reduce((s, l) => s + l.data.length, 0);
-  return { w: W, h: H, levels: out, rects, ms: now() - t0, bytes, texels };
 }
 
 /**
@@ -360,4 +579,6 @@ function reduceRect(src: Uint8Array, sw: number, dst: Uint8Array, dw: number, x0
 /** Clear the painted-atlas cache (tests). */
 export function clearPwCache() {
   cache.clear();
+  jobs.length = 0;
+  unsaved.length = 0;
 }

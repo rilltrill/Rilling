@@ -1029,7 +1029,8 @@ export class Menus {
     this.button(grid, 'QUIT', () => this.actions.quit(), 'small quit');
   }
 
-  showStageIntro(stage: StageDef, campaign: CampaignDef, onDone: () => void) {
+  /** `onDone` (timer or tap) returns false while the stage is still loading: the card stays up until Game hides it. */
+  showStageIntro(stage: StageDef, campaign: CampaignDef, onDone: () => boolean | void) {
     const s = this.screen('intro');
     s.style.setProperty('--accent', campaign.accent);
     el('div', 'letterbox top', s);
@@ -1040,13 +1041,19 @@ export class Menus {
     el('div', 'intro-stage', card, `STAGE ${stage.index + 1}${final ? '<em>FINAL</em>' : ''}`);
     el('div', 'intro-name', card, escapeHtml(stage.name));
     if (stage.tagline) el('div', 'intro-tag', card, escapeHtml(stage.tagline));
-    el('div', 'intro-hint', card, 'GET READY!');
+    const hint = el('div', 'intro-hint', card, 'GET READY!');
     let done = false;
     const finish = () => {
       if (done) return;
       done = true;
+      // Still loading (a first PIXEL WORLD load paints its scenery): the card stays up,
+      // saying so, until play begins (Game hides it then).
+      if (onDone() === false) {
+        hint.textContent = 'LOADING...';
+        hint.classList.add('loading');
+        return;
+      }
       this.hide();
-      onDone();
     };
     this.later(2800, finish);
     s.addEventListener('pointerdown', (e) => {

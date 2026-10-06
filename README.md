@@ -94,7 +94,8 @@ node scripts/snap.mjs --url "http://localhost:5173/?stage=z1&autoplay=1&god=1" -
 | `&debug=1` | Beat / rail overlay |
 | `&seed=42` | Fixed random seed |
 | `&mute=1` | No audio |
-| `&art=3d\|sprites\|pixel` | ART: CLASSIC / PIXEL CAST (default) / PIXEL WORLD (painted pixel-art environments: z1 and d1 so far) |
+| `&art=3d\|sprites\|pixel` | ART: CLASSIC / PIXEL CAST / PIXEL WORLD (default) for this visit (the saved setting is untouched) |
+| `&pwstore=<tag>` | Dev server: persist painted PIXEL WORLD atlases in IndexedDB under that tag (builds always do; `0` turns it off) |
 | `?installhint=1` | Force the iPhone "Add to Home Screen" hint (for testing) |
 
 `window.__game` exposes the running game for tests and the console.
@@ -120,7 +121,7 @@ ios/  android/ Capacitor native projects             tests/         vitest (unit
   and to `claude/arcade-rail-shooter`. Enable it once under **Settings → Pages → Source: GitHub Actions**.
   To let the feature branch deploy, also allow it in **Settings → Environments → github-pages**.
   Vite's `base` is `./`, so the game works from any sub-path.
-- **Single file:** `npm run build:single` produces `dist-single/overrun.html` (about 1 MB) with all JS, CSS,
+- **Single file:** `npm run build:single` produces `dist-single/overrun.html` (about 3.3 MB, ≈ 1 MB gzipped) with all JS, CSS,
   fonts and icons inlined. Open it from disk, host it anywhere, or share it as a claude.ai artifact.
   CI attaches it to every run as the `overrun-single-file` artifact.
 - **Offline / PWA:** the build emits `sw.js`. It precaches the hashed app shell, serves assets
@@ -134,6 +135,24 @@ ios/  android/ Capacitor native projects             tests/         vitest (unit
 | `ios.yml` | Unsigned iOS Simulator build on macOS (artifact). Optional signed TestFlight upload |
 | `pages.yml` | Deploys to GitHub Pages |
 | `android.yml` | Debug APK (artifact) |
+
+## ART modes
+
+Settings → **ART** (and the **ART** chip on the pause screen, which cycles them) picks one of three looks.
+Gameplay, hit boxes and difficulty are identical in all three.
+
+| ART | Characters, pickups, gibs, plants | Environments |
+|---|---|---|
+| **PIXEL WORLD** (default) | hand-painted pixel art (PixelCast) | hand-pixelled environments for all six stages and the title screen: textured facades, ground, signs, skies and panoramas, painted fire and smoke (PixelWorld) |
+| **PIXEL CAST** | hand-painted pixel art (PixelCast) | the 3D environments with retro textures (the approved "pixel cast v3" look) |
+| **CLASSIC** | 3D models | 3D environments (the original look) |
+
+Characters switch at once; the scenery of a stage is built when it loads, so a change between
+PIXEL WORLD and the others shows from the next stage load (the menus say so). Players who never
+picked an ART move to PIXEL WORLD once; a look someone chose (CLASSIC, PIXEL WORLD, or a PIXEL CAST
+picked from now on) is kept. PIXEL WORLD paints each stage's scenery the first time it loads (behind
+the stage's intro card) and keeps the painted atlases on the device, so every later load of that
+stage skips painting.
 
 ## Saved versions
 

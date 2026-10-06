@@ -2147,6 +2147,12 @@ button {
   animation: fade-in 0.1s 1s both, blink 0.4s 1s steps(1) infinite;
 }
 
+/* The card ran out before the stage is ready (a first PIXEL WORLD load still painting). */
+.intro-hint.loading {
+  color: var(--cyan);
+  animation: blink 0.8s steps(1) infinite;
+}
+
 /* ─── First-run tutorial ──────────────────────────────────────────────── */
 .screen.tutorial {
   gap: 12px;

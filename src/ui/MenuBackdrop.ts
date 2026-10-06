@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { DEFAULT_SETTINGS, type ArtStyle } from '../core/types';
-import { artCast, isArtStyle } from '../core/art';
+import { artCast, artWorld, isArtStyle } from '../core/art';
+import { pwDeferPaint, pwMenuAtlas, pwPaintCancel, pwPaintPending, pwPaintStep } from '../content/pixelworld/atlas';
+import { pwStoreFlush, pwStorePrefetch } from '../content/pixelworld/store';
+import { migrateArt } from '../core/Save';
+import { MenuPwCity, MenuPwJungle, backdropGain } from './menuPixel';
 import {
   MenuCast,
   menuPtero,
@@ -142,6 +146,15 @@ class Batch {
   }
 }
 
+/** The transform `Batch.add` applies (Euler order YXZ): for the PIXEL WORLD twins of batched parts. */
+function bmat(x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx): THREE.Matrix4 {
+  _e.set(rx, ry, rz, 'YXZ');
+  _q.setFromEuler(_e);
+  const m = new THREE.Matrix4().compose(_p.set(x, y, z), _q, _s.set(sx, sy, sz));
+  _e.order = 'XYZ';
+  return m;
+}
+
 /** Displace vertices of a (non-indexed) geometry, keeping coincident vertices together. */
 function jitter(g: THREE.BufferGeometry, amount: number, rng: Lcg): THREE.BufferGeometry {
   const out = g.index ? g.toNonIndexed() : g;
@@ -172,6 +185,39 @@ function canvasTexture(size: number, h: number, draw: (g: CanvasRenderingContext
   draw(g, size, h);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/**
+ * ART: PIXEL WORLD's copy of a soft canvas texture (glows, puffs, mist): its alpha in
+ * `steps` flat steps with a 4×4 ordered dither between them, sampled nearest — a
+ * stepped pixel glow instead of a smooth gradient (the stages' light pools do the same).
+ */
+function steppedTexture(src: THREE.CanvasTexture, steps = 4, down = 2): THREE.CanvasTexture {
+  const img = src.image as HTMLCanvasElement;
+  const w = Math.max(4, Math.round(img.width / down));
+  const h = Math.max(4, Math.round(img.height / down));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d')!;
+  g.drawImage(img, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h);
+  const B = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4 + 3;
+      const a = (d.data[i] / 255) * steps + ((B[(y & 3) * 4 + (x & 3)] + 0.5) / 16 - 0.5) * 0.9;
+      d.data[i] = Math.round((Math.max(0, Math.min(steps, Math.floor(a + 0.5))) / steps) * 255);
+    }
+  }
+  g.putImageData(d, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  t.wrapS = src.wrapS;
+  t.wrapT = src.wrapT;
   return t;
 }
 
@@ -260,6 +306,8 @@ interface Vignette {
   pointMats: THREE.ShaderMaterial[];
   /** ART: SPRITES (true) or the 3D characters. */
   setArt(sprites: boolean): void;
+  /** False while its PIXEL WORLD atlases are still painting (the shot holds black until then). */
+  ready(): boolean;
 }
 
 interface Shared {
@@ -268,6 +316,14 @@ interface Shared {
   puffTex: THREE.Texture;
   mistTex: THREE.Texture;
   bolts: THREE.BufferGeometry[];
+}
+
+/** The shared set a PIXEL WORLD vignette gets: the same, its soft textures stepped (`steppedTexture`). */
+function pixelShared(sh: Shared): Shared {
+  const st = (t: THREE.Texture, steps: number, down: number) => sh.own(steppedTexture(t as THREE.CanvasTexture, steps, down));
+  const mist = st(sh.mistTex, 3, 2);
+  mist.wrapS = THREE.RepeatWrapping;
+  return { ...sh, glowTex: st(sh.glowTex, 4, 2), puffTex: st(sh.puffTex, 3, 2), mistTex: mist };
 }
 
 function boltGeometry(rng: Lcg): THREE.BufferGeometry {
@@ -388,16 +444,19 @@ interface Zed {
   lean: number;
 }
 
-function buildCity(sh: Shared): Vignette {
+function buildCity(sh: Shared, pixel = false): Vignette {
   const own = sh.own;
   const rng = new Lcg(1979);
+  // ART: PIXEL WORLD: the same street painted (menuPixel.ts); the classic batches below are still
+  // filled (same draws, same layout) but not shown.
+  const pw = pixel ? new MenuPwCity() : null;
   const scene = new THREE.Scene();
   const fogCol = new THREE.Color(0x161c2b);
   scene.fog = new THREE.FogExp2(fogCol.getHex(), 0.03);
   scene.background = fogCol.clone();
 
   const sky = skyDome(sh, 0x04060c, 0x1c2436, 0x0a0c12);
-  scene.add(sky);
+  if (!pw) scene.add(sky);
   const skyMat = sky.material as THREE.MeshBasicMaterial;
 
   const hemi = new THREE.HemisphereLight(0x5a6c96, 0x120e10, 1.1);
@@ -420,19 +479,23 @@ function buildCity(sh: Shared): Vignette {
     lit.add(new THREE.BoxGeometry(3, 0.16, 240), 0x26262b, side * 6.5, 0.08, -90);
     lit.add(new THREE.BoxGeometry(0.22, 0.2, 240), 0x34343a, side * 5.05, 0.1, -90);
   }
+  pw?.street();
   // road paint (dim, worn)
   for (let z = 10; z > -150; z -= 6) {
     if (rng.chance(0.15)) continue;
     lit.add(new THREE.BoxGeometry(0.16, 0.02, 2.4), 0x6d6448, 0, 0.01, z);
+    pw?.dash(z);
   }
   // potholes / cracked asphalt patches
   for (let i = 0; i < 14; i++) {
     lit.add(new THREE.CircleGeometry(rng.range(0.6, 1.6), 7), 0x0c0d10, rng.range(-4, 4), 0.012, rng.range(-90, 6), -Math.PI / 2);
   }
   // buildings
+  let bIdx = 0;
   for (const side of [-1, 1]) {
     let z = 14;
     while (z > -150) {
+      const wins: { y: number; z: number; r: number; warm: boolean }[] = [];
       const w = rng.range(6, 12);
       const h = rng.range(8, 24);
       const d = 9;
@@ -443,19 +506,32 @@ function buildCity(sh: Shared): Vignette {
       lit.add(new THREE.BoxGeometry(d, h, w), col, cx, h / 2, cz, 0, 0, 0, 1, 1, 1, col.clone().multiplyScalar(0.55).getHex());
       // storefront band + awning
       lit.add(new THREE.BoxGeometry(0.3, 0.5, w * 0.96), 0x111114, side * 8.1, 3.4, cz);
-      if (rng.chance(0.5)) lit.add(new THREE.BoxGeometry(1.4, 0.1, w * 0.7), 0x2a1c1c, side * 7.4, 3.0, cz, 0, 0, side * (rng.chance(0.4) ? 0.35 : 0.12));
+      if (rng.chance(0.5)) {
+        const tilt = rng.chance(0.4) ? 0.35 : 0.12;
+        lit.add(new THREE.BoxGeometry(1.4, 0.1, w * 0.7), 0x2a1c1c, side * 7.4, 3.0, cz, 0, 0, side * tilt);
+        pw?.awning(side, cz, w * 0.7, tilt, bIdx);
+      }
       // broken / jagged roofline
       if (rng.chance(0.55)) {
         const n = 1 + Math.floor(rng.range(0, 3));
         for (let i = 0; i < n; i++) {
           const bw = rng.range(1.5, w * 0.5);
           const bh = rng.range(1, 4);
-          lit.add(new THREE.BoxGeometry(d * rng.range(0.4, 0.9), bh, bw), col, cx + rng.range(-2, 2), h + bh / 2 - 0.4, cz + rng.range(-w / 3, w / 3), rng.range(-0.15, 0.15), 0, rng.range(-0.2, 0.2));
+          const bd = d * rng.range(0.4, 0.9);
+          const args = [cx + rng.range(-2, 2), h + bh / 2 - 0.4, cz + rng.range(-w / 3, w / 3), rng.range(-0.15, 0.15), 0, rng.range(-0.2, 0.2)] as const;
+          pw?.roofBox(bIdx, new THREE.BoxGeometry(bd, bh, bw), bmat(...args));
+          lit.add(new THREE.BoxGeometry(bd, bh, bw), col, ...args);
         }
       }
       // water tank / antenna silhouettes
-      if (rng.chance(0.25)) lit.add(new THREE.CylinderGeometry(1, 1, 2, 7), 0x1a1a1f, cx, h + 1.6, cz);
-      if (rng.chance(0.3)) lit.add(new THREE.BoxGeometry(0.08, 4, 0.08), 0x1a1a1f, cx + 1, h + 2, cz);
+      if (rng.chance(0.25)) {
+        pw?.roofMetal(new THREE.CylinderGeometry(1, 1, 2, 9), bmat(cx, h + 1.6, cz));
+        lit.add(new THREE.CylinderGeometry(1, 1, 2, 7), 0x1a1a1f, cx, h + 1.6, cz);
+      }
+      if (rng.chance(0.3)) {
+        pw?.roofMetal(new THREE.BoxGeometry(0.08, 4, 0.08), bmat(cx + 1, h + 2, cz));
+        lit.add(new THREE.BoxGeometry(0.08, 4, 0.08), 0x1a1a1f, cx + 1, h + 2, cz);
+      }
       // windows on the street-facing face
       const faceX = side * 7.97;
       for (let wy = 4.6; wy < h - 1.2; wy += 2.6) {
@@ -464,13 +540,16 @@ function buildCity(sh: Shared): Vignette {
           if (r < 0.1) {
             const warm = rng.chance(0.75);
             const k = rng.range(0.45, 1);
+            wins.push({ y: wy, z: wz, r, warm });
             const c = warm ? new THREE.Color(0xffb35c).multiplyScalar(k) : new THREE.Color(0x8fc2ff).multiplyScalar(k);
             glow.add(new THREE.PlaneGeometry(1, 1.3), c, faceX, wy, wz, 0, -side * Math.PI / 2);
-          } else if (r < 0.7) {
-            lit.add(new THREE.PlaneGeometry(1, 1.3), r < 0.3 ? 0x050608 : 0x0b0c10, faceX, wy, wz, 0, -side * Math.PI / 2);
+          } else {
+            if (r < 0.7) lit.add(new THREE.PlaneGeometry(1, 1.3), r < 0.3 ? 0x050608 : 0x0b0c10, faceX, wy, wz, 0, -side * Math.PI / 2);
+            wins.push({ y: wy, z: wz, r, warm: false });
           }
         }
       }
+      pw?.building(side, z, w, h, d, bIdx++, wins);
       z -= w + (rng.chance(0.25) ? rng.range(2, 4) : 0.1);
     }
   }
@@ -479,7 +558,7 @@ function buildCity(sh: Shared): Vignette {
   neon.add(new THREE.BoxGeometry(0.12, 0.5, 2.6), 0xff2a4a, 7.85, 5.2, -27);
   neon.add(new THREE.BoxGeometry(0.12, 0.5, 1.2), 0xff2a4a, 7.85, 4.5, -26.3);
   const neonMesh = new THREE.Mesh(own(neon.build()), own(new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false })));
-  scene.add(neonMesh);
+  if (!pw) scene.add(neonMesh);
   const neonMat = neonMesh.material as THREE.MeshBasicMaterial;
 
   // street furniture: lamp posts, wrecked cars, barricades, debris
@@ -491,12 +570,14 @@ function buildCity(sh: Shared): Vignette {
   ];
   for (const [x, z] of lampPosts) {
     const s = Math.sign(x);
+    pw?.lampPost(x, z);
     lit.add(new THREE.CylinderGeometry(0.09, 0.13, 6.2, 6), 0x2b2d33, x, 3.1, z);
     lit.add(new THREE.BoxGeometry(2.4, 0.1, 0.12), 0x2b2d33, x - s * 1.1, 6.1, z);
     lit.add(new THREE.BoxGeometry(0.7, 0.18, 0.36), 0x3a3c42, x - s * 2.25, 6.0, z);
     glow.add(new THREE.BoxGeometry(0.55, 0.05, 0.26), z === -10 ? 0x000000 : 0xffd9a0, x - s * 2.25, 5.89, z);
   }
-  const car = (x: number, z: number, ry: number, col: number, flipped = false) => {
+  const car = (x: number, z: number, ry: number, col: number, flipped = false, burnt = false) => {
+    pw?.sedan(x, z, ry, col, flipped, burnt);
     const y0 = flipped ? 1.45 : 0;
     const rz = flipped ? Math.PI : 0;
     const c = new THREE.Color(col);
@@ -518,19 +599,29 @@ function buildCity(sh: Shared): Vignette {
   };
   car(-3.4, 1, 0.35, 0x3d2626);
   car(3.1, -14, -0.6, 0x283444, true);
-  car(3.6, -24, 0.2, 0x1f1d1a); // the burning wreck
+  car(3.6, -24, 0.2, 0x1f1d1a, false, true); // the burning wreck
+  pw?.fire(3.6, -24);
   car(-3.6, -36, -0.25, 0x3a3a2c);
   // barricade + debris
   for (let i = 0; i < 5; i++) {
-    lit.add(new THREE.BoxGeometry(1.2, 0.15, 0.1), i % 2 ? 0xb8a040 : 0x1a1a1a, -1 + i * 1.25, 0.9, -19.5, 0, 0.1, rng.range(-0.08, 0.08));
+    const tilt = rng.range(-0.08, 0.08);
+    pw?.board(new THREE.BoxGeometry(1.2, 0.15, 0.1), bmat(-1 + i * 1.25, 0.9, -19.5, 0, 0.1, tilt));
+    lit.add(new THREE.BoxGeometry(1.2, 0.15, 0.1), i % 2 ? 0xb8a040 : 0x1a1a1a, -1 + i * 1.25, 0.9, -19.5, 0, 0.1, tilt);
   }
+  pw?.post(new THREE.BoxGeometry(0.1, 0.9, 0.1), bmat(-1.5, 0.45, -19.5));
+  pw?.post(new THREE.BoxGeometry(0.1, 0.9, 0.1), bmat(4.2, 0.45, -19.0));
   lit.add(new THREE.BoxGeometry(0.1, 0.9, 0.1), 0x2a2a2a, -1.5, 0.45, -19.5);
   lit.add(new THREE.BoxGeometry(0.1, 0.9, 0.1), 0x2a2a2a, 4.2, 0.45, -19.0);
   for (let i = 0; i < 22; i++) {
     const s = rng.range(0.25, 0.8);
-    lit.add(jitter(new THREE.IcosahedronGeometry(s, 0), s * 0.3, rng), 0x26262a, rng.range(-7, 7), s * 0.3, rng.range(-60, 6), rng.range(0, 3), rng.range(0, 3), 0, 1, 0.5, 1);
+    const geo = jitter(new THREE.IcosahedronGeometry(s, 0), s * 0.3, rng);
+    const args = [rng.range(-7, 7), s * 0.3, rng.range(-60, 6), rng.range(0, 3), rng.range(0, 3), 0, 1, 0.5, 1] as const;
+    pw?.rock(geo, bmat(...args));
+    lit.add(geo, 0x26262a, ...args);
   }
   // trash bags / dumpsters near the kerbs
+  pw?.dumpster(new THREE.BoxGeometry(1.6, 1.2, 2.2), bmat(-6.9, 0.6, -14), 0);
+  pw?.dumpster(new THREE.BoxGeometry(1.6, 1.2, 2.2), bmat(6.9, 0.6, -52), 1);
   lit.add(new THREE.BoxGeometry(1.6, 1.2, 2.2), 0x1e3326, -6.9, 0.6, -14);
   lit.add(new THREE.BoxGeometry(1.6, 1.2, 2.2), 0x2a2018, 6.9, 0.6, -52);
   // skyline far away (unlit silhouette layer, no fog)
@@ -543,11 +634,20 @@ function buildCity(sh: Shared): Vignette {
   }
   const skyline = new THREE.Mesh(own(sky2.build()), own(new THREE.MeshBasicMaterial({ vertexColors: true, fog: false })));
   skyline.renderOrder = -5;
-  scene.add(skyline);
+  if (!pw) scene.add(skyline);
 
   const litMat = own(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
   const glowMat = own(new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false }));
-  scene.add(new THREE.Mesh(own(lit.build()), litMat), new THREE.Mesh(own(glow.build()), glowMat));
+  const glowMesh = new THREE.Mesh(own(glow.build()), glowMat);
+  if (pw) {
+    // The painted street replaces the lit batch; the glows that stay are the lamp bulbs (the windows are painted).
+    const bulbs = new Batch();
+    for (const [x, z] of lampPosts) bulbs.add(new THREE.BoxGeometry(0.55, 0.05, 0.26), z === -10 ? 0x000000 : 0xffd9a0, x - Math.sign(x) * 2.25, 5.89, z);
+    scene.add(new THREE.Mesh(own(bulbs.build()), glowMat));
+    lit.build().dispose();
+  } else scene.add(new THREE.Mesh(own(lit.build()), litMat), glowMesh);
+  const pwParts = pw ? pw.finish(scene, own) : null;
+  const pwNeonU = pwParts ? ((pwParts.neon.material as THREE.Material).userData.pw as { uPwGlow: { value: number } }) : null;
 
   // ── the flickering lamp: bulb, volumetric cone, light pool, halo ──
   const bulbMat = own(new THREE.MeshBasicMaterial({ color: 0xffd9a0, toneMapped: false }));
@@ -559,7 +659,8 @@ function buildCity(sh: Shared): Vignette {
     const pos = coneGeo.getAttribute('position') as THREE.BufferAttribute;
     const col = new Float32Array(pos.count * 3);
     for (let i = 0; i < pos.count; i++) {
-      const k = Math.pow((pos.getY(i) + 2.9) / 5.8, 1.6);
+      // (Clamped: a vertex a hair below the base made pow() NaN, which the HDR retro target spread into a black cone.)
+      const k = Math.pow(Math.max(0, (pos.getY(i) + 2.9) / 5.8), 1.6);
       col[i * 3] = 1 * k;
       col[i * 3 + 1] = 0.72 * k;
       col[i * 3 + 2] = 0.42 * k;
@@ -603,7 +704,8 @@ function buildCity(sh: Shared): Vignette {
   moonDisc.position.set(-55, 70, -190);
   const moonHalo = sprite(sh, 0x5a74b0, 0.5, 90);
   moonHalo.position.copy(moonDisc.position);
-  scene.add(moonHalo, moonDisc);
+  // (PIXEL WORLD: the painted sky has the moon, its halo and the clouds round it.)
+  if (!pw) scene.add(moonHalo, moonDisc);
 
   // ── fog cards (lit by the lamps, scrolling) ──
   const mistParts: THREE.BufferGeometry[] = [];
@@ -705,10 +807,10 @@ function buildCity(sh: Shared): Vignette {
   // ── fire on the wreck + rain ──
   const flameMat = own(pointsMaterial(sh.puffTex, true));
   const flames = own(new PointPool(36, flameMat));
-  scene.add(flames.points);
   const smokeMat = own(pointsMaterial(sh.puffTex, false));
   const smoke = own(new PointPool(18, smokeMat));
-  scene.add(smoke.points);
+  // (PIXEL WORLD: painted flame strips on the wreck and painted billows instead of soft points.)
+  if (!pw) scene.add(flames.points, smoke.points);
   const fireHalo = sprite(sh, 0xff7a2a, 0.7, 7);
   fireHalo.position.set(3.6, 1.6, -24);
   scene.add(fireHalo);
@@ -812,8 +914,17 @@ function buildCity(sh: Shared): Vignette {
       smoke.tint[i * 3] = 0.02 + (1 - k) * 0.05;
       smoke.tint[i * 3 + 1] = 0.018 + (1 - k) * 0.02;
       smoke.tint[i * 3 + 2] = 0.02;
+      if (pw?.puffs) {
+        // Painted billows on the same path: a dense core low, billows, wisps high; soot → a dark violet grey.
+        _p.set(smoke.pos[i * 3], smoke.pos[i * 3 + 1], smoke.pos[i * 3 + 2]);
+        const cell = k < 0.25 ? (i % 2 ? 3 : i % 3) : k > 0.6 ? 4 + (i & 1) : (i + 1) % 3;
+        const fade = Math.min(1, k / 0.1, (1 - k) / 0.2);
+        _c.setRGB(0.11 + (1 - k) * 0.18 * Math.max(0, 1 - k * 4), 0.085, 0.09).lerp(_c2.setRGB(0.2, 0.18, 0.24), k);
+        pw.puffs.set(i, _p, (1.3 + k * 4.2) * fade, cell, _c);
+      }
     }
     smoke.commit();
+    pw?.puffs?.commit(smoke.count);
     const f = 0.75 + Math.sin(t * 17) * 0.12 + Math.sin(t * 7.3) * 0.13;
     fire.intensity = 50 * f;
     fireHaloMat.opacity = 0.55 * f;
@@ -839,6 +950,7 @@ function buildCity(sh: Shared): Vignette {
   return {
     scene,
     pointMats: [flameMat, smokeMat],
+    ready: () => !pw || pw.painted,
     reset() {
       for (const z of zeds) {
         z.x = z.x0;
@@ -860,6 +972,7 @@ function buildCity(sh: Shared): Vignette {
       _look.set(-0.8 + Math.sin(t * 0.21) * 1.2, 1.9, -40);
       cam.lookAt(_look);
       cam.rotateZ(Math.sin(t * 0.3) * 0.012);
+      pwParts?.backdrop.update(cam.position);
       const k = flicker(t + 0.7);
       lamp.intensity = 70 * k;
       bulbMat.color.setScalar(0.15 + k * 0.85);
@@ -867,6 +980,8 @@ function buildCity(sh: Shared): Vignette {
       poolMat.opacity = 0.5 * k;
       haloMat.opacity = 0.75 * k;
       neonMat.color.setScalar(flicker(t * 1.3 + 2.1) > 0.5 ? 1 : 0.18);
+      if (pwNeonU) pwNeonU.uPwGlow.value = flicker(t * 1.3 + 2.1) > 0.5 ? 1 : 0.18;
+      pw?.tick(dt);
       mistTex.offset.x = t * 0.012;
       updateZeds(dt);
       updateFire(t, dt);
@@ -877,6 +992,7 @@ function buildCity(sh: Shared): Vignette {
       cast.flash = k;
       hemi.intensity = baseHemi + k * 4;
       skyMat.color.setScalar(1 + k * 3.5);
+      if (pwParts) backdropGain(pwParts.backdrop, k);
       (scene.fog as THREE.FogExp2).color.copy(fogCol).lerp(fogFlash, k);
       (scene.background as THREE.Color).copy(fogCol).lerp(fogFlash, k);
       boltMat.opacity = k > 0.25 ? Math.min(1, k * 1.4) : 0;
@@ -900,15 +1016,17 @@ const CRAG_X = 10.5;
 const CRAG_Z = -36;
 const CRAG_TOP = 14;
 
-function buildJungle(sh: Shared): Vignette {
+function buildJungle(sh: Shared, pixel = false): Vignette {
   const own = sh.own;
   const rng = new Lcg(65);
+  // ART: PIXEL WORLD: the same road painted (menuPixel.ts); the classic batches are still filled (same draws).
+  const pw = pixel ? new MenuPwJungle() : null;
   const scene = new THREE.Scene();
   const fogCol = new THREE.Color(0x6a3b37);
   scene.fog = new THREE.FogExp2(fogCol.getHex(), 0.0125);
   scene.background = fogCol.clone();
   const sky = skyDome(sh, 0x1c1238, 0xf07a3a, 0x3a1a14);
-  scene.add(sky);
+  if (!pw) scene.add(sky);
   const skyMat = sky.material as THREE.MeshBasicMaterial;
 
   const hemi = new THREE.HemisphereLight(0xb07090, 0x1a1408, 1.2);
@@ -925,7 +1043,8 @@ function buildJungle(sh: Shared): Vignette {
   sunDisc.position.set(70, 22, -230);
   const sunHalo = sprite(sh, 0xff8a40, 0.55, 140);
   sunHalo.position.copy(sunDisc.position);
-  scene.add(sunHalo, sunDisc);
+  // (PIXEL WORLD: the painted dusk sky has the sun, the painted volcano panel the cone, its lava and smoke.)
+  if (!pw) scene.add(sunHalo, sunDisc);
 
   // ── volcano ──
   const volc = new Batch();
@@ -937,7 +1056,7 @@ function buildJungle(sh: Shared): Vignette {
     volc.add(jitter(new THREE.IcosahedronGeometry(r, 1), r * 0.15, rng), 0x2a2030, -120 + i * 34, -r * 0.45, -150 - rng.range(0, 40), 0, 0, 0, 1.6, 0.6, 1);
   }
   const volcMesh = new THREE.Mesh(own(volc.build()), own(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
-  scene.add(volcMesh);
+  if (!pw) scene.add(volcMesh);
   const lava = new Batch();
   lava.add(new THREE.CircleGeometry(9.5, 14), 0xff6a20, -62, 57.6, -175, -Math.PI / 2);
   for (let i = 0; i < 6; i++) {
@@ -950,10 +1069,10 @@ function buildJungle(sh: Shared): Vignette {
   }
   const lavaMat = own(new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, fog: false }));
   const lavaMesh = new THREE.Mesh(own(lava.build()), lavaMat);
-  scene.add(lavaMesh);
+  if (!pw) scene.add(lavaMesh);
   const crater = sprite(sh, 0xff6a20, 0.7, 40);
   crater.position.set(-62, 60, -174);
-  scene.add(crater);
+  if (!pw) scene.add(crater);
   const craterMat = crater.material as THREE.SpriteMaterial;
 
   // ── ground, track, vegetation, fence ──
@@ -967,11 +1086,14 @@ function buildJungle(sh: Shared): Vignette {
       const away = Math.min(1, Math.abs(x) / 18);
       pos.setZ(i, away * (Math.sin(x * 0.11 + y * 0.07) * 1.6 + Math.sin(y * 0.13) * 1.2 + 1.2) - 0.1);
     }
+    pw?.terrain(g, bmat(0, 0, -80, -Math.PI / 2));
     veg.add(g, 0x1e2414, 0, 0, -80, -Math.PI / 2);
   }
+  pw?.trackStrip();
   veg.add(new THREE.PlaneGeometry(4.2, 140), 0x5a4630, 0, 0.02, -50, -Math.PI / 2);
   for (const sx of [-1, 1]) veg.add(new THREE.PlaneGeometry(0.45, 140), 0x3a2c1c, sx * 1.05, 0.03, -50, -Math.PI / 2);
   const palm = (x: number, z: number, h: number, lean: number, dir: number) => {
+    pw?.plant('palm', x, z, h + 1.8, 5.2);
     const segs = 6;
     let px = x;
     let py = 0;
@@ -991,9 +1113,11 @@ function buildJungle(sh: Shared): Vignette {
     }
   };
   const bush = (x: number, z: number, s: number, col: number) => {
+    pw?.plant('bush', x, z, s * 1.35, s * 2.4);
     veg.add(jitter(new THREE.IcosahedronGeometry(s, 0), s * 0.25, rng), col, x, s * 0.55, z, 0, rng.range(0, 3), 0, 1.2, 0.8, 1.2);
   };
   const tree = (x: number, z: number, h: number) => {
+    pw?.plant('jungleTree', x, z, h + 2.4, 6.5);
     veg.add(new THREE.CylinderGeometry(0.3, 0.5, h, 6), 0x241a12, x, h / 2, z);
     for (let i = 0; i < 4; i++) {
       const r = rng.range(1.6, 2.6);
@@ -1021,6 +1145,7 @@ function buildJungle(sh: Shared): Vignette {
       // ferns at the track edge
       if (rng.chance(0.7)) {
         const fx = s * rng.range(2.3, 3.6);
+        pw?.plant('fern', fx, z, 1.05, 1.7);
         for (let f = 0; f < 5; f++) {
           const g = new THREE.ConeGeometry(0.22, 1.3, 3);
           g.translate(0, 0.65, 0);
@@ -1032,26 +1157,38 @@ function buildJungle(sh: Shared): Vignette {
   // The raptor's crag: a tall rock outcrop right of the track. Its top sits in
   // the upper-right sky, the one area the title logo and the main-menu buttons
   // both leave clear, so the silhouette reads behind every menu.
-  veg.add(jitter(new THREE.CylinderGeometry(2.1, 4.8, CRAG_TOP - 1, 7, 5), 0.8, rng), 0x34302e, CRAG_X, (CRAG_TOP - 1) / 2, CRAG_Z, 0, 0.3, 0.04, 1, 1, 1, 0x1a1816);
-  veg.add(jitter(new THREE.CylinderGeometry(1.2, 2.6, CRAG_TOP * 0.55, 6, 2), 0.5, rng), 0x2e2a28, CRAG_X + 2.4, CRAG_TOP * 0.27, CRAG_Z - 1.2, 0, 1.1, -0.06, 1, 1, 1, 0x181614);
-  veg.add(jitter(new THREE.IcosahedronGeometry(2.4, 1), 0.4, rng), 0x3a3532, CRAG_X - 0.2, CRAG_TOP - 1.2, CRAG_Z, 0, 0.6, 0, 1.15, 0.62, 1.05);
-  veg.add(jitter(new THREE.IcosahedronGeometry(3.6, 1), 0.6, rng), 0x26221f, CRAG_X + 2.6, 2.2, CRAG_Z + 2.4, 0, 1.1, 0, 1.2, 0.85, 1);
-  veg.add(jitter(new THREE.IcosahedronGeometry(2.2, 1), 0.4, rng), 0x2c2825, CRAG_X - 3, 0.9, CRAG_Z + 3.5, 0, 0.2, 0, 1.3, 0.75, 1.1);
+  const crag = (geo: THREE.BufferGeometry, col: number, dark: boolean, bottom: number | undefined, ...t: [number, number, number, number, number, number, number?, number?, number?]) => {
+    const [x, y, z, rx, ry, rz, sx = 1, sy = 1, sz = 1] = t;
+    pw?.crag(geo, bmat(x, y, z, rx, ry, rz, sx, sy, sz), dark);
+    veg.add(geo, col, x, y, z, rx, ry, rz, sx, sy, sz, bottom);
+  };
+  crag(jitter(new THREE.CylinderGeometry(2.1, 4.8, CRAG_TOP - 1, 7, 5), 0.8, rng), 0x34302e, false, 0x1a1816, CRAG_X, (CRAG_TOP - 1) / 2, CRAG_Z, 0, 0.3, 0.04);
+  crag(jitter(new THREE.CylinderGeometry(1.2, 2.6, CRAG_TOP * 0.55, 6, 2), 0.5, rng), 0x2e2a28, true, 0x181614, CRAG_X + 2.4, CRAG_TOP * 0.27, CRAG_Z - 1.2, 0, 1.1, -0.06);
+  crag(jitter(new THREE.IcosahedronGeometry(2.4, 1), 0.4, rng), 0x3a3532, false, undefined, CRAG_X - 0.2, CRAG_TOP - 1.2, CRAG_Z, 0, 0.6, 0, 1.15, 0.62, 1.05);
+  crag(jitter(new THREE.IcosahedronGeometry(3.6, 1), 0.6, rng), 0x26221f, true, undefined, CRAG_X + 2.6, 2.2, CRAG_Z + 2.4, 0, 1.1, 0, 1.2, 0.85, 1);
+  crag(jitter(new THREE.IcosahedronGeometry(2.2, 1), 0.4, rng), 0x2c2825, true, undefined, CRAG_X - 3, 0.9, CRAG_Z + 3.5, 0, 0.2, 0, 1.3, 0.75, 1.1);
   // fallen log by the track
+  pw?.log(new THREE.CylinderGeometry(0.45, 0.55, 7, 9), bmat(2.6, 0.4, -10, 0, 0.9, Math.PI / 2 - 0.08));
   veg.add(new THREE.CylinderGeometry(0.45, 0.55, 7, 7), 0x2e2218, 2.6, 0.4, -10, 0, 0.9, Math.PI / 2 - 0.08);
   // broken electric fence on the right: posts, sagging wires, warning sign
   for (let i = 0; i < 10; i++) {
     const z = -2 - i * 4.2;
     const fallen = i === 4 || i === 5;
+    pw?.fence(new THREE.BoxGeometry(0.16, 3.4, 0.16), bmat(9, fallen ? 0.6 : 1.7, z, fallen ? 0.2 : 0, 0, fallen ? -1.25 : 0), false);
     veg.add(new THREE.BoxGeometry(0.16, 3.4, 0.16), 0x45464a, 9, fallen ? 0.6 : 1.7, z, fallen ? 0.2 : 0, 0, fallen ? -1.25 : 0);
     if (!fallen && i < 9 && i !== 3) {
-      for (let wy = 0; wy < 4; wy++) veg.add(new THREE.BoxGeometry(0.03, 0.03, 4.2), 0x6a6a70, 9, 0.8 + wy * 0.7, z - 2.1, 0.03, 0, 0);
+      for (let wy = 0; wy < 4; wy++) {
+        pw?.fence(new THREE.BoxGeometry(0.03, 0.03, 4.2), bmat(9, 0.8 + wy * 0.7, z - 2.1, 0.03, 0, 0), true);
+        veg.add(new THREE.BoxGeometry(0.03, 0.03, 4.2), 0x6a6a70, 9, 0.8 + wy * 0.7, z - 2.1, 0.03, 0, 0);
+      }
     }
   }
+  pw?.warning(8.88, 1.6, -10, 0.12);
   veg.add(new THREE.BoxGeometry(0.06, 0.8, 1.1), 0xd0a020, 8.9, 1.6, -10, 0, 0, 0.12);
   veg.add(new THREE.BoxGeometry(0.07, 0.18, 1.12), 0x111111, 8.88, 1.62, -10, 0, 0, 0.12);
   const vegMesh = new THREE.Mesh(own(veg.build()), own(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
-  scene.add(vegMesh);
+  if (!pw) scene.add(vegMesh);
+  const pwParts = pw ? pw.finish(scene, own) : null;
 
   // ── raptor (one mesh group, ~9 draw calls) ──
   const rMat = own(new THREE.MeshLambertMaterial({ color: 0x3a3226, flatShading: true }));
@@ -1154,7 +1291,7 @@ function buildJungle(sh: Shared): Vignette {
   // ── volcano smoke + fireflies ──
   const smokeMat = own(pointsMaterial(sh.puffTex, false));
   const smoke = own(new PointPool(26, smokeMat));
-  scene.add(smoke.points);
+  if (!pw) scene.add(smoke.points);
   for (let i = 0; i < smoke.count; i++) {
     smoke.data[i * 6] = (i / smoke.count) * 14;
     smoke.data[i * 6 + 1] = 14;
@@ -1179,6 +1316,7 @@ function buildJungle(sh: Shared): Vignette {
   return {
     scene,
     pointMats: [smokeMat, flyMat],
+    ready: () => !pw || pw.painted,
     reset() {
       cast.invalidate();
     },
@@ -1199,6 +1337,8 @@ function buildJungle(sh: Shared): Vignette {
       _look.set(-3 + Math.sin(t * 0.25) * 1.0, 3.6 + ease * 2.5, -60);
       cam.lookAt(_look);
       cam.rotateZ(Math.sin(t * 1.3) * 0.008);
+      pwParts?.backdrop.update(cam.position);
+      pw?.tick(t);
 
       // Raptor: breathe, sway tail, look around, screech at ~45 % of the shot.
       const sc = p > 0.4 && p < 0.62 ? Math.sin(((p - 0.4) / 0.22) * Math.PI) : 0;
@@ -1251,8 +1391,17 @@ function buildJungle(sh: Shared): Vignette {
         smoke.tint[i * 3] = 0.035 + hot * 0.4;
         smoke.tint[i * 3 + 1] = 0.025 + hot * 0.06;
         smoke.tint[i * 3 + 2] = 0.03;
+        if (pw?.puffs) {
+          // Painted billows rising off the crater: lava-lit at the vent, ash grey, a dusk violet aloft.
+          _p.set(smoke.pos[i * 3], smoke.pos[i * 3 + 1], smoke.pos[i * 3 + 2]);
+          const fade = Math.min(1, k / 0.12, (1 - k) / 0.25);
+          const cell = k < 0.2 ? 3 : k > 0.6 ? 4 + (i & 1) : i % 3;
+          _c.setRGB(0.16 + hot * 0.3, 0.1 + hot * 0.05, 0.11).lerp(_c2.setRGB(0.22, 0.16, 0.24), k);
+          pw.puffs.set(i, _p, (12 + k * 30) * fade, cell, _c);
+        }
       }
       smoke.commit();
+      pw?.puffs?.commit(smoke.count);
       for (let i = 0; i < flies.count; i++) {
         const d = flies.data;
         const s = d[i * 6 + 5];
@@ -1272,6 +1421,7 @@ function buildJungle(sh: Shared): Vignette {
       cast.flash = k;
       hemi.intensity = baseHemi + k * 3;
       skyMat.color.setScalar(1 + k * 1.6);
+      if (pwParts) backdropGain(pwParts.backdrop, k);
       (scene.fog as THREE.FogExp2).color.copy(fogCol).lerp(fogFlash, k);
       (scene.background as THREE.Color).copy(fogCol).lerp(fogFlash, k);
       boltMat.opacity = k > 0.25 ? Math.min(1, k * 1.3) : 0;
@@ -1314,11 +1464,11 @@ function readSave(): string | null {
   }
 }
 
-/** The ART setting in a raw save (an old save's pre-migration value reads as unset). */
+/** The ART setting in a raw save, migrated as Save migrates it (`migrateArt`). */
 function savedArt(raw: string | null): ArtStyle | null {
   try {
-    const st = raw ? (JSON.parse(raw) as { settings?: { art?: unknown; artV?: unknown } }).settings : null;
-    if (st && st.artV === DEFAULT_SETTINGS.artV && isArtStyle(st.art)) return st.art;
+    const st = raw ? (JSON.parse(raw) as { settings?: { art?: unknown; artV?: unknown; artPicked?: unknown } }).settings : null;
+    if (st && typeof st === 'object') return migrateArt({ ...st });
   } catch {
     /* corrupt save */
   }
@@ -1327,6 +1477,11 @@ function savedArt(raw: string | null): ArtStyle | null {
 
 /** How often the title screen looks for an ART change in the save (seconds). */
 const ART_POLL = 0.25;
+/** PIXEL WORLD title: the longest the opening black waits for the atlas store (s), and the paint slice a frame (ms). */
+const STORE_WAIT = 1.2;
+const PAINT_SLICE_MS = 10;
+/** …and for the shot not on screen yet, behind the one that is (ms a frame). */
+const BG_PAINT_SLICE_MS = 3;
 
 const SHOT = 10;
 const FADE = 0.9;
@@ -1336,9 +1491,20 @@ export class MenuBackdrop {
   /** Called when thunder should be heard (volume 0..1). */
   onThunder: ((volume: number) => void) | null = null;
   private res: Disposable[] = [];
-  /** Built on demand: the second shot is first needed under the fade to black. */
-  private shots: Partial<Record<BackdropTheme, Vignette>> = {};
+  /** Built on demand: the second shot is first needed under the fade to black. Keyed `theme` / `theme|pw` (PIXEL WORLD scenery). */
+  private shots: Partial<Record<string, Vignette>> = {};
   private shared: Shared;
+  /** The same shared set with stepped (pixel) glows, puffs and mist, for PIXEL WORLD shots (made on first use). */
+  private pxShared: Shared | null = null;
+  /** Scenery style of the shots (PIXEL WORLD or not): follows ART at cuts only (a shot never swaps mid-way). */
+  private worldArt: boolean;
+  /** PIXEL WORLD: the title's stored atlases are being read (shots wait for it, at most STORE_WAIT s). */
+  private storeWait = 0;
+  private storeReady = true;
+  /** PIXEL WORLD shots' own resources (released while a stage plays: `release`). */
+  private pwRes = new Map<string, Disposable[]>();
+  /** Released: the next PIXEL WORLD shot re-reads the store first. */
+  private needStore = false;
   private current: BackdropTheme = 'city';
   private locked: BackdropTheme | null = null;
   private t = 0;
@@ -1421,15 +1587,39 @@ export class MenuBackdrop {
     this.fadeMesh.renderOrder = 1000;
     this.fadeMesh.frustumCulled = false;
     this.camera.add(this.fadeMesh);
-    this.shot('city').reset();
+    this.worldArt = artWorld(this.art);
+    if (this.worldArt) this.readStore();
+    else this.shot('city').reset();
+  }
+
+  /** PIXEL WORLD: bring the title's painted atlases in from the store before building a shot. */
+  private readStore() {
+    if (!this.storeReady) return;
+    this.storeReady = false;
+    this.storeWait = 0;
+    void pwStorePrefetch('menu').then(() => (this.storeReady = true));
   }
 
   private shot(theme: BackdropTheme): Vignette {
-    let v = this.shots[theme];
+    const key = this.worldArt ? `${theme}|pw` : theme;
+    let v = this.shots[key];
     if (!v) {
-      v = theme === 'city' ? buildCity(this.shared) : buildJungle(this.shared);
+      if (this.worldArt) {
+        // Painted over the next frames (the shot holds black until done: `ready`). Its resources are
+        // its own (`release` frees them while a stage plays).
+        this.pxShared ??= pixelShared(this.shared);
+        const res: Disposable[] = [];
+        this.pwRes.set(key, res);
+        const sh: Shared = { ...this.pxShared, own: (x) => (res.push(x), x) };
+        pwDeferPaint(true);
+        try {
+          v = theme === 'city' ? buildCity(sh, true) : buildJungle(sh, true);
+        } finally {
+          pwDeferPaint(false);
+        }
+      } else v = theme === 'city' ? buildCity(this.shared) : buildJungle(this.shared);
       v.setArt(artCast(this.art));
-      this.shots[theme] = v;
+      this.shots[key] = v;
     }
     return v;
   }
@@ -1443,6 +1633,22 @@ export class MenuBackdrop {
     if (art === this.art) return;
     this.art = art;
     for (const v of Object.values(this.shots)) v?.setArt(artCast(art));
+  }
+
+  /**
+   * A stage is starting: free the PIXEL WORLD shots (their atlases: ≈ 14 MB for both vignettes,
+   * on the GPU and again on the CPU) and drop their pending paint; back on the menus they come back from the atlas
+   * store under the opening black. (The classic shots are small and stay.)
+   */
+  release() {
+    for (const [key, res] of this.pwRes) {
+      this.shots[key]?.scene.clear();
+      delete this.shots[key];
+      for (const r of res) r.dispose();
+    }
+    this.pwRes.clear();
+    pwPaintCancel((d) => !pwMenuAtlas(d));
+    this.needStore = true;
   }
 
   /** Lock the backdrop to one theme (null = alternate). */
@@ -1479,10 +1685,44 @@ export class MenuBackdrop {
       this.t = 0;
       this.current = this.locked ?? (this.current === 'city' ? 'jungle' : 'city');
       this.setArt(menuArt(this.artChosen));
-      this.shot(this.current).reset();
+      // Scenery follows ART at the cut (PIXEL WORLD: painted shots).
+      if (artWorld(this.art) !== this.worldArt) {
+        this.worldArt = artWorld(this.art);
+        if (this.worldArt) this.readStore();
+      }
+      if (this.storeReady || !this.worldArt) this.shot(this.current).reset();
       this.strikeT = -1;
     }
+    // PIXEL WORLD: hold black while the title's stored atlases are read (≤ STORE_WAIT s) and then painted.
+    if (this.worldArt && this.needStore) {
+      this.needStore = false;
+      this.readStore();
+    }
+    if (this.worldArt && !this.storeReady) {
+      this.storeWait += dt;
+      if (this.storeWait < STORE_WAIT) {
+        this.t = 0;
+        this.fadeMat.opacity = 1;
+        return;
+      }
+      this.storeReady = true;
+    }
     const v = this.shot(this.current);
+    if (!v.ready()) {
+      pwPaintStep(PAINT_SLICE_MS);
+      this.t = 0;
+      this.fadeMat.opacity = 1;
+      const c = this.camera;
+      if (c.parent !== v.scene) v.scene.add(c);
+      return;
+    }
+    if (this.worldArt) {
+      // The other shot is built now (still black: its geometry is one short block) and painted in thin
+      // slices behind this one, so the cut never waits; then both are handed to the store.
+      if (!this.locked) this.shot(this.current === 'city' ? 'jungle' : 'city');
+      if (pwPaintPending()) pwPaintStep(BG_PAINT_SLICE_MS);
+      else pwStoreFlush(1);
+    }
     const cam = this.camera;
     if (cam.parent !== v.scene) v.scene.add(cam);
     const aspect = width / Math.max(1, height);
@@ -1528,8 +1768,17 @@ export class MenuBackdrop {
 
   /** The scene of the shot on screen (render it with `camera`, e.g. through a post pass). */
   get scene(): THREE.Scene {
+    // PIXEL WORLD: black until the shot's atlases are read / painted (nothing uploads before).
+    if (this.worldArt && (!this.storeReady || !this.shot(this.current).ready())) return this.blank;
     return this.shot(this.current).scene;
   }
+
+  /** The black frame a PIXEL WORLD shot opens on while it is painted. */
+  private blank = (() => {
+    const s = new THREE.Scene();
+    s.background = new THREE.Color(0x000000);
+    return s;
+  })();
 
   render(renderer: THREE.WebGLRenderer) {
     if (this.disposed) return;

@@ -2,9 +2,24 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { ART_NAMES, ART_STYLES, artCast, artWorld, envPending, isArtStyle, nextArt, pixelWorld } from '../../src/core/art';
 import { DEFAULT_SETTINGS } from '../../src/core/types';
-import { Save } from '../../src/core/Save';
+import { migrateArt, Save } from '../../src/core/Save';
 import { PW_ALIGN, PW_GLOW_A, PW_LEVELS, PW_TPM, PWF, PwCanvas, PwPalette } from '../../src/content/pixelworld/canvas';
-import { clearPwCache, paintTile, PW_DEBUG_TILES, PW_STATS, PwAtlas } from '../../src/content/pixelworld/atlas';
+import {
+  clearPwCache,
+  paintTile,
+  pwCacheHas,
+  pwCacheKeep,
+  pwCached,
+  pwDeferPaint,
+  pwMenuAtlas,
+  pwPaintCancel,
+  pwPaintPending,
+  pwPaintStep,
+  PW_DEBUG_TILES,
+  PW_STATS,
+  PwAtlas,
+} from '../../src/content/pixelworld/atlas';
+import { pwStoreFlush, pwStorePrefetch } from '../../src/content/pixelworld/store';
 import { PwBatch, planarUv } from '../../src/content/pixelworld/batch';
 import { pwLevelFor, PW_MIP_BIAS } from '../../src/content/pixelworld/material';
 import { drawText, FONT_5x7, FONT_BOLD, rasterText, textWidth } from '../../src/content/pixelworld/font';
@@ -58,15 +73,29 @@ describe('ART setting: CLASSIC / PIXEL CAST / PIXEL WORLD', () => {
     expect(envPending('pixel', 'sprites')).toBe(true);
   });
 
-  it('default stays PIXEL CAST; saves keep a PIXEL WORLD choice; junk falls back to the default', () => {
-    expect(DEFAULT_SETTINGS.art).toBe('sprites');
-    const chosen = new Save(memStorage({ 'overrun.save.v1': JSON.stringify({ version: 1, settings: { art: 'pixel', artV: DEFAULT_SETTINGS.artV } }) }), false);
-    expect(chosen.settings.art).toBe('pixel');
-    const junk = new Save(memStorage({ 'overrun.save.v1': JSON.stringify({ version: 1, settings: { art: 'voxels', artV: DEFAULT_SETTINGS.artV } }) }), false);
-    expect(junk.settings.art).toBe(DEFAULT_SETTINGS.art);
-    // (An old save that only stored the earlier '3d' default still moves to the current default once.)
-    const old = new Save(memStorage({ 'overrun.save.v1': JSON.stringify({ version: 1, settings: { art: '3d' } }) }), false);
-    expect(old.settings.art).toBe(DEFAULT_SETTINGS.art);
+  it('default is PIXEL WORLD (versioned migration: un-chosen old defaults move, choices stay); junk falls back to the default', () => {
+    expect(DEFAULT_SETTINGS.art).toBe('pixel');
+    expect(DEFAULT_SETTINGS.artV).toBe(3);
+    const load = (settings: object) => new Save(memStorage({ 'overrun.save.v1': JSON.stringify({ version: 1, settings }) }), false).settings;
+    // Generation 1 (no artV: '3d' was simply the stored default) → PIXEL WORLD.
+    expect(load({ art: '3d' }).art).toBe('pixel');
+    // Generation 2 (PIXEL CAST default): PIXEL CAST was the default → PIXEL WORLD; CLASSIC / PIXEL WORLD were choices → kept.
+    expect(load({ art: 'sprites', artV: 2 }).art).toBe('pixel');
+    expect(load({ art: '3d', artV: 2 }).art).toBe('3d');
+    expect(load({ art: '3d', artV: 2 }).artPicked).toBe(true);
+    expect(load({ art: 'pixel', artV: 2 }).art).toBe('pixel');
+    // Generation 3 on: whatever is stored stays; a recorded choice survives later default changes.
+    expect(load({ art: 'sprites', artV: 3 }).art).toBe('sprites');
+    expect(load({ art: 'sprites', artV: 2, artPicked: true }).art).toBe('sprites');
+    // Junk → the default.
+    expect(load({ art: 'voxels', artV: 3 }).art).toBe(DEFAULT_SETTINGS.art);
+    // A change of ART is recorded as the player's choice.
+    const s = new Save(memStorage({}), false);
+    expect(s.settings.art).toBe('pixel');
+    expect(!!s.settings.artPicked).toBe(false);
+    s.updateSettings({ art: 'sprites' });
+    expect(s.settings.artPicked).toBe(true);
+    expect(migrateArt({ ...s.settings, artV: 2 })).toBe('sprites');
   });
 
   it('World.art: the one query stage builders branch on', () => {
@@ -169,6 +198,95 @@ describe('PixelWorld painting', () => {
     lookdevTiles(again);
     again.build();
     expect(PW_STATS.get('pack')!.cached).toBe(true);
+  });
+
+  it('deferred paint (stage loads): same texels as painting at once, post passes after, texture re-uploaded, cancel spares the title', { timeout: 60_000 }, () => {
+    clearPwCache();
+    // A post pass that rewrites the painted level (stands in for the calm / ink / flame passes).
+    const invert = (d: { levels: { data: Uint8Array }[] }) => {
+      const l = d.levels[0].data;
+      for (let i = 0; i < l.length; i += 4) l[i] = 255 - l[i];
+    };
+    const now = new PwAtlas('stage-now');
+    lookdevTiles(now);
+    now.post(invert);
+    const ref = now.build();
+    expect(ref.painted).toBe(true);
+
+    pwDeferPaint(true);
+    let later: PwAtlas;
+    let menu: PwAtlas;
+    try {
+      later = new PwAtlas('stage-later');
+      lookdevTiles(later);
+      later.build();
+      menu = new PwAtlas('menu-test');
+      lookdevTiles(menu);
+      menu.build();
+    } finally {
+      pwDeferPaint(false);
+    }
+    const d = later.build();
+    // Laid out (rects known) but not painted yet; the pass and the upload wait for the paint.
+    expect(d.painted).toBe(false);
+    expect(pwPaintPending()).toBe(2);
+    let ran = 0;
+    later.post((x) => (invert(x), ran++));
+    later.texture();
+    expect(ran).toBe(0);
+    // A load abandoned half-way: its job and cache entry go, the title's job stays.
+    pwPaintCancel(pwMenuAtlas);
+    expect(pwPaintPending()).toBe(1);
+    expect(pwCached(d.sig)).toBe(false);
+    pwPaintCancel();
+    expect(pwPaintPending()).toBe(0);
+
+    // Again, painted in small slices this time.
+    clearPwCache();
+    pwDeferPaint(true);
+    try {
+      later = new PwAtlas('stage-later');
+      lookdevTiles(later);
+      later.build();
+    } finally {
+      pwDeferPaint(false);
+    }
+    const d2 = later.build();
+    later.post((x) => (invert(x), ran++));
+    const tex2 = later.texture();
+    const v2 = tex2.version;
+    let frames = 0;
+    while (!pwPaintStep(1)) frames++;
+    expect(frames).toBeGreaterThan(2);
+    expect(d2.painted).toBe(true);
+    expect(ran).toBe(1);
+    expect(tex2.version).toBeGreaterThan(v2);
+    // Identical rects and texels at every level.
+    expect([...d2.rects]).toEqual([...ref.rects]);
+    expect(d2.levels.length).toBe(ref.levels.length);
+    for (let i = 0; i < ref.levels.length; i++) expect(Buffer.compare(Buffer.from(d2.levels[i].data), Buffer.from(ref.levels[i].data)), `level ${i}`).toBe(0);
+  });
+
+  it('session cache keeps the stage being played (and the title), the store is a no-op without IndexedDB', async () => {
+    clearPwCache();
+    for (const name of ['z1', 'z1-sky', 'z10', 'd1', 'menu-city']) {
+      const a = new PwAtlas(name);
+      a.tile(`t-${name}`, 32, 32, (c, k) => c.rect(0, 0, 32, 32, k.ramp(0x806040), 2));
+      a.build();
+    }
+    expect(pwCacheHas('z1')).toBe(true);
+    pwCacheKeep(['z1', 'menu']);
+    expect(pwCacheHas('z1')).toBe(true);
+    expect(pwCacheHas('menu')).toBe(true);
+    // 'z10' is not one of z1's atlases (names are `<prefix>` or `<prefix>-…`).
+    expect(pwCacheHas('z10')).toBe(false);
+    expect(pwCacheHas('d1')).toBe(false);
+    // node: no IndexedDB (and no build version) — the prefetch resolves at once, nothing is written.
+    await pwStorePrefetch('d1', ['menu']);
+    expect(pwCacheHas('z1')).toBe(false);
+    expect(pwCacheHas('menu')).toBe(true);
+    expect(pwStoreFlush()).toBe(0);
+    clearPwCache();
   });
 
   it('pixel fonts: bitmap glyphs, tube neon, measured widths', () => {

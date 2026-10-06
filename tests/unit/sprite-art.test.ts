@@ -32,12 +32,12 @@ describe('ART: SPRITES', () => {
     expect(parseLook(null)).toEqual(DEFAULT_LOOK);
   });
 
-  it('defaults ART to SPRITES (PixelCast pixel art; 3D stays one tap away)', () => {
-    expect(DEFAULT_SETTINGS.art).toBe('sprites');
-    // A save from before stored '3d' as the old default: it moves to SPRITES once…
+  it('ART defaults to PIXEL WORLD (pixel cast + painted scenery; PIXEL CAST and CLASSIC stay one tap away)', () => {
+    expect(DEFAULT_SETTINGS.art).toBe('pixel');
+    // A save from before stored '3d' as the old default: it moves to the default once…
     const old = new Save(memStorage({ 'overrun.save.v1': JSON.stringify({ version: 1, settings: { art: '3d' } }) }), false);
-    expect(old.settings.art).toBe('sprites');
-    // …while a 3D choice made since sticks.
+    expect(old.settings.art).toBe('pixel');
+    // …while a 3D choice made under the PIXEL CAST default sticks.
     const chosen = new Save(memStorage({ 'overrun.save.v1': JSON.stringify({ version: 1, settings: { art: '3d', artV: 2 } }) }), false);
     expect(chosen.settings.art).toBe('3d');
   });

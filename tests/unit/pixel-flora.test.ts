@@ -497,7 +497,7 @@ describe.each([
     const was = RETRO_FOLIAGE.value;
     RETRO_FOLIAGE.value = 1;
     const camera = new THREE.PerspectiveCamera(60, 844 / 390, 0.05, 400);
-    const world = new World(camera, new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS, haptics: false }, 99);
+    const world = new World(camera, new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS, art: 'sprites', haptics: false }, 99);
     world.viewport = { width: 844, height: 390 };
     new StageRunner(world, stage).start();
     const env = world.env!;

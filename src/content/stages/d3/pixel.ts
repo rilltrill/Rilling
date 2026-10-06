@@ -1269,7 +1269,7 @@ export class D3PixelWorld {
 
   /** Paint the atlases and build every mesh: terrain / chunks / water → `root` (chunks fog-culled via `culled`). */
   finish(root: THREE.Object3D, culled: THREE.Mesh[], vegPx: THREE.Object3D) {
-    d2CalmLevels(this.atlas.build(), this.calmTiles);
+    this.atlas.post((data) => d2CalmLevels(data, this.calmTiles));
     this.boltMat = pwBackdropMaterial(this.atlas, { gain: 2.2 });
     this.boltMat.transparent = true;
     this.boltMat.depthWrite = false;

@@ -34,7 +34,7 @@ The first time you open the game in a Safari tab, it shows a small *"Install: ta
 ### Other ways to try it
 
 - **Same Wi-Fi, no hosting:** on your computer, run `npm run build && npx vite preview --host`. Then open `http://<computer-ip>:4173` in Safari on the iPhone. Offline mode needs HTTPS, so it isn't available this way.
-- **One HTML file:** `npm run build:single` writes `dist-single/overrun.html`, about 1 MB, with everything inlined. You can host it anywhere that serves HTML, including as a claude.ai artifact, and open the link in Safari. The CI workflow also attaches this file to every run as the `overrun-single-file` artifact.
+- **One HTML file:** `npm run build:single` writes `dist-single/overrun.html`, about 3.3 MB (≈ 1 MB gzipped), with everything inlined. You can host it anywhere that serves HTML, including as a claude.ai artifact, and open the link in Safari. The CI workflow also attaches this file to every run as the `overrun-single-file` artifact.
 
 ---
 

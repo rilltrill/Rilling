@@ -373,11 +373,11 @@ export class Z2PixelWorld {
 
   /** Paint the atlas and build every batch (each mesh joins the group it was made for). */
   finish(gain = 1, flickers?: { mesh: THREE.Mesh; on: THREE.Material; off: THREE.Material }[]) {
-    const data = this.atlas.build();
+    this.atlas.build();
     const tiles = this.atlasTiles();
     // Calm far levels on the tileable surfaces (grout, chequer, bricks collapse into their mid-tone
     // instead of crawling into dashes), and signs kept at level 0 a step longer (letters stay whole).
-    d2CalmLevels(data, tiles);
+    this.atlas.post((data) => d2CalmLevels(data, tiles));
     const signs = new Set<number>();
     for (const t of tiles) if (/^z2(lit|plate|exit|stencil|road)\|/.test(t.key)) signs.add(t.x * 65536 + t.y);
     let anim: THREE.Material | null = null;

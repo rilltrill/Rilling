@@ -8,6 +8,7 @@ import type { ArtStyle, RetroMode } from './core/types';
 import { isArtStyle } from './core/art';
 import { CAMPAIGNS } from './content';
 import { initPlatform } from './platform';
+import { pwStoreEnable } from './content/pixelworld/store';
 
 function parseFlags(q: URLSearchParams): DebugFlags {
   const num = (k: string) => (q.has(k) ? Number(q.get(k)) : undefined);
@@ -51,6 +52,9 @@ function main() {
   const app = document.getElementById('app')!;
   const query = new URLSearchParams(location.search);
   const flags = parseFlags(query);
+  // Dev / bench: `&pwstore=<tag>` persists painted PixelWorld atlases under that version (off on the dev server by default).
+  const store = query.get('pwstore');
+  if (store) pwStoreEnable(store === '0' ? '' : `dev-${store}`);
 
   // Landscape hint (dismissible).
   document.getElementById('rotate-dismiss')?.addEventListener('pointerdown', (ev) => {

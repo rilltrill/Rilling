@@ -330,9 +330,9 @@ mouth, the sprite's silhouette matching the 3D body's.
 ## Art style: PIXEL CAST — PixelCast pixel art (`gameplay/pixel/`, `content/pixel/`)
 
 Settings → ART: **CLASSIC | PIXEL CAST | PIXEL WORLD** (`Settings.art` = `'3d' | 'sprites' |
-'pixel'`, default **PIXEL CAST** (`'sprites'`); `artV` migrates saves that only stored the old
-'3d' default; URL `&art=3d|sprites|pixel` overrides it until the player changes ART; the
-characters switch live mid-stage via the pause screen's ART chip). CLASSIC (`'3d'`) is the
+'pixel'`, default **PIXEL WORLD** (`'pixel'`, default generation `artV` 3 — see *Art style:
+PIXEL WORLD* for the migration); URL `&art=3d|sprites|pixel` overrides it until the player
+changes ART; the characters switch live mid-stage via the pause screen's ART chip). CLASSIC (`'3d'`) is the
 procedural-model look, unchanged. PIXEL WORLD adds painted environments — see *Art style:
 PIXEL WORLD* below. Below, "SPRITES" means either pixel-art style (`artCast(art)`).
 
@@ -652,8 +652,17 @@ answers "what do I draw"):
 | ART (`Settings.art`) | characters, pickups, gibs, plants | environments |
 |---|---|---|
 | CLASSIC (`'3d'`) | 3D models | 3D, Kit retro textures |
-| PIXEL CAST (`'sprites'`, default) | PixelCast pixel art | 3D, Kit retro textures (the saved "pixel cast v3" look) |
-| PIXEL WORLD (`'pixel'`) | PixelCast pixel art | painted PixelWorld pixel art |
+| PIXEL CAST (`'sprites'`) | PixelCast pixel art | 3D, Kit retro textures (the saved "pixel cast v3" look) |
+| PIXEL WORLD (`'pixel'`, **default**) | PixelCast pixel art | painted PixelWorld pixel art (all six stages and the title screen) |
+
+**Default and migration** (`Save.migrateArt`, used by `Save` and by the title backdrop reading
+the raw save): ART default generations are `artV` 1 (no `artV`: CLASSIC was simply the stored
+default), 2 (PIXEL CAST) and 3 (PIXEL WORLD). A save stored under an older generation moves to
+PIXEL WORLD once unless the player chose: from generation 3 on a change of ART records
+`artPicked` (kept through any later default change); before that, anything other than its
+generation's default counts as a choice (CLASSIC or PIXEL WORLD under the PIXEL CAST default
+stay; a PIXEL CAST that was the default — indistinguishable from one picked under it — moves).
+Junk falls back to the default.
 
 - Characters follow the live setting (`artCast`). Environments are built with the stage, so
   a stage keeps the environment style it was LOADED with: `World.art` is fixed at stage
@@ -663,8 +672,8 @@ answers "what do I draw"):
   ("SCENERY CHANGES ON THE NEXT STAGE LOAD").
 - Settings → ART is a three-way row; the pause screen's ART chip is ONE button that cycles
   CLASSIC → PIXEL CAST → PIXEL WORLD (`nextArt`). `&art=3d|sprites|pixel` overrides the
-  setting until the player changes ART. Saves holding anything else migrate to the default
-  (`Save`: `isArtStyle`).
+  setting until the player changes ART. Saves holding anything else fall back to the default
+  (`Save`: `isArtStyle`, `migrateArt`).
 - CLASSIC and PIXEL CAST build byte-identically to before: the classic builders only RECORD
   what PixelWorld needs (`userData.pwBuilding`, `pwSign`, `pwFacade` tags) and never draw
   from the RNG differently. `pixel-world.test.ts` checks per converted stage that PIXEL CAST
@@ -680,14 +689,33 @@ answers "what do I draw"):
   tone ROUNDS). Primitives: `set / rect / hline / vline / line / ellipse / poly / scatter`
   (hand-shaped clusters, `CLUSTERS`), `PwRng` seeded by the tile key. Pure CPU, node-safe.
 - **Atlas** (`atlas.ts`): tiles are REGISTERED while the stage builds (`atlas.tile(key, w,
-  h, paint, { wrap })` → a handle; the same key returns the same tile), PAINTED once in
-  `build()` (deterministic, cached per key for the session), packed into one RGBA8 texture
-  with 5 hand-made levels. Mips are palette-faithful: each texel of a level is a real texel
+  h, paint, { wrap })` → a handle; the same key returns the same tile), LAID OUT in `build()`
+  (rects known at once: meshes can be built) and PAINTED — at once (tests, tools), or, when
+  Game builds a stage behind its intro card (`pwDeferPaint(true)`), as a job of steps (one
+  tile, or one tile's mip chain) that `pwPaintStep(ms)` runs a slice a frame; a texture made
+  before the paint ends uploads once it does. Passes that re-make painted levels (d2 / z2 / d3
+  calm levels, z3 ink levels, z1 flame coverage) register with `atlas.post(fn)` right after
+  `build()`: they run when the paint ends. Deterministic either way, cached by tile list for
+  the session (`pwCacheKeep` drops other stages' copies: one stage's worth of CPU data) and
+  persisted (`store.ts`, below), packed into one RGBA8 texture with 5 hand-made levels. Mips are palette-faithful: each texel of a level is a real texel
   of the four below it (the one nearest their average, within the class most of them
   share) — never a blend; glow wins ties and survives over cut-out, so neon, stars and lit
   windows keep reading at a distance. Alpha classes: 0 = cut out (discarded), 160
   (`PW_GLOW_A`) = unlit glow, 255 = lit. Rects are 16-texel aligned (`PW_ALIGN`); wrap tiles
-  must be multiples of 16. `PW_STATS` holds bytes / paint ms per atlas.
+  must be multiples of 16. `PW_STATS` holds bytes / paint ms / cached / stored per atlas
+  (`window.__pixelWorld`), `PW_PAINT_STATS` the longest single paint step.
+- **Store** (`store.ts`): painted atlases persist in IndexedDB (`overrun-pixelworld`), one
+  record per atlas NAME under `<version>|<name>` — `version` a hash of every source file
+  (`__PW_VERSION__`, injected by vite.config.ts: any code change repaints once; other
+  versions' records are deleted by key range when the store opens). A record holds the tile
+  list it was painted for (checked on use), every level after its `post()` passes, and the
+  rects. Game opens the store at boot, `pwStorePrefetch(stageId)` reads a stage's records
+  while its intro card paints (the build waits ≤ 1.5 s for it), and `pwStoreFlush(1)` hands
+  freshly painted atlases over one a frame, still behind the card (the data is cloned at the
+  call; the disk write runs in the background). No IndexedDB (node, a sandboxed frame), a
+  blocked / slow open, a failed read or a full disk (QuotaExceededError: the store is cleared,
+  writes stop for the session) — the game simply paints. The dev server keeps it off (its
+  `define` would not follow edits): `&pwstore=<tag>` turns it on for benchmarks.
 - **Material** (`material.ts`): flat-shaded Lambert (stage lights, flashlight, fog, tone
   mapping exactly like the 3D scenery) whose colour is fetched texel by texel
   (`texelFetch`, level = log2(texels per pixel) + bias): hard texels, the hand-made levels
@@ -771,11 +799,34 @@ answers "what do I draw"):
 Keep tiles few: a NEUTRAL tile tinted per material beats a tile per colour; wrap shop
 bays (`uScale`) beat one module per shopfront; generic tiles at 32–64 texels square.
 Paint time grows with texels painted: reuse keys, keep variants ≤ 2, prefer clamp
-modules sized to what they show. The phone budget is NOT met with margin yet (a phone
-is ~2–3× slower than the dev box: expect ~400–600 ms at a cold stage load). Next steps, in
-order of payoff: paint in a Worker during the intro card (painters are DOM-free and
-node-safe already), cache painted atlases in IndexedDB by their tile-key list (a repeat
-load skips painting), paint the one-level sky atlas after the first frame.
+modules sized to what they show. Painting no longer blocks: it runs in slices behind the
+intro card and the result is persisted (see *Stage loading* and *Store*), so only the
+first-ever load of a stage on a device paints at all.
+
+Stage loads, production build, real flow (title → intro card), `scripts/load-bench.mjs
+--intro --warm 1 --play 6`, SwiftShader on a shared 4-core box (a phone is ~2–3× slower;
+the card runs 2.8 s). Total = card start → ready to play; *cold* = first load on the device
+(paints, then stores), *warm* = every later load (atlases from IndexedDB, nothing painted):
+
+| stage | PIXEL WORLD cold (build / paint in frames / total) | PIXEL WORLD warm total | PIXEL CAST total |
+|---|---|---|---|
+| z1 | 401 / 443 ms in 27 / 1610 ms | 979 ms | 1070 ms |
+| z2 | 380 / 320 in 17 / 1208 | 855 | 956 |
+| z3 | 520 / 306 in 18 / 1290 | 1116 | 918 |
+| d1 | 1042 / 316 in 17 / 1803 | 1319 | 1789 |
+| d2 | 622 / 316 in 17 / 1437 | 1357 | 1279 |
+| d3 | 706 / 289 in 15 / 1520 | 1403 | 1285 |
+
+With the CPU throttled 3× (a phone proxy): z1 cold 3.4 s / warm 1.8 s, z3 3.8 / 2.0, d1
+4.9 / 3.4 (d1's world build alone 2.7–2.9 s) — a first-ever load may hold the card on
+LOADING... for up to ~2 s; later loads fit inside the card except d1, whose build is the cost.
+Writes to the store cost 50–75 ms (one atlas a frame); reads 30–65 ms (≈ 15–25 MB, during
+the card). Longest single paint step 40–75 ms (a 2048-wide sky band). The long tasks left
+under the card are the world build itself (as in PIXEL CAST) and warm-up + first render;
+none in play comes from PIXEL WORLD (the only in-play long frame, 0.2–0.5 s on SwiftShader
+when the first characters draw a few seconds in, is the same in PIXEL CAST). Next steps: a
+Worker for the cold paint (painters are DOM-free and node-safe), and splitting the world build
+itself (d1's 0.9–1.0 s, shared with PIXEL CAST) over frames.
 
 ### How to convert a stage
 
@@ -1142,6 +1193,29 @@ State `'loading'` covers loads without a card. Stage set pieces that add **light
 or new material types mid-stage still compile then: add such lights at build time
 (intensity 0) and keep set-piece meshes in the scene (hidden) from the start.
 
+PIXEL WORLD loads (`Game.loadingTick`, one step a frame, all behind the intro card or the
+pressed RETRY / RESTART screen — never in play):
+1. `pwStorePrefetch(stage.id)` (started with the card) brings the stage's stored atlases in;
+   the build waits for it (≤ 1.5 s, `LOAD_STORE_WAIT_MS`).
+2. The world builds with `pwDeferPaint(true)`: atlases are laid out, meshes built, painting
+   queued (a cached / stored atlas queues nothing).
+3. `pwPaintStep` paints a slice a frame — 14 ms while the card animates, 45 ms once it has
+   run out (`LOAD_PAINT_SLICE_MS` / `LOAD_PAINT_RUSH_MS`); a step is one tile (the biggest,
+   a 2048-wide sky band, ≈ 60–140 ms on this box cold).
+4. `pwStoreFlush(1)` hands each freshly painted atlas to the store, one a frame.
+5. `finishLoading`: shader warm-up, and every live PixelWorld texture is uploaded
+   (`renderer.initTexture`) — a set piece's atlas never uploads the first time it comes into
+   view — then the first render.
+A world still loading is never drawn (in every ART): the card stays over the last frame on the
+canvas (the title's), so no half-painted scenery shows through it and the build's frame does
+not also compile every shader. If the card's 2.8 s run out (or it is tapped) before the load is
+done, it stays up saying LOADING... until play can begin (`showStageIntro`'s `onDone` returns
+false). The title's painted scenery is freed when a stage builds (`MenuBackdrop.release`). The
+attract demo builds at once (the store was read before it started: `startDemo` waits for it;
+the title's atlases stay cached beside the demo stage's) and paints during its opening black
+cut. `Game.lastLoad` records build / paint (+ frames) / store / warm-up / render / total ms
+(`scripts/load-bench.mjs`).
+
 ## Renderer policy
 
 - Output DPR: one rule (`Engine.outputDpr`): CRT/PIXEL LOW 1.5 / MEDIUM 2 / HIGH 2,
@@ -1165,7 +1239,8 @@ or new material types mid-stage still compile then: add such lights at build tim
 
 ## Debug URL flags
 
-`?stage=z1` jump into a stage · `&art=3d|sprites|pixel` ART: CLASSIC / PIXEL CAST (default) / PIXEL WORLD ·
+`?stage=z1` jump into a stage · `&art=3d|sprites|pixel` ART: CLASSIC / PIXEL CAST / PIXEL WORLD (default) ·
+`&pwstore=<tag>` persist painted atlases on the dev server (version `dev-<tag>`; `0` = off) ·
 `&spriteLook=pal:0,dirs:8` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
 overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor
@@ -1185,6 +1260,24 @@ given, so tooling gets clean captures) · `?stage=zoo&zoo=walker,raptor` dev are
   NAME ENTRY. RETRY/RESTART replace that stage's score; continues are recorded.
 - The 2D overlay follows `engine.retro.targetSize` (`Overlay2D.setPixelGrid`) so
   rings/crosshairs are drawn on the same chunky pixel grid as the 3D.
+- Title backdrop (`ui/MenuBackdrop.ts`): two vignettes, the rainy night street and the
+  sunset jungle road, cut every 10 s. In PIXEL WORLD they are built from the PixelWorld
+  toolkit (`ui/menuPixel.ts`: `MenuPwCity`, `MenuPwJungle`) from the SAME layout calls (the
+  classic batches are still filled with the same draws, just not shown): brick / plaster
+  facades with painted windows (the classic window draw picks the kind: lit rooms, dark
+  panes, blinds, a broken or boarded one), shopfront bays, cornices, awnings, the neon BAR
+  sign, wet asphalt with worn lane paint, slab sidewalks and curbs, the cars in z1's painted
+  car modules, painted night sky and skyline; a painted dusk sky, jungle ranges and the
+  smoking volcano panel, jungle floor, dirt track, the plants as FLORA billboards (d1 species),
+  the crag in painted rock; fire as z1's flame strips and smoke as z3's painted billows; soft
+  glows / mist re-stepped (`steppedTexture`: 3–4 alpha steps, ordered dither, nearest). The
+  scenery follows ART at cuts only. Atlases `menu-…` (≈ 6–8 MB per vignette) are read from
+  the store at boot (the opening black waits ≤ 1.2 s), painted in slices while the shot holds
+  black (10 ms a frame), the other vignette built under the same black and painted behind the
+  first (3 ms a frame); their resources belong to the backdrop (`Kit.untrack`), so stage
+  teardowns don't dispose them, and stage loads never cancel their paint (`pwMenuAtlas`).
+  A stage build frees them (`release()`: GPU textures and CPU copies, ≈ 14 MB); back on the
+  menus they come back from the store under the opening black (≈ 0.1 s).
 
 ## Verifying changes
 

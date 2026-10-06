@@ -360,6 +360,12 @@ export const Kit = {
     return x;
   },
 
+  /** Take a resource back out of the per-stage set (an owner that outlives stages disposes it: the title backdrop). */
+  untrack<T extends { dispose(): void }>(x: T): T {
+    tracked.delete(x);
+    return x;
+  },
+
   /** Dispose every cached and tracked GPU resource. Called between stages. */
   disposeAll() {
     for (const g of geoCache.values()) g.dispose();

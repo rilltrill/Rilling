@@ -49,7 +49,7 @@ export type QualityLevel = 'low' | 'medium' | 'high';
 export type RetroMode = 'crt' | 'pixel' | 'off';
 
 /**
- * ART setting (see `core/art.ts` for the queries):
+ * ART setting (see `core/art.ts` for the queries; default PIXEL WORLD):
  *  - '3d'      CLASSIC — procedural 3D models in 3D environments (the original look);
  *  - 'sprites' PIXEL CAST — PixelCast pixel-art characters (+ pickups, thrown things,
  *              gibs, FLORA plants) over the 3D environments;
@@ -74,6 +74,8 @@ export interface Settings {
   art: ArtStyle;
   /** Which ART default `art` was stored under (see Save: an older un-chosen default moves to the new one once). */
   artV?: number;
+  /** The player changed ART themselves (recorded from ART default generation 3 on): kept across default changes. */
+  artPicked?: boolean;
   /** Photosensitivity: tone down full-screen flashes (lightning, explosions, damage, hit flashes). */
   reduceFlashes: boolean;
   /** Screen-shake intensity multiplier 0..1. */
@@ -90,8 +92,9 @@ export const DEFAULT_SETTINGS: Settings = {
   leftHanded: false,
   quality: 'medium',
   retro: 'crt',
-  art: 'sprites',
-  artV: 2,
+  art: 'pixel',
+  artV: 3,
+  artPicked: false,
   reduceFlashes: false,
   screenShake: 1,
   showFps: false,

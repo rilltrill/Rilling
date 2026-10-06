@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { spriteGeometry } from '../../pixelworld/z3fx';
 import { Kit } from '../../kit/ModelKit';
 import { Rng } from '../../../core/Rng';
 import { EnvKit } from '../../kit/EnvKit';
@@ -80,6 +81,16 @@ export function pwPuffTexture(): THREE.DataTexture {
   puffTex = Kit.track(t);
   return puffTex;
 }
+
+/**
+ * ART: PIXEL WORLD smoke by age (the z3 wrecks' ramp, a night's values: unlit sprites): lit
+ * orange by the fire at its foot, soot, a dark grey-brown body, a dim violet where it thins
+ * into the night sky — a column that sits in the dark, not a lit cloud.
+ */
+const PW_SMOKE_FIRE = new THREE.Color(0x6a2c18);
+const PW_SMOKE_SOOT = new THREE.Color(0x1c1618);
+const PW_SMOKE_BODY = new THREE.Color(0x3a302e);
+const PW_SMOKE_THIN = new THREE.Color(0x3a3448);
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -662,16 +673,36 @@ export class FirePlume {
 
   /**
    * ART: PIXEL WORLD: the glow cones hide (painted flame cards under `group`
-   * take their place) and the embers / smoke draw with a stepped pixel puff.
+   * take their place), the embers draw with a stepped pixel puff and the smoke
+   * column as hand-pixelled billows (`smokeMat`: a `pwSpriteMaterial` over the
+   * painted puff strip) — opaque cut-out puffs lit from the upper left, soot at
+   * the fire to grey-brown to a thin lilac, never a soft translucent haze.
    */
-  pixelArt(puff: THREE.Texture) {
+  pixelArt(puff: THREE.Texture, smokeMat?: THREE.Material) {
     for (const f of this.flames) f.visible = false;
-    for (const c of [this.embers, this.smoke]) {
-      const m = c.points.material as THREE.PointsMaterial;
-      m.map = puff;
-      m.needsUpdate = true;
+    const m = this.embers.points.material as THREE.PointsMaterial;
+    m.map = puff;
+    m.needsUpdate = true;
+    if (!smokeMat) {
+      const sm = this.smoke.points.material as THREE.PointsMaterial;
+      sm.map = puff;
+      sm.needsUpdate = true;
+      return;
     }
+    const im = new THREE.InstancedMesh(spriteGeometry(false), smokeMat, this.smoke.n);
+    im.frustumCulled = false;
+    im.count = 0;
+    im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    im.setColorAt(0, _c.set(0xffffff));
+    im.instanceColor!.setUsage(THREE.DynamicDrawUsage);
+    im.renderOrder = 1;
+    this.group.remove(this.smoke.points);
+    this.group.add(im);
+    this.puffs = im;
   }
+
+  /** ART: PIXEL WORLD's painted smoke billows (replaces the smoke points). */
+  private puffs: THREE.InstancedMesh | null = null;
 
   update(dt: number) {
     this.group.visible = this.active;
@@ -743,8 +774,30 @@ export class FirePlume {
       m.col[c + 1] = g;
       m.col[c + 2] = g * 1.1;
       m.col[c + 3] = a;
+      if (this.puffs) {
+        // Painted billows: a dense core low, cauliflower billows in the body, thinning wisps and
+        // sheared tops high up; grow as they rise, shrink in / out instead of fading (cut-out texels).
+        const age = 1 - k;
+        const grow = s * (0.95 + age * 2.1);
+        const fade = Math.min(1, age / 0.1, k / 0.22);
+        const cell = age < 0.28 ? (i % 2 ? 3 : i % 3) : age > 0.62 ? 4 + (i & 1) : (i + 1) % 3;
+        _p.set(m.pos[j], m.pos[j + 1], m.pos[j + 2]);
+        _s.set(Math.max(0.001, grow * fade), Math.max(0.001, grow * fade), 1 + cell);
+        _m.compose(_p, _q.identity(), _s);
+        this.puffs.setMatrixAt(i, _m);
+        // Soot at the fire (lit from below by it), grey-brown in the body, lilac where it thins.
+        if (age < 0.12) _c.copy(PW_SMOKE_FIRE).lerp(PW_SMOKE_SOOT, age / 0.12);
+        else if (age < 0.35) _c.copy(PW_SMOKE_SOOT).lerp(PW_SMOKE_BODY, (age - 0.12) / 0.23);
+        else _c.copy(PW_SMOKE_BODY).lerp(PW_SMOKE_THIN, Math.min(1, (age - 0.35) / 0.5));
+        this.puffs.setColorAt(i, _c);
+      }
     }
     m.flush();
+    if (this.puffs) {
+      this.puffs.count = m.n;
+      this.puffs.instanceMatrix.needsUpdate = true;
+      if (this.puffs.instanceColor) this.puffs.instanceColor.needsUpdate = true;
+    }
   }
 }
 

@@ -618,10 +618,10 @@ export class Z3PixelWorld {
 
   /** Paint the atlas and add every batch's mesh to its group. Register nothing after this. */
   finish() {
-    const data = this.atlas.build();
+    this.atlas.build();
     const tiles = [...(this.atlas as unknown as { tiles: Map<string, { tile: PwTile }> }).tiles.values()].map((t) => t.tile);
     // Letters keep their bars down the levels; sign faces stay on level 0 a little longer.
-    z3InkLevels(data, tiles);
+    this.atlas.post((data) => z3InkLevels(data, tiles));
     const signs = new Set<number>();
     for (const t of tiles) if (Z3_SIGN_KEY.test(t.key)) signs.add(t.x * 65536 + t.y);
     const base = pwMaterial(this.atlas, { gain: 1 });

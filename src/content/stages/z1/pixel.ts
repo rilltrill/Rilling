@@ -37,6 +37,7 @@ import { M, type FacadeRecord } from './props';
 import type { ZoneId } from './town';
 import { pwMaterial, pwTick } from '../../pixelworld/material';
 import { z1FlameLevels, z1TongueFlameTile, Z1_FLAME_FRAMES, Z1_FLAME_H, Z1_FLAME_LEVELS, Z1_FLAME_W } from '../../pixelworld/z1fire';
+import { PUFF_CELLS, PUFF_COLS, pwSpriteMaterial, z3PuffTile } from '../../pixelworld/z3fx';
 import { pwPuffTexture } from './vfx';
 import { z1DarkBay, z1LaundryBay, z1LitBay, z1PoliceBay, type Z1DarkKind, type Z1LitKind } from '../../pixelworld/z1shops';
 import { Destructible } from '../../../gameplay/Props';
@@ -264,6 +265,9 @@ export class Z1PixelWorld {
     const flames = (this.flames = [z1TongueFlameTile(this.fireAtlas, 0), z1TongueFlameTile(this.fireAtlas, 1)]);
     const sub = { x: 0, y: 0, w: Z1_FLAME_W, h: Z1_FLAME_H };
     const puff = pwPuffTexture();
+    // The smoke columns: the z3 wrecks' painted billows (same strip) on the fire atlas.
+    const puffTile = z3PuffTile(this.fireAtlas);
+    const smokeMat = pwSpriteMaterial(this.fireAtlas, puffTile, { cells: PUFF_CELLS, cols: PUFF_COLS, gain: 1.6 });
     town.anim.fires.forEach((f, fi) => {
       const b = new PwBatch(this.fireAtlas);
       f.plume.flameDefs().forEach((d, i) => {
@@ -278,7 +282,7 @@ export class Z1PixelWorld {
           b.rect(new THREE.Vector3(d.x, -0.04, d.z).addScaledVector(ux, -w / 2), ux, Y, w, h, tile, { sub, flipU: (i + k) % 2 === 1 });
         }
       });
-      f.plume.pixelArt(puff);
+      f.plume.pixelArt(puff, smokeMat);
       this.dynBatches.push({ b, parent: f.plume.group, local: true, anim: true });
     });
     for (const d of Object.values(town.dynZones)) {
@@ -376,7 +380,7 @@ export class Z1PixelWorld {
     for (const { b, parent, local, swap, anim } of this.dynBatches) {
       if (anim && !this.fireMat) {
         // (Coverage levels: a distant fire keeps its tapered tongues instead of filling in.)
-        z1FlameLevels(this.fireAtlas.build(), this.flames);
+        this.fireAtlas.post((data) => z1FlameLevels(data, this.flames));
         this.fireMat = pwMaterial(this.fireAtlas, { anim: { frames: Z1_FLAME_FRAMES, fps: 12 }, side: THREE.DoubleSide });
       }
       const mesh = anim ? b.build(this.fireMat!) : b.build(undefined, { gain: Z1_GAIN });

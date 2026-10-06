@@ -2,6 +2,7 @@ import { defineConfig, type Plugin, type ResolvedConfig } from 'vite';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * Emits dist/sw.js from src/platform/sw-template.js after the build, with the
@@ -49,11 +50,29 @@ function pwaPlugin(): Plugin {
   };
 }
 
+/**
+ * A hash of every source file: the version painted PixelWorld atlases are stored
+ * under (`content/pixelworld/store.ts`) — any code change repaints them once.
+ */
+function sourceVersion(root: string): string {
+  const hash = createHash('sha256');
+  const walk = (dir: string) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const abs = path.join(dir, e.name);
+      if (e.isDirectory()) walk(abs);
+      else if (/\.(ts|js|json|css)$/.test(e.name)) hash.update(path.relative(root, abs)).update(fs.readFileSync(abs));
+    }
+  };
+  walk(path.join(root, 'src'));
+  return hash.digest('hex').slice(0, 16);
+}
+
 // `--mode single` produces a build whose JS/CSS get inlined into one HTML file
 // (see scripts/inline-build.mjs) so the game can be shared as a single page.
 export default defineConfig(({ mode }) => ({
   base: './',
   plugins: [pwaPlugin()],
+  define: { __PW_VERSION__: JSON.stringify(sourceVersion(path.dirname(fileURLToPath(import.meta.url)))) },
   build: {
     target: 'es2020',
     outDir: mode === 'single' ? 'dist-single' : 'dist',

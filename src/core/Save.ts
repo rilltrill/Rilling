@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type Grade, type Settings } from './types';
+import { DEFAULT_SETTINGS, type ArtStyle, type Grade, type Settings } from './types';
 import { isArtStyle } from './art';
 
 const KEY = 'overrun.save.v1';
@@ -124,18 +124,38 @@ export function comfortDefaults(reducedMotion: boolean): Partial<Settings> {
   return reducedMotion ? { reduceFlashes: true, screenShake: 0.5 } : {};
 }
 
+/** The ART default of each generation (`Settings.artV`; a save without one is generation 1). */
+export const ART_DEFAULTS: Readonly<Record<number, ArtStyle>> = { 1: '3d', 2: 'sprites', 3: 'pixel' };
+
+/**
+ * ART migration (versioned): a save stored under an older default generation moves
+ * to the current default once — unless the player chose: from generation 3 on a
+ * choice is recorded (`artPicked`); before that, any ART other than its
+ * generation's default was a choice (CLASSIC or PIXEL WORLD under the PIXEL CAST
+ * default stick; a PIXEL CAST that was simply the default moves to PIXEL WORLD).
+ * Returns the ART the settings end up with (they are updated in place).
+ */
+export function migrateArt(s: { art?: unknown; artV?: unknown; artPicked?: unknown }): ArtStyle {
+  const v = typeof s.artV === 'number' && s.artV >= 1 ? Math.floor(s.artV) : 1;
+  if (!isArtStyle(s.art)) {
+    s.art = DEFAULT_SETTINGS.art;
+    s.artPicked = false;
+  } else if (v !== DEFAULT_SETTINGS.artV) {
+    const chose = s.artPicked === true || (v > 1 && s.art !== ART_DEFAULTS[v]);
+    if (!chose) s.art = DEFAULT_SETTINGS.art;
+    s.artPicked = chose;
+  }
+  s.artV = DEFAULT_SETTINGS.artV;
+  return s.art as ArtStyle;
+}
+
 /** Repair comfort fields from older / hand-edited saves. */
 function cleanSettings(s: Settings): Settings {
   const shake = Number(s.screenShake);
   s.screenShake = Number.isFinite(shake) ? Math.min(1, Math.max(0, shake)) : DEFAULT_SETTINGS.screenShake;
   s.reduceFlashes = !!s.reduceFlashes;
-  if (!isArtStyle(s.art)) s.art = DEFAULT_SETTINGS.art;
-  // ART default generation 2 = SPRITES. A save from before (where '3d' was simply
-  // the stored default) moves to the new default once; choices made since stick.
-  if (s.artV !== DEFAULT_SETTINGS.artV) {
-    s.art = DEFAULT_SETTINGS.art;
-    s.artV = DEFAULT_SETTINGS.artV;
-  }
+  migrateArt(s);
+  s.artPicked = !!s.artPicked;
   return s;
 }
 
@@ -197,8 +217,8 @@ export class Save {
       return {
         ...base,
         ...parsed,
-        // (`artV` only from the stored data: its absence marks an older save.)
-        settings: cleanSettings({ ...DEFAULT_SETTINGS, ...comfortDefaults(this.reducedMotion), ...(parsed.settings ?? {}), artV: parsed.settings?.artV }),
+        // (`artV` / `artPicked` only from the stored data: their absence marks an older save.)
+        settings: cleanSettings({ ...DEFAULT_SETTINGS, ...comfortDefaults(this.reducedMotion), ...(parsed.settings ?? {}), artV: parsed.settings?.artV, artPicked: parsed.settings?.artPicked }),
         unlocked: Array.isArray(parsed.unlocked) ? parsed.unlocked : [],
         best: parsed.best ?? {},
         campaignBest: parsed.campaignBest ?? {},
@@ -225,7 +245,10 @@ export class Save {
   }
 
   updateSettings(patch: Partial<Settings>): void {
+    const art = this.data.settings.art;
     this.data.settings = { ...this.data.settings, ...patch };
+    // A change of ART is the player's choice: it stays through later default changes.
+    if (this.data.settings.art !== art) this.data.settings.artPicked = true;
     this.persist();
   }
 

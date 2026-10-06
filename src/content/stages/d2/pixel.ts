@@ -246,14 +246,17 @@ export class D2PixelWorld {
   /** Paint the atlas and build every painted mesh; hide the classic shells (they stay the occluders). */
   finish() {
     if ([...this.rooms.values()].some((r) => r.sky)) this.skyAtlas.build();
-    const data = this.atlas.build();
+    this.atlas.build();
     // Calm far levels on every tileable surface (no crawling grates / grout / chequer in motion).
-    d2CalmLevels(data, this.atlasTiles());
-    // (Captures / bench read the PixelWorld stats from the page: report the calm pass beside the atlases.)
-    if (typeof window !== 'undefined') {
-      const ws = window as unknown as { __pixelWorld?: Record<string, unknown> };
-      ws.__pixelWorld = { ...(ws.__pixelWorld ?? {}), 'd2-calm': { w: 0, h: 0, tiles: 0, bytes: 0, ms: D2_LEVEL_STATS.ms, texels: 0, cached: D2_LEVEL_STATS.ms === 0 } };
-    }
+    const tiles = this.atlasTiles();
+    this.atlas.post((data) => {
+      d2CalmLevels(data, tiles);
+      // (Captures / bench read the PixelWorld stats from the page: report the calm pass beside the atlases.)
+      if (typeof window !== 'undefined') {
+        const ws = window as unknown as { __pixelWorld?: Record<string, unknown> };
+        ws.__pixelWorld = { ...(ws.__pixelWorld ?? {}), 'd2-calm': { w: 0, h: 0, tiles: 0, bytes: 0, ms: D2_LEVEL_STATS.ms, texels: 0, cached: D2_LEVEL_STATS.ms === 0 } };
+      }
+    });
     const main = pwMaterial(this.atlas, { gain: this.gain });
     // Tileable surfaces (floors, walls, ceilings) switch to their calm levels a step sooner:
     // level texels 1–2 pixels (the cast's own chunkiness), nothing crawls in motion.

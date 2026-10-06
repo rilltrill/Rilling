@@ -3,7 +3,7 @@ import { Engine } from '../core/Engine';
 import { Input } from '../core/Input';
 import { Save } from '../core/Save';
 import type { ArtStyle, CampaignId, Grade, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
-import { artCast } from '../core/art';
+import { artCast, artWorld } from '../core/art';
 import { AudioSystem } from '../audio/Audio';
 import type { MusicId } from '../audio/names';
 import { Hud } from '../ui/Hud';
@@ -24,6 +24,8 @@ import { Projectile } from './Projectile';
 import { prewarmFxAtlases } from '../fx/Fx';
 import { buildWarmupSet } from './Warmup';
 import { SpriteArt, isSpriteEntity, parseLook } from './SpriteArt';
+import { PW_LIVE_TEXTURES, pwCacheKeep, pwDeferPaint, pwMenuAtlas, pwPaintCancel, pwPaintPending, pwPaintStep } from '../content/pixelworld/atlas';
+import { pwStoreFlush, pwStoreOpen, pwStorePrefetch } from '../content/pixelworld/store';
 
 export interface DebugFlags {
   stage?: string;
@@ -70,6 +72,12 @@ type State = 'menu' | 'loading' | 'intro' | 'playing' | 'paused' | 'continue' | 
 const FROZEN: ReadonlySet<State> = new Set<State>(['loading', 'intro', 'results', 'continue', 'paused', 'gameover']);
 /** Frames the loading card / pressed button gets to paint before the (blocking) stage build. */
 const LOAD_PAINT_FRAMES = 2;
+/** The longest a load waits for the stored PixelWorld atlases before building anyway (ms). */
+const LOAD_STORE_WAIT_MS = 1500;
+/** PixelWorld painting behind the intro card: CPU ms per frame (the card keeps animating)… */
+const LOAD_PAINT_SLICE_MS = 14;
+/** …and once nothing animates any more (the card is done, a RETRY's pressed button): finish sooner. */
+const LOAD_PAINT_RUSH_MS = 45;
 /** Pause-screen note while the GPU has dropped the WebGL context. */
 const GFX_NOTE = 'GRAPHICS RESET - PLEASE WAIT';
 /** CONTINUE? countdown length (s), and the least it reopens with after the app was backgrounded. */
@@ -88,6 +96,12 @@ interface Loading {
   built: boolean;
   /** The intro card already finished (play as soon as the load completes). */
   introDone: boolean;
+  /** PIXEL WORLD: the stored atlases are in (or there are none / the store gave up): build. */
+  storeReady: boolean;
+  /** performance.now() when the load was requested. */
+  t0: number;
+  /** Freshly painted atlases handed to the persistent store. */
+  stored?: boolean;
 }
 
 interface Run {
@@ -174,6 +188,8 @@ export class Game implements MenuActions {
   private demo: Demo | null = null;
   /** Rotates through the stages for successive demos. */
   private demoIndex = Date.now() % 997;
+  /** PIXEL WORLD attract demo waiting for its stored atlases (starts when read, if the screen that asked is still up). */
+  private demoWait: { stage: StageDef; ready: boolean; t0: number; screen: string } | null = null;
   /** Overlay pixel grid last pushed to the HUD (re-derived when these change). */
   private gridW = -1;
   private gridH = -1;
@@ -182,6 +198,22 @@ export class Game implements MenuActions {
   lastResult: StageResult | null = null;
   /** Exposed for tests / debugging. */
   stats = { frames: 0, stagesCleared: 0, errors: 0 };
+  /** The last stage load's main-thread costs (ms): world build, shader warm-up, first render (debug / load bench). */
+  lastLoad: {
+    stage: string;
+    art: ArtStyle;
+    /** World build (PixelWorld atlases laid out, not painted). */
+    build: number;
+    /** PixelWorld painting, sliced over `paintFrames` frames behind the card. */
+    paint: number;
+    paintFrames: number;
+    /** Handing the freshly painted atlases to the persistent store. */
+    store: number;
+    warm: number;
+    render: number;
+    /** Wall-clock from the request to ready (the card may run longer). */
+    total: number;
+  } | null = null;
 
   constructor(
     readonly root: HTMLElement,
@@ -249,6 +281,8 @@ export class Game implements MenuActions {
     this.engine.start();
     // Paint the FX sprite/decal atlases behind the title screen so stages never stall on it.
     setTimeout(() => prewarmFxAtlases(), 300);
+    // PIXEL WORLD: open the painted-atlas store now (a stage load then only reads).
+    if (artWorld(this.artStyle)) void pwStoreOpen();
     if (this.flags.stage) {
       const st = this.findStage(this.flags.stage);
       if (st) {
@@ -384,12 +418,27 @@ export class Game implements MenuActions {
   private startStage(stage: StageDef, skipIntro = false) {
     const demo = !!this.demo;
     const showIntro = !(skipIntro || this.flags.autoplay || demo);
-    this.loading = { stage, showIntro, frames: 0, built: false, introDone: !showIntro };
+    // PIXEL WORLD: read the stage's stored atlases while the card paints (the build waits for them).
+    const pw = artWorld(this.artStyle) && !demo;
+    const load: Loading = { stage, showIntro, frames: 0, built: false, introDone: !showIntro, storeReady: !pw, t0: performance.now() };
+    // (A load replaced before it finished leaves no half-painted atlas behind.)
+    pwPaintCancel(pwMenuAtlas);
+    this.loading = load;
+    if (pw) void pwStorePrefetch(stage.id).then(() => (load.storeReady = true));
+    // Other stages' painted atlases leave the session cache (the store keeps them); the demo keeps the
+    // title's and its own (startDemo read them).
+    else pwCacheKeep(demo ? ['menu', stage.id] : []);
     this.input.reset();
     this.holdStart.clear();
     if (demo) {
-      // Attract mode: nobody is waiting on a tap — build now.
-      this.buildWorld(stage, false);
+      // Attract mode: nobody is waiting on a tap — build now (startDemo already read the store).
+      // PixelWorld painting is deferred to the demo's opening black cut (see demoTick).
+      pwDeferPaint(true);
+      try {
+        this.buildWorld(stage, false);
+      } finally {
+        pwDeferPaint(false);
+      }
       this.finishLoading();
       return;
     }
@@ -403,10 +452,14 @@ export class Game implements MenuActions {
     return this.run?.campaign ?? this.findStage(stage.id)?.campaign ?? this.campaigns[0];
   }
 
-  /** The intro card is done (timer or tap): play now, or as soon as the stage is ready. */
-  private introFinished() {
-    if (this.loading) this.loading.introDone = true;
-    else if (this.state === 'intro') this.beginPlay();
+  /** The intro card is done (timer or tap): play now, or as soon as the stage is ready (false: the card stays up meanwhile). */
+  private introFinished(): boolean {
+    if (this.loading) {
+      this.loading.introDone = true;
+      return false;
+    }
+    if (this.state === 'intro') this.beginPlay();
+    return true;
   }
 
   /** Advance a pending stage load by one frame. */
@@ -415,18 +468,47 @@ export class Game implements MenuActions {
     if (!l) return;
     l.frames++;
     if (!l.built) {
-      if (l.frames > LOAD_PAINT_FRAMES) {
-        this.buildWorld(l.stage, l.showIntro);
+      if (l.frames > LOAD_PAINT_FRAMES && (l.storeReady || performance.now() - l.t0 > LOAD_STORE_WAIT_MS)) {
+        const t0 = performance.now();
+        // PixelWorld atlases are laid out now and painted over the next frames (below).
+        pwDeferPaint(true);
+        try {
+          this.buildWorld(l.stage, l.showIntro);
+        } finally {
+          pwDeferPaint(false);
+        }
+        this.lastLoad = { stage: l.stage.id, art: this.world?.art ?? this.artStyle, build: performance.now() - t0, paint: 0, paintFrames: 0, store: 0, warm: 0, render: 0, total: 0 };
         l.built = true;
       }
       return;
     }
+    // Paint a slice a frame behind the card, then persist what was painted (still behind it).
+    if (pwPaintPending()) {
+      const t0 = performance.now();
+      pwPaintStep(l.showIntro && !l.introDone ? LOAD_PAINT_SLICE_MS : LOAD_PAINT_RUSH_MS);
+      if (this.lastLoad) {
+        this.lastLoad.paint += performance.now() - t0;
+        this.lastLoad.paintFrames++;
+      }
+      return;
+    }
+    // Persist what was painted, one atlas a frame (still behind the card / loading screen).
+    if (!l.stored) {
+      const t1 = performance.now();
+      const left = pwStoreFlush(1);
+      if (this.lastLoad) this.lastLoad.store += performance.now() - t1;
+      if (left > 0) return;
+      l.stored = true;
+      if (this.lastLoad && this.lastLoad.store > 0.5) return;
+    }
     this.finishLoading();
+    if (this.lastLoad) this.lastLoad.total = performance.now() - l.t0;
   }
 
   /** Stop a pending load (the player left before it finished). */
   private cancelLoading() {
     this.loading = null;
+    pwPaintCancel(pwMenuAtlas);
   }
 
   /** Tear down the old stage and build the new one (environment, runner, HUD wiring). */
@@ -447,6 +529,8 @@ export class Game implements MenuActions {
     }
     // Environments are built in the ART style in effect now (PIXEL WORLD or not) and keep it for the stage.
     w.art = this.artStyle;
+    // The title's painted scenery is not needed while a stage plays (the attract demo returns to it).
+    if (!demo) this.backdrop?.release();
     this.world = w;
     this.syncSprites(w);
     this.shooter = new Shooter(w);
@@ -493,7 +577,9 @@ export class Game implements MenuActions {
     const stage = l.stage;
     // The attract demo (god mode + aimbot) shrugs off first-appearance hitches, but a
     // multi-second warm-up block would freeze the title screen it starts from.
+    const t0 = performance.now();
     if (!this.demo) this.warmUp(w, stage);
+    if (this.lastLoad) this.lastLoad.warm = performance.now() - t0;
     this.music(stage.music ?? (this.campaignOf(stage).id === 'zombie' ? 'zombie' : 'dino'));
     if (this.demo) {
       // Starts on a black cut that fast-forwards to the first enemies (see demoTick).
@@ -506,7 +592,9 @@ export class Game implements MenuActions {
       return;
     }
     // Render one frame so the intro card has the scene behind it (also uploads the buffers).
+    const t1 = performance.now();
     this.renderWorld(w);
+    if (this.lastLoad) this.lastLoad.render = performance.now() - t1;
     if (l.introDone) this.beginPlay();
     else this.state = 'intro';
   }
@@ -524,6 +612,8 @@ export class Game implements MenuActions {
       w.scene.add(set.group);
       w.scene.updateMatrixWorld();
       this.engine.precompile(w.scene, w.scene);
+      // PIXEL WORLD atlases (multi-MB) go up now, not the first time a set piece using one comes into view.
+      for (const t of PW_LIVE_TEXTURES) this.engine.renderer.initTexture(t);
       // ART: SPRITES draws characters into an offscreen target: compile those variants too.
       this.sprites?.precompile(set.group);
       set.dispose();
@@ -621,6 +711,26 @@ export class Game implements MenuActions {
     const stages = this.campaigns.flatMap((c) => c.stages);
     if (stages.length === 0) return;
     const stage = stages[this.demoIndex++ % stages.length];
+    if (artWorld(this.artStyle)) {
+      // Read the stage's stored PixelWorld atlases first (the title keeps running meanwhile).
+      if (this.demoWait) return;
+      const wait = { stage, ready: false, t0: performance.now(), screen: this.menus.current };
+      this.demoWait = wait;
+      void pwStorePrefetch(stage.id, ['menu']).then(() => (wait.ready = true));
+      return;
+    }
+    this.beginDemo(stage);
+  }
+
+  /** The waiting PIXEL WORLD demo: start it once the store is read — if the attract screen that asked is still up. */
+  private demoWaitTick() {
+    const d = this.demoWait;
+    if (!d || (!d.ready && performance.now() - d.t0 < LOAD_STORE_WAIT_MS)) return;
+    this.demoWait = null;
+    if (this.state === 'menu' && !this.world && !this.loading && this.menus.current === d.screen) this.beginDemo(d.stage);
+  }
+
+  private beginDemo(stage: StageDef) {
     this.run = null;
     this.demo = { t: 0, last: 0, lull: 0, ff: 0, cutAt: performance.now(), sinceCut: 0 };
     this.applyVolumes();
@@ -634,6 +744,14 @@ export class Game implements MenuActions {
    * the next enemy. Returns true when this frame has no live action to show.
    */
   private demoTick(demo: Demo, w: World, runner: StageRunner): boolean {
+    // PIXEL WORLD scenery still being painted: hold the opening black cut (nothing is drawn).
+    if (pwPaintPending()) {
+      pwPaintStep(LOAD_PAINT_SLICE_MS);
+      demo.cutAt = performance.now();
+      return true;
+    }
+    // …then hand it to the store, an atlas a frame, still in the black.
+    if (pwStoreFlush(1) > 0) return true;
     const now = performance.now();
     const real = demo.last ? Math.min(0.25, (now - demo.last) / 1000) : 0;
     demo.last = now;
@@ -1054,6 +1172,7 @@ export class Game implements MenuActions {
     this.stats.frames++;
     this.audio.update(dt);
     if (this.loading && !this.demo) this.loadingTick();
+    if (this.demoWait) this.demoWaitTick();
     const w = this.world;
     if (w) {
       w.viewport.width = this.engine.size.width;
@@ -1087,8 +1206,12 @@ export class Game implements MenuActions {
       // Menus over a frozen world (intro, loading, pause, results, continue, game
       // over): the canvas keeps the last frame, so only redraw when a resize
       // (dynamic resolution, rotation, a settings change) or a lost context cleared it.
+      // A world still loading is not drawn at all (shaders not warmed up, PIXEL WORLD
+      // atlases not painted yet): `finishLoading` renders its first frame.
       const { width, height } = this.engine.size;
-      if (
+      if (this.loading) {
+        /* the card stays over the last frame drawn */
+      } else if (
         width !== this.renderedW ||
         height !== this.renderedH ||
         this.engine.pixelRatio !== this.renderedDpr ||

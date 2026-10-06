@@ -10,7 +10,7 @@
  *   HUMANBOT=1 ZG_STAGES=z1,z2 ZG_SEEDS=1,2,3,4 ZG_SIGMA=0.03 npx vitest run tests/unit/humanbot.test.ts
  *
  * Knobs: ZG_REACT=0.25,0.4  ZG_TAP=3 (taps/s)  ZG_MINION=0|9 (prioritise minions in boss fights)
- *        ZG_FPS=30 (simulation frame rate; phones run 60).
+ *        ZG_FPS=30 (simulation frame rate; phones run 60).  ZG_ART=3d|sprites|pixel (the ART the stages are built in).
  * Targets of a good arcade curve: stage 1 ≈ 0–2 hearts lost, stage 2 moderate,
  * stage 3 hardest but fair; no encounter regularly deals ≥ 3 damage.
  */
@@ -22,6 +22,7 @@ import { StageRunner } from '../../src/gameplay/StageRunner';
 import { Shooter } from '../../src/gameplay/Shooting';
 import { AudioSystem } from '../../src/audio/Audio';
 import { DEFAULT_SETTINGS } from '../../src/core/types';
+import { isArtStyle } from '../../src/core/art';
 import { Kit } from '../../src/content/kit/ModelKit';
 import { ALL_STAGES } from '../../src/content';
 import { Enemy } from '../../src/gameplay/Enemy';
@@ -185,7 +186,9 @@ export function simulateHuman(
   const W = 844;
   const H = 390;
   const camera = new THREE.PerspectiveCamera(58, W / H, 0.05, 400); // matches Engine at 844×390
-  const world = new World(camera, new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS, haptics: false }, o.seed);
+  // ZG_ART=3d|sprites|pixel: the ART the stage is built in (default: the game's default ART).
+  const art = isArtStyle(process.env.ZG_ART) ? process.env.ZG_ART : DEFAULT_SETTINGS.art;
+  const world = new World(camera, new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS, haptics: false, art }, o.seed);
   world.viewport = { width: W, height: H };
   const runner = new StageRunner(world, stage);
   const shooter = new Shooter(world);

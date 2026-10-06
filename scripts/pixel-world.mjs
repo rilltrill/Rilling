@@ -4,7 +4,7 @@
  * environment look-dev (PIXEL CAST vs PIXEL WORLD) and audits.
  *
  *   node scripts/pixel-world.mjs --base http://localhost:5791 --out /tmp/pixelworld/demo \
- *     --shots "z1:1:240:first-contact,d1:2:300" [--modes sprites,pixel] [--retro crt] [--hud] [--sheet]
+ *     --shots "z1:1:240:first-contact,d1:2:300" [--modes sprites,pixel] [--retro crt] [--hud] [--noauto] [--sheet]
  *
  * A shot is  stage:beat:frames[:label]  — the stage is loaded at that beat (god mode,
  * autoplay, seed 7) with game time frozen, then advanced by exactly `frames`
@@ -30,6 +30,9 @@ const out = args.out ?? '/tmp/pixelworld/shots';
 const modes = (args.modes ?? 'sprites,pixel').split(',');
 const retro = args.retro ?? 'crt';
 const hud = args.hud === 'true';
+// --noauto: nobody shoots (the hostiles close in and wind up: telegraph rings on screen with --hud).
+const noauto = args.noauto === 'true';
+const extra = args.extra ?? '';
 mkdirSync(out, { recursive: true });
 const shots = (args.shots ?? 'z1:1:240')
   .split(',')
@@ -68,7 +71,7 @@ for (const shot of shots) {
       });
     });
     // speed=0.00001: game time frozen from the first frame (the steps below are the only time that passes).
-    const url = `${base}/?stage=${shot.stage}&beat=${shot.beat}&god=1&autoplay=1&seed=7&mute=1&retro=${retro}&art=${mode}&speed=0.00001`;
+    const url = `${base}/?stage=${shot.stage}&beat=${shot.beat}&god=1${noauto ? '' : '&autoplay=1'}&seed=7&mute=1&retro=${retro}&art=${mode}&speed=0.00001${extra}`;
     await page.goto(url, { waitUntil: 'load' });
     const t0 = Date.now();
     while (Date.now() - t0 < 60000) {
