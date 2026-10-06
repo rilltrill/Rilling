@@ -1,6 +1,6 @@
 import { bayer } from './canvas';
 import type { PwAtlas, PwTile } from './atlas';
-import { drawText, FONT_3x5, FONT_BOLD } from './font';
+import { drawText, FONT_3x5, FONT_BOLD, textWidth } from './font';
 import { hash2, smooth } from './surfaces';
 import { d1Emblem } from './d1Tiles';
 
@@ -201,12 +201,84 @@ export function d3EmblemDecal(atlas: PwAtlas): PwTile {
   });
 }
 
-/** Stencilled hood marking (module 96 × 16, cut out): RANGER and the car number, worn through. */
-export function d3HoodStencil(atlas: PwAtlas, o: { ink: number }): PwTile {
-  return atlas.tile(`d3hoodstencil|${h6(o.ink)}`, 96, 16, (c, k) => {
-    const ink = k.ramp(o.ink, { light: 0.35 });
-    drawText(c, 'PARK RANGER', 2, 9, FONT_3x5, ink, 3.4);
-    drawText(c, '12', 66, 1, FONT_BOLD, ink, 3.6);
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 96; x++) if (c.at(x, y) && (hash2(x, y, 7) > 0.84 || bayer(x, y) > 0.97)) c.set(x, y, 0, 0);
+/**
+ * A painted steel tube (wrap 16 × 128 at D3_JEEP_TPM, u once round the tube; `pwCylinder` lays
+ * u = 0 on the basis' first direction — screen-left for the roll hoop's posts seen from the gun,
+ * the top for a tube lying across): a 2-texel highlight column, the mid core, a dark rim column
+ * underneath, a few chips placed by rule along it (never a rhythm) and one rust run from a weld.
+ */
+export function d3TubeTile(atlas: PwAtlas, o: { hex: number; primer: number }): PwTile {
+  return atlas.tile(`d3tube|${h6(o.hex)}|${h6(o.primer)}`, 16, 128, (c, k) => {
+    const p = k.ramp(o.hex, { light: 0.5, sat: 0.7 });
+    const pr = k.ramp(o.primer, { light: 0.4 });
+    const rust = k.ramp(0x7a3a1c, { light: 0.42 });
+    // Round the tube: 0–1 highlight, the core, 7–10 the dark underside, back up to the far side.
+    const tone = [4.4, 4.4, 3.6, 3, 3, 3, 2.6, 2, 1.4, 1.4, 1.8, 2.2, 2.6, 3, 3, 3.6];
+    for (let y = 0; y < 128; y++) for (let x = 0; x < 16; x++) c.set(x, y, p, tone[x]);
+    // Chips: three, on the lit face, at hand-picked heights; each a primer fleck with a dark lower lip.
+    for (const [x, y] of [[3, 19], [4, 61], [2, 97]]) {
+      c.set(x, y, pr, 3.4);
+      c.set(x + 1, y, pr, 3);
+      c.set(x, y + 1, p, 1.8);
+    }
+    // One rust run from the weld at the tile's start, down the underside.
+    for (let y = 0; y < 22; y++) if (y < 12 || bayer(8, y) > (y - 12) / 10) c.tint(8 + (y > 9 ? 1 : 0), y, rust, -0.2);
+    c.set(9, 0, rust, 2);
+    c.set(10, 1, rust, 2.4);
+  }, { wrap: true, density: D3_JEEP_TPM });
+}
+
+/**
+ * A square steel bar's face (wrap 16 × 64, u ACROSS the face — laid at exactly 16 texels across —,
+ * v along the bar): a lit bevel down the left edge, a calm core, the shaded right bevel; two
+ * small chips and a short scuff placed by rule (no hashed dashes).
+ */
+export function d3BarTile(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`d3bar|${h6(o.hex)}`, 16, 64, (c, k) => {
+    const p = k.ramp(o.hex, { light: 0.5, sat: 0.7 });
+    const tone = [4, 3.6, 3.2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2.8, 2.4, 1.8, 1.4];
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 16; x++) c.set(x, y, p, tone[x]);
+    for (const [x, y] of [[5, 13], [9, 44]]) {
+      c.set(x, y, p, 4);
+      c.set(x + 1, y + 1, p, 1.8);
+    }
+    for (let j = 0; j < 4; j++) c.set(6 + j, 30 + (j >> 1), p, 3.6);
+  }, { wrap: true, density: D3_JEEP_TPM });
+}
+
+/**
+ * The cabin sill's hazard edge (wrap 32 × 16 at D3_JEEP_TPM): yellow / black diagonal bands 8 texels
+ * wide (whole through the first levels at the lens), a lit leading edge, boot scuffs worn into the
+ * yellow, grit in the black.
+ */
+export function d3SillTile(atlas: PwAtlas): PwTile {
+  return atlas.tile(`d3sill`, 32, 16, (c, k) => {
+    const yl = k.ramp(0xe0b020, { light: 0.45, sat: 1.05 });
+    const ink = k.ramp(0x1a1a1e, { light: 0.4 });
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 32; x++) {
+        const band = ((x + y) >> 3) & 1;
+        c.set(x, y, band ? ink : yl, band ? 1.4 : y === 0 ? 4 : 3);
+      }
+    }
+    // Scuffs (2 × 2: kept by the levels) in the yellow, grit in the black.
+    for (const [x, y] of [[4, 6], [20, 10], [12, 2]]) for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) if (c.at(x + dx, y + dy) === yl) c.set(x + dx, y + dy, yl, 2.2);
+    for (const [x, y] of [[10, 12], [27, 4]]) if (c.at(x, y) === ink) c.set(x, y, ink, 2.6);
+  }, { wrap: true, density: D3_JEEP_TPM });
+}
+
+/**
+ * The hood's one marking (module 48 × 48, cut out, strokes on a 2- / 4-texel grid from the bottom:
+ * whole at the hood's grazing level 1–2): RANGER in 2-texel strokes over a big 12 in 4-texel
+ * strokes, stencilled in cream, lightly worn in 2 × 2 flecks.
+ */
+export function d3HoodMarking(atlas: PwAtlas, o: { ink: number }): PwTile {
+  return atlas.tile(`d3hoodmark2|${h6(o.ink)}`, 48, 48, (c, k) => {
+    const ink = k.ramp(o.ink, { light: 0.35, sat: 0.8 });
+    const tw = textWidth('RANGER', FONT_3x5, { scale: 2 });
+    drawText(c, 'RANGER', Math.round((48 - tw) / 4) * 2, 2, FONT_3x5, ink, 3.2, { scale: 2 });
+    const tw2 = textWidth('12', FONT_BOLD, { scale: 4 });
+    drawText(c, '12', Math.round((48 - tw2) / 8) * 4, 16, FONT_BOLD, ink, 3.4, { scale: 4 });
+    for (let y = 0; y < 48; y += 2) for (let x = 0; x < 48; x += 2) if (c.at(x, y) && hash2(x >> 1, y >> 1, 7) > 0.9) for (let q = 0; q < 4; q++) c.set(x + (q & 1), y + (q >> 1), 0, 0);
   });
 }

@@ -11,31 +11,32 @@ import { hash2 } from './surfaces';
 
 const h6 = (n: number) => n.toString(16).padStart(6, '0');
 
-/** Bridge deck (wrap 64 × 64, u across the road, v along it): planks across with dark gaps, nail rows, tyre-worn tracks, moss in the seams. */
+/**
+ * Bridge deck (wrap 64 × 64, u across the road, v along it): wide rain-dark planks (16 texels,
+ * half a metre) all on one ramp step, soft 2-texel seams one step down, staggered butt joints,
+ * the grain as rare 2 × 2 dashes, nails and moss only as rare 2 × 2 clusters — calm under the
+ * moving camera (few, low-contrast lines across the direction of travel).
+ */
 export function d3DeckTile(atlas: PwAtlas, o: { hex: number }): PwTile {
-  return atlas.tile(`d3deck|${h6(o.hex)}`, 64, 64, (c, k) => {
-    const rng = k.rng;
+  return atlas.tile(`d3deck3|${h6(o.hex)}`, 64, 64, (c, k) => {
     const w = k.ramp(o.hex, { light: 0.42 });
     const moss = k.ramp(0x3f5a2e, { light: 0.42 });
     for (let y = 0; y < 64; y++) {
-      const plank = y >> 3;
-      const ly = y & 7;
-      const pt = hash2(plank, 0, 3) > 0.6 ? 3.2 : hash2(plank, 1, 3) > 0.7 ? 2.6 : 2.9;
+      const plank = y >> 4;
+      const ly = y & 15;
+      // A butt joint per plank, staggered.
+      const joint = (plank * 23 + 9) % 64;
       for (let x = 0; x < 64; x++) {
-        let t = pt;
-        if (ly === 7) t = 0.8;
-        else if (ly === 0) t = pt + 0.8;
-        else if (hash2(x >> 3, y, plank + 5) > 0.88) t -= 0.6; // grain
-        // Tyre-worn tracks: smoother, a touch lighter.
-        if ((x > 10 && x < 20) || (x > 42 && x < 52)) t += ly > 0 && ly < 7 ? 0.3 : 0;
+        let t = 3;
+        if (ly >= 14) t = 2;
+        else if (x === joint || x === joint + 1) t = 2;
+        else if (hash2(x >> 2, y >> 1, plank + 5) > 0.96) t = 2;
         c.set(x, y, w, t);
       }
-      // Nails at the joists.
-      if (ly === 3) for (const x of [4, 30, 58]) c.set(x, y, w, 4.6);
-      // (Moss only as whole short runs in the seams: lone mid-tone specks would win the coarser levels.)
-      if (ly === 7 && plank % 3 === 1) for (let x = 20; x < 28; x++) c.set(x, y, moss, 1.2);
     }
-    for (let i = 0; i < 6; i++) c.streak(rng, rng.int(0, 63), rng.int(0, 63), rng.int(4, 10), -0.7, 0);
+    // Nails (2 × 2, a step up) at two joists; moss (2 × 2) in a seam.
+    for (const [x, y] of [[6, 6], [38, 22], [6, 38], [38, 54]]) c.rect(x, y, 2, 2, w, 4);
+    c.rect(22, 14, 4, 2, moss, 2.2);
   }, { wrap: true });
 }
 

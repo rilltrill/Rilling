@@ -35,6 +35,76 @@ export function d3EnamelTile(atlas: PwAtlas, o: { hex: number; rust?: number; ri
 }
 
 /**
+ * Aircraft livery enamel (wrap 32 × 32): clean paint in soft drifts, panel lines with rivets every
+ * 16 texels, oil and exhaust runs streaking down from a seam (a few long runs, placed by rule —
+ * never rust confetti).
+ */
+export function d3LiveryTile(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`d3livery|${h6(o.hex)}`, 32, 32, (c, k) => {
+    const p = k.ramp(o.hex, { light: 0.4, sat: 0.9 });
+    const oil = k.ramp(0x2a2622, { light: 0.4 });
+    c.rect(0, 0, 32, 32, p, (x, y) => (smooth(x, y, 32, 32, 2, 5) > 0.7 ? 3.4 : 3));
+    for (let y = 0; y < 32; y += 16) {
+      c.hline(0, y, 32, p, 1.8);
+      c.hline(0, y + 1, 32, p, 3.6);
+      for (let x = 3; x < 32; x += 8) c.set(x, y + 3, p, 4.2);
+    }
+    c.vline(21, 0, 32, p, 2.2);
+    // Two runs from the seam: dark at the source, thinning (ordered) as they run down.
+    for (const [x, len] of [[9, 14], [26, 9]]) {
+      for (let j = 0; j < len; j++) if (j < len / 2 || bayer(x, j + 2) > (j - len / 2) / len) c.set(x, 2 + j, oil, j < 3 ? 1.6 : 2.2);
+    }
+  }, { wrap: true });
+}
+
+/** Exhaust soot on the engine housing (module 48 × 24 = 1.5 × 0.75 m, cut out): black at the stack, feathering back and down in dithered fingers. */
+export function d3SootModule(atlas: PwAtlas): PwTile {
+  return atlas.tile(`d3soot`, 48, 24, (c, k) => {
+    const soot = k.ramp(0x1e1c1a, { light: 0.4 });
+    for (let y = 0; y < 24; y++) for (let x = 0; x < 48; x++) {
+      const u = x / 48;
+      const finger = 0.5 + Math.sin(x * 0.55) * 0.18 + Math.sin(x * 1.3) * 0.1;
+      const v = y / 24;
+      if (v > finger * (1 - u * 0.4) + 0.2) continue;
+      if (bayer(x, y) > 1.05 - u) continue;
+      c.set(x, y, soot, u < 0.25 ? 1.4 : 2);
+    }
+  });
+}
+
+/** The main rotor's blur (module 64 × 64, cut out, laid flat over the hub): faint dithered arcs where the blades sweep, darker near the tips. */
+export function d3RotorDiscModule(atlas: PwAtlas): PwTile {
+  return atlas.tile(`d3rotordisc`, 64, 64, (c, k) => {
+    const st = k.ramp(0x24262a, { light: 0.5, sat: 0.6 });
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      const d = Math.hypot(x + 0.5 - 32, y + 0.5 - 32) / 32;
+      if (d > 1 || d < 0.08) continue;
+      const a = Math.atan2(y - 32, x - 32);
+      const sweep = (Math.sin(a * 4) * 0.5 + 0.5) * 0.35 + d * 0.25;
+      if (bayer(x >> 1, y >> 1) > sweep) continue;
+      c.set(x, y, st, d > 0.92 ? 1.6 : 2.6);
+    }
+  });
+}
+
+/** The truck's bent front bumper (module 72 × 10 = 2.25 × 0.3 m, cut out): galvanised steel, dented, one end buckled down, mud on the lower lip. */
+export function d3BumperModule(atlas: PwAtlas): PwTile {
+  return atlas.tile(`d3bumper`, 72, 10, (c, k) => {
+    const st = k.ramp(0x8a8a86, { light: 0.5, sat: 0.6 });
+    const mud = k.ramp(0x4a3624, { light: 0.4 });
+    for (let x = 0; x < 72; x++) {
+      const drop = x > 54 ? Math.round((x - 54) * 0.22) : 0;
+      for (let y = 0; y < 7; y++) {
+        const yy = y + drop;
+        if (yy >= 10) continue;
+        c.set(x, yy, st, y === 0 ? 4.2 : y === 6 ? 1.6 : (x >= 20 && x < 30 && y > 1) ? 2.2 : 3);
+      }
+      if (hash2(x >> 1, 1, 71) > 0.4) c.set(x, Math.min(9, 6 + drop), mud, 2.6);
+    }
+  });
+}
+
+/**
  * The maintenance truck's cab side (module 64 × 52 = 2 × 1.6 m; the front on the
  * RIGHT): the door with its window (the storm in the glass), handle and step,
  * PARK MAINTENANCE stencilled under the emblem, mud thrown up the lower half.
@@ -42,7 +112,7 @@ export function d3EnamelTile(atlas: PwAtlas, o: { hex: number; rust?: number; ri
 export function d3TruckDoorModule(atlas: PwAtlas, o: { hex: number }): PwTile {
   const W = 64;
   const H = 52;
-  return atlas.tile(`d3truckdoor|${h6(o.hex)}`, W, H, (c, k) => {
+  return atlas.tile(`d3truckdoor2|${h6(o.hex)}`, W, H, (c, k) => {
     const rng = k.rng;
     const y = k.ramp(o.hex, { light: 0.45, sat: 1.0 });
     const glass = k.ramp(0x1a2840, { light: 0.55, sat: 0.9 });
@@ -68,6 +138,12 @@ export function d3TruckDoorModule(atlas: PwAtlas, o: { hex: number }): PwTile {
       for (let yy = top; yy < H; yy++) c.set(x, yy, mud, yy === top ? 3.6 : hash2(x, yy, 4) > 0.7 ? 2 : 2.8);
     }
     for (let i = 0; i < 40; i++) c.cluster(rng.int(0, W - 1), rng.int(20, H - 8), i, mud, rng.chance(0.5) ? 3 : 2.4);
+    // The front wheel's arch (centre at u ≈ 0.55, the module's foot): mud thrown up in a fan.
+    for (let i = 0; i < 70; i++) {
+      const a = Math.PI * (0.15 + rng.next() * 0.7);
+      const r = 10 + Math.pow(rng.next(), 0.7) * 16;
+      c.cluster(Math.round(35 + Math.cos(a) * r * 1.3), Math.round(H - Math.sin(a) * r), i, mud, rng.chance(0.5) ? 2.8 : 2.2);
+    }
     for (let i = 0; i < 8; i++) c.streak(rng, rng.int(0, W - 1), 0, rng.int(8, 20), -0.6, y);
   });
 }
@@ -76,7 +152,7 @@ export function d3TruckDoorModule(atlas: PwAtlas, o: { hex: number }): PwTile {
 export function d3TruckFrontModule(atlas: PwAtlas, o: { hex: number }): PwTile {
   const W = 70;
   const H = 52;
-  return atlas.tile(`d3truckfront|${h6(o.hex)}`, W, H, (c, k) => {
+  return atlas.tile(`d3truckfront2|${h6(o.hex)}`, W, H, (c, k) => {
     const y = k.ramp(o.hex, { light: 0.45, sat: 1.0 });
     const dark = k.ramp(0x1c1c1e, { light: 0.4 });
     const st = k.ramp(0x8a8a86, { light: 0.5, sat: 0.6 });
@@ -86,7 +162,24 @@ export function d3TruckFrontModule(atlas: PwAtlas, o: { hex: number }): PwTile {
     c.rect(0, 0, W, H, y, 3);
     c.hline(0, 0, W, y, 4.2);
     // Windscreen opening (upper third; the classic glass sits over it).
-    for (let yy = 3; yy < 21; yy++) for (let x = 5; x < W - 5; x++) c.set(x, yy, glass, ((x + yy) % 19) < 3 ? 3.2 : 2.2);
+    for (let yy = 3; yy < 21; yy++) {
+      for (let x = 5; x < W - 5; x++) {
+        // The storm sky caught in a broad diagonal band (two steps), dark below; the dashboard's edge.
+        const band = (x - yy * 1.4 + 200) % 46;
+        let t = yy > 17 ? 1.2 : band < 7 ? 3.6 : band < 12 ? 2.8 : 2.2;
+        // Wiper arcs: cleared fans (a step darker, no beads).
+        const wa = Math.hypot(x - 22, yy - 21);
+        const wb = Math.hypot(x - 50, yy - 21);
+        const wiped = (wa > 6 && wa < 16) || (wb > 6 && wb < 16);
+        if (wiped && yy <= 17) t = Math.min(t, 2.6);
+        c.set(x, yy, glass, t);
+        // Rain beads outside the wiped fans: a lit texel over a dark one.
+        if (!wiped && yy < 16 && hash2(x, yy, 72) > 0.9) {
+          c.set(x, yy, glass, 4.4);
+          c.set(x, yy + 1, glass, 1.4);
+        }
+      }
+    }
     c.frame(4, 2, W - 8, 20, dark, 1.4);
     // Grille + headlights.
     c.rect(18, 26, 34, 14, dark, 1);

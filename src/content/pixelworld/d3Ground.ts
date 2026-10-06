@@ -1,4 +1,4 @@
-import { bayer, type PwCanvas } from './canvas';
+import { bayer, PWF, type PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { crack, hash2, smooth } from './surfaces';
 
@@ -98,7 +98,7 @@ export const D3_ROAD_W = 256;
  * crumbled shoulder with gravel and grass, leaves blown onto the edges.
  */
 export function d3RoadTile(atlas: PwAtlas, o: D3RoadOpts): PwTile {
-  return atlas.tile(`d3road|${h6(o.hex)}|${h6(o.line)}|3`, D3_ROAD_W, 320, (c, k) => paintRoad(c, k, o), { wrap: true });
+  return atlas.tile(`d3road|${h6(o.hex)}|${h6(o.line)}|4`, D3_ROAD_W, 320, (c, k) => paintRoad(c, k, o), { wrap: true });
 }
 
 function paintRoad(c: PwCanvas, k: PwKit, o: D3RoadOpts) {
@@ -125,15 +125,28 @@ function paintRoad(c: PwCanvas, k: PwKit, o: D3RoadOpts) {
   }
   // Worn (paler) and resealed (darker) areas: a coarse 8 × 8 grid of hard-edged tones,
   // its borders roughened per texel by a hash (pixel-art "clusters", no dither).
+  // (The noise on a 4-texel grid, interpolated per texel and thresholded with a little grain:
+  // lobed, irregular outlines — never the grid's rectangles.)
   const GW = W >> 2;
   const GH = H >> 2;
-  const area = new Int8Array(GW * GH);
+  const noise = new Float32Array(GW * GH);
   for (let gy = 0; gy < GH; gy++) {
-    for (let gx = 0; gx < GW; gx++) {
-      const n = smooth(gx * 4, gy * 4, W, H, 5, 13) * 0.7 + smooth(gx * 4, gy * 4, W, H, 14, 14) * 0.3;
-      area[gy * GW + gx] = n > 0.66 ? 1 : n < 0.3 ? -1 : 0;
-    }
+    for (let gx = 0; gx < GW; gx++) noise[gy * GW + gx] = smooth(gx * 4, gy * 4, W, H, 5, 13) * 0.7 + smooth(gx * 4, gy * 4, W, H, 14, 14) * 0.3;
   }
+  const areaAt = (x: number, y: number) => {
+    const fx = x / 4;
+    const fy = y / 4;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const tx = fx - x0;
+    const ty = fy - y0;
+    const xa = ((x0 % GW) + GW) % GW;
+    const xb = (xa + 1) % GW;
+    const ya = ((y0 % GH) + GH) % GH;
+    const yb = (ya + 1) % GH;
+    const n = (noise[ya * GW + xa] * (1 - tx) + noise[ya * GW + xb] * tx) * (1 - ty) + (noise[yb * GW + xa] * (1 - tx) + noise[yb * GW + xb] * tx) * ty + (hash2(x >> 1, y >> 1, 15) - 0.5) * 0.06;
+    return n > 0.66 ? 1 : n < 0.3 ? -1 : 0;
+  };
   // Wheel paths (two per lane): polished, a half step darker.
   const pathMask = new Uint8Array(W);
   for (const px of [56, 96, 160, 200]) for (let x = px - 9; x <= px + 9; x++) pathMask[x] = 1;
@@ -146,11 +159,7 @@ function paintRoad(c: PwCanvas, k: PwKit, o: D3RoadOpts) {
         R[i] = 0;
         continue;
       }
-      // Jitter the grid lookup a few texels so the area borders are ragged clusters, not steps.
-      const hj = hash2(x >> 1, y >> 1, 15);
-      const jx = x + ((hj * 7) | 0) - 3;
-      const jy = (y + (((hj * 49) | 0) % 7) - 3 + H) % H;
-      const a = area[(jy >> 2) * GW + ((jx < 0 ? 0 : jx >= W ? W - 1 : jx) >> 2)];
+      const a = areaAt(x, y);
       let t = a > 0 ? 3.4 : a < 0 ? 2.4 : 3;
       if (pathMask[(x - wob + W) % W]) t -= 0.5;
       if (x < eL[y] + 5 || x > eR[y] - 5) t = Math.min(t, (x + y) & 1 ? 2 : 2.4);
@@ -567,7 +576,7 @@ export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; s
   const F = D3_ANIM_FRAMES;
   const W = 64;
   const FH = 48;
-  return atlas.tile(`d3puddle|${h6(o.rim)}|${h6(o.water)}|${variant}|${F}`, W, FH * F, (c, k) => {
+  return atlas.tile(`d3puddle2|${h6(o.rim)}|${h6(o.water)}|${h6(o.sky)}|${variant}|${F}`, W, FH * F, (c, k) => {
     const rim = k.ramp(o.rim, { light: 0.42 });
     const wat = k.ramp(o.water, { light: 0.45, sat: 0.9 });
     const sky = k.ramp(o.sky, { light: 0.4, sat: 0.8 });
@@ -582,19 +591,22 @@ export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; s
         shape[y * W + x] = Math.hypot(u, v) / r;
       }
     }
-    // Ripple centres (texels) and phases.
-    d3Frames(c, F, (x, vt, _f, y) => {
+    // Deep water darker than the ground round it, a dark wet rim, and the sky caught in broken
+    // reflection streaks (unlit: they read as water from any side, in any light).
+    d3Frames(c, F, (x, vt, f, y) => {
       const ly = FH - 1 - vt;
       const d = shape[ly * W + x];
       if (d > 1) return;
       if (d > 0.84) {
         if (d > 0.95 && bayer(x, ly) < 0.5) return;
-        c.set(x, y, rim, ly < FH / 2 ? 1.6 : 3.6);
+        c.set(x, y, rim, d > 0.92 ? 1.6 : 1.2);
         return;
       }
-      const v = ly / FH;
-      const t = v < 0.3 ? 3.4 : v < 0.42 ? (bayer(x, ly) < 0.5 ? 3.4 : 2.6) : 2.6;
-      c.set(x, y, v < 0.18 ? sky : wat, t);
+      // Streaks: 2-texel bands, broken into dashes that shift a texel or two per frame (the wind).
+      const band = (ly >> 1) % 5;
+      const dash = hash2((x + f * (band & 1 ? 1 : -1) * 2) >> 3, ly >> 1, 152 + variant);
+      if ((band === 0 && dash > 0.35) || (band === 3 && dash > 0.7)) c.set(x, y, sky, band === 0 ? 2.8 : 2.2, PWF.GLOW);
+      else c.set(x, y, wat, d > 0.72 ? 1.6 : 2.2);
     });
     // Rain rings: drawn as outlines per frame (each ring opens over the frames, fading at the last).
     for (let i = 0; i < 7; i++) {
@@ -611,7 +623,7 @@ export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; s
           const x = Math.round(rx + Math.cos(a) * rr * 1.3 - 0.5);
           const ly = Math.round(ry + Math.sin(a) * rr - 0.5);
           if (x < 0 || x >= W || ly < 0 || ly >= FH || shape[ly * W + x] > 0.84) continue;
-          c.set(x, y0 + ly, sky, age === F - 1 ? 2.6 : Math.sin(a) < 0 ? 2.4 : 3.6);
+          c.set(x, y0 + ly, sky, age === F - 1 ? 2.8 : Math.sin(a) < 0 ? 3 : 4.2, PWF.GLOW);
         }
       }
     }

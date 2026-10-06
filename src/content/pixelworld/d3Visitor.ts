@@ -52,7 +52,7 @@ export type WingWindow = 'dark' | 'lit' | 'broken' | 'flicker';
 export function d3WingWindowModule(atlas: PwAtlas, kind: WingWindow, o: { wall: number; stone: number; frame: number }): PwTile {
   const W = 80;
   const H = 84;
-  return atlas.tile(`d3wingwin|${kind}|${h6(o.wall)}`, W, H, (c, k) => {
+  return atlas.tile(`d3wingwin2|${kind}|${h6(o.wall)}`, W, H, (c, k) => {
     const rng = k.rng;
     const wall = k.ramp(o.wall, { light: 0.4, sat: 0.85 });
     const stone = k.ramp(o.stone, { light: 0.4, sat: 0.8 });
@@ -61,7 +61,6 @@ export function d3WingWindowModule(atlas: PwAtlas, kind: WingWindow, o: { wall: 
     const warm = k.ramp(0xd8823a, { light: 0.5, sat: 1.0 });
     const cold = k.ramp(0x8aa8d8, { light: 0.5, sat: 0.7 });
     const ink = k.ramp(0x101014, { light: 0.4 });
-    const leaf = k.ramp(0x2a4a28, { light: 0.45 });
     c.rect(0, 0, W, H, wall, 3);
     // Opening (64 × 64) with its reveal.
     const ox = 8;
@@ -81,9 +80,14 @@ export function d3WingWindowModule(atlas: PwAtlas, kind: WingWindow, o: { wall: 
         const px = ox + x;
         const py = oy + y;
         if (kind === 'lit') {
-          // The lamp's pool on the ceiling, falling off down the room (stepped).
-          const d = Math.hypot((x - 30) / 34, (y - 6) / 40);
-          c.set(px, py, warm, d < 0.35 ? 4.2 : d < 0.7 ? 3.4 : d < 1 ? 2.8 : 2.2, PWF.GLOW);
+          // The room: a lamp-lit back wall falling off in dithered steps, the floor darker, a
+          // half-drawn blind across the top (slats lit from below).
+          const d = Math.hypot((x - 30) / 30, (y - 18) / 30);
+          const b = bayer(x, y) * 0.5;
+          let t = d + b < 0.55 ? 3.4 : d + b < 0.95 ? 2.8 : d + b < 1.35 ? 2.2 : 1.8;
+          if (y > 50) t = Math.min(t, 2.4);
+          if (y < 14) t = y % 3 === 2 ? 1.2 : y < 13 ? 2.6 : 3.4;
+          c.set(px, py, warm, t, PWF.GLOW);
         } else if (kind === 'flicker') {
           c.set(px, py, cold, y < 6 ? 4 : y < 30 ? 3.2 : 2.6, PWF.GLOW);
         } else {
@@ -93,7 +97,22 @@ export function d3WingWindowModule(atlas: PwAtlas, kind: WingWindow, o: { wall: 
         }
       }
     }
-    if (kind === 'lit' || kind === 'flicker') {
+    if (kind === 'lit') {
+      // Silhouettes against the lit wall: a shelf unit, a toppled display stand, a hanging sign.
+      for (const sx of [ox + 3, ox + 21]) c.rect(sx, oy + 16, 2, 46, ink, 1);
+      for (const sy of [26, 38, 50]) {
+        c.rect(ox + 3, oy + sy, 20, 2, ink, 1);
+        for (let i = 0; i < 4; i++) if (hash2(i, sy, 9) > 0.3) c.rect(ox + 6 + i * 4, oy + sy - 4 - (i & 1), 3, 4 + (i & 1), ink, 1.4);
+      }
+      c.line(ox + 34, oy + 62, ox + 52, oy + 44, ink, 1);
+      c.line(ox + 35, oy + 62, ox + 53, oy + 44, ink, 1);
+      c.rect(ox + 50, oy + 40, 8, 6, ink, 1);
+      c.line(ox + 36, oy + 14, ox + 36, oy + 22, ink, 1);
+      c.line(ox + 50, oy + 14, ox + 50, oy + 22, ink, 1);
+      c.rect(ox + 34, oy + 22, 18, 7, ink, 1.2);
+      c.rect(ox + 36, oy + 24, 14, 3, warm, 2.6, PWF.GLOW);
+    }
+    if (kind === 'flicker') {
       // Interior silhouettes in the glow: a hanging lamp, shelves, a fern in a pot.
       const sil = ink;
       c.vline(ox + 30, oy, 8, sil, 1);
@@ -103,7 +122,7 @@ export function d3WingWindowModule(atlas: PwAtlas, kind: WingWindow, o: { wall: 
       c.rect(ox + 46, oy + 52, 8, 12, sil, 1);
       for (let f = 0; f < 7; f++) {
         const a = -Math.PI / 2 + (f - 3) * 0.45;
-        for (let s = 0; s < 12; s++) c.set(ox + 50 + Math.round(Math.cos(a) * s), oy + 52 + Math.round(Math.sin(a) * s * 0.8 + (s * s) / 30), kind === 'lit' ? leaf : sil, 1.2);
+        for (let s = 0; s < 12; s++) c.set(ox + 50 + Math.round(Math.cos(a) * s), oy + 52 + Math.round(Math.sin(a) * s * 0.8 + (s * s) / 30), sil, 1.2);
       }
     }
     if (kind === 'broken') {
@@ -143,6 +162,7 @@ export function d3WingWindowModule(atlas: PwAtlas, kind: WingWindow, o: { wall: 
     // Sill (stone, lit top, its shadow on the wall) and the drip stain under it.
     c.rect(ox - 4, oy + oh, ow + 8, 5, stone, 3);
     c.hline(ox - 4, oy + oh, ow + 8, stone, 4.4);
+    if (kind === 'lit') for (let x = ox; x < ox + ow; x++) if (bayer(x, 1) < 0.75) c.set(x, oy + oh, warm, 3, PWF.GLOW);
     c.hline(ox - 4, oy + oh + 5, ow + 8, wall, 1.6);
     for (let i = 0; i < 9; i++) c.streak(rng, ox + rng.int(0, ow), oy + oh + 6, rng.int(4, H - oy - oh - 6), -0.8, wall);
     if (kind === 'broken') for (let i = 0; i < 8; i++) c.set(ox + rng.int(4, ow - 4), oy + oh + 1, glass, 4.6);
@@ -158,7 +178,7 @@ export function d3WingWindowModule(atlas: PwAtlas, kind: WingWindow, o: { wall: 
 export function d3AtriumModule(atlas: PwAtlas): PwTile {
   const W = 192;
   const H = 144;
-  return atlas.tile(`d3atrium`, W, H, (c, k) => {
+  return atlas.tile(`d3atrium3`, W, H, (c, k) => {
     const glass = k.ramp(0x1a2840, { light: 0.55, sat: 0.9 });
     const fr = k.ramp(0x2e2a24, { light: 0.55, sat: 0.6 });
     const red = k.ramp(0x8a1a14, { light: 0.5, sat: 1.0 });
@@ -200,8 +220,22 @@ export function d3AtriumModule(atlas: PwAtlas): PwTile {
     c.rect(150, 10, 26, 60, ban, 2.2);
     c.rect(158, 26, 10, 10, gold, 2.6);
     drawText(c, 'PI', 158, 42, FONT_3x5, gold, 2.6);
-    // Two warm panes high up.
-    for (const [px, py] of [[64, 4], [128, 40]]) c.rect(px + 2, py + 2, 28, 30, warm, 3.6, PWF.GLOW);
+    // The upper gallery seen through two panes: a pendant lamp's warm light falling off in dithered
+    // steps, the gallery's balustrade and a hanging GIFTS board in silhouette against it.
+    for (const [px, py, lx] of [[64, 0, 80], [128, 36, 150]]) {
+      // A small round pool round the lamp, dim, dithered out well inside the pane (never a lit pane).
+      for (let y = py + 2; y < py + 30; y++) for (let x = px + 4; x < px + 29; x++) {
+        const d = Math.hypot((x - lx) / 10, (y - py - 7) / 12) + bayer(x, y) * 0.45;
+        if (d < 1) c.set(x, y, warm, d < 0.4 ? 3.2 : d < 0.7 ? 2.4 : 1.8, PWF.GLOW);
+      }
+      c.vline(lx, py + 2, 3, bone, 1);
+      c.rect(lx - 2, py + 5, 5, 2, bone, 1);
+      c.rect(px + 2, py + 24, 29, 2, bone, 1);
+      for (let x = px + 3; x < px + 31; x += 3) c.vline(x, py + 26, 6, bone, 1);
+      c.rect(px + 2, py + 31, 29, 1, bone, 1);
+    }
+    c.rect(69, 10, 12, 6, bone, 1);
+    drawText(c, 'GIFTS', 70, 11, FONT_3x5, warm, 2.4, { flag: PWF.GLOW });
     // Steel grid: 6 × 4 panes.
     for (let i = 0; i <= 6; i++) {
       const x = Math.min(W - 2, Math.round((i * W) / 6));
@@ -252,13 +286,20 @@ export function d3ThatchTile(atlas: PwAtlas, o: { hex: number }): PwTile {
   }, { wrap: true });
 }
 
-/** The ragged straw fringe hanging from an eave (wrap 64 × 16, cut out, u along the eave, v down from the edge at the top). */
+/**
+ * The ragged straw fringe hanging from an eave (wrap 64 × 32 = 2 × 1 m, cut out, u along the eave,
+ * v down from the edge at the top): bundles of uneven length, a few torn short, wet tufts dangling
+ * further, lit tips — the eave line is never a ruler edge.
+ */
 export function d3FringeTile(atlas: PwAtlas, o: { hex: number }): PwTile {
-  return atlas.tile(`d3fringe|${h6(o.hex)}`, 64, 16, (c, k) => {
+  return atlas.tile(`d3fringe2|${h6(o.hex)}`, 64, 32, (c, k) => {
     const t = k.ramp(o.hex, { light: 0.45, sat: 0.95 });
     for (let x = 0; x < 64; x++) {
-      const len = 4 + Math.floor(hash2(x, 0, 21) * 6 + smooth(x, 0, 64, 4, 8, 22) * 6);
-      for (let y = 0; y < Math.min(16, len); y++) c.set(x, y, t, y === 0 ? 1.6 : y === len - 1 ? 3.8 : x % 3 === 0 ? 2.2 : 3);
+      const bundle = x >> 2;
+      let len = 7 + Math.floor(hash2(bundle, 0, 21) * 8 + smooth(x, 0, 64, 4, 6, 22) * 8 + hash2(x, 1, 23) * 3);
+      if (hash2(bundle, 2, 24) > 0.86) len = 3 + Math.floor(hash2(x, 3, 25) * 3);
+      if (hash2(bundle, 4, 26) > 0.9) len = Math.min(31, len + 10);
+      for (let y = 0; y < Math.min(32, len); y++) c.set(x, y, t, y === 0 ? 1.6 : y >= len - 2 ? 3.8 : (x & 3) === 0 ? 2.2 : y < 4 ? 2.4 : 3);
     }
   }, { wrap: true });
 }
@@ -307,7 +348,7 @@ export function d3FasciaTile(atlas: PwAtlas, o: { hex: number }): PwTile {
 export function d3MarqueeModule(atlas: PwAtlas, text: string): PwTile {
   const W = 416;
   const H = 45;
-  return atlas.tile(`d3marquee|${text}`, W, H, (c, k) => {
+  return atlas.tile(`d3marquee2|${text}`, W, H, (c, k) => {
     const rng = k.rng;
     const board = k.ramp(0x2e261c, { light: 0.5, sat: 0.7 });
     const bulb = k.ramp(0xffd8a0, { light: 0.55, sat: 0.9 });
@@ -321,16 +362,35 @@ export function d3MarqueeModule(atlas: PwAtlas, text: string): PwTile {
     const tw = textWidth(text, FONT_5x7) * S;
     const x0 = Math.round((W - tw) / 2);
     const y0 = Math.round((H - 7 * S) / 2);
-    // Rasterise the text once at scale 1 (a scratch canvas), then a bulb per glyph texel.
+    // Rasterise the text once at scale 1 (a scratch canvas, letter by letter: the letter index per
+    // texel), then a bulb per glyph texel. Dead bulbs only inside words — never on a word's first
+    // or last letter — and one per letter at most (the word still reads at a glance).
     const scratch = new PwCanvas(textWidth(text, FONT_5x7) + 1, 8);
-    drawText(scratch, text, 0, 0, FONT_5x7, 1, 3);
+    const letterOf = new Int16Array(scratch.w).fill(-1);
+    const deadIn = new Set<number>();
+    let cx = 0;
+    let wi = 0;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      const w = textWidth(ch, FONT_5x7);
+      if (ch !== ' ') {
+        drawText(scratch, ch, cx, 0, FONT_5x7, 1, 3);
+        for (let x = cx; x < cx + w; x++) letterOf[x] = i;
+        // Only wide letters well inside a word (O, N, E, R, C), every other one.
+        const atStart = i === 0 || text[i - 1] === ' ';
+        const atEnd = i === text.length - 1 || text[i + 1] === ' ';
+        if (!atStart && !atEnd && 'ONECR'.includes(ch) && (i + wi) % 2 === 1) deadIn.add(i);
+      } else wi++;
+      cx += w + FONT_5x7.gap;
+    }
     const mask: number[][] = [];
     for (let y = 0; y < scratch.h; y++) for (let x = 0; x < scratch.w; x++) if (scratch.at(x, y)) mask.push([x, y]);
-    let n = 0;
+    const killed = new Set<number>();
     for (const [gx, gy] of mask) {
       const bx = x0 + gx * S;
       const by = y0 + gy * S;
-      const dead = (n++ * 37 + gx * 7) % 13 < 2;
+      const li = letterOf[gx];
+      const dead = deadIn.has(li) && !killed.has(li) && gy === 3 && (killed.add(li), true);
       if (dead) {
         c.rect(bx, by, 3, 3, sock, 1.6);
         c.set(bx, by, sock, 3.4);
@@ -528,44 +588,178 @@ export function d3BrickTile(atlas: PwAtlas, o: { hex: number }): PwTile {
   }, { wrap: true });
 }
 
-/** The ticket kiosk's window (module 52 × 26 = 1.6 × 0.8 m): a warm-lit hatch, a TICKETS board over it, a clerk's empty stool, a price list. */
+/**
+ * The ticket kiosk's front (module 64 × 40 = 2 × 1.25 m): a green TICKETS board in 2-texel strokes
+ * (on a 2-texel grid: whole at level 1), under it the recessed lit booth — a dark reveal, a
+ * lamp-lit back wall falling off in dithered steps, a price card, two ticket rolls and a cash tin
+ * on a lit wooden counter ledge.
+ */
 export function d3KioskWindowModule(atlas: PwAtlas): PwTile {
-  const W = 52;
-  const H = 26;
-  return atlas.tile(`d3kioskwin`, W, H, (c, k) => {
-    const warm = k.ramp(0xffc070, { light: 0.55 });
+  const W = 64;
+  const H = 40;
+  return atlas.tile(`d3kioskwin2`, W, H, (c, k) => {
+    const warm = k.ramp(0xffb860, { light: 0.55 });
     const ink = k.ramp(0x2a1c10, { light: 0.4 });
     const board = k.ramp(0x2f5a2a, { light: 0.45 });
     const cream = k.ramp(0xe8d8a0, { light: 0.4 });
-    c.rect(0, 0, W, 8, board, 3);
-    const tw = textWidth('TICKETS', FONT_3x5);
-    drawText(c, 'TICKETS', Math.round((W - tw) / 2), 1, FONT_3x5, cream, 3.6);
-    c.rect(0, 8, W, H - 8, warm, 3.6, PWF.GLOW);
-    c.rect(4, 10, 12, 10, cream, 3, PWF.GLOW);
-    for (let y = 12; y < 19; y += 2) c.hline(5, y, 9, ink, 1, PWF.GLOW);
-    c.rect(30, 16, 6, 2, ink, 1, PWF.GLOW);
-    c.vline(31, 18, 8, ink, 1, PWF.GLOW);
-    c.vline(35, 18, 8, ink, 1, PWF.GLOW);
-    c.hline(0, 8, W, ink, 1);
+    const wood = k.ramp(0x6e543a, { light: 0.42 });
+    c.rect(0, 0, W, 14, board, 3);
+    c.hline(0, 0, W, board, 4);
+    c.hline(0, 13, W, board, 1.6);
+    const tw = textWidth('TICKETS', FONT_3x5, { scale: 2 });
+    drawText(c, 'TICKETS', Math.round((W - tw) / 4) * 2, 2, FONT_3x5, cream, 3.6, { scale: 2, shadow: { ramp: board, tone: 1.4 } });
+    // The booth: lamp at the top left, light falling off down and right.
+    for (let y = 14; y < H; y++) for (let x = 0; x < W; x++) {
+      const d = Math.hypot((x - 16) / 34, (y - 15) / 22) + bayer(x, y) * 0.3;
+      c.set(x, y, warm, d < 0.45 ? 3.6 : d < 0.85 ? 3 : d < 1.25 ? 2.4 : 1.8, PWF.GLOW);
+    }
+    c.rect(14, 14, 5, 2, ink, 1);
+    // A price card on the back wall, ticket rolls and a tin on the counter.
+    c.rect(38, 18, 12, 9, cream, 2.6, PWF.GLOW);
+    for (let y = 20; y < 26; y += 2) c.hline(40, y, 8, ink, 1.4, PWF.GLOW);
+    c.rect(0, 31, W, 3, wood, 3);
+    c.hline(0, 31, W, wood, 4);
+    c.rect(0, 34, W, 6, wood, 2);
+    for (const x of [8, 13]) {
+      c.rect(x, 27, 4, 4, cream, 3.4);
+      c.set(x + 1, 28, ink, 1);
+    }
+    c.rect(24, 28, 7, 3, k.ramp(0x6a6e72, { light: 0.5 }), 3);
+    // The reveal: dark top and left inside edge.
+    c.rect(0, 14, W, 2, ink, 1);
+    c.rect(0, 14, 2, 17, ink, 1.2);
     c.frame(0, 0, W, H, ink, 1.4);
   });
 }
 
-/** A floodlight head (module 64 × 26 = 2 × 0.8 m): a steel housing with three dead lamps behind cracked glass. */
-export function d3FloodheadModule(atlas: PwAtlas, lit: boolean): PwTile {
-  const W = 64;
-  const H = 26;
-  return atlas.tile(`d3flood|${lit ? 1 : 0}`, W, H, (c, k) => {
-    const st = k.ramp(0x2a2c30, { light: 0.5, sat: 0.6 });
-    const lamp = k.ramp(lit ? 0xf0f4ff : 0x4a4e58, { light: 0.5 });
-    c.rect(0, 0, W, H, st, 2.6);
-    c.hline(0, 0, W, st, 4);
-    c.hline(0, H - 1, W, st, 1);
-    for (const x0 of [4, 24, 44]) {
-      c.rect(x0, 5, 16, 16, st, 1.2);
-      c.ellipse(x0 + 8, 13, 6.5, 6.5, lamp, (u, v) => (lit ? (u * u + v * v < 0.3 ? 5 : 4) : u + v < -0.6 ? 3.6 : 2.2), lit ? PWF.GLOW : 0);
-      if (!lit) c.line(x0 + 4, 8, x0 + 11, 17, lamp, 4.4);
+/**
+ * Painted wall dressing for the lodge (cut-out modules on the stucco): rain-stain streaks hanging
+ * under a cornice (wrap 64 × 32, u along the wall), and a damp splashed foot (wrap 64 × 16).
+ */
+export function d3DripBandTile(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`d3dripband|${h6(o.hex)}`, 64, 32, (c, k) => {
+    const s = k.ramp(o.hex, { light: 0.4, sat: 0.85 });
+    for (let x = 0; x < 64; x++) {
+      const len = Math.round(3 + hash2(x >> 1, 1, 31) * 6 + (hash2(x >> 3, 2, 32) > 0.6 ? hash2(x, 3, 33) * 22 : 0));
+      for (let y = 0; y < len; y++) {
+        if (y > len - 4 && bayer(x, y) < (y - (len - 4)) / 4) continue;
+        c.set(x, y, s, y < 2 ? 1.6 : 2.2);
+      }
+    }
+  }, { wrap: true });
+}
+
+export function d3DampFootTile(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`d3dampfoot|${h6(o.hex)}`, 64, 16, (c, k) => {
+    const s = k.ramp(o.hex, { light: 0.4, sat: 0.85 });
+    const mud = k.ramp(0x4a3d2e, { light: 0.42 });
+    for (let x = 0; x < 64; x++) {
+      const top = Math.round(4 + smooth(x, 0, 64, 4, 6, 34) * 8);
+      for (let y = top; y < 16; y++) {
+        if (y < top + 2 && bayer(x, y) < 0.5) continue;
+        c.set(x, y, s, y < top + 3 ? 2.4 : 2);
+      }
+    }
+    // Splash-back: mud flecks thrown up the foot.
+    for (let i = 0; i < 18; i++) c.cluster(Math.floor(hash2(i, 1, 35) * 62), 9 + Math.floor(hash2(i, 2, 35) * 6), i, mud, 2.6);
+  }, { wrap: true });
+}
+
+/**
+ * The park map on its board (module 40 × 28 = 1.25 × 0.875 m): a timber frame, the island in
+ * green on a blue sea, trails as yellow dashes, the paddocks as fenced squares, a red YOU ARE
+ * HERE dot, a cream legend strip; a torn corner, rain streaks.
+ */
+export function d3ParkMapModule(atlas: PwAtlas): PwTile {
+  return atlas.tile(`d3parkmap`, 40, 28, (c, k) => {
+    const rng = k.rng;
+    const wood = k.ramp(0x5e442c, { light: 0.42 });
+    const sea = k.ramp(0x2a4a6a, { light: 0.45 });
+    const land = k.ramp(0x3f6a3a, { light: 0.45 });
+    const yl = k.ramp(0xe0b020, { light: 0.45 });
+    const red = k.ramp(0xd02a1a, { light: 0.5 });
+    const cream = k.ramp(0xe8d8a8, { light: 0.35 });
+    const ink = k.ramp(0x1a1610, { light: 0.4 });
+    c.rect(0, 0, 40, 28, wood, 2.8);
+    c.frame(0, 0, 40, 28, wood, 3.8);
+    c.rect(2, 2, 36, 18, sea, 2.8);
+    for (let y = 3; y < 19; y++) for (let x = 3; x < 37; x++) {
+      const d = Math.hypot((x - 19) / 15, (y - 11) / 7.5) + (smooth(x, y, 40, 28, 4, 36) - 0.5) * 0.5;
+      if (d < 1) c.set(x, y, land, d > 0.85 ? 3.8 : 3);
+    }
+    for (const [x, y] of [[9, 7], [24, 6], [27, 13]]) c.frame(x, y, 5, 4, ink, 1.4);
+    for (let i = 0; i < 26; i++) if (i % 3 !== 2) c.set(8 + i, 11 + Math.round(Math.sin(i * 0.35) * 2), yl, 3.6);
+    c.rect(14, 12, 2, 2, red, 3.8);
+    c.rect(2, 21, 36, 5, cream, 3);
+    drawText(c, 'PARK MAP', 4, 21, FONT_3x5, ink, 1);
+    c.rect(34, 22, 2, 2, red, 3.8);
+    for (let y = 0; y < 5; y++) for (let x = 0; x < 5 - y; x++) c.set(35 + x + y, y, 0, 0);
+    for (let i = 0; i < 4; i++) c.streak(rng, rng.int(3, 36), 2, rng.int(6, 14), -0.6, 0);
+  });
+}
+
+/** An EVACUATION notice taped to the wall (module 24 × 32, cut out): a red band, EVACUATE, lines of type, a torn wet corner. */
+export function d3NoticeModule(atlas: PwAtlas): PwTile {
+  return atlas.tile(`d3notice`, 24, 32, (c, k) => {
+    const paper = k.ramp(0xd8d0bc, { light: 0.35, sat: 0.6 });
+    const red = k.ramp(0xc02418, { light: 0.45 });
+    const ink = k.ramp(0x1a1610, { light: 0.4 });
+    const tape = k.ramp(0xc8b880, { light: 0.4 });
+    c.rect(0, 0, 24, 32, paper, 3.2);
+    c.rect(0, 0, 24, 9, red, 3);
+    drawText(c, 'EVAC', 4, 2, FONT_3x5, paper, 4);
+    for (let y = 12; y < 28; y += 3) c.hline(3, y, 14 + ((y * 7) % 5), ink, 1.6);
+    c.rect(9, 0, 6, 2, tape, 3.4);
+    for (let y = 0; y < 6; y++) for (let x = 0; x < 6 - y; x++) c.set(23 - x, 31 - y, 0, 0);
+    for (let y = 14; y < 32; y++) c.shift(1 + (y % 3 === 0 ? 1 : 0), y, -0.6);
+  });
+}
+
+/** Claw gouges raked through the stucco (module 32 × 48, cut out): three deep slashes, dark cores, lit lower lips, crumbled edges. */
+export function d3GougeModule(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`d3gouge|${h6(o.hex)}`, 32, 48, (c, k) => {
+    const s = k.ramp(o.hex, { light: 0.4, sat: 0.85 });
+    for (let g = 0; g < 3; g++) {
+      for (let j = 0; j < 40; j++) {
+        const x = 5 + g * 8 + Math.round(j * 0.3);
+        const y = 3 + j + g * 2;
+        const w = j < 4 || j > 34 ? 1 : 2;
+        for (let q = 0; q < w; q++) c.set(x + q, y, s, 0.6);
+        c.set(x + w, y, s, 4.2);
+        c.set(x - 1, y, s, 1.8);
+        if (hash2(j, g, 37) > 0.75) c.set(x - 2, y, s, 2.2);
+      }
     }
   });
 }
 
+/**
+ * A floodlight head (module 64 × 26 = 2 × 0.8 m): a steel housing with three lamp bays under
+ * visors — lit: each lens a white-hot core in a stepped warm-white ring (glow) with a glint;
+ * dark: dead lenses mirroring the storm, one cracked.
+ */
+export function d3FloodheadModule(atlas: PwAtlas, lit: boolean): PwTile {
+  const W = 64;
+  const H = 26;
+  return atlas.tile(`d3flood2|${lit ? 1 : 0}`, W, H, (c, k) => {
+    const st = k.ramp(0x2a2c30, { light: 0.5, sat: 0.6 });
+    const lamp = k.ramp(lit ? 0xf0f0e0 : 0x3a4458, { light: 0.5, sat: lit ? 0.6 : 0.8 });
+    const ring = k.ramp(0xe8d8a0, { light: 0.5 });
+    c.rect(0, 0, W, H, st, 2.6);
+    c.hline(0, 0, W, st, 4);
+    c.hline(0, H - 1, W, st, 1);
+    for (const x0 of [3, 23, 43]) {
+      // Visor over the bay, the bay's dark rim.
+      c.rect(x0 - 1, 2, 20, 3, st, 3.6);
+      c.hline(x0 - 1, 4, 20, st, 1.4);
+      c.ellipse(x0 + 9, 14, 8, 8, st, 1);
+      c.ellipse(x0 + 9, 14, 6.5, 6.5, lit ? ring : lamp, (u, v) => {
+        const d = u * u + v * v;
+        if (lit) return d < 0.2 ? 5 : d < 0.5 ? 4.4 : 3.4;
+        return u + v < -0.7 ? 3.6 : d > 0.7 ? 1.6 : 2.2;
+      }, lit ? PWF.GLOW : 0);
+      if (lit) c.rect(x0 + 8, 13, 2, 2, lamp, 5, PWF.GLOW);
+      else if (x0 === 23) c.line(x0 + 5, 9, x0 + 12, 19, lamp, 4.2);
+    }
+  });
+}

@@ -216,7 +216,7 @@ export class JeepViewModel {
     // Grab handle + warm cabin light.
     Kit.add(c, Kit.cyl(0.025, 0.025, 0.7, 6), tx('metal', 0xd0b020, 4, 0.4), 1.1, 0.25, -1.05);
     Kit.add(c, Kit.box(0.5, 0.06, 0.2), Kit.glow(0xffd090, 0.9), -0.6, 0.72, -0.7);
-    jp?.paint(c);
+    jp?.paintCabin(c);
     baker.bake(c);
     this.cabin.add(c);
   }

@@ -244,7 +244,7 @@ export class ParkEnv {
       // PIXEL WORLD: the painted storm panorama replaces the sky dome; the strikes draw painted forks.
       const pw = (this.pw = new D3PixelWorld());
       this.baker.pixel = true;
-      this.root.add(pw.buildBackdrop(railPoint(this.len / 2, new THREE.Vector3())));
+      this.root.add(pw.buildBackdrop(railPoint(this.len / 2, new THREE.Vector3()), this.fog));
     }
     this.flora2d = new FloraField(floraAtlas(D3_FLORA, D3_BIOME, 'd3'), {
       far: FOG_FAR + 8,

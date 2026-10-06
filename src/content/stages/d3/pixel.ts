@@ -1,16 +1,17 @@
 import * as THREE from 'three';
 import { PwAtlas, type PwTile } from '../../pixelworld/atlas';
 import { PwBatch } from '../../pixelworld/batch';
+import { d2CalmLevels } from '../../pixelworld/d2levels';
 import { PwBackdrop } from '../../pixelworld/backdrop';
 import { pwBackdropMaterial, pwMaterial, pwTick } from '../../pixelworld/material';
-import { rockTile } from '../../pixelworld/surfaces';
+import { hash2, rockTile } from '../../pixelworld/surfaces';
 import {
   D3_ANIM_FRAMES, D3_ROAD_W, d3FloorTile, d3FootprintDecal, d3GravelTile, d3MudRoadTile, d3MudTile, d3PuddleDecal, d3RoadTile, d3SkidDecal, d3VergeTile, d3WaterTile,
 } from '../../pixelworld/d3Ground';
 import { d3BoltModule, d3RangeTile, d3SkyTile } from '../../pixelworld/d3Sky';
 import {
   d3BarrierBoardModule, d3CableTile, d3ConcreteTile, d3DangerBoardModule, d3DrumLidModule, d3DrumTile, d3FlareDecal, d3FrondModule, d3InsulatorModule, d3LampHeadModule, d3PalmBarkTile,
-  d3PoleTile, d3PylonFaceModule, d3SignBoardModule, d3UtilityPoleTile, d3WireSpanModule, d3FireModule, d3WindsockModule, d3VineModule, d3FlarePoolDecal,
+  d3PoleTile, d3PylonFaceModule, d3TornFenceModule, d3StumpFaceModule, d3RubbleTopModule, d3ScorchDecal, d3SignBoardModule, d3UtilityPoleTile, d3WireSpanModule, d3FireModule, d3WindsockModule, d3VineModule, d3FlarePoolDecal, d3FlarePlumeModule,
 } from '../../pixelworld/d3Park';
 import {
   d1CarBackModule, d1CarCabinModule, d1CarFrontModule, d1CarPaintTile, d1CarSideModule, d1CarUnderModule, d1TreadTile, d1WheelModule, type CarPaint,
@@ -18,7 +19,7 @@ import {
 import { planksTile, stoneTile } from '../../pixelworld/surfaces';
 import {
   d3AtriumModule, d3BannerModule, d3BrickTile, d3ColumnTile, d3FasciaTile, d3FloodheadModule, d3FringeTile, d3KioskWindowModule, d3LobbyModule, d3LodgeDoorModule, d3MarqueeModule,
-  d3MosaicModule, d3PaverTile, d3StuccoTile, d3ThatchTile, d3WingWindowModule, type WingWindow,
+  d3MosaicModule, d3PaverTile, d3StuccoTile, d3ThatchTile, d3WingWindowModule, type WingWindow, d3DripBandTile, d3DampFootTile, d3ParkMapModule, d3NoticeModule, d3GougeModule,
 } from '../../pixelworld/d3Visitor';
 import type { VisitorParts, HelipadParts, HeliParts } from './props';
 import { FloraField, floraAtlas, floraReach } from '../../pixel/floraField';
@@ -36,10 +37,10 @@ const D3_STONE_BIOME: FloraBiome = {
     lichen: { hex: 0x6a7a5a, sat: 0.7, dark: 0.4, light: 0.4 },
   },
 };
-import { kitTile, retexture, type TileRule } from '../../pixelworld/retexture';
+import { kitTile, repaintable, retexture, type TileRule } from '../../pixelworld/retexture';
 import { corrugatedTile, hazardTile } from '../../pixelworld/surfaces';
 import {
-  d3CapModule, d3CraneTile, d3EnamelTile, d3HeliSideModule, d3HutWindowModule, d3PadLettersModule, d3PadTile, d3PaintStripeTile, d3TankPlateModule, d3TruckDoorModule, d3TruckFrontModule,
+  d3CapModule, d3CraneTile, d3EnamelTile, d3HeliSideModule, d3LiveryTile, d3SootModule, d3RotorDiscModule, d3BumperModule, d3HutWindowModule, d3PadLettersModule, d3PadTile, d3PaintStripeTile, d3TankPlateModule, d3TruckDoorModule, d3TruckFrontModule,
 } from '../../pixelworld/d3Vehicles';
 import { d3DeckTile, d3FoamModule, d3TimberTile } from '../../pixelworld/d3Bridge';
 import { pwCylinder, pwDecal, pwPanel } from '../d1/pwShapes';
@@ -143,6 +144,30 @@ export function hideMeshes(o: THREE.Object3D, keep?: (m: THREE.Mesh) => boolean)
   });
 }
 
+/**
+ * The sky band's material: the backdrop material whose colour is scaled by elevation — the live
+ * fog ratio `uLo` up to v0 (the fog-coloured horizon), blending to the flash gain `uHi` by v1
+ * (the storm heaps light up with the lightning; the horizon only as much as the fog does).
+ */
+function d3SkyMaterial(atlas: PwAtlas, v0: number, v1: number): THREE.MeshBasicMaterial {
+  const m = pwBackdropMaterial(atlas);
+  const u = { uLo: { value: new THREE.Color(1, 1, 1) }, uHi: { value: 1 }, uV: { value: new THREE.Vector2(v0, v1) } };
+  m.userData.d3 = u;
+  const base = m.onBeforeCompile;
+  m.onBeforeCompile = (shader, r) => {
+    base.call(m, shader, r);
+    shader.uniforms.uD3Lo = u.uLo;
+    shader.uniforms.uD3Hi = u.uHi;
+    shader.uniforms.uD3V = u.uV;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('uniform float uPwGain;', 'uniform float uPwGain;\n  uniform vec3 uD3Lo;\n  uniform float uD3Hi;\n  uniform vec2 uD3V;')
+      .replace('diffuseColor.rgb = (diffuseColor.rgb + pwEmit);', 'diffuseColor.rgb = (diffuseColor.rgb + pwEmit) * mix(uD3Lo, vec3(uD3Hi), smoothstep(uD3V.x, uD3V.y, vPwUv.y));');
+  };
+  m.customProgramCacheKey = () => 'd3SkyBackdrop1';
+  m.name = 'pwBackdrop:d3-sky';
+  return m;
+}
+
 export type TerrainKind = 'floor' | 'mud' | 'rock' | 'bed';
 
 export class D3PixelWorld {
@@ -154,8 +179,12 @@ export class D3PixelWorld {
   readonly anim: PwBatch;
   /** Static painted scenery per 60 m chunk (fog-culled with the classic chunks). */
   private chunks = new Map<number, PwBatch>();
-  /** Batches laid in a moving group's own frame. */
-  private parts: { batch: PwBatch; parent: THREE.Object3D; cull: boolean }[] = [];
+  /** Signs per chunk (their own material: level bias −0.25, the letters stay whole further away). */
+  private signs = new Map<number, PwBatch>();
+  /** Wrap tiles whose far levels are re-made calm (`d2CalmLevels`): the deck, the plaza pavers. */
+  private calmTiles = new Set<PwTile>();
+  /** Batches laid in a moving group's own frame (`mat`: the sign or the calm-level material). */
+  private parts: { batch: PwBatch; parent: THREE.Object3D; cull: boolean; mat?: 'sign' | 'calm' }[] = [];
   /** Painted meshes that copy a classic object's world matrix every frame (the flying roadblock car). */
   private followers: { batch: PwBatch; target: THREE.Object3D; mesh: THREE.Mesh | null }[] = [];
   /** Windsocks swinging with the wind. */
@@ -165,17 +194,23 @@ export class D3PixelWorld {
   /** Swinging banners: pivots rocked by the wind each frame. */
   private banners: { pivot: THREE.Object3D; phase: number }[] = [];
   private time = 0;
+  /** The helicopter's main rotor and its blur disc (shown above a spin rate). */
+  private rotor: { rotor: THREE.Object3D; disc: THREE.Object3D; last: number } | null = null;
   /** Invisible material for the classic hit meshes of painted destructibles (still raycast, never drawn). */
   private hidden: THREE.MeshBasicMaterial | null = null;
   backdrop: PwBackdrop | null = null;
   /** Boulders as hand-pixelled billboards (the SPRITES scenery: they toggle with the plants). */
   readonly stones: FloraField;
   private skyMat: THREE.MeshBasicMaterial | null = null;
+  private rangeMat: THREE.MeshBasicMaterial | null = null;
+  private fog: THREE.Fog | null = null;
+  private fogBase = new THREE.Color(STORM.fog);
   private animMat: THREE.Material | null = null;
   /** The forks' material (made at `finish`: the world atlas must be painted first). */
   boltMat!: THREE.MeshBasicMaterial;
   private floorT: PwTile;
-  private fireT: PwTile;
+  private fireT: PwTile[];
+  private flameN = 0;
   private flameGeos = new Map<string, THREE.BufferGeometry>();
   private mudT: PwTile;
   private rockT: PwTile;
@@ -188,12 +223,12 @@ export class D3PixelWorld {
     this.anim = new PwBatch(a);
     this.floorT = d3FloorTile(a, { hex: D3C.grass, dark: D3C.loam, leaf: D3C.leaf, water: D3C.sky, stone: D3C.stone });
     this.mudT = d3MudTile(a, { hex: D3C.mud, water: D3C.water });
-    this.rockT = rockTile(a, { hex: 0x5c5a52, moss: 0x34492d, band: 18 });
+    this.rockT = rockTile(a, { hex: 0x5c5a52, moss: 0x34492d, band: 18, size: 96 });
     this.bedT = d3GravelTile(a, { hex: 0x5a5e58, silt: D3C.bed });
     // Bolts: painted forks (cut-out, glowing), in the world atlas (its levels keep the glow far away).
-    for (let i = 0; i < 3; i++) d3BoltModule(a, i);
+    for (let i = 0; i < 2; i++) d3BoltModule(a, i);
     // Fires (spawned during play): the animated flame, registered up front.
-    this.fireT = d3FireModule(a, D3_ANIM_FRAMES);
+    this.fireT = [d3FireModule(a, D3_ANIM_FRAMES, 0), d3FireModule(a, D3_ANIM_FRAMES, 1)];
   }
 
   /** The static batch of the chunk at rail distance d. */
@@ -204,10 +239,18 @@ export class D3PixelWorld {
     return b;
   }
 
-  /** A batch laid in `parent`'s own frame (it moves with it). */
-  part(parent: THREE.Object3D, cull = false): PwBatch {
+  /** The sign batch of the chunk at rail distance d. */
+  signChunk(d: number): PwBatch {
+    const k = Math.floor(d / CHUNK);
+    let b = this.signs.get(k);
+    if (!b) this.signs.set(k, (b = new PwBatch(this.atlas)));
+    return b;
+  }
+
+  /** A batch laid in `parent`'s own frame (it moves with it); `mat` picks the sign / calm material. */
+  part(parent: THREE.Object3D, cull = false, mat?: 'sign' | 'calm'): PwBatch {
     const b = new PwBatch(this.atlas);
-    this.parts.push({ batch: b, parent, cull });
+    this.parts.push({ batch: b, parent, cull, mat });
     return b;
   }
 
@@ -248,7 +291,7 @@ export class D3PixelWorld {
   /** A rain puddle (the classic disc: radius r, stretched `sz` along its local z, turned `yaw`). */
   puddle(p: THREE.Vector3, yaw: number, rx: number, rz: number, variant: number, muddy = false) {
     // (One painted puddle per kind; `variant` mirrors it so neighbours differ.)
-    const t = d3PuddleDecal(this.atlas, muddy ? { rim: D3C.mudDeep, water: 0x47505c, sky: 0x8088a0 } : { rim: 0x2a2620, water: D3C.water, sky: D3C.sky }, 0);
+    const t = d3PuddleDecal(this.atlas, muddy ? { rim: 0x2a2018, water: 0x1e2430, sky: 0x52627e } : { rim: 0x24221e, water: 0x1a2232, sky: D3C.sky }, 0);
     const sub = { x: 0, y: 0, w: t.w, h: t.h / D3_ANIM_FRAMES };
     const ax = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     const az = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
@@ -301,10 +344,22 @@ export class D3PixelWorld {
     const ins = d3InsulatorModule(a);
     const steel = d3PoleTile(a, { hex: 0x34363c });
     const b = this.chunk(d);
-    // The face module covers 9.5 m; a stump shows its bottom part.
-    const sub = intact ? undefined : { x: 0, y: 0, w: face.w, h: Math.round(h * 32) };
+    if (!intact) {
+      // A snapped stump: its own darker face module (jagged cut-out break, rebar ends, cracks, the
+      // hazard band square on the foot), the broken top set below the break's notches.
+      const sf = d3StumpFaceModule(a, { hex: 0x56544e, moss: 0x3f5a2e }, variant % 2);
+      b.withMatrix(g.matrixWorld, () => {
+        for (const [n, r] of [[Z, X], [X, NZ], [NZ, NX], [NX, Z]] as [THREE.Vector3, THREE.Vector3][]) pwPanel(b, n.clone().multiplyScalar(0.45).setY(h / 2), r, Y, 0.9, h, sf);
+        b.rect(V(-0.45, h - 0.5, 0.45), X, NZ, 0.9, 0.9, d3RubbleTopModule(a, { hex: 0x56544e }));
+        b.box(0, 0.25, 0, 1.2, 0.5, 1.2, { px: conc, nx: conc, pz: conc, nz: conc, py: conc, ny: null });
+      });
+      // Soot on the ground round its foot.
+      _p.setFromMatrixPosition(g.matrixWorld);
+      pwDecal(b, _p.x, 0.03, _p.z, 3, 3, variant, d3ScorchDecal(a));
+      return;
+    }
     b.withMatrix(g.matrixWorld, () => {
-      b.box(0, h / 2, 0, 0.9, h, 0.9, { px: face, nx: face, pz: face, nz: face, py: conc, ny: null }, { sub });
+      b.box(0, h / 2, 0, 0.9, h, 0.9, { px: face, nx: face, pz: face, nz: face, py: conc, ny: null });
       b.box(0, 0.25, 0, 1.2, 0.5, 1.2, { px: conc, nx: conc, pz: conc, nz: conc, py: conc, ny: null });
       if (intact) {
         b.box(0, h + 0.15, 0, 1.1, 0.3, 1.1, conc);
@@ -361,8 +416,9 @@ export class D3PixelWorld {
     const a = this.atlas;
     const b = this.chunk(d);
     const back = d3PoleTile(a, { hex: 0x5a5c5e });
+    const sb = this.signChunk(d);
+    sb.withMatrix(g.matrixWorld, () => pwPanel(sb, V(0, 0, 0.05), X, Y, 3.75, 1.82, d3DangerBoardModule(a, 0), { backTile: back }));
     b.withMatrix(g.matrixWorld, () => {
-      pwPanel(b, V(0, 0, 0.05), X, Y, 3.75, 1.82, d3DangerBoardModule(a, variant % 2), { backTile: back });
       for (const sx of [-1.4, 1.4]) b.box(sx, -0.6, -0.08, 0.1, 3, 0.1, back);
     });
   }
@@ -570,8 +626,8 @@ export class D3PixelWorld {
         _p.subVectors(p1, p0).normalize();
         const out = new THREE.Vector3(_p.z, 0, -_p.x).multiplyScalar(0.06);
         const len = p0.distanceTo(p1);
-        b.rect(p0.clone().add(out).setY(y - 0.55), _p.clone(), Y, len, 0.55, fringe, { v0: 0 });
-        b.rect(p1.clone().add(out).setY(y - 0.55), _p.clone().negate(), Y, len, 0.55, fringe, { v0: 0 });
+        b.rect(p0.clone().add(out).setY(y - 1), _p.clone(), Y, len, 1, fringe, { v0: 0 });
+        b.rect(p1.clone().add(out).setY(y - 1), _p.clone().negate(), Y, len, 1, fringe, { v0: 0 });
       }
     };
     eave(-12.5, -9, 11.4 / Math.SQRT2, 8.42);
@@ -589,9 +645,11 @@ export class D3PixelWorld {
     b.box(0, 7.8, 1.6, 28, 0.8, 5, { pz: fascia, px: fascia, nx: fascia, ny: stD, py: conc });
     // VISITOR CENTER: the marquee on its board.
     b.box(0, 7.95, 4.08, 13, 1.4, 0.15, { px: steel, nx: steel, py: steel, ny: steel, nz: null, pz: null });
+    // (The bulb letters stay on the default level bias: their 3 × 3 bulbs on a 4-texel pitch merge into whole strokes at level 1.)
     pwPanel(b, V(0, 7.95, 4.157), X, Y, 13, 1.4, d3MarqueeModule(a, 'VISITOR CENTER'));
     // Floor of the portico and the step.
     const pav = d3PaverTile(a, { hex: 0x7c7a72 });
+    this.calmTiles.add(pav);
     b.box(0, 0.15, 1.5, 42, 0.3, 7, { py: pav, pz: conc, px: conc, nx: conc });
     b.box(0, 0.075, 5.4, 18, 0.15, 1.2, { py: conc, pz: conc, px: conc, nx: conc });
     // The doorway: the dark lobby, its steel frame.
@@ -606,6 +664,31 @@ export class D3PixelWorld {
       pwPanel(this.part(pivot), V(0, -len / 2, 0), X, Y, 2.0, len, d3BannerModule(a, len), { back: true });
       this.banners.push({ pivot, phase: x });
     }
+    // Wall dressing: rain stains hanging under the cornices, a damp splashed foot over the plinth,
+    // the park map and an EVACUATION notice on the atrium's flanks, claw gouges beside the doors.
+    const drip = d3DripBandTile(a, { hex: 0x7a705e });
+    const foot = d3DampFootTile(a, { hex: 0x6a604e });
+    for (const sd of [-1, 1]) {
+      const x0 = sd < 0 ? -20 : 7.5;
+      b.rect(V(x0, 6.8, -0.986), X, Y, 12.5, 1, drip, { u0: sd < 0 ? 0 : 23 });
+      b.rect(V(x0, 1.1, -0.986), X, Y, 12.5, 0.5, foot, { u0: sd < 0 ? 0 : 31 });
+    }
+    b.rect(V(-6, 10.8, -0.986), X, Y, 12, 1, drip, { u0: 11 });
+    pwPanel(b, V(-6.75, 2.2, -0.982), X, Y, 1.25, 0.875, d3ParkMapModule(a));
+    pwPanel(b, V(6.6, 2.0, -0.982), X, Y, 0.75, 1.0, d3NoticeModule(a));
+    const gouge = d3GougeModule(a, { hex: 0x9c917c });
+    pwPanel(b, V(-3.4, 1.7, -0.982), X, Y, 1.0, 1.5, gouge);
+    pwPanel(b, V(3.5, 1.4, -0.982), X, Y, 1.0, 1.5, gouge, { flipU: true });
+    // The lit ground-floor window's light on the portico floor (a dim warm pool).
+    pwDecal(b, -9.5, 0.304, 0.4, 3, 2.2, 0, d3FlarePoolDecal(a, { hex: 0xb07a4a }));
+    // Palm fronds hanging over the eaves from the trees behind (breaking the roofline).
+    const fr = [d3FrondModule(a, { hex: 0x355f36, rib: 0x6a5a3a }, 0), d3FrondModule(a, { hex: 0x2f5530, rib: 0x6a5a3a }, 1)];
+    for (const [x, y, z, ry, droop, i] of [[-19.4, 8.7, -0.6, Math.PI, 0.55, 0], [-15.5, 8.9, -0.5, Math.PI - 0.4, 0.45, 1], [19.4, 8.6, -0.6, 0, 0.55, 1], [15, 9.0, -0.5, 0.4, 0.4, 0], [-4.8, 12.8, 0.1, Math.PI - 0.3, 0.6, 1], [5.2, 12.7, 0.1, 0.3, 0.5, 0]] as [number, number, number, number, number, number][]) {
+      const dir = V(Math.cos(ry), -droop, 0.35).normalize();
+      const up = new THREE.Vector3().crossVectors(dir, X).normalize();
+      if (up.y < 0) up.negate();
+      pwPanel(b, V(x, y, z).addScaledVector(dir, 1.2), dir, up, 2.6, 0.9, fr[i], { back: true });
+    }
     this.plaza(plaza, inv);
     return flick;
   }
@@ -617,6 +700,7 @@ export class D3PixelWorld {
     const root = plaza.parent!;
     const b = this.part(root, true);
     const pav = d3PaverTile(a, { hex: 0x626058 });
+    this.calmTiles.add(pav);
     const stone = stoneTile(a, { hex: 0x8a867c });
     const brick = d3BrickTile(a, { hex: 0x7a5a48 });
     const soil = d3MudTile(a, { hex: D3C.mud, water: D3C.water });
@@ -655,7 +739,7 @@ export class D3PixelWorld {
       const planks = planksTile(a, { hex: 0x6e543a, horizontal: true });
       b.withMatrix(_m, () => {
         b.box(0, 1.3, 0, 3, 2.6, 2.4, { px: planks, nx: planks, pz: planks, nz: planks, py: null, ny: null });
-        pwPanel(b, V(0, 1.6, 1.215), X, Y, 1.6, 0.8, d3KioskWindowModule(a));
+        pwPanel(b, V(0, 1.55, 1.215), X, Y, 2.0, 1.25, d3KioskWindowModule(a));
       });
       for (const c of kiosk.children) {
         const m = c as THREE.Mesh;
@@ -735,6 +819,9 @@ export class D3PixelWorld {
       b.box(0, 1.15, -1.3, 2.3, 0.9, 4.0, { px: corr, nx: corr, nz: corr, pz: corr, py: null, ny: null });
       b.box(0, 1.67, -1.3, 2.3, 0.15, 4.0, { px: crane, nx: crane, nz: crane, pz: crane, py: planksTile(a, { hex: 0x5a4a38 }), ny: null });
       for (const sx of [-1, 1]) for (const sz of [-2.4, -0.6, 1.9]) pwCylinder(b, V(sx * 0.82, 0.4, sz), V(sx * 1.22, 0.4, sz), 0.5, 0.5, 10, tread, { capB: wheel });
+      // The front bumper, bent: a cut-out card buckled down at one end.
+      _m.makeTranslation(0, 0.62, 2.88).multiply(new THREE.Matrix4().makeRotationZ(-0.04));
+      b.withMatrix(b.matrix.clone().multiply(_m), () => pwPanel(b, V(0, 0, 0), X, Y, 2.25, 0.3, d3BumperModule(a), { back: true }));
       _m.makeTranslation(0.5, 2.6, -1.2).multiply(new THREE.Matrix4().makeRotationX(-0.35));
       b.withMatrix(b.matrix.clone().multiply(_m), () => b.box(0, 0, 0, 0.3, 0.3, 4.2, crane));
     });
@@ -756,15 +843,47 @@ export class D3PixelWorld {
     };
   }
 
+  /**
+   * Re-emit `g`'s repaintable meshes (removed) in `frame`'s own frame: the deck's planks into `calm`
+   * (the calm-level material: no crawl under the moving camera), everything else into `main`.
+   */
+  private paintBridge(g: THREE.Object3D, frame: THREE.Object3D, main: PwBatch, calm: PwBatch) {
+    frame.updateMatrixWorld(true);
+    g.updateMatrixWorld(true);
+    const rule = this.bridgeRule();
+    const deck = d3DeckTile(this.atlas, { hex: 0x74583a });
+    this.calmTiles.add(deck);
+    const inv = frame.matrixWorld.clone().invert();
+    main.setMatrix(inv);
+    calm.setMatrix(inv);
+    const list: THREE.Mesh[] = [];
+    g.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && !(m as THREE.InstancedMesh).isInstancedMesh && !m.userData.pixelWorld && !m.userData.noMerge && !Array.isArray(m.material) && repaintable(m.material)) list.push(m);
+    });
+    for (const m of list) {
+      const mat = m.material as THREE.Material;
+      main.geometry(m.geometry, m.matrixWorld, (nx, ny, nz) => {
+        const t = rule(mat, nx, ny, nz);
+        return t === deck ? null : t;
+      });
+      calm.geometry(m.geometry, m.matrixWorld, (nx, ny, nz) => (rule(mat, nx, ny, nz) === deck ? deck : null));
+      m.parent?.remove(m);
+    }
+    main.setMatrix(null);
+    calm.setMatrix(null);
+  }
+
   /** A bridge piece (deck segment / trestle tower) painted in its own frame (a loose piece: it falls on the collapse). */
   bridgePiece(g: THREE.Object3D) {
-    this.paintIn(g, g, this.part(g), this.bridgeRule());
+    this.paintBridge(g, g, this.part(g), this.part(g, false, 'calm'));
   }
 
   /** The intact bridge: every piece copy of `whole` painted into one batch (hidden with it at the collapse). */
   bridgeWhole(whole: THREE.Object3D) {
     const b = this.part(whole, true);
-    for (const c of [...whole.children]) this.paintIn(c, whole, b, this.bridgeRule());
+    const calm = this.part(whole, true, 'calm');
+    for (const c of [...whole.children]) this.paintBridge(c, whole, b, calm);
   }
 
   /** Abutments and posts (concrete), the river (animated, flowing along it), foam round the rocks: the classic group `g` (world frame). */
@@ -862,9 +981,9 @@ export class D3PixelWorld {
   /** The rescue helicopter (`P.helicopter`, placed; before its bake): livery, nose, boom, fins, skids; rotors in their own frames. */
   helicopter(h: HeliParts) {
     const a = this.atlas;
-    const white = d3EnamelTile(a, { hex: 0xccd0d4, rivets: true });
-    const navy = d3EnamelTile(a, { hex: 0x22304e });
-    const orange = d3EnamelTile(a, { hex: 0xe06a1a });
+    const white = d3LiveryTile(a, { hex: 0xccd0d4 });
+    const navy = d3LiveryTile(a, { hex: 0x22304e });
+    const orange = d3LiveryTile(a, { hex: 0xe06a1a });
     const steel = d3PoleTile(a, { hex: 0x24262a });
     const rule = this.ruleBy([[0xccd0d4, white], [0x22304e, navy], [0xe06a1a, orange], [0x24262a, steel]]);
     // The open door's dark box and its little light: the side module paints them.
@@ -880,8 +999,21 @@ export class D3PixelWorld {
     this.paintIn(h.body, h.body, b, rule);
     pwPanel(b, V(1.172, 1.8, 0), NZ, Y, 3.6, 2.0, d3HeliSideModule(a, true), { flipU: true });
     pwPanel(b, V(-1.172, 1.8, 0), Z, Y, 3.6, 2.0, d3HeliSideModule(a, false));
+    // Exhaust soot down both flanks of the engine housing (1.5 × 0.7 × 2.6 at y 3.1, z −0.6), from its stacks aft.
+    const soot = d3SootModule(a);
+    pwPanel(b, V(0.752, 3.12, -1.3), NZ, Y, 1.5, 0.75, soot, { flipU: true });
+    pwPanel(b, V(-0.752, 3.12, -1.3), Z, Y, 1.5, 0.75, soot);
     this.paintIn(h.rotor, h.rotor, this.part(h.rotor), rule);
     this.paintIn(h.tailRotor, h.tailRotor, this.part(h.tailRotor), rule);
+    // The main rotor's blur disc (shown while it spins fast: `update`).
+    const disc = new THREE.Group();
+    disc.name = 'd3-rotor-disc';
+    disc.position.copy(h.rotor.position);
+    disc.visible = false;
+    // (Attached at `finish`: a bake drops empty groups.)
+    if (h.rotor.parent) this.late.push([h.rotor.parent, disc]);
+    pwPanel(this.part(disc), V(0, 0.14, 0), X, NZ, 11.4, 11.4, d3RotorDiscModule(a), { back: true });
+    this.rotor = { rotor: h.rotor, disc, last: h.rotor.rotation.y };
   }
 
   /** The finale fuel tank (`tank.root`, after it was added to the world): classic meshes kept as hit boxes but not drawn; painted tank + trailer on top. */
@@ -936,14 +1068,17 @@ export class D3PixelWorld {
       const p = at(d, lat);
       this.skid(p.x, 0.036, p.z, yaw(d) + Math.PI + dy, d);
     }
-    // Flares burning on the shoulders.
-    const flare = d3FlareDecal(a);
-    const pool = d3FlarePoolDecal(a);
-    for (const [d, lat] of [[404, 3.3], [409, -3.4], [437, 3.2], [446, -3.3], [471, 3.4], [489, -3.2], [503, 3.3], [512, -3.4]] as [number, number][]) {
+    // Flares burning in the verges (off the lanes the Tyrant and the raptors run): a stick on the
+    // ground, its small upright plume (crossed cards), a tight dim pool of light; one dying orange.
+    for (const [d, lat, hex] of [[405, 5.3, 0xff4a30], [438, -5.6, 0xff4a30], [471, 6.1, 0xff8a2a], [503, -5.2, 0xff4a30]] as [number, number, number][]) {
       const p = at(d, lat);
-      // The red light it throws on the wet road (unlit, so it reads in the dark), then the flare.
-      pwDecal(this.chunk(d), p.x, 0.034, p.z, 3.4, 3.4, yaw(d), pool);
-      pwDecal(this.chunk(d), p.x, 0.04, p.z, 0.9, 0.9, yaw(d) + d, flare);
+      const b = this.chunk(d);
+      pwDecal(b, p.x, p.y + 0.03, p.z, 2, 2, yaw(d), d3FlarePoolDecal(a, { hex: hex === 0xff4a30 ? 0xc06a5a : 0xb07a4a }));
+      pwDecal(b, p.x, p.y + 0.04, p.z, 0.5, 0.5, yaw(d) + d, d3FlareDecal(a, { hex }));
+      const plume = d3FlarePlumeModule(a, { hex });
+      const hx = p.x + Math.cos(yaw(d) + d) * 0.16;
+      const hz = p.z - Math.sin(yaw(d) + d) * 0.16;
+      for (const r of [0, Math.PI / 2]) pwPanel(b, V(hx, p.y + 0.27, hz), V(Math.cos(r), 0, Math.sin(r)), Y, 0.25, 0.5, plume, { back: true });
     }
     // Fronds and branches blown onto the road.
     const fr = d3FrondModule(a, { hex: 0x355f36, rib: 0x6a5a3a }, 1);
@@ -954,7 +1089,7 @@ export class D3PixelWorld {
     // A tour car on its side in the left treeline (glass gone).
     {
       const d = 466;
-      const p = at(d, -11.5);
+      const p = at(d, -8.6);
       const m = new THREE.Matrix4().makeRotationY(yaw(d) + 0.7).setPosition(p.x, p.y - 0.15, p.z).multiply(new THREE.Matrix4().makeRotationZ(-Math.PI / 2).setPosition(1.0, 0, 0));
       const b = this.chunk(d);
       b.withMatrix(m, () => this.paintTourCar(b, true));
@@ -990,16 +1125,29 @@ export class D3PixelWorld {
         this.cable(s0, at(d - 16 + k * 2, -8.5 + k).setY(0.1), 1.0, toRoad, d);
       }
     }
+    // The old paddock fence along both treelines, broken in places (cut-out 6 m spans).
+    for (const lat of [-9.6, 9.8]) {
+      for (let d = 402, i = 0; d < 516; d += 6, i++) {
+        const h = hash2(i, lat > 0 ? 1 : 2, 91);
+        if (h < 0.18) continue;
+        const v = h > 0.78 ? 1 : h > 0.62 ? 2 : 0;
+        const p0 = at(d, lat);
+        const p1 = at(d + 6, lat);
+        const dir = p1.clone().sub(p0).setY(0).normalize();
+        pwPanel(this.chunk(d), p0.clone().lerp(p1, 0.5).setY((p0.y + p1.y) / 2 + 1.5), dir, Y, 6, 3, d3TornFenceModule(a, v), { back: true });
+      }
+    }
     // EVACUATE boards on posts (the escape route to the helipad).
-    for (const [d, lat, text, ry] of [[413, -5.9, 'EVACUATE >', 1.15], [487, 6.0, '< EVACUATE', -1.1]] as [number, number, string, number][]) {
+    for (const [d, lat, text, ry] of [[413, -5.9, 'EVACUATE', Math.PI + 0.45], [487, 6.0, 'EVACUATE', Math.PI - 0.45]] as [number, number, string, number][]) {
       const p = at(d, lat);
       const w = text.length * 6 * 0.07 + 0.5;
       const h = 0.07 * 7 + 0.4;
       const m = new THREE.Matrix4().makeRotationY(yaw(d) + ry).setPosition(p.x, p.y, p.z);
       const b = this.chunk(d);
       const wood = d3PoleTile(a, { hex: 0x5e442c });
+      const sb = this.signChunk(d);
+      sb.withMatrix(m, () => pwPanel(sb, V(0, 1.9, 0.051), X, Y, w, h, d3SignBoardModule(a, text, w, h, 0.07), { backTile: wood }));
       b.withMatrix(m, () => {
-        pwPanel(b, V(0, 1.9, 0.051), X, Y, w, h, d3SignBoardModule(a, text, w, h), { backTile: wood });
         for (const sx of [-w / 2 + 0.2, w / 2 - 0.2]) b.box(sx, 1.05, -0.06, 0.12, 2.1, 0.12, wood);
       });
     }
@@ -1034,36 +1182,50 @@ export class D3PixelWorld {
     const h = px * 7 + 0.4;
     const wood = d3PoleTile(a, { hex: 0x5e442c });
     const b = this.chunk(d);
+    const sb = this.signChunk(d);
+    sb.withMatrix(g.matrixWorld, () => pwPanel(sb, V(0, 2.2, 0.051), X, Y, w, h, d3SignBoardModule(a, text, w, h, px), { backTile: wood }));
     b.withMatrix(g.matrixWorld, () => {
-      pwPanel(b, V(0, 2.2, 0.051), X, Y, w, h, d3SignBoardModule(a, text, w, h), { backTile: wood });
       for (const sx of [-w / 2 + 0.25, w / 2 - 0.25]) b.box(sx, 1.2, -0.08, 0.14, 2.4, 0.14, wood);
     });
   }
 
   // ─── Backdrop ──────────────────────────────────────────────────────────────
 
-  /** The painted storm panorama (follows the camera itself). */
-  buildBackdrop(anchor: THREE.Vector3): THREE.Group {
+  /**
+   * The painted storm panorama (follows the camera itself). Its horizon matches the fog, flash or
+   * not: the ranges' colour follows the live fog colour (`fog`: the Storm lerps it toward its flash
+   * colour), and the sky band blends from that (below ~7°) to the clouds' flash gain (above ~15°).
+   */
+  buildBackdrop(anchor: THREE.Vector3, fog: THREE.Fog): THREE.Group {
     const s = this.skyAtlas;
-    const sky = d3SkyTile(s, { fog: STORM.fog, horizon: STORM.skyHorizon, top: 0x101828, cloud: 0x1e2638, rim: 0x6a78a0, el0: -6, el1: 40, moonAz: 300, moonEl: 28 });
-    const far = d3RangeTile(s, { hex: 0x1e2838, fog: STORM.fog, el0: -2, el1: 12, height: 0.75, seed: 3, palms: 0.25, fogFoot: 0.32, moonAz: 300 });
-    const near = d3RangeTile(s, { hex: 0x121a24, fog: STORM.fog, el0: -2, el1: 9, height: 0.7, seed: 8, palms: 0.85, fogFoot: 0.36, moonAz: 300 });
-    this.backdrop = new PwBackdrop(s, { tile: sky, el0: -6, el1: 40, radius: 330 }, [
+    const moonAz = 300;
+    const sky = d3SkyTile(s, { fog: STORM.fog, top: 0x0b0f18, cloud: 0x2c354c, rim: 0x6a78a0, el0: -4, el1: 33, moonAz, moonEl: 26 });
+    const far = d3RangeTile(s, { hex: 0x080c12, fog: STORM.fog, haze: 0.62, el0: -2, el1: 12, seed: 3, moonAz, yaw: 0, hill: [0.22, 0.5], palm: [14, 26], palms: 0.35, crown: 6, fogRows: 14 });
+    const near = d3RangeTile(s, { hex: 0x080c12, fog: STORM.fog, haze: 0.36, el0: -2, el1: 13, seed: 8, moonAz, yaw: 140, hill: [0.14, 0.3], palm: [26, 50], palms: 0.62, crown: 9, fogRows: 16 });
+    this.backdrop = new PwBackdrop(s, { tile: sky, el0: -4, el1: 33, radius: 330 }, [
       { tile: far, radius: 300, el0: -2, el1: 12, follow: 1 },
-      { tile: near, radius: 240, el0: -2, el1: 9, yaw: 140, follow: 0.94 },
+      { tile: near, radius: 240, el0: -2, el1: 13, yaw: 140, follow: 0.94 },
     ]);
     this.backdrop.anchor.copy(anchor);
     const g = this.backdrop.build();
-    g.traverse((o) => {
+    this.fog = fog;
+    // Two materials: the sky band (fog-matched low, flashing high) and the ranges (fog-matched).
+    const rpd = sky.h / 37;
+    const skyMat = d3SkyMaterial(s, (7 + 4) * rpd, (15 + 4) * rpd);
+    const rangeMat = pwBackdropMaterial(s);
+    rangeMat.name = 'pwBackdrop:d3-ranges';
+    g.children.forEach((c, i) => c.traverse((o) => {
       const m = o as THREE.Mesh;
-      if (m.isMesh && !this.skyMat) this.skyMat = m.material as THREE.MeshBasicMaterial;
-    });
+      if (m.isMesh) m.material = i === 0 ? skyMat : rangeMat;
+    }));
+    this.skyMat = skyMat;
+    this.rangeMat = rangeMat;
     return g;
   }
 
   /** The lightning forks as camera-facing cards in the classic bolts' frame (local XY, ~120 m tall). */
   boltGeometry(i: number): THREE.BufferGeometry {
-    const t = this.atlas.get(`d3bolt|${i % 3}`)!;
+    const t = this.atlas.get(`d3bolt|${i % 2}`)!;
     const b = new PwBatch(this.atlas);
     b.rect(new THREE.Vector3(-21, -6, 0), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), 42, 126, t);
     return b.build(this.boltMat)!.geometry;
@@ -1071,11 +1233,13 @@ export class D3PixelWorld {
 
   /** A painted flame card `w` × `h` m centred on its origin (two-sided, animated, unlit) — `Fire` uses them for its tongues. */
   flameCard(w: number, h: number): THREE.Mesh {
-    const key = `${w.toFixed(3)}|${h.toFixed(3)}`;
+    // Alternate the two painted fires (neighbouring tongues never flicker in step).
+    const v = this.flameN++ & 1;
+    const key = `${w.toFixed(3)}|${h.toFixed(3)}|${v}`;
     let geo = this.flameGeos.get(key);
     if (!geo) {
       const b = new PwBatch(this.atlas);
-      const t = this.fireT;
+      const t = this.fireT[v];
       pwPanel(b, V(0, 0, 0), X, Y, w, h, t, { back: true });
       const m = b.build(this.animMat!)!;
       // (pwPanel maps the whole strip: the material plays one frame of it; rescale v to a frame.)
@@ -1096,7 +1260,7 @@ export class D3PixelWorld {
 
   /** Paint the atlases and build every mesh: terrain / chunks / water → `root` (chunks fog-culled via `culled`). */
   finish(root: THREE.Object3D, culled: THREE.Mesh[], vegPx: THREE.Object3D) {
-    this.atlas.build();
+    d2CalmLevels(this.atlas.build(), this.calmTiles);
     this.boltMat = pwBackdropMaterial(this.atlas, { gain: 2.2 });
     this.boltMat.transparent = true;
     this.boltMat.depthWrite = false;
@@ -1109,9 +1273,18 @@ export class D3PixelWorld {
       ter.name = 'pw:d3-terrain';
       root.add(ter);
     }
+    const signMat = pwMaterial(this.atlas, { bias: -0.25, tag: 'sign' });
+    const calmMat = pwMaterial(this.atlas, { bias: 1.5, tag: 'calm' });
     for (const b of this.chunks.values()) {
       const m = b.build();
       if (!m) continue;
+      root.add(m);
+      culled.push(m);
+    }
+    for (const b of this.signs.values()) {
+      const m = b.build(signMat);
+      if (!m) continue;
+      m.name = 'pw:d3-signs';
       root.add(m);
       culled.push(m);
     }
@@ -1120,7 +1293,7 @@ export class D3PixelWorld {
     if (an) root.add(an);
     for (const [p, c] of this.late) p.add(c);
     for (const p of this.parts) {
-      const m = p.batch.build();
+      const m = p.batch.build(p.mat === 'sign' ? signMat : p.mat === 'calm' ? calmMat : undefined);
       if (!m) continue;
       p.parent.add(m);
       if (p.cull) culled.push(m);
@@ -1156,11 +1329,22 @@ export class D3PixelWorld {
       bn.pivot.rotation.x = -0.1 - Math.max(0, gust) * 0.18 + Math.sin(t) * 0.07 + Math.sin(t * 2.3) * 0.03;
       bn.pivot.rotation.z = Math.sin(t * 0.8) * 0.04;
     }
+    if (this.rotor && dt > 0) {
+      const r = this.rotor;
+      const spin = Math.abs(r.rotor.rotation.y - r.last) / dt;
+      r.last = r.rotor.rotation.y;
+      r.disc.visible = spin > 9;
+    }
     this.backdrop?.update(cam);
-    const u = this.skyMat?.userData.pw as { uPwGain: { value: number }; uPwGlow: { value: number } } | undefined;
-    if (u) {
-      u.uPwGain.value = 1 + flash * 1.5;
-      u.uPwGlow.value = 1 + flash * 0.6;
+    if (this.skyMat && this.rangeMat && this.fog) {
+      // The live fog colour over the stage's base fog, per channel (linear): the fog-coloured
+      // horizon and the ranges brighten exactly as the fogged scenery does in a flash.
+      const f = this.fog.color;
+      const b = this.fogBase;
+      this.rangeMat.color.setRGB(f.r / b.r, f.g / b.g, f.b / b.b);
+      const u = this.skyMat.userData.d3 as { uLo: { value: THREE.Color }; uHi: { value: number } };
+      u.uLo.value.copy(this.rangeMat.color);
+      u.uHi.value = 1 + flash * 1.3;
     }
   }
 }

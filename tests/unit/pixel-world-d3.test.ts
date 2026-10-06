@@ -8,6 +8,7 @@ import { AudioSystem } from '../../src/audio/Audio';
 import { Kit } from '../../src/content/kit/ModelKit';
 import { clearPwCache, PW_STATS } from '../../src/content/pixelworld/atlas';
 import { park } from '../../src/content/stages/d3/env';
+import { D3_SIGN_FITS } from '../../src/content/pixelworld/d3Park';
 import { nullHud, simulateStage } from './sim';
 
 /**
@@ -80,6 +81,13 @@ describe('d3 TYRANT CHASE in PIXEL WORLD', () => {
     expect(PW_STATS.has('d3-jeep')).toBe(true);
     const meshes = pwMeshes(px);
     expect(meshes.length).toBeGreaterThan(10);
+    // Signs: every painted text fits its board with a clear margin (the road boards, EVACUATE, DANGER).
+    const texts = new Set(D3_SIGN_FITS.map((f) => f.text));
+    for (const t of ['< VISITOR CENTER', 'HELIPAD >', 'HELIPAD', 'BRIDGE', 'EVACUATE', 'DANGER']) expect(texts.has(t), t).toBe(true);
+    for (const f of D3_SIGN_FITS) {
+      expect(f.tw + 2 * f.margin, `${f.key} width`).toBeLessThanOrEqual(f.W);
+      expect(f.th + 2 * f.margin, `${f.key} height`).toBeLessThanOrEqual(f.H);
+    }
     // Occluders: the classic meshes (hidden in PIXEL WORLD), never a painted one.
     const occ = px.env!.occluders ?? [];
     for (const o of occ) {

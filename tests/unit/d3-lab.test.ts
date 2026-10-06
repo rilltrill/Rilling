@@ -74,8 +74,23 @@ describe.skipIf(!process.env.D3_LAB)('d3 lab', () => {
         total += best;
         console.log(`cpu ${a.name}: ${best.toFixed(1)} ms`);
       }
-      // The jeep atlas lives on the view model (not on the env painter).
       console.log(`cpu total (env atlases): ${total.toFixed(1)} ms`);
+      // The jeep atlas lives on the view model (the last one built).
+      const { D3_JEEP_ATLAS } = await import('../../src/content/stages/d3/jeepPixel');
+      const ja = D3_JEEP_ATLAS as unknown as { name: string; o: object; tiles: Map<string, { tile: { key: string; w: number; h: number; wrap: boolean; density: number }; paint: never }> } | null;
+      if (ja) {
+        let best = Infinity;
+        for (let r = 0; r < 5; r++) {
+          clearPwCache();
+          const fresh = new PwAtlas(ja.name, ja.o);
+          for (const { tile, paint } of ja.tiles.values()) fresh.tile(tile.key, tile.w, tile.h, paint, { wrap: tile.wrap, density: tile.density });
+          const c0 = process.cpuUsage();
+          fresh.build();
+          const c1 = process.cpuUsage(c0);
+          best = Math.min(best, (c1.user + c1.system) / 1000);
+        }
+        console.log(`cpu ${ja.name}: ${best.toFixed(1)} ms; all three: ${(total + best).toFixed(1)} ms`);
+      }
     }
     if (process.env.D3_BENCH) {
       const { paintTile } = await import('../../src/content/pixelworld/atlas');
