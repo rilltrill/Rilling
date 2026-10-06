@@ -76,7 +76,7 @@ test.describe('boot & menus', () => {
     expect(errors).toEqual([]);
   });
 
-  test('ART defaults to SPRITES; the pause ART chip swaps 3D / SPRITES live and sticks', async ({ page }, info) => {
+  test('ART defaults to PIXEL CAST; the pause ART chip cycles CLASSIC / PIXEL CAST / PIXEL WORLD and sticks', async ({ page }, info) => {
     const errors = trackErrors(page);
     await seedSave(page);
     await page.goto('/?stage=d2&god=1&mute=1');
@@ -87,25 +87,63 @@ test.describe('boot & menus', () => {
     const art = () =>
       page.evaluate(() => {
         const g = (window as any).__game;
-        return { style: g.artStyle as string, sprites: !!g.sprites, saved: g.save.settings.art as string };
+        return { style: g.artStyle as string, sprites: !!g.sprites, saved: g.save.settings.art as string, loaded: g.world?.art as string };
       });
-    // Default: pixel art (the sprite renderer is up), nothing forced by the link.
-    expect(await art()).toEqual({ style: 'sprites', sprites: true, saved: 'sprites' });
+    // Default: pixel-art characters on the 3D scenery (the sprite renderer is up), nothing forced by the link.
+    expect(await art()).toEqual({ style: 'sprites', sprites: true, saved: 'sprites', loaded: 'sprites' });
 
     await press(page, '.hud-pause');
     await expect(page.locator('#menus .screen.pause')).toBeVisible();
-    const chip = page.locator('.pause-art');
+    const chip = page.locator('.pause-art .art-chip');
+    const note = page.locator('.pause-art-note');
     await expect(chip).toBeVisible();
-    await expect(chip.locator('.seg.on')).toHaveText('SPRITES');
-    await press(page, '.pause-art button[aria-label="ART 3D"]');
-    await expect(chip.locator('.seg.on')).toHaveText('3D');
-    await expect.poll(art).toEqual({ style: '3d', sprites: false, saved: '3d' });
-    await shot(page, info, 'paused-art-3d');
-    await press(page, '.pause-art button[aria-label="ART SPRITES"]');
-    await expect.poll(art).toEqual({ style: 'sprites', sprites: true, saved: 'sprites' });
-    await shot(page, info, 'paused-art-sprites');
+    await expect(chip).toHaveText('PIXEL CAST');
+    await expect(note).toHaveText('');
+    // PIXEL CAST → PIXEL WORLD: characters stay pixel art; the scenery waits for the next stage load (said so).
+    await press(page, '.pause-art .art-chip');
+    await expect(chip).toHaveText('PIXEL WORLD');
+    await expect(chip).toHaveAttribute('aria-label', 'ART PIXEL WORLD');
+    await expect(note).toHaveText('SCENERY CHANGES ON THE NEXT STAGE LOAD');
+    await expect.poll(art).toEqual({ style: 'pixel', sprites: true, saved: 'pixel', loaded: 'sprites' });
+    await shot(page, info, 'paused-art-pixel-world');
+    // → CLASSIC: 3D characters at once; the loaded scenery is classic-style 3D already (no note).
+    await press(page, '.pause-art .art-chip');
+    await expect(chip).toHaveText('CLASSIC');
+    await expect(note).toHaveText('');
+    await expect.poll(art).toEqual({ style: '3d', sprites: false, saved: '3d', loaded: 'sprites' });
+    await shot(page, info, 'paused-art-classic');
+    // → PIXEL CAST again.
+    await press(page, '.pause-art .art-chip');
+    await expect(chip).toHaveText('PIXEL CAST');
+    await expect.poll(art).toEqual({ style: 'sprites', sprites: true, saved: 'sprites', loaded: 'sprites' });
+    await shot(page, info, 'paused-art-pixel-cast');
     await press(page, 'button:has-text("RESUME")');
     await expect.poll(async () => (await snapshot(page))?.state).toBe('playing');
+    expect((await snapshot(page))!.frameErrors).toBe(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('&art=pixel loads a stage in PIXEL WORLD (painted scenery) without touching the saved setting', async ({ page }, info) => {
+    const errors = trackErrors(page);
+    await seedSave(page);
+    await page.goto('/?stage=z1&god=1&mute=1&art=pixel');
+    await requireWebGL(page);
+    await waitForBoot(page);
+    await expect.poll(async () => (await snapshot(page))?.state).toBe('playing');
+    await page.waitForTimeout(1500);
+    const st = await page.evaluate(() => {
+      const g = (window as any).__game;
+      let pw = 0;
+      g.world.scene.traverse((o: any) => {
+        if (o.userData?.pixelWorld) pw++;
+      });
+      return { style: g.artStyle as string, loaded: g.world.art as string, saved: g.save.settings.art as string, pw };
+    });
+    expect(st.style).toBe('pixel');
+    expect(st.loaded).toBe('pixel');
+    expect(st.saved).toBe('sprites');
+    expect(st.pw).toBeGreaterThan(0);
+    await shot(page, info, 'art-pixel-world-z1');
     expect((await snapshot(page))!.frameErrors).toBe(0);
     expect(errors).toEqual([]);
   });

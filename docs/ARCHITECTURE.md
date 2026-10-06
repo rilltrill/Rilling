@@ -246,12 +246,14 @@ older lays out exactly as before). `civilian-align.test.ts` checks every pose
   in 'crt' mode, scanlines, curvature, convergence error, phosphor bloom and
   vignette. Settings → DISPLAY: CRT / PIXEL / OFF (`Settings.retro`).
 
-## Art style: SPRITES — PixelCast pixel art (`gameplay/pixel/`, `content/pixel/`)
+## Art style: PIXEL CAST — PixelCast pixel art (`gameplay/pixel/`, `content/pixel/`)
 
-Settings → ART: **SPRITES | 3D** (`Settings.art`, default **SPRITES** on this branch; `artV`
-migrates saves that only stored the old '3d' default; URL `&art=sprites|3d` overrides it
-until the player changes ART; live mid-stage via the pause screen's ART chip). ART: 3D is
-the procedural-model look, unchanged.
+Settings → ART: **CLASSIC | PIXEL CAST | PIXEL WORLD** (`Settings.art` = `'3d' | 'sprites' |
+'pixel'`, default **PIXEL CAST** (`'sprites'`); `artV` migrates saves that only stored the old
+'3d' default; URL `&art=3d|sprites|pixel` overrides it until the player changes ART; the
+characters switch live mid-stage via the pause screen's ART chip). CLASSIC (`'3d'`) is the
+procedural-model look, unchanged. PIXEL WORLD adds painted environments — see *Art style:
+PIXEL WORLD* below. Below, "SPRITES" means either pixel-art style (`artCast(art)`).
 
 In SPRITES, characters that have a **painter** are drawn as hand-made pixel art by
 **PixelCast**; so are every pickup, everything thrown at the camera, the gibs and the
@@ -561,6 +563,206 @@ stay live 3D meshes over the sprite (blood pools too). Tuning: `&spriteLook=pal:
 captures: `scripts/snap-art.mjs`, `scripts/look-art.mjs`; numbers: `scripts/bench-art.mjs`
 (draw calls, redraws, paint ms, primitives, sprite vs model silhouette area, style pops).
 
+## Art style: PIXEL WORLD — PixelWorld environments (`content/pixelworld/`)
+
+The ART setting has three values (`Settings.art`, `core/art.ts` is the ONE place that
+answers "what do I draw"):
+
+| ART (`Settings.art`) | characters, pickups, gibs, plants | environments |
+|---|---|---|
+| CLASSIC (`'3d'`) | 3D models | 3D, Kit retro textures |
+| PIXEL CAST (`'sprites'`, default) | PixelCast pixel art | 3D, Kit retro textures (the saved "pixel cast v3" look) |
+| PIXEL WORLD (`'pixel'`) | PixelCast pixel art | painted PixelWorld pixel art |
+
+- Characters follow the live setting (`artCast`). Environments are built with the stage, so
+  a stage keeps the environment style it was LOADED with: `World.art` is fixed at stage
+  load and stage builders branch on `pixelWorld(world)` — never on the setting. A change
+  that differs in environment (`envPending(loaded, wanted)`) shows from the next stage load
+  (RETRY / RESTART / next stage); the settings row and the pause chip say so
+  ("SCENERY CHANGES ON THE NEXT STAGE LOAD").
+- Settings → ART is a three-way row; the pause screen's ART chip is ONE button that cycles
+  CLASSIC → PIXEL CAST → PIXEL WORLD (`nextArt`). `&art=3d|sprites|pixel` overrides the
+  setting until the player changes ART. Saves holding anything else migrate to the default
+  (`Save`: `isArtStyle`).
+- CLASSIC and PIXEL CAST build byte-identically to before: the classic builders only RECORD
+  what PixelWorld needs (`userData.pwBuilding`, `pwSign`, `pwFacade` tags) and never draw
+  from the RNG differently. `pixel-world.test.ts` checks per converted stage that PIXEL CAST
+  has no PixelWorld meshes, that occluders / ground / the world RNG are identical in both
+  styles, and the simulator plays z1 identically in both.
+
+### How it works
+
+- **Canvas** (`canvas.ts`): painters draw in RAMP space — every texel is a ramp id (a
+  6-step hue-shifted ramp from the same `makeRamp` as PixelCast and FLORA: base on step 3,
+  violet shadows, warm pale highlights, step 0 = outline shade), a tone 0…5 and flags
+  (`PWF.GLOW` unlit, `PWF.DITHER` ordered dither between two steps; without it a fractional
+  tone ROUNDS). Primitives: `set / rect / hline / vline / line / ellipse / poly / scatter`
+  (hand-shaped clusters, `CLUSTERS`), `PwRng` seeded by the tile key. Pure CPU, node-safe.
+- **Atlas** (`atlas.ts`): tiles are REGISTERED while the stage builds (`atlas.tile(key, w,
+  h, paint, { wrap })` → a handle; the same key returns the same tile), PAINTED once in
+  `build()` (deterministic, cached per key for the session), packed into one RGBA8 texture
+  with 5 hand-made levels. Mips are palette-faithful: each texel of a level is a real texel
+  of the four below it (the one nearest their average, within the class most of them
+  share) — never a blend; glow wins ties and survives over cut-out, so neon, stars and lit
+  windows keep reading at a distance. Alpha classes: 0 = cut out (discarded), 160
+  (`PW_GLOW_A`) = unlit glow, 255 = lit. Rects are 16-texel aligned (`PW_ALIGN`); wrap tiles
+  must be multiples of 16. `PW_STATS` holds bytes / paint ms per atlas.
+- **Material** (`material.ts`): flat-shaded Lambert (stage lights, flashlight, fog, tone
+  mapping exactly like the 3D scenery) whose colour is fetched texel by texel
+  (`texelFetch`, level = log2(texels per pixel) + bias): hard texels, the hand-made levels
+  take over before anything crawls. Per vertex: the tile rect (w < 0 = module, clamped;
+  w > 0 = tileable, wrapped inside its rect), texel UV (or PLANAR: projected world
+  position, 24 B a vertex for big bakes), vertex colour (tint / painted AO). `gain` matches
+  the stage's scenery brightness; `anim` plays vertical strip tiles (water, flicker).
+- **Batch** (`batch.ts`): `PwBatch` collects quads into ONE mesh per batch (one draw):
+  `rect` (wrap tiles map at `PW_TPM` from `u0/v0`, modules stretch, `sub` / `flipU`,
+  `tintRGB` for NEUTRAL tiles), `box`, `ribbon` (a strip along points with v running along
+  it: roads), `geometry` (re-texture any Kit geometry by planar projection in its own
+  scaled frame or in world space), `setMatrix` (lay in a group's frame).
+- **Re-texturing** (`retexture.ts`): `retexture(group, batch, rule)` moves every static
+  opaque Kit-textured mesh into the batch with a painted tile picked by `rule` (default
+  `kitTileRule`: Kit texture name → PixelWorld tile; `overrides` per material) and removes
+  it from the group. Skips glows, transparent, double-sided, instanced, `noMerge` and
+  already-PixelWorld meshes. NEUTRAL tiles (`neutral(tile)`: painted round a grey) are
+  tinted per material by vertex colour — one tile for every brick colour of a stage.
+- **Backdrop** (`backdrop.ts`, `sky.ts`): a camera-following panorama: a sky band and up
+  to 3 cut-out layers (skylines, ranges, a volcano panel with `span`), each with a
+  `follow` factor (< 1: a little parallax), 2048 texels round (≈ 1 texel a retro pixel),
+  one level, unlit, fogless. Painters: `nightSkyTile` (stars, moon, cloud banks),
+  `skylineTile` (lit windows, rooftop clutter, a moon-lit rim), `daySkyTile` (haze band to
+  `haze`°, cumulus lit from `sunAz`), `rangeTile` (normalised ridges, jungle canopy line,
+  light / shadow divides that wander down the faces, foot haze), `volcanoTile`,
+  `stormSkyTile`, `duskSkyTile`.
+- **Painters**: `surfaces.ts` (brick in bond with mortar and spalls, plaster, panels,
+  siding, corrugated, stone, roofs, asphalt with patches / cracks / wet glints, sidewalk,
+  curb, lane paint, dirt road with ruts, grass, rock faces, metal, planks, fabric, grate,
+  hazard stripes, tiles, water), `facade.ts` (window / door / shopfront modules with goods,
+  cornice, awning, valance, wall foot / head bands, posters, graffiti, drainpipes, AC units,
+  fire escapes, soot), `signs.ts` (neon boards, blades and their neon edge, lightboxes,
+  marquees, painted signs, road signs, movie posters), `font.ts` (5×7, 3×5, bold, tall,
+  neon script; `neonText` draws tubes on the glyph skeleton), `interior.ts` (painted walls,
+  lab panels, ceilings, terrazzo, carpet, blood trails, pipes, vents, doors, notices),
+  `props.ts` (prop billboards as FLORA species, cut-out fences / railings / guard rails).
+- **Look-dev**: `lookdev.ts` registers every painter; `PW_DUMP=/tmp/pw npx vitest run
+  tests/unit/pixel-world-dump.test.ts` writes each tile ×3 (wrap tiles 2×2 to check seams)
+  and the packed atlas; `PW_STAGE_SKY=d1|z1` dumps a stage's panorama; `PW_BENCH=1` /
+  `PW_PROF=z1` time painting. In game: `node scripts/pixel-world.mjs --base <dev url> --out
+  <dir> --modes sprites,pixel --sheet --shots "z1:2:200:label,…"` captures the same frozen
+  instant in each ART (deterministic) with draw calls / triangles / atlas stats.
+
+### Style guide (keep stages consistent)
+
+1. **Density**: world surfaces are painted at `PW_TPM` = 32 texels a metre (≈ 1 texel a
+   retro pixel at 8 m); signs and modules at the same density; backdrops 2048 texels round.
+   Never scale a tile to fit: lay wrap tiles at density, size modules in whole texels.
+2. **Palette**: colours come from the stage's existing material colours through
+   `k.ramp(hex, …)` (6-step hue-shifted ramps) — the environment shares the cast's palette
+   discipline. No free RGB, no gradients except dithered bands (sky, light falloff), no
+   per-texel noise: texture is CLUSTERS (bricks, spalls, pebbles, tufts, stains of 2–6
+   texels), placed by hand-written rules.
+3. **Light** from the upper left and front, as PixelCast: raised features lit top / left,
+   dark bottom / right, one step of cast shadow below-right; recesses the other way round.
+   Outlines are selective (step 0 only where a form needs separating), never black boxes.
+4. **Wear tells the story**: weathered feet (splash-back, damp), drip-stained heads under
+   cornices, rust runs below metal, soot over fires, cracks / patches on roads — a few
+   readable clusters, not a uniform dirt overlay.
+5. **Text is always pixel font**: neon = tubes on the regular glyph skeleton with a glow
+   core and a halo ring; painted signs on boards. Size signs like the classic ones
+   (`pwSign.bw/bh`: the classic board; letters `size` m tall caps).
+6. **Glow** (`PWF.GLOW`) only for light sources: lit windows, neon, lamps, screens, lava.
+   Light ON surfaces is the stage's lights, plus pixel light pools (stepped rings with
+   Bayer-dithered step edges, screened over the surface: `pwPoolTexture`).
+7. **Horizons match the fog**: a backdrop's horizon band is the stage fog colour up to
+   the elevation the fogged scenery reaches (fogged trees must sit on haze, not on blue).
+8. **Gameplay never changes**: no new occluders, colliders, raycast targets or RNG draws.
+   PixelWorld meshes are `noMerge`, `userData.pixelWorld`, `raycast` disabled.
+
+### Budgets (per stage, measured)
+
+| budget | limit | z1 MAIN STREET | d1 JUNGLE RUN |
+|---|---|---|---|
+| atlas memory (all levels) | ≤ 24 MB | 11.4 MB (world 2048×768 8.0 MB + sky 2048×432 3.4 MB) | 6.6 MB (world 512×512 1.3 MB + sky 2048×672 5.3 MB) |
+| paint at stage load | ≤ 300 ms on a phone | 170–210 ms (node on a shared 4-core dev box; sky 36–41 ms) | 180–195 ms (sky 125–130 ms) |
+| draw calls (same frame) | ≤ 250 | 45–51 (PIXEL CAST 53–60) | 44–50 (PIXEL CAST 50–57) |
+| triangles (same frame) | — | 49 k (PIXEL CAST 73 k) | 31 k (PIXEL CAST 31 k) |
+| per-frame work | no allocations | backdrop follow (a position set per layer) | same |
+
+Keep tiles few: a NEUTRAL tile tinted per material beats a tile per colour; wrap shop
+bays (`uScale`) beat one module per shopfront; generic tiles at 32–64 texels square.
+Paint time grows with texels painted: reuse keys, keep variants ≤ 2, prefer clamp
+modules sized to what they show. The phone budget is NOT met with margin yet (a phone
+is ~2–3× slower than the dev box: expect ~400–600 ms at a cold stage load). Next steps, in
+order of payoff: paint in a Worker during the intro card (painters are DOM-free and
+node-safe already), cache painted atlases in IndexedDB by their tile-key list (a repeat
+load skips painting), paint the one-level sky atlas after the first frame.
+
+### How to convert a stage
+
+1. **Record, don't change**, in the classic builders: put `userData.pwBuilding` /
+   `pwSign` / `pwFacade` (or your own records) on what painting replaces. No RNG draws
+   move: CLASSIC / PIXEL CAST must build byte-identically (run the stage's simulator test
+   in both and compare).
+2. Make `stages/<id>/pixel.ts`: a class owning `PwAtlas('<id>')` (+ a one-level sky
+   atlas), its batches and a `TileRule` mapping the stage's materials to painted tiles
+   (start from `kitTileRule`; add `overrides` for the stage's signature surfaces).
+3. In the env builder: `const pw = pixelWorld(world) ? new XPixelWorld() : null`. Convert
+   each zone / chunk BEFORE the stage's baker runs (z1: before `bakeMerge`; d1: before
+   `merged()`), so the bake only sees what stays classic. Lay new painted geometry (ground,
+   road ribbons, facades, signs) into batches; `retexture` the rest.
+4. `pw.atlas.build()` once everything is registered, then build each batch and add its mesh
+   to the zone / chunk group it belongs to (it culls with it). Register NOTHING after
+   `build()` (it throws).
+5. Backdrop: `PwBackdrop` from the stage's sky colours; call `backdrop.update(camPos)`
+   where the classic sky followed the camera.
+6. Big baked scenery (d3's packed 20–24 B bakes): use PLANAR batches (`pwMaterial(atlas,
+   { planar: true })`) — no UVs, the tile per vertex.
+7. Small round props → FLORA species (`props.ts` pattern) in the stage's FloraField; thin
+   flat structures → cut-out tiles on single quads (two-sided material).
+8. Check: `pixel-world.test.ts` style test (budgets, no occluder / ground / RNG change),
+   the simulator in both styles, `scripts/pixel-world.mjs` captures of 2 beats + the boss
+   (PIXEL CAST vs PIXEL WORLD), judged at 844×390 with the CRT on.
+
+### Stage work-lists
+
+- **z1 MAIN STREET** (converted): facades, shopfronts, signs, marquee, posters, roads,
+  sidewalks, curbs, lane paint, roofs, trims, street furniture re-painted; night panorama.
+  Still classic: cars (re-painted Kit boxes — give them painted body / glass / grille
+  modules), street lamps and their heads, the diner's chrome body and window glass, the
+  fire effects, the river / alley interiors past beat 10, the boss arena dressing
+  (butcher shop interior), the title-screen backdrop. Facade variety: 5 wall kinds; add
+  storefront goods per shop name and a second window set.
+- **d1 JUNGLE RUN** (converted): dirt road ribbon with ruts and ragged grass edges, painted
+  meadow, rocks / boulders / cliffs as fractured rock faces, day panorama (fog-matched
+  haze, cumulus, jungle ranges, smoking volcano). Still classic: the park gate and
+  palisade (wooden planks are a natural `planksTile` job), river / waterfall (animated
+  `waterTile` strip), fallen tree, the car, the herd, dirt patches (still rectangles —
+  paint ragged-edge patch decals), the visitor-centre buildings in the fog.
+- **z2 HOSPITAL** (interior, z2/bake.ts colour baker, zones in zonesUpper/Lower.ts):
+  `paintedWallTile` / `labPanelTile` walls with wainscot and scuffs, `ceilingTile` with
+  light panels as glow modules, `terrazzoTile` / sheet-vinyl floors, `bloodTrailDecal`,
+  `noticeModule` (WARD signs, room numbers in 3×5), curtains as `fabricTile`, the
+  ambulance bay exterior (night: reuse z1's asphalt, night sky + skyline backdrop),
+  morgue drawers as metal modules, OR lamps as glow. Convert per zone before `bake(g)`;
+  keep curtains / drawers / vents (animated set pieces) classic or re-paint them in place.
+- **z3 HIGHWAY** (dusk exterior, z3/bake.ts per-50 m chunk baker): `duskSkyTile` panorama
+  + burning-city skyline layer (`skylineTile` with fire glow) + hills; `asphaltTile` road
+  with lane paint, `guardRailTile`, jersey barriers as concrete, billboards
+  (`paintedSign`), overpass concrete + soot, tanker / burnt cars re-painted (metal, rust,
+  soot), houses (`sidingTile`, `roofTile`), utility poles + wires. Convert per chunk
+  before `bake(b)`; road strips are long — use planar batches.
+- **d2 RESEARCH LABS** (interior, d2/bake.ts recipes): lobby (terrazzo, reception desk,
+  park logo signage as `paintedSign`), shop (shelves of goods modules), kitchen
+  (`tilesTile` walls, steel counters), server room (rack modules with glow LEDs),
+  greenhouse (glass roof grid, planters), hatchery, containment wing (hazard stripes,
+  `grateTile` floors, warning signs), tunnels (`pipesTile`, concrete, steam vents
+  classic). Convert per room before `bake()`.
+- **d3 TYRANT CHASE** (storm exterior, d3/bake.ts Baker with packed vertices and sway):
+  `stormSkyTile` panorama with rain curtains; terrain (grass / mud) and road strips as
+  PLANAR batches (24 B a vertex — d3 is ≈ 1 M vertices, keep it packed), paddock fences
+  (`chainFenceTile`, cut-out), roadblock (`hazardTile`, drums as prop species), visitor
+  centre (`plasterTile`, `windowModule`), bridge planks / cables, helipad paint. Swaying
+  vegetation is already FLORA in PIXEL CAST — leave it.
+
 ## Audio
 
 `audio/`: `Audio.ts` (buses, voice pool, pre-render cache, ducking, iOS unlock,
@@ -644,7 +846,7 @@ or new material types mid-stage still compile then: add such lights at build tim
 
 ## Debug URL flags
 
-`?stage=z1` jump into a stage · `&art=sprites|3d` character art (Settings ART, default SPRITES) ·
+`?stage=z1` jump into a stage · `&art=3d|sprites|pixel` ART: CLASSIC / PIXEL CAST (default) / PIXEL WORLD ·
 `&spriteLook=pal:0,dirs:8` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
 overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor

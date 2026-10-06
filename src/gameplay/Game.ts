@@ -3,6 +3,7 @@ import { Engine } from '../core/Engine';
 import { Input } from '../core/Input';
 import { Save } from '../core/Save';
 import type { ArtStyle, CampaignId, Grade, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
+import { artCast } from '../core/art';
 import { AudioSystem } from '../audio/Audio';
 import type { MusicId } from '../audio/names';
 import { Hud } from '../ui/Hud';
@@ -39,7 +40,7 @@ export interface DebugFlags {
    * tooling gets clean screenshots. Undefined = the player's DISPLAY setting.
    */
   retro?: RetroMode;
-  /** Forced character art (`&art=sprites|3d`); undefined = the player's ART setting. */
+  /** Forced ART (`&art=3d|sprites|pixel`); undefined = the player's ART setting. */
   art?: ArtStyle;
 }
 
@@ -303,7 +304,7 @@ export class Game implements MenuActions {
     if (this.world) this.syncSprites(this.world);
   }
 
-  /** Character art in effect (URL flag over the ART setting). */
+  /** ART in effect (URL flag over the ART setting): characters live, environments from the next stage load. */
   get artStyle(): ArtStyle {
     return this.flags.art ?? this.save.settings.art ?? '3d';
   }
@@ -317,7 +318,7 @@ export class Game implements MenuActions {
 
   /** Create / drop the sprite renderer for `w` to match the ART setting (also mid-stage). */
   private syncSprites(w: World) {
-    const want = this.artStyle === 'sprites';
+    const want = artCast(this.artStyle);
     // Foliage goes leafy with the pixel-art cast (a shared uniform: no recompile).
     RETRO_FOLIAGE.value = want ? 1 : 0;
     if (want && !this.sprites) {
@@ -444,6 +445,8 @@ export class Game implements MenuActions {
       this.run.stageBombs = this.run.bombs;
       this.run.banked = 0;
     }
+    // Environments are built in the ART style in effect now (PIXEL WORLD or not) and keep it for the stage.
+    w.art = this.artStyle;
     this.world = w;
     this.syncSprites(w);
     this.shooter = new Shooter(w);
@@ -852,6 +855,7 @@ export class Game implements MenuActions {
       campaign: this.run?.campaign.name,
       score: this.world?.score.score ?? 0,
       art: this.artStyle,
+      loadedArt: this.world?.art,
     };
   }
 

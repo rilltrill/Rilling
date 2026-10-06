@@ -11,6 +11,10 @@ import { FloraField, floraArtToggle, floraAtlas } from '../../pixel/floraField';
 import { Z1_BIOME } from '../../pixel/floraBiomes';
 import { STREET_TREE } from '../../pixel/floraSpecies';
 import { STREET_PROPS } from '../../pixel/floraProps';
+import { pixelWorld } from '../../../core/art';
+import { Z1PixelWorld, pwPoolTexture } from './pixel';
+import { PwBatch } from '../../pixelworld/batch';
+import { asphaltTile } from '../../pixelworld/surfaces';
 
 /** Per-world handles the stage script needs (set pieces, lights). */
 export interface Z1Scene {
@@ -82,20 +86,36 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   const accent = new THREE.PointLight(0xff3c9a, 0, 14, 1.4);
   root.add(fireLight, accent);
 
+  // ART: PIXEL WORLD: painted facades, signs, ground and sky (z1/pixel.ts); else the classic scenery.
+  const pw = pixelWorld(world) ? new Z1PixelWorld() : null;
+
   // ─── Sky ──────────────────────────────────────────────────────────────────
-  const sky = nightSky(MOON_DIR, FOG, 0x03050b);
+  const sky = pw ? pw.buildBackdrop(MOON_DIR, FOG) : nightSky(MOON_DIR, FOG, 0x03050b);
   root.add(sky);
 
   // ─── Base ground ──────────────────────────────────────────────────────────
+  let baseGround: PwBatch | null = null;
   {
-    const ground = new THREE.Mesh(Kit.plane(520, 520), Kit.tex('asphalt', 0x1d1f25, 1, 0.6));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(-40, -0.03, -150);
-    root.add(ground);
+    if (pw) {
+      baseGround = new PwBatch(pw.atlas);
+      // (The road's own painted asphalt, darkened: one tile fewer to paint.)
+      baseGround.rect(new THREE.Vector3(-300, -0.03, 110), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), 520, 520, asphaltTile(pw.atlas, { hex: 0x2c2f37, wet: true, wear: 0.6 }), { tint: 0xd8d8d8 });
+    } else {
+      const ground = new THREE.Mesh(Kit.plane(520, 520), Kit.tex('asphalt', 0x1d1f25, 1, 0.6));
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.set(-40, -0.03, -150);
+      root.add(ground);
+    }
   }
 
   // ─── Town ─────────────────────────────────────────────────────────────────
   const town = buildTown();
+  if (pw) {
+    for (const id of Object.keys(town.zones) as ZoneId[]) pw.convertZone(id, town.zones[id]);
+    pw.finish(town.zones);
+    const m = baseGround?.build();
+    if (m) root.add(m);
+  }
   const zoneBoxes: { id: ZoneId; groups: THREE.Group[]; box: THREE.Box3 }[] = [];
   for (const id of Object.keys(town.zones) as ZoneId[]) {
     const g = town.zones[id];
@@ -132,7 +152,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   vegPx.add(flora2d.build());
   root.add(veg3D, vegPx);
   const untoggle = floraArtToggle(scene, [vegPx], [veg3D]);
-  const pools = town.pools.build(poolSurface);
+  const pools = pw ? town.pools.build(undefined, pwPoolTexture(), true) : town.pools.build(poolSurface);
   const beams = town.beams.build();
   root.add(pools, beams);
   const rain = new Rain(420);
@@ -175,7 +195,8 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     const cam = w.camera;
     cam.getWorldPosition(_cam);
     // Sky follows the camera on XZ so it always reads as infinitely far.
-    sky.position.set(_cam.x, 0, _cam.z);
+    if (pw?.backdrop) pw.backdrop.update(_cam);
+    else sky.position.set(_cam.x, 0, _cam.z);
 
     // Flashlight: from just right of / below the eye, aimed where the camera looks.
     cam.getWorldDirection(_dir);

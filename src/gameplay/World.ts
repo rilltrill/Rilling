@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { EventBus } from '../core/EventBus';
 import { Rng } from '../core/Rng';
-import type { PickupKind, Settings } from '../core/types';
+import type { ArtStyle, PickupKind, Settings } from '../core/types';
+import { isArtStyle } from '../core/art';
 import type { AudioSystem } from '../audio/Audio';
 import { Fx } from '../fx/Fx';
 import { RailRig } from './RailRig';
@@ -82,6 +83,12 @@ export class World {
   time = 0;
   /** Global time multiplier (debug ?speed=, slow-mo). */
   timeScale = 1;
+  /**
+   * ART style this stage was LOADED with (environments follow it: `pixelWorld(world)`
+   * in core/art.ts; characters follow the live setting). Game sets it before the
+   * environment is built; defaults to the settings' ART.
+   */
+  art: ArtStyle;
   viewport = { width: 1, height: 1 };
   private slowMoT = 0;
   private slowMoScale = 1;
@@ -103,6 +110,7 @@ export class World {
     seed = 1337,
   ) {
     this.rng = new Rng(seed);
+    this.art = isArtStyle(settings.art) ? settings.art : 'sprites';
     this.rig = new RailRig(camera);
     this.scene.add(this.rig.space, this.rig.viewModelHolder, this.fx.group);
     this.fx.groundAt = (x, z) => this.groundAt(x, z);

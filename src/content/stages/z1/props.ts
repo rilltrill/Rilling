@@ -108,9 +108,11 @@ function cyl(g: THREE.Object3D, rt: number, rb: number, h: number, seg: number, 
 /** Flat sign board with neon letters, facing +Z, centred at origin. */
 export function boardSign(text: string, color: number, size = 0.7, opts: { frame?: boolean; back?: number; pad?: number } = {}): THREE.Group {
   const g = new THREE.Group();
+  // ART: PIXEL WORLD repaints this sign with pixel-font neon (see z1/pixel.ts).
   const w = textWidth(text, size) + (opts.pad ?? size * 0.9);
   const h = size * 1.7;
-  box(g, w, h, 0.14, opts.back !== undefined ? Kit.tex('metal', opts.back, 1.5, 0.5) : M.signBack, 0, 0, -0.07);
+  g.userData.pwSign = { kind: 'board', text, color, size, frame: opts.frame !== false, back: opts.back, bw: w, bh: h };
+  box(g, w, h, 0.14, opts.back !== undefined ? Kit.tex('metal', opts.back, 1.5, 0.5) : M.signBack, 0, 0, -0.07).userData.pwFacade = 'signBack';
   const glow = Kit.glow(color, 1.5);
   addText(g, text, glow, { size, depth: 0.06 }).position.z = 0.03;
   if (opts.frame !== false) {
@@ -129,9 +131,10 @@ export function boardSign(text: string, color: number, size = 0.7, opts: { frame
  */
 export function bladeSign(text: string, color: number, size = 0.62, back = 0x1a1a20): THREE.Group {
   const g = new THREE.Group();
+  g.userData.pwSign = { kind: 'blade', text, color, size, back };
   const h = verticalHeight(text, size) + size * 1.1;
   const out = size * 1.9;
-  box(g, 0.22, h, out, Kit.tex('metal', back, 1.5, 0.5), 0, 0, out / 2 + 0.35);
+  box(g, 0.22, h, out, Kit.tex('metal', back, 1.5, 0.5), 0, 0, out / 2 + 0.35).userData.pwFacade = 'signBack';
   // Brackets.
   box(g, 0.08, 0.08, 0.5, M.metal, 0, h / 2 - 0.2, 0.2);
   box(g, 0.08, 0.08, 0.5, M.metal, 0, -h / 2 + 0.2, 0.2);
@@ -188,6 +191,36 @@ export interface BuildingSpec {
 export const GROUND_H = 4.6;
 export const FLOOR_H = 3.2;
 
+/**
+ * What a building's facade shows, recorded while `building()` builds it (no
+ * extra rng draws): ART: PIXEL WORLD paints it (z1/pixel.ts) in place of the
+ * meshes tagged `userData.pwFacade` (window boxes, shop glass, doors…).
+ */
+export interface FacadeRecord {
+  spec: BuildingSpec;
+  w: number;
+  d: number;
+  h: number;
+  /** Trim is the light stone (else the dark). */
+  trimLight: boolean;
+  windows: { x: number; y: number; kind: 'warm' | 'dim' | 'tv' | 'dark'; boarded: boolean; ghoul: boolean; blind: boolean }[];
+  /** Ground floor. */
+  shop: ShopSpec | null;
+  /** Shop window x / width, door x. */
+  shopX: number;
+  shopW: number;
+  doorX: number;
+  /** Residential ground-floor windows lit (dim). */
+  groundLit: boolean;
+  fireEscapeX: number | null;
+}
+
+/** Tag a mesh PIXEL WORLD replaces with painted modules (`kind`: what it was). */
+function pwTag<T extends THREE.Object3D>(o: T, kind: string): T {
+  o.userData.pwFacade = kind;
+  return o;
+}
+
 export function buildingHeight(floors: number) {
   return GROUND_H + FLOOR_H * (floors - 1) + 0.7;
 }
@@ -199,11 +232,13 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
   const h = buildingHeight(floors);
   const body = facadeMat(s.color, s.tex);
   const trim = s.trim ?? (rng.chance(0.5) ? M.trimLight : M.trimDark);
-  box(g, w, h, d, body, 0, h / 2, -d / 2);
+  const rec: FacadeRecord = { spec: s, w, d, h, trimLight: trim === M.trimLight, windows: [], shop: s.shop ?? null, shopX: -w * 0.12, shopW: w * 0.6, doorX: w / 2 - 1.3, groundLit: false, fireEscapeX: null };
+  g.userData.pwBuilding = rec;
+  pwTag(box(g, w, h, d, body, 0, h / 2, -d / 2), 'body');
   // Pilasters + cornice + floor band.
   box(g, 0.45, h, 0.2, trim, w / 2 - 0.22, h / 2, 0.08);
   box(g, 0.45, h, 0.2, trim, -w / 2 + 0.22, h / 2, 0.08);
-  box(g, w + 0.25, 0.45, 0.55, trim, 0, h - 0.22, 0.16);
+  pwTag(box(g, w + 0.25, 0.45, 0.55, trim, 0, h - 0.22, 0.16), 'cornice');
   box(g, w + 0.25, 0.14, d + 0.2, M.roof, 0, h + 0.07, -d / 2);
   box(g, w, 0.28, 0.3, trim, 0, GROUND_H, 0.12);
 
@@ -215,26 +250,37 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
     const y = GROUND_H + 0.35 + (f - 1) * FLOOR_H + 1.15;
     for (let c = 0; c < cols; c++) {
       const x = -w / 2 + 0.7 + span * (c + 0.5);
-      box(g, 1.35, 1.95, 0.08, M.winFrame, x, y, 0.03);
+      pwTag(box(g, 1.35, 1.95, 0.08, M.winFrame, x, y, 0.03), 'win');
       const r = rng.next();
       const mat = r < lit * 0.6 ? M.winWarm : r < lit * 0.85 ? M.winDim : r < lit ? M.winTv : M.winDark;
-      box(g, 1.12, 1.7, 0.1, mat, x, y, 0.04);
-      box(g, 1.5, 0.1, 0.25, trim, x, y - 0.98, 0.1);
+      pwTag(box(g, 1.12, 1.7, 0.1, mat, x, y, 0.04), 'win');
+      pwTag(box(g, 1.5, 0.1, 0.25, trim, x, y - 0.98, 0.1), 'win');
+      const wr: FacadeRecord['windows'][number] = { x, y, kind: mat === M.winWarm ? 'warm' : mat === M.winDim ? 'dim' : mat === M.winTv ? 'tv' : 'dark', boarded: false, ghoul: false, blind: false };
+      rec.windows.push(wr);
       // Some dark windows are boarded up (reuses the window roll: no extra rng draws).
-      if (mat === M.winDark && r > 0.88) boardUp(g, x, y, 1.3, 1.85, 0.1);
+      if (mat === M.winDark && r > 0.88) {
+        pwTagNew(g, () => boardUp(g, x, y, 1.3, 1.85, 0.1), 'win');
+        wr.boarded = true;
+      }
       if (mat !== M.winDark && s.ghouls !== false && rng.chance(0.16)) {
         // Something standing in the window…
-        box(g, 0.42, 0.95, 0.02, Kit.mat(0x0b0b0e), x + rng.spread(0.2), y - 0.35, 0.1);
-        box(g, 0.24, 0.26, 0.02, Kit.mat(0x0b0b0e), x + rng.spread(0.1), y + 0.28, 0.1);
+        pwTag(box(g, 0.42, 0.95, 0.02, Kit.mat(0x0b0b0e), x + rng.spread(0.2), y - 0.35, 0.1), 'win');
+        pwTag(box(g, 0.24, 0.26, 0.02, Kit.mat(0x0b0b0e), x + rng.spread(0.1), y + 0.28, 0.1), 'win');
+        wr.ghoul = true;
       } else if (mat !== M.winDark && rng.chance(0.4)) {
         // Half-drawn blind.
-        box(g, 1.12, 0.6, 0.02, Kit.tex('cloth', 0x5a4a38, 0.5), x, y + 0.55, 0.1);
+        pwTag(box(g, 1.12, 0.6, 0.02, Kit.tex('cloth', 0x5a4a38, 0.5), x, y + 0.55, 0.1), 'win');
+        wr.blind = true;
       }
     }
   }
 
   // Fire escape on the facade.
-  if (s.fireEscape && floors >= 3) addFireEscape(g, floors, rng.chance(0.5) ? -w / 4 : w / 4);
+  if (s.fireEscape && floors >= 3) {
+    const fx = rng.chance(0.5) ? -w / 4 : w / 4;
+    addFireEscape(g, floors, fx);
+    rec.fireEscapeX = fx;
+  }
 
   // Ground floor.
   const shop = s.shop;
@@ -245,25 +291,25 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
     if (!shop.noWindow) {
       // Lit shop interiors read as tiled walls behind the glass.
       const imat = shop.interior ? texGlow(shop.interior, shop.interiorIntensity ?? 0.5, 'tiles', 1, 0.3) : M.winDark;
-      box(g, ww, 2.4, 0.1, imat, wx, 1.85, 0.04);
-      for (let i = 1; i < 3; i++) box(g, 0.09, 2.4, 0.16, M.winFrame, wx - ww / 2 + (ww * i) / 3, 1.85, 0.07);
-      if (shop.boarded) boardUp(g, wx, 1.85, ww + 0.1, 2.5, 0.18);
+      pwTag(box(g, ww, 2.4, 0.1, imat, wx, 1.85, 0.04), 'shop');
+      for (let i = 1; i < 3; i++) pwTag(box(g, 0.09, 2.4, 0.16, M.winFrame, wx - ww / 2 + (ww * i) / 3, 1.85, 0.07), 'shop');
+      if (shop.boarded) pwTagNew(g, () => boardUp(g, wx, 1.85, ww + 0.1, 2.5, 0.18), 'shop');
     }
-    box(g, ww + 0.2, 0.65, 0.2, trim, wx, 0.33, 0.1);
-    box(g, ww + 0.3, 0.12, 0.2, trim, wx, 3.1, 0.1);
+    pwTag(box(g, ww + 0.2, 0.65, 0.2, trim, wx, 0.33, 0.1), shop.noWindow ? 'keep' : 'shop');
+    pwTag(box(g, ww + 0.3, 0.12, 0.2, trim, wx, 3.1, 0.1), shop.noWindow ? 'keep' : 'shop');
     // Door with a small lit pane.
-    box(g, 1.15, 2.6, 0.12, M.door, dx, 1.3, 0.04);
-    if (shop.interior) box(g, 0.6, 0.9, 0.04, Kit.glow(shop.interior, (shop.interiorIntensity ?? 0.5) * 0.8), dx, 1.85, 0.11);
+    pwTag(box(g, 1.15, 2.6, 0.12, M.door, dx, 1.3, 0.04), 'door');
+    if (shop.interior) pwTag(box(g, 0.6, 0.9, 0.04, Kit.glow(shop.interior, (shop.interiorIntensity ?? 0.5) * 0.8), dx, 1.85, 0.11), 'door');
     if (shop.shutter) {
       // Half-closed roll-down shutter over the window.
-      box(g, ww + 0.1, 1.3, 0.06, M.shutter, wx, 2.4, 0.16);
-      for (let i = 0; i < 4; i++) box(g, ww + 0.1, 0.03, 0.08, M.metal, wx, 1.85 + i * 0.3, 0.18);
+      pwTag(box(g, ww + 0.1, 1.3, 0.06, M.shutter, wx, 2.4, 0.16), 'shop');
+      for (let i = 0; i < 4; i++) pwTag(box(g, ww + 0.1, 0.03, 0.08, M.metal, wx, 1.85 + i * 0.3, 0.18), 'shop');
     }
     if (shop.awning !== undefined) {
       const aw = w * 0.86;
       const am = Kit.tex('cloth', shop.awning, 0.5);
-      box(g, aw, 0.08, 1.8, am, 0, 3.55, 0.85, 0.34);
-      box(g, aw, 0.36, 0.05, am, 0, 3.1, 1.72);
+      pwTag(box(g, aw, 0.08, 1.8, am, 0, 3.55, 0.85, 0.34), 'awning');
+      pwTag(box(g, aw, 0.36, 0.05, am, 0, 3.1, 1.72), 'valance');
     }
     if (shop.board) {
       const b = boardSign(shop.board.text, shop.board.color, shop.board.size ?? 0.55, { pad: 0.6 });
@@ -272,13 +318,15 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
     }
   } else {
     // Residential ground floor: entrance + two dark windows.
-    box(g, 1.3, 2.7, 0.12, M.door, 0, 1.35, 0.04);
+    pwTag(box(g, 1.3, 2.7, 0.12, M.door, 0, 1.35, 0.04), 'door');
     box(g, 1.7, 0.2, 0.5, trim, 0, 2.85, 0.25);
     const r = rng.next();
+    rec.doorX = 0;
+    rec.groundLit = r < 0.3;
     for (const sx of [-1, 1]) {
       const x = sx * w * 0.28;
-      box(g, 1.6, 1.8, 0.08, M.winFrame, x, 1.8, 0.03);
-      box(g, 1.4, 1.6, 0.1, r < 0.3 ? M.winDim : M.winDark, x, 1.8, 0.04);
+      pwTag(box(g, 1.6, 1.8, 0.08, M.winFrame, x, 1.8, 0.03), 'groundWin');
+      pwTag(box(g, 1.4, 1.6, 0.1, r < 0.3 ? M.winDim : M.winDark, x, 1.8, 0.04), 'groundWin');
     }
   }
   if (shop?.blade) {
@@ -313,6 +361,13 @@ export function building(s: BuildingSpec, rng: Rng): THREE.Group {
     g.add(bb);
   }
   return g;
+}
+
+/** Tag every object `build` adds to `g` (boards and other multi-mesh helpers). */
+function pwTagNew(g: THREE.Object3D, build: () => void, kind: string) {
+  const n = g.children.length;
+  build();
+  for (let i = n; i < g.children.length; i++) pwTag(g.children[i], kind);
 }
 
 /** Planks nailed over a window opening (wall facing +Z): a board panel + a diagonal brace. */

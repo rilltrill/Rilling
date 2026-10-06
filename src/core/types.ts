@@ -49,10 +49,15 @@ export type QualityLevel = 'low' | 'medium' | 'high';
 export type RetroMode = 'crt' | 'pixel' | 'off';
 
 /**
- * Character art: '3d' = the procedural models, 'sprites' = 2D pixel art (PixelCast
- * hand-painted figures; characters without a painter use live impostors).
+ * ART setting (see `core/art.ts` for the queries):
+ *  - '3d'      CLASSIC — procedural 3D models in 3D environments (the original look);
+ *  - 'sprites' PIXEL CAST — PixelCast pixel-art characters (+ pickups, thrown things,
+ *              gibs, FLORA plants) over the 3D environments;
+ *  - 'pixel'   PIXEL WORLD — the pixel cast AND PixelWorld painted pixel-art
+ *              environments (facades, ground, signage, backdrops).
+ * Characters switch live; environments follow the style a stage was LOADED with.
  */
-export type ArtStyle = '3d' | 'sprites';
+export type ArtStyle = '3d' | 'sprites' | 'pixel';
 
 export interface Settings {
   sfxVolume: number; // 0..1
@@ -65,7 +70,7 @@ export interface Settings {
   quality: QualityLevel;
   /** Arcade-monitor post effect. */
   retro: RetroMode;
-  /** Character art style (ART: 3D / SPRITES). */
+  /** ART: CLASSIC ('3d') / PIXEL CAST ('sprites') / PIXEL WORLD ('pixel'). */
   art: ArtStyle;
   /** Which ART default `art` was stored under (see Save: an older un-chosen default moves to the new one once). */
   artV?: number;

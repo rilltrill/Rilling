@@ -2012,6 +2012,34 @@ button {
   gap: 2ch;
 }
 
+/* ART: three long names (CLASSIC / PIXEL CAST / PIXEL WORLD) — tighter type so the row fits a phone column. */
+.art-row .seg {
+  font-size: calc(var(--tr) * 0.82);
+  padding: 0 5px;
+  white-space: nowrap;
+}
+
+.art-chip {
+  min-width: 14ch;
+}
+
+.art-note {
+  min-height: 1em;
+  margin-top: -2px;
+  font-size: calc(var(--tr) * 0.72);
+  color: var(--gold);
+  text-align: right;
+  letter-spacing: 0.04em;
+}
+
+.pause-art-note {
+  text-align: center;
+}
+
+.art-note:empty {
+  display: none;
+}
+
 .btn.quit {
   color: #ff8a80;
 }

@@ -7,6 +7,8 @@ import { Kit } from '../../kit/ModelKit';
 import { Rng } from '../../../core/Rng';
 import { clamp, easeInOutSine } from '../../../core/math';
 import { Flora, COL } from './flora';
+import { pixelWorld } from '../../../core/art';
+import { D1PixelWorld } from './pixel';
 import { Herd } from './herd';
 import {
   buildBarricade,
@@ -118,6 +120,8 @@ export class JungleEnv {
     }),
   );
   private backdrop = new THREE.Group();
+  /** ART: PIXEL WORLD (painted road, meadow, rocks, sky panorama; d1/pixel.ts) — null in CLASSIC / PIXEL CAST. */
+  private pw: D1PixelWorld | null = null;
   private time = 0;
 
   // Set pieces.
@@ -286,13 +290,17 @@ export class JungleEnv {
     this.veg3D.name = 'd1-veg3d';
     this.vegPx.name = 'd1-vegPx';
     root.add(this.veg3D, this.vegPx);
+    this.pw = pixelWorld(w) ? new D1PixelWorld() : null;
     this.buildBackdrop();
-    // Subdivided (a 2-triangle 1.6 km plane loses depth precision and flickers
-    // through the road) and sunk well below the road/verge ribbons.
-    const ground = new THREE.Mesh(Kit.plane(1600, 1600, 48, 48), tm(COL.ground, 'grass', 0.28));
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(0, GROUND_Y, -340);
-    root.add(ground);
+    if (this.pw) this.pw.ground(GROUND_Y);
+    else {
+      // Subdivided (a 2-triangle 1.6 km plane loses depth precision and flickers
+      // through the road) and sunk well below the road/verge ribbons.
+      const ground = new THREE.Mesh(Kit.plane(1600, 1600, 48, 48), tm(COL.ground, 'grass', 0.28));
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.set(0, GROUND_Y, -340);
+      root.add(ground);
+    }
     this.buildRoad();
     this.buildRiver();
     this.buildVegetation();
@@ -303,6 +311,7 @@ export class JungleEnv {
     this.buildCliffs();
     this.buildEnd();
     this.vegPx.add(this.flora2d.build());
+    this.pw?.finish(root, this.vegPx);
     if (this.crownPx) this.vegPx.add(this.crownPx);
     if (this.rootPx) this.vegPx.add(this.rootPx);
     this.untoggle = floraArtToggle(w.scene, [this.vegPx], [this.veg3D, this.tree.crown3D, this.tree.roots3D]);
@@ -341,6 +350,9 @@ export class JungleEnv {
   /** Bake the SPRITES scenery split off a group (see floraSplit) and register it for fog culling. */
   private keepPx(kept: THREE.Group, cull = true) {
     if (!kept.children.length) return;
+    // PIXEL WORLD: rocks / earth / grass patches re-painted (into one PixelWorld mesh) before the bake.
+    this.pw?.rocks(kept);
+    if (!kept.children.length) return;
     merged(kept);
     this.vegPx.add(kept);
     for (const c of kept.children) {
@@ -354,6 +366,17 @@ export class JungleEnv {
   private buildBackdrop() {
     const b = this.backdrop;
     this.root.add(b);
+    if (this.pw) {
+      // Painted panorama (follows the camera itself); the 3D smoke plume is kept (animated) but hidden.
+      this.root.add(this.pw.buildBackdrop(this.P(0, 0)));
+      this.smokeBase.set(-95, 95, -250);
+      this.smoke = new THREE.InstancedMesh(this.flora.blob(new Rng(77)), tm(0xc8c6c0, 'none', 1, 1, { fog: false }), 7);
+      this.smoke.visible = false;
+      this.smoke.frustumCulled = false;
+      b.add(this.smoke);
+      this.instanced.push(this.smoke);
+      return;
+    }
     b.add(EnvKit.sky(0x2f7fd0, 0xc6dfd6, 0xa8c4b0, 330));
     const rng = new Rng(77);
     // Mountain ring (unfogged, pre-hazed colours).
@@ -396,12 +419,17 @@ export class JungleEnv {
     const g = new THREE.Group();
     const c = this.curve;
     const to = this.len;
-    // Layers ≥ 1.5 cm apart so they never z-fight: verge 0 < road 0.02 < edges 0.035 < tracks 0.05 < puddles.
-    // Packed dirt, darker compacted tyre ruts, pebbly edges, grass verges.
-    g.add(EnvKit.ribbon(c, 7.2, tm(COL.road, 'dirt', 0.6, 0.75), { y: 0.02, step: 2, to }));
-    for (const off of [-1.1, 1.1]) g.add(EnvKit.ribbon(c, 0.7, tm(COL.roadTrack, 'dirt', 0.9, 0.85), { y: 0.05, step: 2, offset: off, to }));
-    for (const off of [-3.55, 3.55]) g.add(EnvKit.ribbon(c, 0.5, tm(0x86704c, 'dirt', 1.1), { y: 0.035, step: 2, offset: off, to }));
-    for (const off of [-4.4, 4.4]) g.add(EnvKit.ribbon(c, 1.8, tm(COL.verge, 'grass', 0.55), { y: 0.0, step: 2, offset: off, to }));
+    if (this.pw) {
+      // PIXEL WORLD: one painted ribbon (tracks along the road, ragged grassy edges over the meadow).
+      this.pw.road(c, to);
+    } else {
+      // Layers ≥ 1.5 cm apart so they never z-fight: verge 0 < road 0.02 < edges 0.035 < tracks 0.05 < puddles.
+      // Packed dirt, darker compacted tyre ruts, pebbly edges, grass verges.
+      g.add(EnvKit.ribbon(c, 7.2, tm(COL.road, 'dirt', 0.6, 0.75), { y: 0.02, step: 2, to }));
+      for (const off of [-1.1, 1.1]) g.add(EnvKit.ribbon(c, 0.7, tm(COL.roadTrack, 'dirt', 0.9, 0.85), { y: 0.05, step: 2, offset: off, to }));
+      for (const off of [-3.55, 3.55]) g.add(EnvKit.ribbon(c, 0.5, tm(0x86704c, 'dirt', 1.1), { y: 0.035, step: 2, offset: off, to }));
+      for (const off of [-4.4, 4.4]) g.add(EnvKit.ribbon(c, 1.8, tm(COL.verge, 'grass', 0.55), { y: 0.0, step: 2, offset: off, to }));
+    }
     // Puddles + embedded stones.
     const rng = new Rng(5);
     for (let d = 8; d < this.len; d += rng.range(10, 22)) {
@@ -1014,6 +1042,7 @@ export class JungleEnv {
     this.flora2d.time.value = t;
     const d = w.rig.d;
     this.backdrop.position.set(w.camera.position.x, 0, w.camera.position.z);
+    this.pw?.backdrop?.update(w.camera.position);
     if (this.heatTip && (w.weapons.heat > 0.5 || w.weapons.overheated)) {
       this.heatTip = false;
       this.heatTipShown = true;

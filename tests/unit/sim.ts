@@ -4,7 +4,7 @@ import { StageRunner } from '../../src/gameplay/StageRunner';
 import { Shooter } from '../../src/gameplay/Shooting';
 import { AudioSystem } from '../../src/audio/Audio';
 import { AutoPlayer } from '../../src/debug/AutoPlayer';
-import { DEFAULT_SETTINGS } from '../../src/core/types';
+import { DEFAULT_SETTINGS, type ArtStyle } from '../../src/core/types';
 import type { StageDef } from '../../src/gameplay/StageTypes';
 import { Kit } from '../../src/content/kit/ModelKit';
 import { Enemy, ndcInPlayArea } from '../../src/gameplay/Enemy';
@@ -41,13 +41,15 @@ export interface SimResult {
  * AutoPlayer aimbot, god mode, fixed timestep. Proves the stage can be completed
  * (no soft-locks, every enemy reachable on screen, boss killable).
  */
-export function simulateStage(stage: StageDef, opts: { maxTime?: number; fps?: number; seed?: number } = {}): SimResult {
+export function simulateStage(stage: StageDef, opts: { maxTime?: number; fps?: number; seed?: number; art?: ArtStyle } = {}): SimResult {
   const maxTime = opts.maxTime ?? 900;
   const dt = 1 / (opts.fps ?? 30);
   const camera = new THREE.PerspectiveCamera(60, 844 / 390, 0.05, 400);
   const world = new World(camera, new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS, haptics: false }, opts.seed ?? 99);
   world.viewport = { width: 844, height: 390 };
   world.player.god = true;
+  // ART the environment is built in (PIXEL WORLD scenery must not change gameplay).
+  if (opts.art) world.art = opts.art;
   const runner = new StageRunner(world, stage);
   const shooter = new Shooter(world);
   const bot = new AutoPlayer(world, shooter, 6);

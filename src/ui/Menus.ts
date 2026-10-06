@@ -3,6 +3,7 @@ import { INITIAL_CHARS, cleanInitials, type Save } from '../core/Save';
 import type { AudioSystem } from '../audio/Audio';
 import type { SfxName } from '../audio/names';
 import type { ArtStyle, CampaignId, Grade, QualityLevel, RetroMode, Settings, StageResult } from '../core/types';
+import { ART_NAMES, ART_STYLES, envPending, nextArt } from '../core/art';
 import { haptic } from '../core/Haptics';
 import { applyComfort, el, escapeHtml, onTap } from './dom';
 import { cityCardArt, jungleCardArt, LOCK_ICON, SKULL_ICON, TUTORIAL_ART } from './art';
@@ -33,8 +34,10 @@ export interface PauseInfo {
   stage: string;
   campaign?: string;
   score: number;
-  /** Character art in effect (the ART chip lights it). */
+  /** ART in effect (the ART chip shows it). */
   art?: ArtStyle;
+  /** ART the stage was loaded with (its environments keep that style until the next load). */
+  loadedArt?: ArtStyle;
 }
 
 /** Arcade name entry after a qualifying run. */
@@ -723,7 +726,8 @@ export class Menus {
     this.backButton(s, back);
   }
 
-  showSettings(back: Back) {
+  /** `loadedArt`: the ART the running stage was loaded with (from the pause screen), for the scenery note. */
+  showSettings(back: Back, loadedArt?: ArtStyle) {
     const s = this.screen('settings');
     el('h2', 'screen-title', s, 'SETTINGS');
     const form = el('div', 'settings-form', s);
@@ -821,10 +825,20 @@ export class Menus {
         ['off', 'OFF'],
       ] as [RetroMode, string][], st, commit);
     }
-    this.segRow(colA, 'ART', 'art', [
-      ['3d', '3D'],
-      ['sprites', 'SPRITES'],
-    ] as [ArtStyle, string][], st, commit);
+    {
+      let sync = () => {};
+      const row = this.segRow(colA, 'ART', 'art', ART_STYLES.map((a) => [a, ART_NAMES[a]]) as [ArtStyle, string][], st, () => {
+        commit();
+        sync();
+      });
+      row.classList.add('art-row');
+      // PIXEL WORLD scenery is built with the stage: say when a change shows there.
+      const note = el('div', 'set-note art-note', colA, '');
+      sync = () => {
+        note.textContent = loadedArt && envPending(loadedArt, st.art) ? 'SCENERY CHANGES ON THE NEXT STAGE LOAD' : '';
+      };
+      sync();
+    }
     this.segRow(colA, 'SCREEN SHAKE', 'screenShake', SHAKE_OPTS, st, commit, 'SHAKE');
     this.toggleRow(colA, 'SHOW FPS', 'showFps', st, commit);
     this.toggleRow(colB, 'AIM ASSIST', 'aimAssist', st, commit);
@@ -986,28 +1000,31 @@ export class Menus {
     const col = el('div', 'menu-col pause-col', s);
     this.button(col, 'RESUME', () => this.actions.resume(), 'primary big');
     if (info?.art) {
-      // One-tap A/B of the character art (live, behind the pause veil).
+      // ART chip: one tap cycles CLASSIC → PIXEL CAST → PIXEL WORLD (characters switch live,
+      // behind the pause veil; the scenery style shows from the next stage load).
       const row = el('div', 'set-row seg-row pause-art', col);
       el('span', 'set-label', row, 'ART');
       const wrap = el('div', 'set-seg', row);
-      for (const [value, text] of [
-        ['3d', '3D'],
-        ['sprites', 'SPRITES'],
-      ] as [ArtStyle, string][]) {
-        const b = el('button', `seg ${value === info.art ? 'on' : ''}`, wrap, text);
-        b.setAttribute('aria-label', `ART ${text}`);
-        onTap(b, () => {
-          wrap.querySelectorAll('.seg').forEach((x) => x.classList.remove('on'));
-          b.classList.add('on');
-          info.art = value;
-          this.feedback('ui_click');
-          this.actions.setArt(value);
-        });
-      }
+      const b = el('button', 'seg on art-chip', wrap, ART_NAMES[info.art]);
+      b.setAttribute('aria-label', `ART ${ART_NAMES[info.art]}`);
+      const note = el('div', 'set-note art-note pause-art-note', col, '');
+      const sync = () => {
+        const a = info.art!;
+        b.innerHTML = ART_NAMES[a];
+        b.setAttribute('aria-label', `ART ${ART_NAMES[a]}`);
+        note.textContent = info.loadedArt && envPending(info.loadedArt, a) ? 'SCENERY CHANGES ON THE NEXT STAGE LOAD' : '';
+      };
+      sync();
+      onTap(b, () => {
+        info.art = nextArt(info.art!);
+        sync();
+        this.feedback('ui_click');
+        this.actions.setArt(info.art);
+      });
     }
     const grid = el('div', 'menu-grid', col);
     this.button(grid, 'RESTART STAGE', () => this.actions.restart(), 'small');
-    this.button(grid, 'SETTINGS', () => this.showSettings(() => this.showPause(info)), 'small');
+    this.button(grid, 'SETTINGS', () => this.showSettings(() => this.showPause(info), info?.loadedArt), 'small');
     this.button(grid, 'HOW TO PLAY', () => this.showHowTo(() => this.showPause(info)), 'small');
     this.button(grid, 'QUIT', () => this.actions.quit(), 'small quit');
   }

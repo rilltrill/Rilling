@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { DEFAULT_SETTINGS, type ArtStyle } from '../core/types';
+import { artCast, isArtStyle } from '../core/art';
 import {
   MenuCast,
   menuPtero,
@@ -1295,7 +1296,7 @@ function menuArt(ignoreLink = false): ArtStyle {
   if (!ignoreLink) {
     try {
       const u = new URLSearchParams(globalThis.location?.search ?? '').get('art');
-      if (u === 'sprites' || u === '3d') return u;
+      if (isArtStyle(u)) return u;
     } catch {
       /* no location */
     }
@@ -1317,7 +1318,7 @@ function readSave(): string | null {
 function savedArt(raw: string | null): ArtStyle | null {
   try {
     const st = raw ? (JSON.parse(raw) as { settings?: { art?: unknown; artV?: unknown } }).settings : null;
-    if (st && st.artV === DEFAULT_SETTINGS.artV && (st.art === 'sprites' || st.art === '3d')) return st.art;
+    if (st && st.artV === DEFAULT_SETTINGS.artV && isArtStyle(st.art)) return st.art;
   } catch {
     /* corrupt save */
   }
@@ -1427,7 +1428,7 @@ export class MenuBackdrop {
     let v = this.shots[theme];
     if (!v) {
       v = theme === 'city' ? buildCity(this.shared) : buildJungle(this.shared);
-      v.setArt(this.art === 'sprites');
+      v.setArt(artCast(this.art));
       this.shots[theme] = v;
     }
     return v;
@@ -1441,7 +1442,7 @@ export class MenuBackdrop {
   setArt(art: ArtStyle) {
     if (art === this.art) return;
     this.art = art;
-    for (const v of Object.values(this.shots)) v?.setArt(art === 'sprites');
+    for (const v of Object.values(this.shots)) v?.setArt(artCast(art));
   }
 
   /** Lock the backdrop to one theme (null = alternate). */

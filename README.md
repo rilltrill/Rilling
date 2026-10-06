@@ -94,6 +94,7 @@ node scripts/snap.mjs --url "http://localhost:5173/?stage=z1&autoplay=1&god=1" -
 | `&debug=1` | Beat / rail overlay |
 | `&seed=42` | Fixed random seed |
 | `&mute=1` | No audio |
+| `&art=3d\|sprites\|pixel` | ART: CLASSIC / PIXEL CAST (default) / PIXEL WORLD (painted pixel-art environments: z1 and d1 so far) |
 | `?installhint=1` | Force the iPhone "Add to Home Screen" hint (for testing) |
 
 `window.__game` exposes the running game for tests and the console.

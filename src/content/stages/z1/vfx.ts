@@ -83,12 +83,14 @@ export class LightPools {
   /**
    * `surface` gives the retro texture of whatever each pool lands on: the pool is
    * multiplied by the same world-space pixel texture, so lit asphalt / stone keeps
-   * its pattern instead of washing out under a flat additive splash.
+   * its pattern instead of washing out under a flat additive splash. `map`
+   * replaces the soft radial falloff and `light` screens the pool over what it
+   * lands on (ART: PIXEL WORLD: stepped pixel rings).
    */
-  build(surface?: (x: number, z: number, wall: boolean) => RetroParams): THREE.InstancedMesh {
+  build(surface?: (x: number, z: number, wall: boolean) => RetroParams, map?: THREE.Texture, light = false): THREE.InstancedMesh {
     const mat = Kit.track(
       new THREE.MeshBasicMaterial({
-        map: radialTexture(),
+        map: map ?? radialTexture(),
         transparent: true,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
@@ -96,6 +98,16 @@ export class LightPools {
         fog: true,
       }),
     );
+    if (light) {
+      // Screen the pool over the surface (dst + pool × (1 − dst)): full colour on black asphalt (the
+      // neon wash still reads), less on lit texels — the painted pattern under a lamp keeps showing
+      // instead of washing out under a flat additive disc.
+      mat.blending = THREE.CustomBlending;
+      mat.blendEquation = THREE.AddEquation;
+      mat.blendSrc = THREE.OneMinusDstColorFactor;
+      mat.blendDst = THREE.OneFactor;
+      mat.premultipliedAlpha = true;
+    }
     const geo = Kit.track(new THREE.PlaneGeometry(1, 1));
     const n = Math.max(1, this.defs.length);
     if (surface) {

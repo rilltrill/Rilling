@@ -253,9 +253,11 @@ export function buildTown(): Town {
     const g = bld({ w: 0, d: 16, floors: 3, color: 0x70323a, tex: 'brick', trim: M.trimLight, shop: { interior: 0xffc68a, interiorIntensity: 0.55 } }, a, b, MAIN_FACADE, 'W');
     // Marquee box over the sidewalk.
     const mq = new THREE.Group();
+    // ART: PIXEL WORLD: a painted marquee board (z1/pixel.ts).
+    mq.userData.pwSign = { kind: 'marquee', text: 'LAST SHOW/TONIGHT', color: 0xfff2d8, size: 1.15, w: 12.6, z: 3.25 };
     Kit.add(mq, Kit.box(14, 1.7, 3.2), Kit.tex('metal', 0x2e1c21, 1.2, 0.6), 0, 0, 1.6);
     const board = Kit.glow(0xfff2d8, 0.85);
-    Kit.add(mq, Kit.box(12.6, 1.15, 0.06), board, 0, 0, 3.22);
+    Kit.add(mq, Kit.box(12.6, 1.15, 0.06), board, 0, 0, 3.22).userData.pwFacade = 'signBack';
     const letters = Kit.mat(0x1a1214);
     const t1 = addText(mq, 'LAST SHOW', letters, { size: 0.42, depth: 0.04, stroke: 0.07 });
     t1.position.set(0, 0.18, 3.27);
@@ -286,7 +288,7 @@ export function buildTown(): Town {
     g.add(blade);
     // Posters.
     for (const [lx, c] of [[-5.6, 0x8a2a3a], [5.6, 0x2a5a8a]] as const) {
-      Kit.add(g, Kit.box(1.1, 1.6, 0.06), Kit.glow(c, 0.45), lx, 1.7, 0.08);
+      Kit.add(g, Kit.box(1.1, 1.6, 0.06), Kit.glow(c, 0.45), lx, 1.7, 0.08).userData.pwFacade = 'poster';
     }
     // Ticket booth.
     Kit.add(g, Kit.box(1.6, 2.4, 1.2), Kit.tex('planks', 0x6a2a30, 1.5), 0, 1.2, 0.7);
@@ -1229,7 +1231,9 @@ function buildDiner(zone: THREE.Group, pools: LightPools, addDyn: (o: THREE.Obje
   g.add(open);
   // Rooftop DINER sign + EAT blade.
   const sign = new THREE.Group();
-  Kit.add(sign, Kit.box(9.2, 2.1, 0.2), M.signBack, 0, 0, 0);
+  // ART: PIXEL WORLD: neon script on a riveted board (z1/pixel.ts).
+  sign.userData.pwSign = { kind: 'board', text: 'Diner', color: C.neonPink, size: 1.25, script: true, border: C.neonCyan, bw: 9.2, bh: 2.1 };
+  Kit.add(sign, Kit.box(9.2, 2.1, 0.2), M.signBack, 0, 0, 0).userData.pwFacade = 'signBack';
   const pink = Kit.glow(C.neonPink, 1.6);
   const cyan = Kit.glow(C.neonCyan, 1.6);
   addText(sign, 'DINER', pink, { size: 1.25, depth: 0.08 }).position.z = 0.12;
