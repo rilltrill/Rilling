@@ -104,8 +104,8 @@ export function d3SteelTile(atlas: PwAtlas, o: { hex: number; calm?: boolean }):
       const n = rng.int(3, 7);
       for (let j = 0; j < n; j++) c.set(wrap(x + j, 32), y, s, o.calm ? 3.8 : 4.6);
     }
-    for (let i = 0; i < 4; i++) c.cluster(rng.int(0, 30), rng.int(0, 30), i, rust, 2.6);
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < (o.calm ? 0 : 4); i++) c.cluster(rng.int(0, 30), rng.int(0, 30), i, rust, 2.6);
+    for (let i = 0; i < (o.calm ? 4 : 10); i++) {
       const x = rng.int(0, 31);
       const y = rng.int(0, 30);
       c.shift(x, y, 1.6);
