@@ -3,14 +3,14 @@ import { EnvKit } from '../../kit/EnvKit';
 import { CURVE, ROOMS, TUNNEL, TUNNEL_SPOTS, dAtZ, railXAtZ } from './layout';
 import { ROOM_CONVERTERS, type D2PixelWorld, type RoomParts } from './pixel';
 import { dropMeshes, paintGroup, type Paint } from './pixelMesh';
-import { centreOf, matIs, NZ, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y, Z } from './pixelShared';
+import { centreOf, matIs, NZ, voidPaint, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y, Z } from './pixelShared';
 import { paintVents } from './pixelShop';
 import type { PwBatch } from '../../pixelworld/batch';
 import type { PwTile } from '../../pixelworld/atlas';
-import { motorTile, oilyConcreteTile, pipeTile, pumpFaceTile, tankLabelTile, tankSkinTile, tunnelDeckTile, tunnelWallTile, wallMarkTile } from '../../pixelworld/d2service';
+import { motorTile, oilPoolTile, oilyConcreteTile, pipeTile, pumpFaceTile, tankLabelTile, tankSkinTile, tunnelDeckTile, tunnelWallTile, wallMarkTile } from '../../pixelworld/d2service';
 import { crateTile } from '../../pixelworld/d2shop';
 import { drainTile } from '../../pixelworld/d2contain';
-import { bloodDecal, splatDecal } from '../../pixelworld/d2decals';
+import { bloodDecal } from '../../pixelworld/d2decals';
 
 /** The MAINTENANCE TUNNEL and the PUMP ROOM in PIXEL WORLD. */
 
@@ -158,7 +158,7 @@ function convertPump(pw: D2PixelWorld, parts: RoomParts) {
         return { tile: g.metal, map: 'local' };
       }
       case 'void':
-        return { tile: g.plain, map: 'local', tint: 0x0c0d10 };
+        return voidPaint(pw, m, wface, 11);
       case 'drain':
         return face === 'py' ? { tile: drainTile(a), map: 'fit' } : { tile: g.metal, map: 'local' };
     }
@@ -173,7 +173,18 @@ function convertPump(pw: D2PixelWorld, parts: RoomParts) {
     const tz = R.z1 + 3.2;
     b.rect(_o.set(tx - 0.75, 1.3, tz + 1.17), X, Y, 1.5, 0.5, tankLabelTile(a, s < 0 ? 'COOLANT' : 'H2O'));
   }
-  b.rect(_o.set(cx + 2.2, 0.012, -282), X, NZ, 1.6, 1.6, splatDecal(a, 0x1e1c22, 2));
+  // Oil where it would be: round the pumps, under the tanks, a run toward the drain.
+  for (const [x, z, r, v] of [
+    [R.x0 + 2.6, -279.0, 0.3, 0],
+    [R.x1 - 4.4, -291.6, 2.8, 1],
+    [cx - 5.6, -289.1, 0.1, 2],
+    [cx + 4.0, -289.4, 3.0, 0],
+    [cx - 0.4, -286.6, 1.9, 1],
+  ] as const) {
+    const u = new THREE.Vector3(Math.cos(r), 0, -Math.sin(r));
+    const w = new THREE.Vector3(-Math.sin(r), 0, -Math.cos(r));
+    b.rect(_o.set(x - u.x - w.x * 0.75, 0.011, z - u.z - w.z * 0.75), u, w, 2, 1.5, oilPoolTile(a, v));
+  }
   b.rect(_o.set(cx - 3.4, 0.012, -285), X, NZ, 1.2, 1.2, bloodDecal(a, 2, false));
   void wallFace;
   void Z;

@@ -117,148 +117,109 @@ export function lobbyFloorTile(atlas: PwAtlas): PwTile {
 }
 
 /**
- * The park emblem as a floor mosaic (7 m round, cut out): an orange ring with
- * PRIMAL ISLAND / VISITOR CENTRE in dark tesserae, brass borders, a deep green
- * field with a gold three-toed track — chipped, cracked and scuffed. 192 × 192 (laid over 7 m).
+ * The park emblem as a floor mosaic (7 m round, cut out), drawn for the
+ * grazing view it is always seen at: a brass rim, a ring of chunky alternating
+ * gold and park-green segments (no lettering to turn to speckle), a deep green
+ * field and a bold gold three-toed print with a 2-texel dark outline and a lit
+ * upper-left edge — PRE-STRETCHED 1.6× along the view axis (the canvas
+ * vertical), so it foreshortens back to a claw print instead of a blob. Wear in
+ * whole 4-texel tesserae and one crack. 128 × 128 (laid over 7 m).
  */
 export function emblemMosaic(atlas: PwAtlas): PwTile {
-  return atlas.tile('d2emblem', 192, 192, (c, k) => {
+  return atlas.tile('d2emblem|r3', 128, 128, (c, k) => {
     const rng = k.rng;
-    const orange = k.ramp(0xd08420, { light: 0.45, sat: 1.0 });
+    const gold = k.ramp(0xe0b050, { light: 0.55, sat: 1.0 });
     const green = k.ramp(0x24563a, { light: 0.45, sat: 1.0 });
-    const gold = k.ramp(0xe0bc68, { light: 0.55, sat: 1.0 });
-    const ink = k.ramp(0x3a1e10, { light: 0.4 });
+    const leaf = k.ramp(0x3a8a4a, { light: 0.45, sat: 1.0 });
+    const ink = k.ramp(0x2a1a10, { light: 0.4 });
     const brass = k.ramp(0xb08a40, { light: 0.55 });
-    const cx = 96;
-    const cy = 96;
-    const R0 = 84;
-    const R1 = 95;
-    // Tesserae: 3 × 3 blocks, each its own step (flecks of the next tone), cut out round the disc.
-    for (let y = 0; y < 192; y++) {
-      for (let x = 0; x < 192; x++) {
-        const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
-        if (d > R1 + 1.5) continue;
-        const tx = Math.floor(x / 3);
-        const ty = Math.floor(y / 3);
-        const v = hash2(tx, ty, 5);
-        const tt = v < 0.05 ? 2 : v > 0.95 ? 4 : 3;
-        if (d > R1 - 0.5) c.set(x, y, brass, x + y < cx + cy ? 4 : 2);
-        else if (d > R0 + 0.5) c.set(x, y, orange, tt);
-        else if (d > R0 - 1) c.set(x, y, brass, x + y < cx + cy ? 4 : 2);
-        else c.set(x, y, green, (tx + ty) % 2 === 0 && v < 0.08 ? 2.6 : 3);
-      }
-    }
-    // Ring lettering by inverse polar mapping: glyph rows run along the radius.
-    const ring = (text: string, mid: number, top: boolean) => {
-      const f = FONT_5x7;
-      const scale = 1;
-      const tw = textWidth(text, f, { scale, spacing: 1 });
-      const mask = new Uint8Array(tw * 7);
-      const tmp: { set: (x: number, y: number) => void } = { set: (x, y) => (mask[y * tw + x] = 1) };
-      // Rasterise into the mask through a scratch canvas-like writer.
-      let px = 0;
-      for (const ch of text) {
-        const g = f.glyphs.get(ch);
-        if (!g) {
-          px += f.space + 2;
+    const cx = 64;
+    const cy = 64;
+    const R1 = 63.5;
+    const R0 = 53;
+    for (let y = 0; y < 128; y++) {
+      for (let x = 0; x < 128; x++) {
+        const dx = x + 0.5 - cx;
+        const dy = y + 0.5 - cy;
+        const d = Math.hypot(dx, dy);
+        if (d > R1) continue;
+        if (d > R1 - 2.5) {
+          c.set(x, y, brass, dx + dy < 0 ? 4 : 2);
           continue;
         }
-        let gw = 0;
-        for (let r = 0; r < g.length; r++) for (let q = 0; q < g[r].length; q++) if (g[r][q] === '#') {
-          tmp.set(px + q, r);
-          gw = Math.max(gw, q + 1);
+        if (d > R0 + 2) {
+          // 16 chunky segments, a dark joint between them.
+          const a = (Math.atan2(dy, dx) / (Math.PI * 2) + 1) % 1;
+          const seg = Math.floor(a * 16);
+          const f = a * 16 - seg;
+          if (f < 0.07) c.set(x, y, ink, 1.5);
+          else c.set(x, y, seg % 2 ? leaf : gold, d > R1 - 4.5 ? 3.75 : d < R0 + 4 ? 2.5 : 3);
+          continue;
         }
-        px += gw + f.gap + 1;
-      }
-      const arcR = (R0 + R1) / 2;
-      const span = (px / arcR) * 1.55;
-      for (let y = Math.floor(cy - R1); y <= cy + R1; y++) {
-        for (let x = Math.floor(cx - R1); x <= cx + R1; x++) {
-          const dx = x + 0.5 - cx;
-          const dy = y + 0.5 - cy;
-          const d = Math.hypot(dx, dy);
-          if (d < R0 + 2 || d > R1 - 2) continue;
-          let a = Math.atan2(dy, dx) - mid;
-          while (a < -Math.PI) a += Math.PI * 2;
-          while (a > Math.PI) a -= Math.PI * 2;
-          const s = top ? a / span + 0.5 : -a / span + 0.5;
-          if (s < 0 || s >= 1) continue;
-          const gx = Math.floor(s * px * 1.0);
-          const rr = top ? (R1 - 2 - d) / ((R1 - R0 - 4) / 7) : (d - R0 - 2) / ((R1 - R0 - 4) / 7);
-          const gy = Math.floor(rr);
-          if (gx < 0 || gx >= tw || gy < 0 || gy > 6) continue;
-          if (mask[gy * tw + gx]) c.set(x, y, ink, 2);
+        if (d > R0) {
+          c.set(x, y, brass, dx + dy < 0 ? 4 : 2);
+          continue;
         }
-      }
-    };
-    ring('PRIMAL ISLAND', -Math.PI / 2, true);
-    ring('VISITOR CENTRE', Math.PI / 2, false);
-    // Stars between the words.
-    for (const a of [0, Math.PI]) {
-      const x = Math.round(cx + Math.cos(a) * (R0 + R1) / 2);
-      const y = Math.round(cy + Math.sin(a) * (R0 + R1) / 2);
-      for (const [dx, dy] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [0, 2], [0, -2], [2, 0], [-2, 0]]) c.set(x + dx, y + dy, ink, 2);
-    }
-    // The gold track: heel pad and three toes ending in claws (lit upper-left edges, dark outline).
-    const track: number[][] = [];
-    const heel = { x: cx, y: cy + 29 };
-    c.ellipse(heel.x, heel.y, 19, 15, gold, 3);
-    for (const [ang, len] of [[-0.55, 48], [0, 57], [0.55, 48]] as const) {
-      const a = -Math.PI / 2 + ang;
-      // Toes: a tapered quad from the pad to the claw, a rounded knuckle.
-      const px = -Math.sin(a);
-      const py = Math.cos(a);
-      const bx = heel.x + Math.cos(a) * 4;
-      const by = heel.y - 7 + Math.sin(a) * 4;
-      const tx0 = heel.x + Math.cos(a) * len;
-      const ty0 = heel.y - 7 + Math.sin(a) * len;
-      c.poly([bx + px * 8.5, by + py * 8.5, tx0 + px * 4, ty0 + py * 4, tx0 - px * 4, ty0 - py * 4, bx - px * 8.5, by - py * 8.5], gold, 3);
-      c.ellipse(heel.x + Math.cos(a) * len * 0.55, heel.y - 7 + Math.sin(a) * len * 0.55, 7.5, 7.5, gold, 3);
-      const tx = tx0;
-      const ty = ty0;
-      track.push([tx, ty, a]);
-      // Claw: a dark hooked triangle.
-      c.poly([tx - Math.sin(a) * 5, ty + Math.cos(a) * 5, tx + Math.cos(a) * 14, ty + Math.sin(a) * 14, tx + Math.sin(a) * 5, ty - Math.cos(a) * 5], gold, 1);
-    }
-    // Fern sprays flanking the track, a ring of dots inside the border.
-    for (const sgn of [-1, 1]) for (let f = 0; f < 3; f++) frond(c, cx + sgn * 50, cy + 48 - f * 4, -Math.PI / 2 - sgn * (0.35 + f * 0.4), 26 - f * 5, gold, 2.5);
-    for (let a = 0; a < Math.PI * 2; a += Math.PI / 36) c.set(Math.round(cx + Math.cos(a) * (R0 - 5)), Math.round(cy + Math.sin(a) * (R0 - 5)), gold, 3);
-    // Shade the track: lit upper-left edge, dark lower-right edge + outline.
-    const edits: [number, number, number][] = [];
-    for (let y = 1; y < 191; y++) {
-      for (let x = 1; x < 191; x++) {
-        if (c.at(x, y) !== gold) continue;
-        const t = c.toneAt(x, y);
-        if (c.at(x - 1, y) !== gold || c.at(x, y - 1) !== gold) edits.push([x, y, t + 1.5]);
-        else if (c.at(x + 1, y) !== gold || c.at(x, y + 1) !== gold) edits.push([x, y, 1]);
-        else if (c.at(x - 2, y) !== gold || c.at(x, y - 2) !== gold) edits.push([x, y, t + 0.75]);
+        c.set(x, y, green, 3);
       }
     }
-    for (const [x, y, t] of edits) c.set(x, y, gold, Math.min(5, t));
-    // Tesserae on the track too.
-    for (let y = 0; y < 192; y++) for (let x = 0; x < 192; x++) if (c.at(x, y) === gold && hash2(Math.floor(x / 3), Math.floor(y / 3), 9) > 0.95) c.shift(x, y, -0.5);
-    // Wear: missing tesserae, a long crack, scuffs.
-    for (let i = 0; i < 40; i++) {
+    // The print (in an unstretched frame, mapped 1.6× along canvas y): heel pad, three toes, claws.
+    const S = 1.6;
+    const P = (px: number, py: number): [number, number] => [cx + px, cy + py * S];
+    const heelR = 9;
+    c.ellipse(cx, cy + 16 * S, heelR, heelR * 0.9 * S, gold, 3);
+    for (const ang of [-0.82, 0, 0.82]) {
+      const aa = -Math.PI / 2 + ang;
+      const len = ang === 0 ? 32 : 27;
+      const [bx, by] = P(Math.cos(aa) * 5, 12 + Math.sin(aa) * 5);
+      const [tx, ty] = P(Math.cos(aa) * len, 12 + Math.sin(aa) * len);
+      const nx = -Math.sin(aa);
+      const ny = Math.cos(aa) * S;
+      c.poly([bx + nx * 4.5, by + ny * 4.5, tx + nx * 2.5, ty + ny * 2.5, tx - nx * 2.5, ty - ny * 2.5, bx - nx * 4.5, by - ny * 4.5], gold, 3);
+      // A knuckle pad half way, the hooked claw tip.
+      const [mx, my] = P(Math.cos(aa) * len * 0.55, 12 + Math.sin(aa) * len * 0.55);
+      c.ellipse(mx, my, 4.5, 4.5 * S * 0.8, gold, 3);
+      const [kx, ky] = P(Math.cos(aa) * (len + 9), 12 + Math.sin(aa) * (len + 9));
+      c.poly([tx + nx * 3, ty + ny * 3, kx, ky, tx - nx * 3, ty - ny * 3], gold, 2.25);
+    }
+    // Outline (2 texels, dark) round the print, a lit upper-left inner edge (2 texels).
+    const isGold = (x: number, y: number) => c.at(x, y) === gold;
+    const edits: [number, number, number, number][] = [];
+    for (let y = 2; y < 126; y++) {
+      for (let x = 2; x < 126; x++) {
+        if (isGold(x, y)) {
+          if (!isGold(x - 1, y) || !isGold(x, y - 1) || !isGold(x - 2, y) || !isGold(x, y - 2)) edits.push([x, y, gold, 4.25]);
+          else if (!isGold(x + 1, y) || !isGold(x, y + 1)) edits.push([x, y, gold, 2]);
+          continue;
+        }
+        let near = false;
+        for (let q = -2; q <= 2 && !near; q++) for (let r = -2; r <= 2 && !near; r++) if (Math.abs(q) + Math.abs(r) <= 2 && isGold(x + q, y + r)) near = true;
+        if (near) edits.push([x, y, ink, 1.5]);
+      }
+    }
+    for (const [x, y, r, t] of edits) c.set(x, y, r, t);
+    // Wear: whole tesserae missing (4×4, darker), a crack across the field.
+    for (let i = 0; i < 22; i++) {
       const a = rng.next() * Math.PI * 2;
-      const r = rng.range(10, R1 - 3);
-      const x = Math.floor((cx + Math.cos(a) * r) / 3) * 3;
-      const y = Math.floor((cy + Math.sin(a) * r) / 3) * 3;
-      for (let q = 0; q < 9; q++) c.shift(x + (q % 3), y + Math.floor(q / 3), q === 0 || q === 1 || q === 3 ? -2 : -1.5);
+      const r = rng.range(8, R1 - 4);
+      const x = Math.floor((cx + Math.cos(a) * r) / 4) * 4;
+      const y = Math.floor((cy + Math.sin(a) * r) / 4) * 4;
+      c.shade(x, y, 4, 4, -1.25);
+      c.shade(x, y + 3, 4, 1, 0.5);
     }
-    let x = 26;
-    let y = 128;
-    let a = -0.5;
-    for (let i = 0; i < 150; i++) {
-      if (Math.hypot(x - cx, y - cy) < R1 - 1) {
-        c.shift(Math.round(x), Math.round(y), -2);
+    let x = 18;
+    let y = 86;
+    let ang = -0.5;
+    for (let i = 0; i < 90; i++) {
+      if (Math.hypot(x - cx, y - cy) < R1 - 2) {
+        c.shift(Math.round(x), Math.round(y), -1.75);
+        c.shift(Math.round(x) + 1, Math.round(y), -1.75);
         c.shift(Math.round(x) + 1, Math.round(y) + 1, 0.75);
       }
-      a += rng.spread(0.35);
-      x += Math.cos(a);
-      y += Math.sin(a);
+      ang += rng.spread(0.3);
+      x += Math.cos(ang);
+      y += Math.sin(ang);
     }
-    scuffs(c, rng, 18, 18, 156, 156, 34, -0.75);
-    void track;
   });
 }
 

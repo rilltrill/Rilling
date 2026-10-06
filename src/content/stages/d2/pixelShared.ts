@@ -4,6 +4,7 @@ import type { PwTile } from '../../pixelworld/atlas';
 import type { PwBatch } from '../../pixelworld/batch';
 import { d2DoorTile, d2SignTile, d2WallTextTile, type SignSpec } from '../../pixelworld/d2signs';
 import { balustradeTile } from '../../pixelworld/d2lobby';
+import { dimCorridorTile } from '../../pixelworld/d2walls';
 import type { BurstDoor } from './setpieces';
 import type { D2PixelWorld } from './pixel';
 import { dropMeshes, emitMesh, paintGroup, tagOf, type Face, type MeshRule, type Paint } from './pixelMesh';
@@ -139,4 +140,18 @@ export function moveAll(root: THREE.Object3D, b: PwBatch, rule: MeshRule) {
 /** World position of a mesh's centre. */
 export function centreOf(m: THREE.Object3D, out = _p): THREE.Vector3 {
   return out.setFromMatrixPosition(m.matrixWorld);
+}
+
+const _vb = new THREE.Box3();
+/**
+ * A dark box behind a side door ('void'): the face toward the room carries a
+ * painted dim corridor (fit) when it is door-sized, every other face stays a
+ * dark plain finish.
+ */
+export function voidPaint(pw: D2PixelWorld, m: THREE.Mesh, wface: Face, roomCx: number): Paint {
+  _vb.setFromObject(m);
+  const cx = (_vb.min.x + _vb.max.x) / 2;
+  const into = cx < roomCx ? 'px' : 'nx';
+  if (wface === into && _vb.max.y - _vb.min.y > 2) return { tile: dimCorridorTile(pw.atlas, Math.round(Math.abs(_vb.min.z)) % 2), map: 'fit' };
+  return { tile: pw.gen().plain, map: 'local', tint: 0x0e0f12 };
 }

@@ -2,13 +2,15 @@ import * as THREE from 'three';
 import { ROOMS, railXAtZ } from './layout';
 import { ROOM_CONVERTERS, type D2PixelWorld, type RoomParts } from './pixel';
 import { dropMeshes, emitMesh, paintGroup, relativeMatrix, type Paint } from './pixelMesh';
-import { centreOf, hexOf, matIs, NZ, paintDoor, paintRailings, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y, Z } from './pixelShared';
+import { centreOf, hexOf, matIs, NZ, paintDoor, voidPaint, paintRailings, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y, Z } from './pixelShared';
 import type { BurstDoor, SkeletonDisplay } from './setpieces';
 import {
   bloodDragTile, columnTile, cofferTile, deskFrontTile, emblemMosaic, fasciaTile, friezeTile, galleryDoorTile, graniteTile, lobbyFloorTile, muralTile, nightSkyPlaneTile,
   clerestoryTile, moonTile, paperTile, pillarBannerTile, plaqueTile, posterTile, vineCurtainTile, wainscotTile, welcomeBannerTile,
 } from '../../pixelworld/d2lobby';
 import { bloodDecal, gougeDecal, pocksDecal } from '../../pixelworld/d2decals';
+import { lobbyAshlarTile, pilasterTile, waterStreakTile } from '../../pixelworld/d2walls';
+import { crtScreenTile } from '../../pixelworld/d2lab';
 import { stoneTile } from '../../pixelworld/surfaces';
 import { terrazzoTile } from '../../pixelworld/interior';
 import { tintFor } from '../../pixelworld/batch';
@@ -42,6 +44,7 @@ function convertLobby(pw: D2PixelWorld, parts: RoomParts) {
   const deskShort = deskFrontTile(a, false);
   const mural = muralTile(a);
   const drag = bloodDragTile(a);
+  const ashlar = lobbyAshlarTile(a);
 
   // ── Shell: stucco walls (world-projected plaster in the wall's colour), coffered timber ceiling ──
   pw.copyShell(shell, b, (m, _face, _col, wface) => {
@@ -50,7 +53,8 @@ function convertLobby(pw: D2PixelWorld, parts: RoomParts) {
       if (wface === 'py') return null;
       return { tile: g.woodH, map: 'world', tint: 0x4a3a2c };
     }
-    return { tile: g.plaster, map: 'world' };
+    // Rusticated sandstone ashlar (NEUTRAL: tinted to the render colour).
+    return { tile: ashlar, map: 'world' };
   });
 
   // ── Replaced dressing ──
@@ -113,6 +117,8 @@ function convertLobby(pw: D2PixelWorld, parts: RoomParts) {
       }
       case 'bloodDrag':
         return { tile: drag, map: 'fit' };
+      case 'void':
+        return voidPaint(pw, m, wface, 0);
     }
     // The floor (polished tiles material).
     if (matIs(m, 0x948a7a, 'tiles')) return wface === 'py' ? { tile: floor, map: 'world' } : null;
@@ -135,6 +141,20 @@ function convertLobby(pw: D2PixelWorld, parts: RoomParts) {
     [2, -10, -22, -34, -46].forEach((z, i) => {
       const zz = z - 6 + (side < 0 ? 1 : -1);
       b.rect(_o.set(x, 8.4, zz), side < 0 ? NZ : Z, Y, 2, 4, clerestoryTile(a, (i + (side > 0 ? 1 : 0)) % 2));
+    });
+  }
+  // Pilasters on the column lines (balcony to frieze), water run down from the skylight's gutters.
+  const pil = pilasterTile(a);
+  const wallHex = 0x9a8a74;
+  for (const side of [-1, 1]) {
+    const x = side < 0 ? R.x0 + 0.21 : R.x1 - 0.21;
+    const ux = side < 0 ? NZ : Z;
+    for (const z of [2, -10, -22, -34, -46]) {
+      b.rect(_o.set(x, 5.35, z + (side < 0 ? 0.5 : -0.5)), ux, Y, 1, 8.05, pil, { u0: 0, v0: 5.35 * 32, tintRGB: tintFor(pil, wallHex) });
+    }
+    const streaks = side < 0 ? [-8, -32] : [-12, -44];
+    streaks.forEach((z, i) => {
+      b.rect(_o.set(x + (side < 0 ? 0.004 : -0.004), 10.4, z + (side < 0 ? 0.5 : -0.5)), ux, Y, 1, 3, waterStreakTile(a, i + (side > 0 ? 1 : 0)));
     });
   }
   // Pillar banners (two-sided cards facing the hall).
@@ -192,6 +212,15 @@ function convertLobby(pw: D2PixelWorld, parts: RoomParts) {
     b.rect(_o.set(x, 0.013, z), u, w, 0.3, 0.42, paperTile(a, Math.round(r * 3) % 3));
   }
   void railXAtZ;
+  // The reception CRTs: a painted screen over each glowing monitor box (turned 0.3 rad like the monitor).
+  const crt = crtScreenTile(a);
+  for (const z of [-13, -16.5]) {
+    const yaw = 0.3;
+    const n = new THREE.Vector3(-Math.cos(yaw), 0, Math.sin(yaw));
+    const r = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const c = new THREE.Vector3(6.8 + 0.39, 1.42, z).addScaledVector(n, 0.016);
+    b.rect(_o.copy(c).addScaledVector(r, -0.27).setY(1.42 - 0.17), r, Y, 0.54, 0.34, crt);
+  }
 
   // ── Dynamic set pieces ──
   if (parts.banner) welcomeBanner(pw, parts.banner as THREE.Group);

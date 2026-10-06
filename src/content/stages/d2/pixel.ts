@@ -61,7 +61,7 @@ export class D2PixelWorld {
     D2_DEBUG.last = this;
   }
   private rooms = new Map<string, RoomBatches>();
-  private dyn: { parent: THREE.Object3D; batch: PwBatch; card: boolean }[] = [];
+  private dyn: { parent: THREE.Object3D; batch: PwBatch; card: boolean; onMesh?: (m: THREE.Mesh) => void }[] = [];
   /** Shell groups whose baked meshes are hidden at finish (they stay the occluders). */
   private shells: THREE.Object3D[] = [];
   /** Per-frame hooks (sky lightning) — allocation-free. */
@@ -104,9 +104,9 @@ export class D2PixelWorld {
   }
 
   /** A painted mesh for a dynamic object (geometry in `parent`'s frame; the mesh is added to `parent` at finish). */
-  dynamic(parent: THREE.Object3D, card = false): PwBatch {
+  dynamic(parent: THREE.Object3D, card = false, onMesh?: (m: THREE.Mesh) => void): PwBatch {
     const b = new PwBatch(this.atlas);
-    this.dyn.push({ parent, batch: b, card });
+    this.dyn.push({ parent, batch: b, card, onMesh });
     return b;
   }
 
@@ -274,6 +274,7 @@ export class D2PixelWorld {
       if (!m) continue;
       m.matrixAutoUpdate = true;
       d.parent.add(m);
+      d.onMesh?.(m);
     }
     // The classic shells: still the bullet-stoppers, no longer drawn.
     for (const s of this.shells) for (const c of s.children) c.visible = false;

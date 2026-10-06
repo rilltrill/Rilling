@@ -15,39 +15,255 @@ import { bloodSplat, h6, plate, rivet, scuffs, shiftW, waterStain } from './d2ki
 
 const TOYS = [0x3aa04a, 0xe07a20, 0x8a4ac0, 0x2a8ad0, 0xd0402a, 0xe0c030];
 
-/** Souvenir-shop carpet: deep blue pile, a repeat of yellow tracks and green fronds, a trodden path, a soda stain. 128 × 128. */
+/**
+ * Souvenir-shop carpet (world, 4 m repeat): a deep navy pile woven with a
+ * mid-blue diamond lattice (2-texel lines), and in every diamond a muted-gold
+ * medallion — a ring round a three-toed track — on a half-drop. Two blues and
+ * one gold, no greens and no speckle (the compys are green: they must pop off
+ * it), every motif darker than the cast. A trodden lane down the aisle (2×2
+ * clustered), a soda stain. 128 × 128.
+ */
 export function shopCarpetTile(atlas: PwAtlas): PwTile {
   return atlas.tile(
-    'd2carpet',
+    'd2carpet|r3',
     128,
     128,
     (c, k) => {
-      const rng = k.rng;
-      const blue = k.ramp(0x32508a, { light: 0.4, sat: 1.0 });
-      const yel = k.ramp(0xe0b030, { light: 0.4 });
-      const grn = k.ramp(0x2a8a4a, { light: 0.4 });
-      for (let y = 0; y < 128; y++) for (let x = 0; x < 128; x++) c.set(x, y, blue, (x * 3 + y * 5) % 7 === 0 ? 2 : (x + y * 3) % 11 === 0 ? 4 : 3);
-      // Motifs on a half-drop grid: a three-toed track, a fern spray.
-      for (let gy = 0; gy < 4; gy++) {
-        for (let gx = 0; gx < 4; gx++) {
-          const cx = gx * 32 + (gy % 2 ? 16 : 0) + 8;
-          const cy = gy * 32 + 10;
-          if ((gx + gy) % 2 === 0) {
-            c.ellipse(cx, cy + 5, 2.5, 2, yel, 3);
-            for (const a of [-0.55, 0, 0.55]) for (let s = 0; s < 6; s++) c.set(Math.round(cx + Math.sin(a) * s), Math.round(cy + 3 - Math.cos(a) * s), yel, s === 5 ? 2 : 3);
-          } else {
-            frond(c, cx - 2, cy + 8, -1.2, 9, grn, 3);
-            frond(c, cx + 2, cy + 8, -2.0, 7, grn, 3);
+      const navy = k.ramp(0x22386a, { light: 0.35, sat: 0.9 });
+      const blue = k.ramp(0x3a5a92, { light: 0.35, sat: 0.85 });
+      const gold = k.ramp(0xa8843c, { light: 0.35, sat: 0.75 });
+      const soda = k.ramp(0x2a1a14, { light: 0.4 });
+      c.rect(0, 0, 128, 128, navy, 3);
+      // Diamond lattice (period 64), 2 texels wide, lit on its upper-left edge.
+      for (let y = 0; y < 128; y++) {
+        for (let x = 0; x < 128; x++) {
+          const d1 = (((x + y) % 64) + 64) % 64;
+          const d2 = (((x - y) % 64) + 64) % 64;
+          if (d1 < 2 || d2 < 2) c.set(x, y, blue, d1 === 0 || d2 === 0 ? 3.5 : 2.75);
+        }
+      }
+      // Medallions at the diamond centres (half-drop): a gold ring, a three-toed track inside.
+      for (const [cx, cy] of [
+        [32, 0],
+        [0, 32],
+        [32, 64],
+        [64, 32],
+        [96, 0],
+        [96, 64],
+        [0, 96],
+        [64, 96],
+        [32, 128],
+        [96, 128],
+        [128, 32],
+        [128, 96],
+      ] as const) {
+        if (cx > 128 || cy > 128) continue;
+        for (let y = -11; y <= 11; y++) {
+          for (let x = -11; x <= 11; x++) {
+            const d = Math.hypot(x + 0.5, y + 0.5);
+            const px = (((cx + x) % 128) + 128) % 128;
+            const py = (((cy + y) % 128) + 128) % 128;
+            if (d >= 8 && d < 10.2) c.set(px, py, gold, x + y < -2 ? 3.25 : 2.5);
+            else if (d < 8) c.set(px, py, navy, 2.5);
+          }
+        }
+        // The track: a heel pad and three toes (2 texels wide).
+        const put = (x: number, y: number, t: number) => c.set((((cx + x) % 128) + 128) % 128, (((cy + y) % 128) + 128) % 128, gold, t);
+        for (let y = 1; y < 4; y++) for (let x = -1; x < 2; x++) put(x, y, 3);
+        for (const [dx, sx] of [[-1, -1], [0, 0], [1, 1]] as const) {
+          for (let s = 0; s < 5; s++) {
+            const x = Math.round(dx + sx * s * 0.7);
+            const y = -s;
+            put(x, y, s === 4 ? 2.5 : 3);
+            put(x + (sx >= 0 ? 1 : -1) * 0, y, 3);
           }
         }
       }
-      // Trodden: a darker, flattened band; a soda stain; fluff.
-      for (let y = 0; y < 128; y++) for (let x = 40; x < 88; x++) if (bayer(x, y) < 0.35 + 0.15 * Math.sin(y * 0.1)) c.shift(x, y, -0.6);
-      waterStain(c, 96, 40, 9, 6, { dt: -1 });
-      scuffs(c, rng, 0, 0, 128, 128, 20, 0.75);
+      // Trodden lane down the aisle: the pile flattened a step darker (2×2 clusters, thinning out).
+      for (let y = 0; y < 128; y += 2) {
+        for (let x = 36; x < 92; x += 2) {
+          const t = Math.abs(x - 64) / 28;
+          if (hash2(x >> 1, y >> 1, 41) < 0.65 - t * 0.6) c.shade(x, y, 2, 2, -0.75);
+        }
+      }
+      // A soda stain with a dried rim.
+      for (let y = -8; y <= 8; y++) {
+        for (let x = -10; x <= 10; x++) {
+          const d = Math.hypot(x / 10, y / 7) + (hash2((100 + x) >> 1, (40 + y) >> 1, 5) - 0.5) * 0.25;
+          if (d > 1) continue;
+          if (d > 0.82) c.tint(100 + x, 40 + y, soda, -0.25);
+          else c.shift(100 + x, 40 + y, -0.75);
+        }
+      }
     },
     { wrap: true },
   );
+}
+
+/**
+ * Display-table skirt (world, v from the floor; 2 × 1 m): a park-green cloth
+ * draped from the table top — the rolled lip of the top cloth at 0.82 m, soft
+ * vertical folds (lit / shade pairs of irregular width), a gold scalloped hem
+ * with a fringe a hand above the floor, the dark gap under it (toe-kick
+ * shadow). 64 × 32 (rows: floor = 31, table top = 5).
+ */
+export function tableSkirtTile(atlas: PwAtlas): PwTile {
+  return atlas.tile(
+    'd2tableskirt',
+    64,
+    32,
+    (c, k) => {
+      const cloth = k.ramp(0x2a6a3a, { light: 0.45, sat: 0.95 });
+      const gold = k.ramp(0xd0a030, { light: 0.5 });
+      const shadow = k.ramp(0x101410, { light: 0.4 });
+      const cream = k.ramp(0xe8dcc0, { light: 0.5, sat: 0.6 });
+      const top = 5;
+      // Under-table shadow first (the gap the skirt does not reach).
+      c.rect(0, 0, 64, 32, shadow, 1);
+      // Folds: lit ridge / shade valley pairs at irregular spacing, the cloth swinging a little at the hem.
+      const folds = [0, 7, 15, 20, 29, 36, 41, 50, 57];
+      for (let y = top; y < 29; y++) {
+        for (let x = 0; x < 64; x++) {
+          let d = 99;
+          for (const f of folds) d = Math.min(d, Math.abs(((x - f + 96) % 64) - 32) === 32 ? 0 : Math.min(Math.abs(x - f), 64 - Math.abs(x - f)));
+          let t = 3;
+          if (d === 0) t = 4;
+          else if (d === 1) t = 3.5;
+          else if (d === 3 || d === 4) t = 2.25;
+          // Folds deepen toward the hem.
+          if (y > 18 && d >= 3 && d <= 4) t -= 0.5;
+          c.set(x, y, cloth, t);
+        }
+      }
+      // The rolled lip of the cream top cloth over the edge (lit), its shadow on the skirt.
+      for (let x = 0; x < 64; x++) {
+        c.set(x, top - 2, cream, 3.5);
+        c.set(x, top - 1, cream, 4);
+        c.set(x, top, cream, 2.5);
+        c.set(x, top + 1, cloth, 1.75);
+      }
+      // Scalloped gold hem (8-texel scallops) with a fringe of 2-texel tassels below.
+      for (let x = 0; x < 64; x++) {
+        const sx = (x % 8) - 3.5;
+        const dip = Math.round(2 - (sx * sx) / 7);
+        for (let y = 25; y < 27 + dip; y++) c.set(x, y, gold, y === 25 ? 4 : y === 26 + dip ? 2 : 3);
+        if (x % 4 < 2) c.set(x, 27 + dip, gold, 2.25);
+      }
+    },
+    { wrap: true },
+  );
+}
+
+/** The park emblem printed on a table skirt (cut out): a gold ring, a claw print, a dino either side, PRIMAL ISLAND. 48 × 18. */
+export function skirtLogoTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('d2skirtlogo', 48, 18, (c, k) => {
+    const gold = k.ramp(0xd0a030, { light: 0.5 });
+    const cream = k.ramp(0xe8dcc0, { light: 0.45, sat: 0.6 });
+    const ink = k.ramp(0x18301e, { light: 0.4 });
+    c.ellipse(24, 8, 7.5, 7.5, gold, (u, v) => (u + v < -0.6 ? 4 : 3));
+    c.ellipse(24, 8, 5.5, 5.5, ink, 2);
+    // Three-toed print.
+    c.rect(23, 9, 3, 3, gold, 3.5);
+    for (const [dx, sx] of [[-2, -1], [0, 0], [2, 1]] as const) for (let s = 0; s < 4; s++) c.set(24 + dx + sx * Math.round(s * 0.5), 7 - s, gold, 3.5);
+    silhouette(c, RAPTOR, 2, 4, 14, 8, cream, { tone: 3 });
+    silhouette(c, RAPTOR, 32, 4, 14, 8, cream, { tone: 3, flip: true });
+    const t = 'PRIMAL ISLAND';
+    drawText(c, t, Math.round((48 - textWidth(t, FONT_3x5)) / 2), 13, FONT_3x5, cream, 3.5);
+  });
+}
+
+/**
+ * A stack of folded park T-shirts (fit on the sides of the stack box): three
+ * shirts in muted souvenir colours, each a fold with a lit lip and a shadowed
+ * underside, a collar notch on the front, a price tag on a tab. 18 × 8.
+ */
+export function shirtStackTile(atlas: PwAtlas, v: number): PwTile {
+  const sets = [
+    [0x2a6a8a, 0xc87a2a, 0x3a7a3a],
+    [0xb03a2a, 0xe0c060, 0x2a4a7a],
+    [0x6a4a8a, 0x2a6a3a, 0xd0a040],
+  ];
+  const cols = sets[v % sets.length];
+  return atlas.tile(`d2shirtstack|${v % sets.length}`, 18, 8, (c, k) => {
+    const tag = k.ramp(0xf0ece0, { light: 0.3 });
+    const red = k.ramp(0xc0302a, { light: 0.45 });
+    for (let i = 0; i < 3; i++) {
+      const r = k.ramp(cols[i], { light: 0.45, sat: 0.85 });
+      const y0 = 8 - (i + 1) * 3 + (i === 2 ? 1 : 0);
+      const h = i === 2 ? 2 : 3;
+      for (let y = y0; y < y0 + h; y++) for (let x = i === 0 ? 0 : 1; x < (i === 0 ? 18 : 17); x++) c.set(x, y, r, y === y0 ? 4 : y === y0 + h - 1 ? 1.75 : 3);
+      // Fold line and collar notch.
+      c.set(8 + i, y0, r, 2);
+      c.set(9 + i, y0, r, 2);
+    }
+    // Price tag on a tab.
+    c.rect(14, 3, 4, 3, tag, 3.5);
+    c.set(15, 4, red, 3);
+  });
+}
+
+/**
+ * Merchandise stood on the display tables (cut out, two-sided cards breaking the
+ * box silhouette): 0 = a pyramid of park mugs and a snow globe, 1 = a SALE card
+ * on a little easel, 2 = a big standing raptor plush. 24 × 24 (0.75 m).
+ */
+export function merchCardTile(atlas: PwAtlas, kind: number): PwTile {
+  return atlas.tile(`d2merchcard|${kind % 3}`, 24, 24, (c, k) => {
+    const rng = k.rng;
+    const ink = k.ramp(0x101014, { light: 0.4 });
+    if (kind % 3 === 0) {
+      const mug = k.ramp(0xe8e0d0, { light: 0.35 });
+      const logo = k.ramp(0x2a6a3a, { light: 0.45 });
+      const glass = k.ramp(0x9ad0e8, { light: 0.45 });
+      const base = k.ramp(0x6a3a1a, { light: 0.45 });
+      // Mugs: 3 + 2 + 1, each with a handle and a green logo.
+      const mugAt = (x: number, y: number) => {
+        c.rect(x, y, 5, 5, mug, 3);
+        c.vline(x, y, 5, mug, 4);
+        c.vline(x + 4, y, 5, mug, 2);
+        c.set(x + 5, y + 1, mug, 2.5);
+        c.set(x + 6, y + 2, mug, 2.5);
+        c.set(x + 5, y + 3, mug, 2.5);
+        c.rect(x + 1, y + 2, 2, 2, logo, 3);
+      };
+      for (let i = 0; i < 3; i++) mugAt(1 + i * 6, 19);
+      for (let i = 0; i < 2; i++) mugAt(4 + i * 6, 14);
+      mugAt(7, 9);
+      // Snow globe on the right: a glass dome with a tiny volcano, a wooden base.
+      c.ellipse(20, 12, 3.5, 4, glass, (u, v) => (u + v < -0.6 ? 4.5 : 3));
+      c.poly([18, 15, 20, 11, 22, 15], k.ramp(0x4a3a30, { light: 0.4 }), 2.5);
+      c.set(20, 11, k.ramp(0xff6020, { light: 0.5 }), 4, PWF.GLOW);
+      c.rect(17, 16, 7, 3, base, 3);
+      c.hline(17, 16, 7, base, 4);
+      c.outline(1);
+    } else if (kind % 3 === 1) {
+      const card = k.ramp(0xf0e8c8, { light: 0.35 });
+      const red = k.ramp(0xc8302a, { light: 0.45 });
+      const wood = k.ramp(0x6a4a2a, { light: 0.45 });
+      // Easel legs, the card, SALE in red with a price under it.
+      c.line(6, 23, 9, 14, wood, 2.5);
+      c.line(17, 23, 14, 14, wood, 2.5);
+      plate(c, 3, 5, 18, 13, card, { tone: 3.25 });
+      c.frame(4, 6, 16, 11, red, 2.5);
+      drawText(c, 'SALE', 5 + Math.round((14 - textWidth('SALE', FONT_3x5)) / 2), 7, FONT_3x5, red, 3);
+      drawText(c, '$4.99', 5 + Math.round((14 - textWidth('$4.99', FONT_3x5)) / 2), 12, FONT_3x5, ink, 2);
+      c.outline(1);
+    } else {
+      // A big standing raptor plush: orange felt, cream belly, stitched seams, a swing tag.
+      const r = k.ramp(0xd07a2a, { light: 0.5, sat: 1.0 });
+      const cream = k.ramp(0xf0e0b0, { light: 0.4 });
+      const tag = k.ramp(0xf0f0e8, { light: 0.3 });
+      silhouette(c, RAPTOR, 0, 4, 24, 20, r, { tone: 3 });
+      for (let y = 12; y < 18; y++) for (let x = 9; x < 14; x++) if (c.at(x, y) === r) c.set(x, y, cream, 3);
+      for (let x = 2; x < 20; x += 3) if (c.at(x, 11) === r) c.set(x, 11, r, 1.75);
+      c.set(17, 6, cream, 5);
+      c.set(18, 6, ink, 1);
+      c.line(12, 19, 15, 22, ink, 2);
+      c.rect(14, 21, 3, 2, tag, 3.5);
+      void rng;
+      c.outline(0);
+    }
+  });
 }
 
 /**

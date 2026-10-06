@@ -102,8 +102,8 @@ export function buildKitchen(ctx: Ctx): KitchenOut {
     pipe(stat, steelDark, new THREE.Vector3(cx, ry, z1 + 0.5), new THREE.Vector3(cx, R.h, z1 + 0.5), 0.02, 4);
     for (let z = z0 - 0.8; z > z1 + 0.6; z -= 0.75) {
       const pr = 0.13 + rnd() * 0.1;
-      pipe(stat, black, new THREE.Vector3(cx, ry, z), new THREE.Vector3(cx, ry - 0.25, z), 0.008, 3);
-      Kit.add(stat, Kit.cyl(pr, pr * 0.9, 0.04 + rnd() * 0.18, 10), rnd() < 0.5 ? steelDark : S.metal(0xa05a30), cx, ry - 0.3 - pr, z, Math.PI / 2, 0, 0);
+      pipe(stat, black, new THREE.Vector3(cx, ry, z), new THREE.Vector3(cx, ry - 0.25, z), 0.008, 3).userData.pw = 'panHook';
+      Kit.add(stat, Kit.cyl(pr, pr * 0.9, 0.04 + rnd() * 0.18, 10), rnd() < 0.5 ? steelDark : S.metal(0xa05a30), cx, ry - 0.3 - pr, z, Math.PI / 2, 0, 0).userData.pw = 'pan';
     }
   }
 

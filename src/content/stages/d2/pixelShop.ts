@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { ROOM_CONVERTERS, type D2PixelWorld, type RoomParts } from './pixel';
 import { dropMeshes, paintGroup, type Paint } from './pixelMesh';
-import { centreOf, matIs, paintDoor, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y } from './pixelShared';
+import { centreOf, matIs, NZ, paintDoor, voidPaint, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y, Z } from './pixelShared';
 import type { BurstDoor } from './setpieces';
-import { acousticTile, counterFrontTile, crateTile, mascotTile, merchShelfTile, plushCardTile, postcardTile, shirtEdgeTile, shirtTopTile, shopCarpetTile, tableclothTile, ventGrilleTile, wallpaperTile } from '../../pixelworld/d2shop';
+import { acousticTile, counterFrontTile, crateTile, mascotTile, merchCardTile, merchShelfTile, plushCardTile, postcardTile, shirtStackTile, shirtTopTile, shopCarpetTile, skirtLogoTile, tableclothTile, tableSkirtTile, ventGrilleTile, wallpaperTile } from '../../pixelworld/d2shop';
 import { terrazzoTile } from '../../pixelworld/interior';
 import { bloodDecal } from '../../pixelworld/d2decals';
 import { hash2 } from '../../pixelworld/surfaces';
@@ -39,8 +39,9 @@ function convertShop(pw: D2PixelWorld, parts: RoomParts) {
   const crate = crateTile(a, 0x5a4a34);
   const terrazzo = terrazzoTile(a, { hex: 0xc8c0b0, chips: [0x5a4a3a, 0xe8e0d0, 0xa05a30] });
   const shirtTop = shirtTopTile(a);
-  const shirtEdge = shirtEdgeTile(a);
   const cloth = tableclothTile(a);
+  const skirt = tableSkirtTile(a);
+  const logo = skirtLogoTile(a);
 
   pw.copyShell(shell, b, (m, _f, _c, wface) => {
     if (texOf(m) === 'tiles') return wface === 'ny' ? { tile: ceil, map: 'world' } : wface === 'py' ? null : { tile: g.plaster, map: 'world', tint: 0xb4b0a4 };
@@ -65,6 +66,22 @@ function convertShop(pw: D2PixelWorld, parts: RoomParts) {
     return tag === 'toy' || tag === 'shelfBoard' || tag === 'shelfBox' || tag === 'mascot';
   });
   const ventRule = paintVents(pw, stat, (x, z) => Math.abs(x + 1.6) < 0.2 && Math.abs(z + 65) < 0.2);
+  // Display tables (their boxes stay classic-shaped under a draped skirt) and the T-shirt stacks on them.
+  const tables: THREE.Box3[] = [];
+  const stacks = new Map<string, { x: number; z: number; hex: number }>();
+  stat.updateMatrixWorld(true);
+  stat.traverse((o) => {
+    if (o.userData.pw === 'table') tables.push(new THREE.Box3().setFromObject(o));
+    if (o.userData.pw === 'shirts') {
+      const c = centreOf(o, _p);
+      const key = `${Math.round(c.x * 10)}|${Math.round(c.z * 10)}`;
+      const hex = ((o as THREE.Mesh).material as THREE.MeshLambertMaterial).color.getHex();
+      const st = stacks.get(key);
+      // (The top shirt's colour tints the stack's top.)
+      if (!st || c.y > 0) stacks.set(key, { x: c.x, z: c.z, hex });
+    }
+  });
+  dropMeshes(stat, (m) => m.userData.pw === 'shirts');
 
   const rule = roomRule(pw, (m, face, tag, wface): Paint | null | undefined => {
     const v = ventRule(m, wface);
@@ -84,11 +101,10 @@ function convertShop(pw: D2PixelWorld, parts: RoomParts) {
       case 'counterTop':
         return { tile: terrazzo, map: 'world' };
       case 'table':
-        return { tile: g.woodH, map: 'local', tint: 0x8a6038 };
+        // The draped skirt on every side (world: the hem always a hand above the floor); the top is under the cloth.
+        return wallFace(wface) ? { tile: skirt, map: 'world' } : null;
       case 'tablecloth':
-        return wface === 'py' ? { tile: cloth, map: 'fit' } : { tile: g.cloth, map: 'local', tint: 0x2a6a3a };
-      case 'shirts':
-        return face === 'py' ? { tile: shirtTop, map: 'fit' } : { tile: shirtEdge, map: 'fit' };
+        return wface === 'py' ? { tile: cloth, map: 'fit' } : wface === 'ny' ? null : { tile: skirt, map: 'world' };
       case 'postcard': {
         const c = centreOf(m);
         return face === 'pz' || face === 'nz' ? { tile: postcardTile(a, Math.floor(hash2(Math.round(c.x * 20), Math.round(c.y * 20), 3) * 4)), map: 'fit' } : { tile: g.cloth, map: 'local' };
@@ -96,7 +112,7 @@ function convertShop(pw: D2PixelWorld, parts: RoomParts) {
       case 'crate':
         return { tile: crate, map: 'fit' };
       case 'void':
-        return { tile: g.plain, map: 'local', tint: 0x101014 };
+        return voidPaint(pw, m, wface, 0);
     }
     if (matIs(m, 0x32508a, 'carpet')) return wface === 'py' ? { tile: carpet, map: 'world' } : null;
     if (matIs(m, 0xc8a87e, 'wallpaper')) return wallFace(wface) ? { tile: paper, map: 'world' } : { tile: g.plaster, map: 'local', tint: 0xc8a87e };
@@ -104,6 +120,31 @@ function convertShop(pw: D2PixelWorld, parts: RoomParts) {
   });
   paintGroup(stat, b, rule, { move: true });
 
+  // T-shirt stacks: one painted folded stack per pile (sides: folds, collars, a price tag; top: the print).
+  let si = 0;
+  for (const st of stacks.values()) {
+    const t = shirtStackTile(a, si++);
+    b.box(st.x, 0.86 + 0.12, st.z, 0.55, 0.24, 0.45, { px: t, nx: t, pz: t, nz: t });
+    b.box(st.x, 0.86 + 0.12, st.z, 0.55, 0.24, 0.45, { py: shirtTop }, { tint: st.hex });
+  }
+  // The park emblem printed on each table's aisle-side skirt; merchandise stood on the tops (cut-out cards
+  // break the box silhouette: mug pyramids, SALE easels, a big plush raptor).
+  tables.forEach((tb, i) => {
+    const cx = (tb.min.x + tb.max.x) / 2;
+    const cz = (tb.min.z + tb.max.z) / 2;
+    const inward = cx < 0 ? 1 : -1;
+    const fx = inward > 0 ? tb.max.x + 0.012 : tb.min.x - 0.012;
+    const lw = 1.5;
+    b.rect(_o.set(fx, 0.2, inward > 0 ? cz + lw / 2 : cz - lw / 2), inward > 0 ? NZ : Z, Y, lw, 0.5625, logo);
+    const z0 = tb.max.z;
+    const yaw = inward * 0.45;
+    const ux = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    for (const [dz, kind] of [[0.9, i % 3], [2.4, (i + 1) % 3]] as const) {
+      const w = kind === 2 ? 0.75 : 0.6;
+      const x = cx + inward * 0.45;
+      cards.rect(_o.set(x - ux.x * w / 2, 0.86, z0 - dz - ux.z * w / 2), ux, Y, w, w, merchCardTile(a, kind));
+    }
+  });
   // Plush toys (tables, floor) as little cards facing the aisle / the approach.
   toys.forEach((t, i) => {
     const sz = 0.34 * t.s;

@@ -3,7 +3,7 @@ import { ROOMS, railXAtZ } from './layout';
 import { CELLS, HALL } from './containment';
 import { ROOM_CONVERTERS, type D2PixelWorld, type RoomParts } from './pixel';
 import { dropMeshes, emitMesh, paintGroup, type Paint } from './pixelMesh';
-import { matIs, NX, NZ, paintRailings, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y, Z } from './pixelShared';
+import { matIs, NX, NZ, voidPaint, paintRailings, paintSigns, paintWallTexts, roomRule, texOf, wallFace, X, Y, Z } from './pixelShared';
 import type { GlassWall } from './setpieces';
 import { baleTile, blastDoorTile, concreteColumnTile, dadoTile, dangerPictoTile, dragTrailTile, drainTile, floorLineTile, floorStencilTile, hallMarkTile, hazardBandTile, slabFloorTile, specimenBoardTile, strawTile, tankWallTile, tankXTile } from '../../pixelworld/d2contain';
 import { classicBoard, d2SignTile } from '../../pixelworld/d2signs';
@@ -13,15 +13,39 @@ import { gratingTile } from '../../pixelworld/d2lab';
 import { balustradeTile } from '../../pixelworld/d2lobby';
 import { bloodDecal, gougeDecal, pocksDecal } from '../../pixelworld/d2decals';
 import { tintFor } from '../../pixelworld/batch';
+import { clawCrackTile, condensationTile, glassSheenTile } from '../../pixelworld/d2glass';
+import { cableTrayTile, dripStainTile, fadedHazardTile, hallWallTile } from '../../pixelworld/d2walls';
 import type { PwBatch } from '../../pixelworld/batch';
 
 /** The CONTAINMENT WING and the HOLDING HALL (boss arena) in PIXEL WORLD. */
 
 const _o = new THREE.Vector3();
 
+/**
+ * What is on a glass wall's pane (cut-out overlay just in front of it, in the wall's own frame):
+ * sheen, smudges, scratches, condensation, and (`claw`) raking claw cracks. It hides with the
+ * pane when the glass shatters (an allocation-free per-frame check).
+ */
+function glassOverlay(pw: D2PixelWorld, w: GlassWall, claw: number | null, tint?: number) {
+  const a = pw.atlas;
+  const { w: W, h: H } = w.o;
+  const cb = pw.dynamic(w.root, true, (m) => {
+    m.visible = w.pane.visible;
+    pw.animators.push(() => {
+      m.visible = w.pane.visible;
+    });
+  });
+  cb.rect(_o.set(-W / 2, 0.2, 0.05), X, Y, W, H - 0.32, glassSheenTile(a, tint), { u0: 0, v0: 0 });
+  cb.rect(_o.set(-W / 2, 0.2, 0.055), X, Y, W, 0.5, condensationTile(a, tint), { u0: 0, v0: 0 });
+  if (claw !== null) cb.rect(_o.set(-1.0 + (claw % 2) * 0.6, H * 0.35, 0.06), X, Y, 2, 2, clawCrackTile(a, claw));
+}
+
 /** Re-paint a glass wall's baked steel frame (static) into the room's mesh; the pane, cracks and teeth stay classic. */
 function glassFrames(pw: D2PixelWorld, walls: GlassWall[], b: PwBatch) {
   const g = pw.gen();
+  walls.forEach((w, i) => {
+    if (!w.broken) glassOverlay(pw, w, i % 3 === 1 ? i : null, w.o.tint);
+  });
   for (const w of walls) {
     w.root.updateMatrixWorld(true);
     for (const ch of [...w.root.children]) {
@@ -104,8 +128,9 @@ function convertHall(pw: D2PixelWorld, parts: RoomParts) {
   const crate = crateTile(a, 0x6a5236);
   const catwalk = gratingTile(a, 0x464c54);
   const tankWall = tankWallTile(a);
+  const hallWall = hallWallTile(a);
 
-  pw.copyShell(shell, b, () => ({ tile: g.concrete, map: 'world' }));
+  pw.copyShell(shell, b, () => ({ tile: hallWall, map: 'world' }));
   dropMeshes(stat, (m) => m.userData.pw === 'claw' || m.userData.pw === 'ring');
   // The SPECIMEN X lettering becomes one lit board (below).
   paintWallTexts(pw, stat, b, { skip: (t) => t === 'SPECIMEN X' || t === 'CLASS 5 CONTAINMENT' });
@@ -116,7 +141,7 @@ function convertHall(pw: D2PixelWorld, parts: RoomParts) {
       case 'column':
         return wallFace(face) ? { tile: column, map: 'cyl' } : { tile: g.concrete, map: 'local' };
       case 'buttress':
-        return { tile: g.concrete, map: 'world', tint: 0x464a52 };
+        return { tile: hallWall, map: 'world', tint: 0x50545c };
       case 'truss':
         return { tile: g.metal, map: 'local' };
       case 'catwalk':
@@ -126,7 +151,7 @@ function convertHall(pw: D2PixelWorld, parts: RoomParts) {
       case 'crate':
         return { tile: crate, map: 'fit' };
       case 'void':
-        return { tile: g.plain, map: 'local', tint: 0x0c0d10 };
+        return voidPaint(pw, m, wface, 11);
       case 'bloodDrag':
         return { tile: dragTrailTile(a), map: 'fit' };
     }
@@ -144,7 +169,8 @@ function convertHall(pw: D2PixelWorld, parts: RoomParts) {
     const t = (i / 96) * Math.PI * 2;
     ring.push(new THREE.Vector3(H.center.x + Math.cos(t) * 7.5, 0, H.center.z + Math.sin(t) * 7.5));
   }
-  b.ribbon(ring, 0.4, floorLineTile(a), { y: 0.011 });
+  // Worn cream (the boss's telegraph rings are yellow / orange: the floor ring must not compete).
+  b.ribbon(ring, 0.4, floorLineTile(a, 0xd8d0b0), { y: 0.011 });
   let bay = 0;
   for (let z = R.z0 - 3; z > H.tankZ; z -= 6) {
     bay++;
@@ -200,6 +226,26 @@ function convertHall(pw: D2PixelWorld, parts: RoomParts) {
     const t = hallMarkTile(a, lbl, 2, 0xe0b020);
     const x = s < 0 ? R.x0 + 0.215 : R.x1 - 0.215;
     b.rect(_o.set(x, 4.25, H.gateZ + (s < 0 ? t.wM / 2 : -t.wM / 2)), s < 0 ? NZ : Z, Y, t.wM, t.hM, t.tile);
+  }
+  // The long walls' story: drip stains under the catwalks, a cable tray and conduit, a faded
+  // hazard band up high, SECTOR X stencilled at eye level between the buttresses.
+  const tray = cableTrayTile(a);
+  const band = fadedHazardTile(a);
+  const sector = hallMarkTile(a, 'SECTOR X', 2, 0xc8c0a8);
+  for (const s of [-1, 1]) {
+    const x = s < 0 ? R.x0 + 0.212 : R.x1 - 0.212;
+    const ux = s < 0 ? NZ : Z;
+    const zA = s < 0 ? R.z0 : H.tankZ;
+    const len = R.z0 - H.tankZ;
+    b.rect(_o.set(x, 7.5, zA), ux, Y, len, 0.5, tray, { u0: 0, v0: 0 });
+    b.rect(_o.set(x, 9.0, zA), ux, Y, len, 0.5, band, { u0: 0, v0: 0 });
+    let i = 0;
+    for (let z = R.z0 - 6; z > H.tankZ + 2; z -= 6) {
+      const zc = z;
+      b.rect(_o.set(x + s * -0.002, 3.9, zc + (s < 0 ? 1 : -1)), ux, Y, 2, 2, dripStainTile(a, i + (s > 0 ? 1 : 0)));
+      if (i % 2 === 1 && Math.abs(zc - H.gateZ) > 2.5) b.rect(_o.set(x + s * -0.004, 2.75, zc + (s < 0 ? sector.wM / 2 : -sector.wM / 2)), ux, Y, sector.wM, sector.hM, sector.tile);
+      i++;
+    }
   }
   const wall = 0x646870;
   const gouge = gougeDecal(a, 0);

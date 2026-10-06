@@ -165,45 +165,103 @@ export function pipeTile(atlas: PwAtlas): PwTile {
   return t;
 }
 
-/** Oil-stained floor slabs (world): saw-cut joints every 2 m, trowel arcs, oil blots, a painted walkway line, scuffs. 128 × 128. */
+/**
+ * Pump-room floor slabs (world, 4 m repeat): four 2 m slabs each its own pour
+ * (tone, trowel arcs as 2-texel clusters, a hairline crack or a patch), 2-texel
+ * saw-cut joints with a lit lip, scuffs. Clean of oil: the spills are laid as
+ * decals where they belong (pumps, drain, tanks), never in the repeat. 128 × 128.
+ */
 export function oilyConcreteTile(atlas: PwAtlas, hex: number): PwTile {
   return atlas.tile(
-    `d2oilfloor|${hex.toString(16)}`,
+    `d2oilfloor|${hex.toString(16)}|r3`,
     128,
     128,
     (c, k) => {
       const rng = k.rng;
       const m = k.ramp(hex, { light: 0.45, sat: 0.6 });
-      const oil = k.ramp(0x1e1c22, { light: 0.55, sat: 1.0 });
+      const patch = k.ramp(0x6a6660, { light: 0.4, sat: 0.5 });
+      const slabTone = [3, 2.75, 3.25, 2.9];
       for (let y = 0; y < 128; y++) {
         for (let x = 0; x < 128; x++) {
-          let t = 3;
-          if ((x & 63) === 0 || (y & 63) === 0) t = 1.5;
-          else if ((x & 63) === 1 || (y & 63) === 1) t = 3.75;
-          else if (Math.abs(Math.sin(x * 0.11 + Math.sin(y * 0.07) * 2) * Math.cos(y * 0.09)) > 0.95) t = 3.5;
+          const sid = (x >> 6) + (y >> 6) * 2;
+          let t = slabTone[sid];
+          const lx = x & 63;
+          const ly = y & 63;
+          if (lx < 2 || ly < 2) t = 1.5;
+          else if (lx === 2 || ly === 2) t = 3.75;
           c.set(x, y, m, t);
         }
       }
-      c.scatter(rng, 0, 0, 128, 128, 50, 0, -0.75, { shapes: 3 });
-      for (let i = 0; i < 5; i++) {
-        const cx = rng.int(8, 120);
-        const cy = rng.int(8, 120);
-        const rx = rng.int(4, 11);
-        const ry = rng.int(3, 7);
-        for (let y = -ry; y <= ry; y++) for (let x = -rx; x <= rx; x++) {
-          const d = (x / rx) ** 2 + (y / ry) ** 2 + (hash2(cx + x, cy + y, 3) - 0.5) * 0.4;
-          if (d > 1) continue;
-          // Solid dark pool, a dithered rim, one small off-centre sheen (a centred one reads as a ring / a letter O).
-          const rim = d > 0.72;
-          const sheen = !rim && Math.abs(x / rx + 0.35) < 0.12 && y < 0 && y > -ry * 0.7;
-          c.set(wrapI(cx + x, 128), wrapI(cy + y, 128), oil, rim ? (bayer(cx + x, cy + y) < 0.5 ? 1.75 : 2.25) : sheen ? 2.5 : 1);
+      // Trowel arcs (2-texel dabs along swept arcs), slab by slab.
+      for (let sid = 0; sid < 4; sid++) {
+        const ox = (sid & 1) * 64;
+        const oy = (sid >> 1) * 64;
+        for (let a = 0; a < 3; a++) {
+          const cx = ox + rng.int(10, 54);
+          const cy = oy + rng.int(10, 54);
+          const r = rng.int(8, 16);
+          for (let t = 0; t < 2.2; t += 0.18) {
+            const x = Math.round(cx + Math.cos(t + a) * r);
+            const y = Math.round(cy + Math.sin(t + a) * r * 0.6);
+            if ((x & 63) > 3 && (y & 63) > 3) c.shade(x, y, 2, 1, hash2(x, y, 3) > 0.5 ? 0.5 : -0.5);
+          }
         }
       }
+      // A patched slab corner and a crack.
+      c.rect(70, 72, 18, 12, patch, 2.75);
+      c.frame(70, 72, 18, 12, patch, 2);
       crack(c, rng, 30, 90, 26, 0.3, { dt: -1.5, lip: 0.75, branch: 0.1 });
-      scuffs(c, rng, 0, 0, 128, 128, 30, -0.75);
+      scuffs(c, rng, 0, 0, 128, 128, 24, -0.75);
     },
     { wrap: true },
   );
+}
+
+/**
+ * A spill of machine oil (cut out, 2 × 1.5 m): a big irregular black pool with
+ * an iridescent sheen rim (violet, green and gold clumps), a thinner tongue
+ * where it ran, drips trailing off toward the drain, boot prints out of it.
+ * 64 × 48.
+ */
+export function oilPoolTile(atlas: PwAtlas, v: number): PwTile {
+  return atlas.tile(`d2oilpool|${v % 3}`, 64, 48, (c, k) => {
+    const oil = k.ramp(0x14121a, { light: 0.55, sat: 1.0 });
+    const vio = k.ramp(0x5a3a8a, { light: 0.5, sat: 1.0 });
+    const grn = k.ramp(0x2a6a5a, { light: 0.5, sat: 1.0 });
+    const gold = k.ramp(0x8a7a3a, { light: 0.5 });
+    const seed = v * 13 + 5;
+    const lobes: [number, number, number, number][] = [
+      [26, 22, 15, 10],
+      [38 + (v % 2) * 4, 26, 11, 8],
+      [18, 28, 8, 6],
+    ];
+    const inside = (x: number, y: number) => {
+      let best = 0;
+      for (const [lx, ly, rx, ry] of lobes) best = Math.max(best, 1 - ((x - lx) / rx) ** 2 - ((y - ly) / ry) ** 2);
+      return best + (hash2((x + seed) >> 1, y >> 1, 9) - 0.5) * 0.25;
+    };
+    for (let y = 0; y < 48; y++) {
+      for (let x = 0; x < 64; x++) {
+        const d = inside(x, y);
+        if (d <= 0) continue;
+        if (d < 0.18) {
+          // Sheen rim: iridescent clumps (2×2), else the oil's lit edge.
+          const h = hash2((x + seed) >> 1, (y + seed) >> 1, 4);
+          c.set(x, y, h < 0.2 ? vio : h < 0.35 ? grn : h < 0.45 ? gold : oil, h < 0.45 ? 2.25 : 2);
+        } else c.set(x, y, oil, d > 0.6 ? 0.5 : 1);
+      }
+    }
+    // A sheen highlight off-centre (a crescent, never a ring).
+    for (let i = 0; i < 9; i++) c.rect(16 + i * 2, 15 + Math.round(Math.sin(i * 0.5) * 2), 2, 1, i % 3 === 0 ? vio : grn, 3);
+    // The run: a tongue and drips trailing off (2 texels wide).
+    for (let j = 0; j < 14; j++) c.rect(48 + j, 30 + Math.round(j * 0.6), 2, 2, oil, 1);
+    for (let j = 0; j < 4; j++) c.rect(62 - j * 2, 40 + j, 2, 1, oil, 1.5);
+    // Boot prints stepping out of it (oil-dark soles).
+    for (const [x, y] of [[8, 38], [4, 44]]) {
+      c.rect(x, y, 3, 2, oil, 1.5);
+      c.rect(x, y + 3, 3, 1, oil, 1.5);
+    }
+  });
 }
 
 /** Coolant tank skin (cylinder-wrapped along its axis; NEUTRAL): weld seams, rivet rows, a stencil band, rust weeping from the seams. 64 × 64. */

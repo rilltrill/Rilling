@@ -664,3 +664,139 @@ export function _labRefs(c: PwCanvas, k: PwKit) {
   void c;
   void k;
 }
+
+/**
+ * An incubator's apron under its table top (world, 2 × 0.375 m, wrap): a
+ * stainless panel with a lit lip, louvred vent slots (2-texel), a stencilled
+ * unit number band and a warning sticker every 2 m. 64 × 16.
+ */
+export function incubatorApronTile(atlas: PwAtlas): PwTile {
+  return atlas.tile(
+    'd2incapron',
+    64,
+    16,
+    (c, k) => {
+      const m = k.ramp(0xb4bac0, { light: 0.55, sat: 0.4 });
+      const yel = k.ramp(0xf0d020, { light: 0.45 });
+      const ink = k.ramp(0x1a1a1e, { light: 0.4 });
+      c.rect(0, 0, 64, 16, m, 3);
+      c.hline(0, 0, 64, m, 4.5);
+      c.hline(0, 1, 64, m, 3.5);
+      c.hline(0, 14, 64, m, 1.75);
+      c.hline(0, 15, 64, m, 1);
+      for (let x = 4; x < 30; x += 4) {
+        c.rect(x, 5, 2, 6, m, 1.25);
+        c.rect(x, 11, 2, 1, m, 3.75);
+      }
+      plate(c, 40, 4, 10, 8, yel, { tone: 3 });
+      c.rect(44, 6, 2, 3, ink, 1);
+      c.rect(44, 10, 2, 1, ink, 1);
+      c.rect(56, 6, 2, 6, m, 2);
+    },
+    { wrap: true },
+  );
+}
+
+/**
+ * The incubator's control panel on its aisle side (fit, 3.4 × 0.375 m): a lit
+ * temperature readout (37.5 in green LED digits), status lamps, a dial, the
+ * unit plate, a clipboard hung off a hook with a curling sheet. 112 × 12.
+ */
+export function incubatorPanelTile(atlas: PwAtlas, unit: number): PwTile {
+  return atlas.tile(`d2incpanel|${unit}`, 112, 12, (c, k) => {
+    const m = k.ramp(0xb4bac0, { light: 0.55, sat: 0.4 });
+    const led = k.ramp(0x60ff90, { light: 0.6 });
+    const red = k.ramp(0xff4030, { light: 0.6 });
+    const amber = k.ramp(0xffb020, { light: 0.6 });
+    const screen = k.ramp(0x0c1a12, { light: 0.4 });
+    const paper = k.ramp(0xe8e4d8, { light: 0.35 });
+    const ink = k.ramp(0x2a2a34, { light: 0.4 });
+    c.rect(0, 0, 112, 12, m, 3);
+    c.hline(0, 0, 112, m, 4.5);
+    c.hline(0, 11, 112, m, 1.25);
+    // Readout.
+    c.rect(8, 2, 24, 8, m, 1.5);
+    c.rect(9, 3, 22, 6, screen, 1.5);
+    drawText(c, unit % 2 ? '37.5' : '38.1', 11, 3, FONT_3x5, led, 4.5, { flag: PWF.GLOW });
+    // Status lamps, a dial.
+    c.rect(36, 4, 2, 2, led, 4.5, PWF.GLOW);
+    c.rect(40, 4, 2, 2, unit === 2 ? red : amber, 4.5, PWF.GLOW);
+    c.ellipse(50, 6, 3, 3, m, (u, v) => (u + v < -0.4 ? 4.5 : 2));
+    c.set(51, 5, ink, 1);
+    // Unit plate.
+    plate(c, 60, 3, 18, 6, k.ramp(0x2a8a5a, { light: 0.45 }), { tone: 3 });
+    drawText(c, `U-0${unit + 1}`, 62, 4, FONT_3x5, paper, 4);
+    // Clipboard on a hook.
+    c.rect(88, 1, 12, 11, k.ramp(0x7a5230, { light: 0.45 }), 3);
+    c.rect(89, 3, 10, 8, paper, 3.5);
+    for (let y = 5; y < 10; y += 2) c.hline(90, y, 7, ink, 2);
+    c.rect(92, 1, 4, 2, m, 4);
+  });
+}
+
+/** A coolant hose drooping from an incubator's tray to the floor (cut out, two-sided card, 0.5 × 1 m): a ribbed grey hose with a lit top edge, a brass coupling, a coil on the floor. 16 × 32. */
+export function hoseCardTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('d2hose', 16, 32, (c, k) => {
+    const h = k.ramp(0x4a5058, { light: 0.5, sat: 0.4 });
+    const brass = k.ramp(0xc8a24c, { light: 0.55 });
+    c.rect(2, 0, 4, 3, brass, 3.5);
+    for (let y = 3; y < 26; y++) {
+      const x = Math.round(3 + Math.sin(y * 0.18) * 2 + (y > 18 ? (y - 18) * 0.4 : 0));
+      c.rect(x, y, 3, 1, h, y % 3 === 0 ? 2 : 3);
+      c.set(x, y, h, 4);
+    }
+    c.ellipse(9, 28, 6, 2.5, h, (u, v) => (v < -0.3 ? 4 : 2.5));
+    c.ellipse(9, 28, 3, 1, h, 1.5);
+    c.outline(0);
+  });
+}
+
+/**
+ * A reception CRT's screen (fit on the glass, 0.54 × 0.34 m): the park's
+ * terminal gone wrong — a dark green phosphor field in 2-texel scan bands,
+ * SYSTEM / FAILURE in red, a blinking-cursor block, a curved glass highlight
+ * in the top-left corner. Unlit (GLOW). 32 × 20.
+ */
+export function crtScreenTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('d2crt', 32, 20, (c, k) => {
+    const ph = k.ramp(0x0e2a1a, { light: 0.5, sat: 0.9 });
+    const red = k.ramp(0xff3a30, { light: 0.6 });
+    const grn = k.ramp(0x60ff90, { light: 0.6 });
+    const glass = k.ramp(0xc8f0e0, { light: 0.5 });
+    for (let y = 0; y < 20; y++) c.hline(0, y, 32, ph, (y >> 1) % 2 ? 1.5 : 2, PWF.GLOW);
+    drawText(c, 'SYSTEM', 4, 3, FONT_3x5, red, 4.5, { flag: PWF.GLOW });
+    drawText(c, 'FAILURE', 4, 10, FONT_3x5, red, 4.5, { flag: PWF.GLOW });
+    c.rect(4, 16, 3, 2, grn, 4.5, PWF.GLOW);
+    c.hline(1, 1, 5, glass, 3.5, PWF.GLOW);
+    c.vline(1, 1, 4, glass, 3.5, PWF.GLOW);
+    // Rounded tube corners (cut out → the dark bezel shows).
+    for (const [x, y] of [[0, 0], [31, 0], [0, 19], [31, 19]]) c.set(x, y, 0, 0);
+  });
+}
+
+/**
+ * Cables dropping from the overhead tray to a rack top (cut out, two-sided, 0.75 ×
+ * 1 m): four 2-texel cables (blue, yellow, black, red) hanging in uneven loops,
+ * a zip-tied bundle at the top, a loose end with a plug swinging. 24 × 32.
+ */
+export function cableDropTile(atlas: PwAtlas, v: number): PwTile {
+  return atlas.tile(`d2cabledrop|${v % 2}`, 24, 32, (c, k) => {
+    const cols = [0x2a5aaa, 0xd0a020, 0x1e1e22, 0xa82a20].map((h) => k.ramp(h, { light: 0.45 }));
+    const tie = k.ramp(0xe8e8e0, { light: 0.3 });
+    for (let i = 0; i < 4; i++) {
+      const x0 = 8 + i * 2;
+      const sag = 6 + ((i * 5 + v * 3) % 7);
+      for (let y = 0; y < 32; y++) {
+        const t = y / 31;
+        // One bundle bowing the same way (cables of different slack), not opposing loops.
+        const x = Math.round(x0 + Math.sin(t * Math.PI * 0.8) * sag * 0.45 * (v % 2 ? 1 : -1));
+        c.rect(x, y, 2, 1, cols[i], x % 3 === 0 ? 3.5 : 3);
+      }
+    }
+    c.rect(7, 2, 10, 2, tie, 3.5);
+    // A loose end with a plug.
+    for (let y = 8; y < 22; y++) c.rect(20 - Math.round((y - 8) * 0.15), y, 2, 1, cols[3], 3);
+    c.rect(17, 22, 3, 3, k.ramp(0x3a3a3e, { light: 0.4 }), 2.5);
+    c.outline(0);
+  });
+}
