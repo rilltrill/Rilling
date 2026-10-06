@@ -681,10 +681,10 @@ answers "what do I draw"):
 
 | budget | limit | z1 MAIN STREET | d1 JUNGLE RUN |
 |---|---|---|---|
-| atlas memory (all levels) | ≤ 24 MB | 11.4 MB (world 2048×768 8.0 MB + sky 2048×432 3.4 MB) | 9.3 MB (world 1024×848 4.4 MB + sky 2048×592 4.6 MB + jeep 256×160 0.2 MB; FLORA stone / herd sprites 2 × 512×256 R8) |
-| paint at stage load | ≤ 300 ms on a phone | 170–210 ms (node on a shared 4-core dev box; sky 36–41 ms) | ≈ 100 ms warm on a quiet box (min of 5: world ≈ 60, sky ≈ 35, jeep ≈ 3); 149 ms min of 10 at load avg 18 (world 99, sky 47, jeep 3) + FLORA stones 14 / herd 7 ms |
-| draw calls (same frame) | ≤ 250 | 45–51 (PIXEL CAST 53–60) | 23–52 (PIXEL CAST 34–71) |
-| triangles (same frame) | — | 49 k (PIXEL CAST 73 k) | 18–20 k (PIXEL CAST 23–32 k) |
+| atlas memory (all levels) | ≤ 24 MB | 14.3 MB (world 2048×1040 10.8 MB + sky 2048×368 2.9 MB + fire strips 256×448 0.6 MB) | 9.3 MB (world 1024×848 4.4 MB + sky 2048×592 4.6 MB + jeep 256×160 0.2 MB; FLORA stone / herd sprites 2 × 512×256 R8) |
+| paint at stage load | ≤ 300 ms on a phone | ≈ 200 ms warm, min of 8 at load avg 8–16 (world ≈ 165, sky ≈ 25, fire ≈ 6; the z1 tile painters ≈ 70 ms of it, the rest the shared resolve / pack / mip pass over 1.7 M texels) | ≈ 100 ms warm on a quiet box (min of 5: world ≈ 60, sky ≈ 35, jeep ≈ 3); 149 ms min of 10 at load avg 18 (world 99, sky 47, jeep 3) + FLORA stones 14 / herd 7 ms |
+| draw calls (same frame) | ≤ 250 | 15–61 over 26 beats (PIXEL CAST 21–90) | 23–52 (PIXEL CAST 34–71) |
+| triangles (same frame) | — | 15–42 k (PIXEL CAST 19–74 k) | 18–20 k (PIXEL CAST 23–32 k) |
 | per-frame work | no allocations | backdrop follow (a position set per layer) | same |
 
 Keep tiles few: a NEUTRAL tile tinted per material beats a tile per colour; wrap shop
@@ -724,13 +724,23 @@ load skips painting), paint the one-level sky atlas after the first frame.
 
 ### Stage work-lists
 
-- **z1 MAIN STREET** (converted): facades, shopfronts, signs, marquee, posters, roads,
-  sidewalks, curbs, lane paint, roofs, trims, street furniture re-painted; night panorama.
-  Still classic: cars (re-painted Kit boxes — give them painted body / glass / grille
-  modules), street lamps and their heads, the diner's chrome body and window glass, the
-  fire effects, the river / alley interiors past beat 10, the boss arena dressing
-  (butcher shop interior), the title-screen backdrop. Facade variety: 5 wall kinds; add
-  storefront goods per shop name and a second window set.
+- **z1 MAIN STREET** (converted end to end; `stages/z1/pixel.ts` + `pw*.ts`; painters
+  `pixelworld/z1*.ts`): wet asphalt with patches / tar snakes / alligator cracks and a
+  decal sheet (skids, blood, manholes, puddles), herringbone brick + granite setts in the
+  square; facades with string courses, copings, pediments, chimney pots, aerials, fire
+  escapes, ghost signs and a billboard; painted cars (body / glass / chrome / police /
+  burnt), the diner (lit flutes, interior counter, stools, menu, pass), the overturned bus
+  (legible roof, windowed sides, soot), the gas station (canopy, logo, price sign, pillars,
+  a convenience-store bay, pumps / propane cage / drums painted over their unchanged hit
+  boxes, a pale canopy top for the collapse), PRIME MEATS (cold-room windows, doorway,
+  doors, awning, valance, cleaver blade), kiosks (bills, fascia, bundles), the bandstand
+  (turned posts, balustrade, lace, shingles), the courthouse (ashlar, columns, frieze,
+  clock), shop bays for the laundry and the police lobby, hand-drawn animated flames for
+  every fire (`z1fire.ts`, own atlas) with stepped pixel puffs, soft-edged dithered lamp
+  shafts, stepped light pools; the night panorama with the MILLBROOK townline. Still
+  classic: trees (FLORA), lamp-globe spheres, the fountain, benches / crates / sawhorses
+  outside the barricade, the courthouse pediment, the extra glass panes, the title-screen
+  backdrop.
 - **d1 JUNGLE RUN** (converted end to end; `stages/d1/pixel.ts`, `jeepPixel.ts`,
   `herdPixel.ts`, `pwShapes.ts`; painters `pixelworld/d1*.ts`): the road (`d1RoadTile`: ruts
   with worn tread prints, damp hollows, pebbles, crown tufts, a raptor track, ragged verges),
