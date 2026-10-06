@@ -842,9 +842,9 @@ load skips painting), paint the one-level sky atlas after the first frame.
   Breakable doors are re-painted in place (same triangles: same hit boxes). Still classic
   (re-textured only): gurney / bed / table frames, the surgical lamp, pipes and cable trays,
   benches, pendant lamps, the cocoon, glass, light bars, FX. Budgets: world atlas 2048×688
-  (7.2 MB with mips) + sky 1024×416 (1.6 MB); paint ≈ 102 ms world (incl. 2.4 ms calm levels) +
-  23 ms sky (node, min of 12, load ≈ 9); ≤ 109 draw calls at the heaviest beat (the bay; PIXEL
-  CAST 160). Checks: `tests/unit/pixel-world-z2.test.ts` (budget, occluders, ground, set
+  (7.2 MB with mips) + sky 1024×416 (1.6 MB); paint ≈ 96 ms world (incl. 2.5 ms calm levels) +
+  25 ms sky ≈ 121 ms (node, min of 12, load ≈ 10; the storm painter is ≈ 20 ms of it); ≤ 109
+  draw calls at the heaviest beat (the bay; PIXEL CAST 162). Checks: `tests/unit/pixel-world-z2.test.ts` (budget, occluders, ground, set
   pieces, destructibles' hit rays, the boiler wall's blocks, RNG, full-stage simulator in both
   styles).
 - **z3 HIGHWAY TO HELL** (converted end to end; `stages/z3/pixel.ts` = `Z3PixelWorld`, the
