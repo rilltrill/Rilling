@@ -1,7 +1,7 @@
 import { bayer, PWF, PW_BACKDROP_TPD, type PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { hash2 } from './surfaces';
-import { h6 } from './z3kit';
+import { dith, h6 } from './z3kit';
 
 /**
  * HIGHWAY TO HELL (z3) panorama for ART: PIXEL WORLD, painted straight into
@@ -155,32 +155,39 @@ function paintSky(c: PwCanvas, k: PwKit, o: Z3SkyOpts) {
     const fv = famV[((x % TW) + TW) % TW];
     return fv > 1.4 ? { body: cloudWarm, rim: rimWarm, hot: fv > 3 } : fv < -1 ? { body: cloudCool, rim: rimFire, hot: false } : { body: cloudCool, rim: rimCool, hot: false };
   };
-  for (let n = 0; n < 14; n++) {
+  // Fewer, fatter banks (a bank under five rows reads as a scanline glitch through the CRT).
+  for (let n = 0; n < 10; n++) {
     const el = 2.5 + Math.pow(rng.next(), 1.1) * 17;
     const base = rowOfEl(el);
     const cx = rng.int(0, TW - 1);
-    const L = Math.round((70 + rng.next() * 220) * (1.15 - el / 40));
-    const hMax = Math.max(3, Math.round((5 + rng.next() * 9) * (1.1 - el / 40)));
+    const L = Math.round((90 + rng.next() * 220) * (1.15 - el / 40));
+    const hMax = Math.max(6, Math.round((7 + rng.next() * 9) * (1.1 - el / 40)));
     bank(c, rng, cx, base, L, hMax, rampsAt);
   }
-  for (let n = 0; n < 16; n++) {
+  // Long low streaks: fewer and fatter than before (two-row bodies, a ragged underside, breaks
+  // only in whole 8-texel stretches) — thin dashed lines read as scanline glitches through the CRT.
+  for (let n = 0; n < 6; n++) {
     const el = 1.6 + Math.pow(rng.next(), 2) * 10;
     const cy = rowOfEl(el);
     const cx = rng.int(0, TW - 1);
-    const L = Math.round(30 + rng.next() * 140);
+    const L = Math.round(70 + rng.next() * 130);
     const seed = rng.int(0, 9999);
     for (let dx = -L; dx <= L; dx++) {
       const x = (cx + dx + TW * 4) % TW;
       const u = dx / L;
-      if (hash2(dx >> 2, seed, 5) > 0.9 || Math.abs(u) > 0.97) continue;
+      if (Math.abs(u) > 0.97) continue;
       const rs = rampsAt(x);
-      const y = cy + (Math.abs(u) > 0.6 && hash2(dx >> 4, seed, 3) > 0.5 ? 1 : 0);
-      if (y < 0 || y >= H) continue;
-      R[y * TW + x] = rs.body;
-      T[y * TW + x] = 2.6;
-      if (y + 1 < H && Math.abs(u) < 0.8) {
+      const thick = Math.abs(u) < 0.7 ? 2 : 1;
+      const y = cy + (Math.abs(u) > 0.6 && hash2((dx + 512) >> 4, seed, 3) > 0.5 ? 1 : 0);
+      for (let r = 0; r < thick; r++) {
+        const yy = y - r;
+        if (yy < 0 || yy >= H) continue;
+        R[yy * TW + x] = rs.body;
+        T[yy * TW + x] = r === 0 ? 2.3 : 2.7;
+      }
+      if (y + 1 < H && Math.abs(u) < 0.8 && hash2(dx >> 1, seed, 7) > 0.2) {
         R[(y + 1) * TW + x] = rs.rim;
-        T[(y + 1) * TW + x] = rs.hot ? 5 : 3;
+        T[(y + 1) * TW + x] = rs.hot ? 4.6 : 3;
       }
     }
   }
@@ -420,8 +427,20 @@ function bank(c: PwCanvas, rng: { next(): number; int(a: number, b: number): num
       if (by > bot[j]) bot[j] = by;
     }
   }
+  // No slivers: a column needs three rows of cloud, a run of columns at least twelve.
+  const keep = new Uint8Array(L * 2 + 1);
+  for (let j = 0; j <= L * 2; ) {
+    if (top[j] >= base || bot[j] < 0 || bot[j] - top[j] < 2) {
+      j++;
+      continue;
+    }
+    let e = j;
+    while (e <= L * 2 && top[e] < base && bot[e] >= 0 && bot[e] - top[e] >= 2) e++;
+    if (e - j >= 12) keep.fill(1, j, e);
+    j = e;
+  }
   for (let j = 0; j <= L * 2; j++) {
-    if (top[j] >= base || bot[j] < 0) continue;
+    if (!keep[j]) continue;
     const x = (((cx - L + j) % W) + W) % W;
     const rs = rampsAt(x);
     const b = bot[j];
@@ -429,7 +448,7 @@ function bank(c: PwCanvas, rng: { next(): number; int(a: number, b: number): num
       const i = y * W + x;
       const d = y - top[j];
       R[i] = rs.body;
-      T[i] = d === 0 ? 3.4 : d === 1 ? 3 : y >= b - 1 ? 2 : 2.4;
+      T[i] = d === 0 ? 3.1 : d === 1 ? 2.9 : y >= b - 1 ? 2 : 2.4;
       F[i] = 0;
     }
     // Lit belly: the underside rim (two rows, hot, near the sun).
@@ -658,18 +677,251 @@ export function z3CityTile(atlas: PwAtlas, o: Z3CityOpts): PwTile {
         b++;
       }
     }
-    // The fire line along the foot: a ragged glowing band, smoke darkening above it, then the fog.
+    // The foot: a dark shoreline, not a glowing tube — separate fires (tongues and a dithered halo)
+    // with dark gaps, street lamps and headlights as single points, and under them in the water
+    // broken reflection streaks (every other row) and a few ripple dashes, melting into the fog.
+    const glowAt = new Float32Array(W);
     for (let x = 0; x < W; x++) {
-      const fh = 2 + Math.round(hash2(x >> 2, 0, 11) * 4 + hash2(x >> 4, 0, 12) * 4);
-      for (let t = 0; t < fh; t++) {
-        const y = ground - t;
-        if (!R[y * W + x]) continue;
-        setT(x, y, t > fh - 2 ? fire : fireHot, t > fh - 2 ? 3 : 4, PWF.GLOW);
+      for (let t = 0; t < 2; t++) setT(x, ground - t, body2, 1.6);
+    }
+    let fx = rng.int(2, 12);
+    while (fx < W - 4) {
+      const fw = rng.int(3, 9);
+      const fh = rng.int(3, 8);
+      for (let xx = fx; xx < fx + fw; xx++) {
+        const hh = Math.round(fh * (1 - Math.abs(xx - fx - fw / 2) / (fw / 2 + 1)) + hash2(xx, 0, 13) * 2);
+        for (let t = 0; t < hh; t++) setT(xx, ground - 1 - t, t > hh - 3 ? fire : fireHot, t > hh - 3 ? 3 : 4.4, PWF.GLOW);
+        glowAt[xx] = Math.max(glowAt[xx], hh);
       }
-      for (let y = ground + 1; y < H; y++) {
-        const yb = (y - ground) / Math.max(1, H - ground);
-        if (BAYER[(y & 3) * 4 + (x & 3)] < yb * 1.8 + 0.1) setT(x, y, fog, 3);
-        else setT(x, y, fire, 2, PWF.GLOW);
+      // Halo round the blaze (dithered, glowing a step down).
+      for (let xx = fx - 2; xx < fx + fw + 2; xx++) for (let t = 0; t < fh + 2; t++) {
+        const y = ground - 1 - t;
+        if (xx < 0 || xx >= W || y < 0) continue;
+        const i = y * W + xx;
+        if (F[i] === PWF.GLOW) continue;
+        if (BAYER[(y & 3) * 4 + (xx & 3)] < 0.35 * (1 - t / (fh + 2))) setT(xx, y, fire, 2, PWF.GLOW);
+      }
+      fx += fw + rng.int(10, 42);
+    }
+    for (let i = 0; i < Math.round(W / 9); i++) {
+      const x = rng.int(1, W - 2);
+      if (glowAt[x]) continue;
+      const head = rng.chance(0.25);
+      setT(x, ground - 1, head ? warm : dim, head ? 5 : 3.6, PWF.GLOW);
+      if (head) setT(x + 2, ground - 1, warm, 5, PWF.GLOW);
+      glowAt[x] = Math.max(glowAt[x], 1);
+    }
+    for (let y = ground + 1; y < H; y++) {
+      const yb = (y - ground) / Math.max(1, H - ground);
+      for (let x = 0; x < W; x++) {
+        const fogged = BAYER[(y & 3) * 4 + (x & 3)] < yb * 1.5 + 0.05;
+        const refl = glowAt[x] > 0 && (y - ground) <= glowAt[x] * 1.6 + 1 && (y & 1) === 1 && hash2(x, y >> 1, 17) > 0.25;
+        if (refl && !fogged) setT(x, y, glowAt[x] > 1 ? fire : dim, glowAt[x] > 1 ? 3 : 2.6, PWF.GLOW);
+        else if (fogged) setT(x, y, fog, 3);
+        else setT(x, y, body2, hash2(x >> 3, y, 19) > 0.9 ? 2.4 : 1.4);
+      }
+    }
+  });
+}
+
+export interface Z3RidgeOpts {
+  /** Rock body (hazed sandstone), the fog it melts into at the foot. */
+  rock: number;
+  fog: number;
+  span: number;
+  el0: number;
+  el1: number;
+}
+
+/**
+ * The ridge the tunnel bores through, as the bridge sees it (a panel `span`° wide, cut out above
+ * the crest): a broken mesa in beds — flat ledges lit by the low sun behind the camera, risers
+ * stepping down, overhang shadows, joints, gullies, desert varnish, scrub on the shelves, boulders
+ * and a dead tree on the crest, a mast with its beacon — hazed toward the dusk, the ROUTE 9 portal
+ * at its foot. Shown from the bridge in place of the far 3D rock (which is in the fog there).
+ */
+export function z3RidgeTile(atlas: PwAtlas, o: Z3RidgeOpts): PwTile {
+  const W = Math.round((o.span * PW_BACKDROP_TPD) / 16) * 16;
+  const H = z3RowsFor(o.el1 - o.el0);
+  return atlas.tile(`z3ridge|${h6(o.rock)}|${o.span}|${o.el0}|${o.el1}`, W, H, (c, k) => {
+    const rng = k.rng;
+    const R = c.ramp;
+    const T = c.tone;
+    const F = c.flag;
+    const rock = k.ramp(o.rock, { light: 0.42, sat: 0.95 });
+    const rock2 = k.ramp(mixHex(o.rock, 0x8a5a48, 0.45), { light: 0.42, sat: 0.95 });
+    const fog = k.ramp(o.fog, { light: 0.35, dark: 0.5 });
+    const scrub = k.ramp(0x4a4234, { light: 0.4 });
+    const conc = k.ramp(0x8a7470, { light: 0.4 });
+    const dark = k.ramp(0x1c1420, { light: 0.4 });
+    const lamp = k.ramp(0xffb050, { light: 0.5 });
+    const red = k.ramp(0xff3020, { light: 0.4 });
+    const rowsPerDeg = H / (o.el1 - o.el0);
+    // The rock's foot: the far ground seen from the deck is a couple of degrees under the horizon.
+    const g = Math.round((o.el1 + 2) * rowsPerDeg);
+    const set = (x: number, y: number, r: number, t: number, f = 0) => {
+      if (x < 0 || y < 0 || x >= W || y >= H) return;
+      const i = y * W + x;
+      R[i] = r;
+      T[i] = t;
+      F[i] = f;
+    };
+    // Envelope (rows above the ground row): a flat-topped mesa with sheer cliffs over its talus,
+    // a lower bench across a saddle (the road's notch, the portal under it), hoodoos at the ends.
+    const smooth = (x: number, s: number, seed: number) => {
+      const xs = x / s;
+      const i0 = Math.floor(xs);
+      const f = xs - i0;
+      const sm = f * f * (3 - 2 * f);
+      return hash2(i0, seed, 3) + (hash2(i0 + 1, seed, 3) - hash2(i0, seed, 3)) * sm;
+    };
+    const mesa = (u: number, c0: number, half: number, top: number, cliff: number, talus: number) => {
+      const d = Math.abs(u - c0);
+      if (d < half) return top;
+      if (d < half + 0.012) return top + (cliff - top) * ((d - half) / 0.012);
+      return cliff * Math.max(0, 1 - (d - half - 0.012) / talus) ** 1.3;
+    };
+    const spire = (u: number, c0: number, w: number, h: number) => (Math.abs(u - c0) < w ? h : 0);
+    const env = new Float32Array(W);
+    for (let x = 0; x < W; x++) {
+      const u = x / (W - 1);
+      const e = Math.max(
+        mesa(u, 0.33, 0.12, 10.6, 7.2, 0.3),
+        mesa(u, 0.69, 0.07, 7.8, 5.2, 0.24),
+        mesa(u, 0.5, 0.0, 4.2, 4.2, 0.2),
+        spire(u, 0.155, 0.009, 6.4),
+        spire(u, 0.862, 0.007, 5.6),
+        0.8,
+      );
+      // Notches and crumbs in the rims (small), never a smooth dome.
+      env[x] = e * rowsPerDeg + (smooth(x, 9, 5) - 0.5) * 3 + (smooth(x, 3, 6) - 0.5) * 1.5;
+    }
+    // Beds 5–8 rows thick; the crest is the top of the highest whole bed under the envelope, so the
+    // outline steps (flat shelves, near-vertical risers) — now and then a bed's broken stump above.
+    const beds: number[] = [0];
+    for (let b = 0; beds[beds.length - 1] < H; b++) beds.push(beds[beds.length - 1] + 5 + Math.floor(hash2(b, 0, 9) * 4));
+    // (Bed index per height, looked up: the painter's inner loops ask for it per texel.)
+    const bedTab = new Int16Array(H + 2);
+    for (let h = 0, b = 0; h < H + 2; h++) {
+      while (b + 1 < beds.length && beds[b + 1] <= h) b++;
+      bedTab[h] = b;
+    }
+    const bedOf = (h: number) => bedTab[Math.max(0, Math.min(H + 1, Math.floor(h)))];
+    const crest = new Int16Array(W);
+    for (let x = 0; x < W; x++) {
+      // Stepped, but not a staircase: the shelves wander (2/3 of the way to the bed's top).
+      const e = env[x];
+      const bb = bedOf(e);
+      const q = beds[bb] + (hash2(x >> 3, bb, 13) > 0.75 ? Math.min(e - beds[bb], 3) : 0);
+      crest[x] = Math.max(1, Math.round(q + (e - q) * 0.35));
+    }
+    // Buttresses and recesses run DOWN the faces (vertical emphasis, like weathered sandstone);
+    // the beds show as lit shelf rims on the buttresses and a shadow line under each lip.
+    for (let x = 0; x < W; x++) {
+      const top = g - crest[x];
+      const bv = smooth(x, 5, 31) * 0.55 + smooth(x, 13, 32) * 0.45;
+      const stepL = x > 0 ? crest[x - 1] - crest[x] : 0;
+      const stepR = x + 1 < W ? crest[x + 1] - crest[x] : 0;
+      for (let y = Math.max(0, top); y < H; y++) {
+        const h = g - y;
+        const b = bedOf(Math.max(0, h));
+        const r = b % 3 === 1 ? rock2 : rock;
+        const inBed = h - beds[b];
+        const bedH = beds[b + 1] - beds[b];
+        let t = 2.1 + bv * 1.3 - (y - top) * 0.012;
+        if (y === top) t = 4.2;
+        else if (y === top + 1) t = 3.4 + bv * 0.4;
+        else if (inBed === bedH - 1 && bv > 0.5) t = 3.9;
+        else if (inBed === bedH - 2 && bv > 0.35) t -= 0.7;
+        // Risers beside a step: the face turned to the light (left) or away (right).
+        if (stepL < 0 && y < g - crest[x - 1] + 1) t = 3.7;
+        if (stepR > 0 && y < g - crest[x + 1] + 1) t = 1.6;
+        set(x, y, r, t);
+      }
+      // Desert varnish weeping from the crest.
+      if (hash2(x, 0, 21) > 0.88) for (let j = 0; j < 4 + Math.floor(hash2(x, 1, 21) * 10); j++) if (dith(x, top + 2 + j, 1 - j / 14)) set(x, top + 2 + j, rock, 1.7);
+    }
+    // Long cracks down the faces (a dark line with a lit lip beside).
+    for (let j = 0; j < Math.round(W / 18); j++) {
+      let x = Math.floor(hash2(j, 0, 23) * W);
+      const y0 = g - crest[x] + 2;
+      const len = Math.round(crest[x] * (0.3 + hash2(j, 1, 23) * 0.5));
+      for (let s2 = 0; s2 < len; s2++) {
+        const y = y0 + s2;
+        if (y >= H || x < 1 || x >= W - 1) break;
+        if (R[y * W + x]) T[y * W + x] = 1.5;
+        if (R[y * W + x + 1]) T[y * W + x + 1] = Math.max(T[y * W + x + 1], 3.5);
+        if (hash2(s2 >> 1, j, 24) > 0.78) x += hash2(s2, j, 25) > 0.5 ? 1 : -1;
+      }
+    }
+    // Gullies: dark wedges cut down from the crest.
+    for (let j = 0; j < 7; j++) {
+      const x0 = Math.floor(W * (0.12 + hash2(j, 0, 25) * 0.76));
+      const len = Math.round(crest[x0] * (0.5 + hash2(j, 1, 25) * 0.4));
+      let gx = x0;
+      for (let s = 0; s < len; s++) {
+        const y = g - crest[x0] + 1 + s;
+        const w = Math.max(1, Math.round(3 - (s / len) * 2));
+        for (let d = 0; d < w; d++) if (R[y * W + gx + d]) T[y * W + gx + d] = d === 0 ? 1.4 : 2;
+        if (R[y * W + gx + w]) T[y * W + gx + w] = 3.9;
+        if (hash2(s >> 2, j, 27) > 0.7) gx += hash2(s, j, 28) > 0.5 ? 1 : -1;
+      }
+    }
+    // Scrub on the shelves, boulders and a dead tree on the crest.
+    for (let i = 0; i < Math.round(W / 4); i++) {
+      const x = rng.int(1, W - 3);
+      const h = beds[bedOf(rng.int(1, Math.max(2, crest[x])))];
+      const y = g - h;
+      if (y <= g - crest[x] || !R[y * W + x]) continue;
+      set(x, y - 1, scrub, 2.4);
+      set(x + 1, y - 1, scrub, 3.2);
+      if (rng.chance(0.4)) set(x + 2, y - 1, scrub, 2);
+    }
+    for (let i = 0; i < 14; i++) {
+      const x = rng.int(3, W - 4);
+      const y = g - crest[x];
+      set(x, y - 1, rock, 3.8);
+      set(x + 1, y - 1, rock, 2.6);
+      if (rng.chance(0.5)) set(x, y - 2, rock, 4);
+    }
+    {
+      const x = Math.round(W * 0.3);
+      const y = g - crest[x];
+      for (let t = 1; t < 9; t++) set(x, y - t, dark, 2);
+      for (let t = 0; t < 4; t++) set(x + 1 + t, y - 5 - (t >> 1), dark, 2);
+      for (let t = 0; t < 3; t++) set(x - 1 - t, y - 6 - t, dark, 2);
+      set(x + 4, y - 8, dark, 2);
+      // A relay mast on the higher summit, its beacon lit.
+      const mx = Math.round(W * 0.37);
+      const my = g - crest[mx];
+      for (let t = 1; t < 14; t++) set(mx, my - t, dark, 2.2);
+      for (const t of [5, 9]) ((set(mx - 1, my - t, dark, 2), set(mx + 1, my - t, dark, 2)));
+      set(mx, my - 14, red, 5, PWF.GLOW);
+    }
+    // The ROUTE 9 portal at the foot: board-formed concrete, a hazard rule, two black bores, lamps.
+    {
+      const pw = Math.round(8.5 * PW_BACKDROP_TPD);
+      const ph = Math.round(3.0 * rowsPerDeg);
+      const x0 = Math.round(W * 0.5 - pw / 2);
+      for (let y = g - ph; y < g + 1; y++) for (let x = x0; x < x0 + pw; x++) set(x, y, conc, y === g - ph ? 3.8 : (y - (g - ph)) % 3 === 0 ? 2.6 : 3);
+      for (let x = x0; x < x0 + pw; x++) set(x, g - ph + Math.round(ph * 0.42), x % 4 < 2 ? lamp : dark, x % 4 < 2 ? 3 : 2);
+      for (const [bx, bw] of [[0.1, 0.3], [0.56, 0.36]] as const) {
+        const bx0 = x0 + Math.round(pw * bx);
+        for (let y = g - Math.round(ph * 0.5); y < g + 1; y++) for (let x = bx0; x < bx0 + Math.round(pw * bw); x++) set(x, y, dark, y === g - Math.round(ph * 0.5) ? 1.4 : 1);
+      }
+      for (const lx of [x0 + 2, x0 + pw - 3]) set(lx, g - Math.round(ph * 0.62), lamp, 4.5, PWF.GLOW);
+    }
+    // The foot melts into the fog (dithered).
+    for (let y = 0; y < H; y++) {
+      const fogK = (y - (g - 1.5 * rowsPerDeg)) / (H - (g - 1.5 * rowsPerDeg));
+      if (fogK <= 0) continue;
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        if (!R[i] || F[i]) continue;
+        if (BAYER[(y & 3) * 4 + (x & 3)] < Math.min(1, fogK * 1.25)) {
+          R[i] = fog;
+          T[i] = 3;
+        }
       }
     }
   });

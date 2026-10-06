@@ -3,9 +3,10 @@ import { PwAtlas } from '../../pixelworld/atlas';
 import { PwBatch } from '../../pixelworld/batch';
 import { PwBackdrop } from '../../pixelworld/backdrop';
 import { kitTileRule, retexture, type TileRule } from '../../pixelworld/retexture';
-import { z3CityTile, z3HillsTile, z3SkyTile } from '../../pixelworld/z3sky';
+import { z3CityTile, z3HillsTile, z3RidgeTile, z3SkyTile } from '../../pixelworld/z3sky';
 import { z3ScrubTile } from '../../pixelworld/z3road';
-import { z3StrataTile } from '../../pixelworld/z3structures';
+import { z3KeepOut, z3StrataTile } from '../../pixelworld/z3structures';
+import { z3InkLevels } from '../../pixelworld/z3levels';
 import { Z3Road } from './pwRoad';
 import { Z3Roadside } from './pwRoadside';
 import { Z3Vehicles } from './pwVehicles';
@@ -13,17 +14,19 @@ import { Z3Trucks } from './pwTrucks';
 import { Z3Structures } from './pwStructures';
 import { Z3Buildings } from './pwBuildings';
 import { BAY_FRAMES, z3BayWater, z3BridgeHouse, z3ContainerTile, z3ExitSign, z3HullTile, z3SosPhone } from '../../pixelworld/z3bay';
-import { z3FootingTile, z3SteelPoleTile } from '../../pixelworld/z3roadside';
+import { z3FlareFire, z3FlarePool, z3FlareStick, z3FootingTile, z3SteelPoleTile, z3TunnelLamp } from '../../pixelworld/z3roadside';
 import { tintFor } from '../../pixelworld/batch';
-import { pwMaterial, pwTick } from '../../pixelworld/material';
+import { pwMaterial, pwTick, type PwMaterialOptions } from '../../pixelworld/material';
 import { Z3FxAtlas } from '../../pixelworld/z3fx';
 import type { PwCarRecord } from './props';
 import type { Ctx } from './scenery';
 import { partsOf } from './pwTrucks';
+import { D } from './layout';
 import { box, cylinder } from './pwShapes';
+import { craggyLump, type RockTiles } from './pwRock';
+import { hash2 } from '../../pixelworld/surfaces';
 import { Kit } from '../../kit/ModelKit';
 import { chainFenceTile } from '../../pixelworld/props';
-import { paintedSign } from '../../pixelworld/signs';
 import type { PwTile } from '../../pixelworld/atlas';
 
 /**
@@ -53,6 +56,12 @@ export const Z3_FOG = 0xa65a54;
  * the ridge reads as a darker hill against the burning skyline, not a flat pink blob.
  */
 export const Z3_HAZE = 0x6e3e4c;
+/** What the far water fades to (the dusk sky's violet laid on the bay). */
+export const Z3_WATER_HAZE = 0x6a4060;
+/** What the far buildings fade to (a little darker and cooler than the rock's haze). */
+export const Z3_BLD_HAZE = 0x5e3646;
+/** Azimuth span (deg) of the ridge panel the bridge sees. */
+const RIDGE_SPAN = 48;
 
 const _inv = new THREE.Matrix4();
 
@@ -85,9 +94,16 @@ export class Z3PixelWorld {
   readonly st: Z3Structures;
   readonly bld: Z3Buildings;
   backdrop: PwBackdrop | null = null;
+  private ridgeLayer: THREE.Object3D | null = null;
+  private ridgeMesh: THREE.Mesh | null = null;
+  private farBatch: { batch: PwBatch; parent: THREE.Object3D } | null = null;
+  private farMesh: THREE.Mesh | null = null;
+  private bridgeView = false;
   private batches = new Map<THREE.Object3D, PwBatch>();
   /** Rock batches per group (hazed toward `Z3_HAZE`, not the fog colour). */
   private rockBatches = new Map<THREE.Object3D, PwBatch>();
+  /** Building batches per group (hazed toward `Z3_BLD_HAZE`: the far warehouses keep their shapes). */
+  private bldBatches = new Map<THREE.Object3D, PwBatch>();
   /** The group being converted (rock goes to its rock batch). */
   private cur: THREE.Object3D | null = null;
   /** Batches laid in a moving group's own frame (built in `finish`). */
@@ -103,10 +119,14 @@ export class Z3PixelWorld {
   private gateLink: PwTile;
   private strata: PwTile;
   private gatePlate: PwTile;
+  private rockTiles: RockTiles;
+  /** Scrub and dead trees for the rock's ledges (env.ts adds them to the stage's flora field). */
+  readonly plants: { key: string; x: number; y: number; z: number; h: number }[] = [];
 
   constructor(readonly ctx: Ctx) {
     this.rule = kitTileRule(this.atlas);
     this.strata = z3StrataTile(this.atlas);
+    this.rockTiles = { face: this.strata, top: z3ScrubTile(this.atlas, { hex: 0x56493a, grass: 0x7a6a40 }) };
     this.anim = new PwBatch(this.atlas);
     const a = this.atlas;
     this.bay = {
@@ -119,9 +139,13 @@ export class Z3PixelWorld {
       footing: z3FootingTile(a),
       steel: z3SteelPoleTile(a),
       scrub: z3ScrubTile(a, { hex: 0x56493a, grass: 0x7a6a40 }),
+      flare: z3FlareStick(a),
+      flareFire: z3FlareFire(a),
+      flarePool: z3FlarePool(a),
+      tunLamp: z3TunnelLamp(a),
     };
     this.gateLink = chainFenceTile(this.atlas, { hex: 0x9a9ea4, rust: 0.4 });
-    this.gatePlate = paintedSign(this.atlas, 'KEEP OUT', { ground: 0xe0b820, ink: 0x1a1a1a, font: 'bold', cap: 0.14 }).tile;
+    this.gatePlate = z3KeepOut(this.atlas);
     this.road = new Z3Road(this.atlas, ctx);
     this.side = new Z3Roadside(this.atlas);
     this.veh = new Z3Vehicles(this.atlas);
@@ -142,6 +166,20 @@ export class Z3PixelWorld {
     const g = this.cur!;
     let b = this.rockBatches.get(g);
     if (!b) this.rockBatches.set(g, (b = new PwBatch(this.atlas)));
+    return b;
+  }
+
+  /** The far portal's batch (world frame, in the group being converted): the bridge view hides it. */
+  private far(): PwBatch {
+    if (!this.farBatch) this.farBatch = { batch: new PwBatch(this.atlas), parent: this.cur! };
+    return this.farBatch.batch;
+  }
+
+  /** The building batch of the group being converted. */
+  private bldg(): PwBatch {
+    const g = this.cur!;
+    let b = this.bldBatches.get(g);
+    if (!b) this.bldBatches.set(g, (b = new PwBatch(this.atlas)));
     return b;
   }
 
@@ -263,22 +301,29 @@ export class Z3PixelWorld {
         this.st.graffiti(b, o, tag as unknown as { text: string; color: number });
         dropUntagged(o, drop);
         return true;
-      case 'tseg':
-        drop.push(...this.st.tunnelSeg(b, o, tag as unknown as { i: number }));
+      case 'tseg': {
+        // The last metres of the bore go with the far portal (hidden from the bridge with the ridge).
+        const far = (tag as unknown as { d: number }).d > D.TUNNEL_TO - 24;
+        drop.push(...this.st.tunnelSeg(far ? this.far() : b, o, tag as unknown as { i: number }));
         return true;
+      }
       case 'fan':
         this.st.fan(b, o as THREE.Mesh);
         drop.push(o);
         return true;
-      case 'portal':
-        drop.push(...this.st.portal(b, o, (tag as unknown as { dir: number }).dir));
+      case 'portal': {
+        const dir = (tag as unknown as { dir: number }).dir;
+        drop.push(...this.st.portal(dir < 0 ? this.far() : b, o, dir));
         return true;
+      }
       case 'bseg':
         drop.push(...this.st.bridgeSeg(b, o));
         return true;
       case 'susp':
       case 'cable':
-        this.st.cable(b, o as THREE.Mesh, tag.k === 'susp');
+        // (The bridge's steel fades to the dusk mauve, not the pink fog: from the approach the far
+        // towers and the cable's sweep hold as a darker silhouette.)
+        this.st.cable(this.rock(), o as THREE.Mesh, tag.k === 'susp');
         drop.push(o);
         return true;
       case 'blamp':
@@ -286,7 +331,7 @@ export class Z3PixelWorld {
         dropUntagged(o, drop, true);
         return true;
       case 'tower':
-        drop.push(...this.st.tower(b, o));
+        drop.push(...this.st.tower(this.rock(), o));
         return true;
       case 'sandbags':
         this.st.sandbags(b, o, tag as unknown as { len: number; rows: number });
@@ -297,21 +342,21 @@ export class Z3PixelWorld {
         dropUntagged(o, drop, true);
         return true;
       case 'house':
-        this.bld.house(b, o, tag as unknown as Parameters<Z3Buildings['house']>[2]);
+        this.bld.house(this.bldg(), o, tag as unknown as Parameters<Z3Buildings['house']>[2]);
         dropUntagged(o, drop, true);
         return true;
       case 'gas':
-        drop.push(...this.bld.gas(b, o));
+        drop.push(...this.bld.gas(this.bldg(), o));
         return true;
       case 'gasSign':
         this.bld.gasSign(b, o);
         dropUntagged(o, drop, true);
         return true;
       case 'warehouse':
-        drop.push(...this.bld.warehouse(b, o, tag as unknown as Parameters<Z3Buildings['warehouse']>[2]));
+        drop.push(...this.bld.warehouse(this.bldg(), o, tag as unknown as Parameters<Z3Buildings['warehouse']>[2]));
         return true;
       case 'motel':
-        drop.push(...this.bld.motel(b, o, tag as unknown as { wins: number[] }));
+        drop.push(...this.bld.motel(this.bldg(), o, tag as unknown as { wins: number[] }));
         return false;
       case 'motelSign':
         this.bld.motelSign(b, o);
@@ -321,11 +366,11 @@ export class Z3PixelWorld {
         drop.push(...this.bld.billboard(b, o, tag as unknown as { art: string; lit: boolean }));
         return true;
       case 'block':
-        this.bld.block(b, o as THREE.Mesh, tag as unknown as Parameters<Z3Buildings['block']>[2]);
+        this.bld.block(this.bldg(), o as THREE.Mesh, tag as unknown as Parameters<Z3Buildings['block']>[2]);
         drop.push(o);
         return true;
       case 'blockRoof':
-        this.bld.blockRoof(b, o as THREE.Mesh);
+        this.bld.blockRoof(this.bldg(), o as THREE.Mesh);
         drop.push(o);
         return true;
       case 'blockWin':
@@ -350,7 +395,12 @@ export class Z3PixelWorld {
       case 'shore':
         for (const p of partsOf(o, true)) {
           const hex = (p.mesh.material as THREE.MeshLambertMaterial).color.getHex();
-          (hex === 0x7a746c ? b : this.rock()).geometry(p.mesh.geometry, p.rel, hex === 0x7a746c ? this.bay.footing : this.strata, { world: true });
+          if (p.mesh.geometry.type === 'IcosahedronGeometry') {
+            // Shore boulders: small stepped crags at the waterline.
+            const e = p.rel.elements;
+            const seed = Math.floor(hash2(Math.round(e[12] * 3), Math.round(e[14] * 3), 9) * 9973);
+            craggyLump(this.rock(), p.rel, this.rockTiles, { ground: -26, seed, segs: 12, crown: 0.5 });
+          } else (hex === 0x7a746c ? b : this.rock()).geometry(p.mesh.geometry, p.rel, hex === 0x7a746c ? this.bay.footing : this.strata, { world: true });
           drop.push(p.mesh);
         }
         return true;
@@ -378,10 +428,36 @@ export class Z3PixelWorld {
         }
         b.setMatrix(null);
         return false;
-      case 'ridge':
-        this.rock().geometry((o as THREE.Mesh).geometry, o.matrixWorld, this.strata, { world: true });
+      case 'ridge': {
+        // Stepped desert cliff in the lump's place (the classic lump only says where the rock goes).
+        const e = o.matrixWorld.elements;
+        const seed = Math.floor(hash2(Math.round(e[12]), Math.round(e[14]), 5) * 9973);
+        const ledges = craggyLump(this.rock(), o.matrixWorld, this.rockTiles, { ground: 0, seed });
+        this.plant(ledges, seed);
         drop.push(o);
         return true;
+      }
+      case 'flare': {
+        // A painted flare (stick, burning end) and its stepped red pool on the road.
+        const g = ((o as THREE.Mesh).geometry as THREE.CylinderGeometry).parameters;
+        b.setMatrix(o.matrixWorld);
+        cylinder(b, new THREE.Vector3(0, -g.height / 2, 0), new THREE.Vector3(0, g.height / 2, 0), 0.045, 0.045, 6, this.bay.flare, { capB: this.bay.flareFire });
+        b.setMatrix(null);
+        const p = o.getWorldPosition(new THREE.Vector3());
+        b.rect(new THREE.Vector3(p.x - 0.75, 0.016, p.z + 0.75), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), 1.5, 1.5, this.bay.flarePool);
+        drop.push(o);
+        return true;
+      }
+      case 'tlight': {
+        // The tunnel's lamp: a sodium tube behind its diffuser (still in the lights group: the
+        // stall's flicker hides it with the group).
+        const d = ((o as THREE.Mesh).geometry as THREE.BoxGeometry).parameters;
+        b.setMatrix(o.matrixWorld);
+        box(b, 0, 0, 0, d.width, d.height, d.depth, { ny: this.bay.tunLamp, px: this.bay.tunLamp, nx: this.bay.tunLamp });
+        b.setMatrix(null);
+        drop.push(o);
+        return true;
+      }
       case 'hazardBand':
       case 'gatePost':
         this.st.hazard(b, o as THREE.Mesh);
@@ -390,6 +466,16 @@ export class Z3PixelWorld {
       default:
         return false;
     }
+  }
+
+  /** Scrub on the rock's lit ledges, now and then a dead tree (pixel billboards of the stage's flora). */
+  private plant(ledges: { x: number; y: number; z: number; room: number }[], seed: number) {
+    ledges.forEach((l, i) => {
+      const r = hash2(seed, i, 61);
+      if (r < 0.35) return;
+      const tree = r > 0.86 && l.room > 2.2;
+      this.plants.push({ key: tree ? 'deadTree' : r > 0.6 ? 'bushWide' : 'bush', x: l.x, y: l.y - 0.15, z: l.z, h: tree ? 3.6 + hash2(seed, i, 67) * 2 : 0.9 + hash2(seed, i, 71) * 0.7 });
+    });
   }
 
   // ─── Moving set pieces (their own painted mesh in their own frame) ────────
@@ -500,56 +586,145 @@ export class Z3PixelWorld {
   }
 
   /** The painted panorama (replaces the dome, glow ring, sun, hills and box skyline). */
-  buildBackdrop(sunAz: number, sunEl: number, cityAz: number): THREE.Group {
+  buildBackdrop(sunAz: number, sunEl: number, cityAz: number, ridgeAz: number): THREE.Group {
     const s = this.skyAtlas;
     const sky = z3SkyTile(s, { fog: Z3_FOG, el0: -6, el1: 40, sunAz, sunEl, cityAz });
     const hills = z3HillsTile(s, { near: 0x3a2234, far: 0x52304a, fog: Z3_FOG, el0: -2, el1: 8, sunAz, cityAz });
     const span = 130;
     const city = z3CityTile(s, { body: 0x2a1a30, fog: Z3_FOG, span, el0: -2, el1: 22 });
+    const ridge = z3RidgeTile(s, { rock: 0x744450, fog: Z3_FOG, span: RIDGE_SPAN, el0: -4, el1: 12 });
     this.backdrop = new PwBackdrop(s, { tile: sky, el0: -6, el1: 40, radius: 330 }, [
       { tile: hills, radius: 320, el0: -2, el1: 8 },
       { tile: city, radius: 310, el0: -2, el1: 22, span, yaw: cityAz },
+      { tile: ridge, radius: 300, el0: -4, el1: 12, span: RIDGE_SPAN, yaw: ridgeAz },
     ]);
-    return this.backdrop.build();
+    const g = this.backdrop.build();
+    this.ridgeLayer = g.children[3] ?? null;
+    if (this.ridgeLayer) this.ridgeLayer.visible = false;
+    return g;
+  }
+
+  /**
+   * The far rock from the bridge: the 3D ridge (in the fog there, a mauve heap) gives way to the
+   * painted ridge panel once the camera is out on the bridge looking back (call per frame).
+   */
+  view(onBridge: boolean) {
+    if (this.bridgeView === onBridge) return;
+    this.bridgeView = onBridge;
+    if (this.ridgeMesh) this.ridgeMesh.visible = !onBridge;
+    if (this.farMesh) this.farMesh.visible = !onBridge;
+    if (this.ridgeLayer) this.ridgeLayer.visible = onBridge;
   }
 
   /** Paint the atlas and add every batch's mesh to its group. Register nothing after this. */
   finish() {
-    this.atlas.build();
+    const data = this.atlas.build();
+    const tiles = [...(this.atlas as unknown as { tiles: Map<string, { tile: PwTile }> }).tiles.values()].map((t) => t.tile);
+    // Letters keep their bars down the levels; sign faces stay on level 0 a little longer.
+    z3InkLevels(data, tiles);
+    const signs = new Set<number>();
+    for (const t of tiles) if (Z3_SIGN_KEY.test(t.key)) signs.add(t.x * 65536 + t.y);
+    const base = pwMaterial(this.atlas, { gain: 1 });
+    const sign = pwMaterial(this.atlas, { gain: 1, bias: Z3_SIGN_BIAS, tag: 'sign' });
     for (const [g, b] of this.batches) {
-      const m = b.build(undefined, { gain: 1 });
-      if (m) g.add(m);
+      const m = b.build(base);
+      if (m) {
+        splitSigns(m, base, sign, signs);
+        g.add(m);
+      }
     }
-    if (this.rockBatches.size) {
-      const mat = rockMaterial(this.atlas);
-      for (const [g, b] of this.rockBatches) {
+    if (this.bldBatches.size) {
+      const mat = hazeMaterial(this.atlas, 'z3bld', Z3_BLD_HAZE, 0.72);
+      for (const [g, b] of this.bldBatches) {
         const m = b.build(mat);
         if (m) g.add(m);
       }
     }
+    if (this.rockBatches.size) {
+      const mat = hazeMaterial(this.atlas, 'z3rock', Z3_HAZE, 0.8);
+      for (const [g, b] of this.rockBatches) {
+        const m = b.build(mat);
+        if (!m) continue;
+        g.add(m);
+        if (g.userData.pw?.k === 'ridgeGroup') this.ridgeMesh = m;
+      }
+    }
+    if (this.farBatch) {
+      const m = this.farBatch.batch.build(base);
+      if (m) {
+        splitSigns(m, base, sign, signs);
+        this.farBatch.parent.add(m);
+        this.farMesh = m;
+      }
+    }
     for (const { batch, parent } of this.parts) {
-      const m = batch.build(undefined, { gain: 1 });
-      if (m) parent.add(m);
+      const m = batch.build(base);
+      if (m) {
+        splitSigns(m, base, sign, signs);
+        parent.add(m);
+      }
     }
     if (this.animParent) {
-      this.animMat = pwMaterial(this.atlas, { anim: { frames: BAY_FRAMES, fps: 3 } });
+      // The bay keeps its swell and the dusk glints out to the horizon (hazed, never flat fog).
+      this.animMat = hazeMaterial(this.atlas, 'z3water', Z3_WATER_HAZE, 0.7, { anim: { frames: BAY_FRAMES, fps: 3 } });
       const m = this.anim.build(this.animMat);
       if (m) this.animParent.add(m);
     }
   }
 }
 
-/** The PixelWorld material, fogged toward `Z3_HAZE` (the rock's aerial perspective) instead of the fog colour. */
-function rockMaterial(atlas: PwAtlas): THREE.MeshLambertMaterial {
-  const m = pwMaterial(atlas, { tag: 'z3rock' });
-  if (m.userData.z3rock) return m;
-  m.userData.z3rock = true;
+/** Painted letters (highway signs, posters, graffiti, cast letters, plates): their own material. */
+const Z3_SIGN_KEY = /^z3(sign|graffiti|cast|bb|flammable|keepout|stencil|unit)(\||$)/;
+/**
+ * Level bias of the letters. Their levels keep the glyphs (ink levels, glyphs on the level grid),
+ * so the right level is the one sampled at under a texel a pixel: a coarser level a step sooner
+ * (+0.75: 0.6–1.2 level texels a pixel) never drops a one-texel bar between two pixels.
+ */
+export const Z3_SIGN_BIAS = 0.25;
+
+/**
+ * One painted mesh, up to two draws: its triangles re-ordered into the rest (`base`) and the
+ * signs (`sign`, by their tile's atlas rect), as geometry groups.
+ */
+function splitSigns(m: THREE.Mesh, base: THREE.Material, sign: THREE.Material, signs: Set<number>) {
+  const g = m.geometry;
+  const idx = g.index!;
+  const rect = g.getAttribute('pwRect') as THREE.BufferAttribute;
+  const n = idx.count / 3;
+  const a: number[] = [];
+  const s: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = idx.getX(i * 3);
+    const key = rect.getX(v) * 65536 + rect.getY(v);
+    const out = signs.has(key) ? s : a;
+    out.push(idx.getX(i * 3), idx.getX(i * 3 + 1), idx.getX(i * 3 + 2));
+  }
+  if (!s.length) return;
+  const all = a.concat(s);
+  g.setIndex(idx.array instanceof Uint32Array ? new THREE.Uint32BufferAttribute(all, 1) : new THREE.Uint16BufferAttribute(all, 1));
+  g.clearGroups();
+  if (a.length) g.addGroup(0, a.length, 0);
+  g.addGroup(a.length, s.length, 1);
+  m.material = [base, sign];
+}
+
+/**
+ * The PixelWorld material fogged toward `haze` (aerial perspective: the far rock, the far buildings)
+ * instead of the fog colour, never more than `cap` of the way: a warehouse 120 m off keeps its doors
+ * and lettering as darker shapes, it does not dissolve into a flat salmon block.
+ */
+function hazeMaterial(atlas: PwAtlas, tag: string, haze: number, cap: number, o: PwMaterialOptions = {}): THREE.MeshLambertMaterial {
+  const m = pwMaterial(atlas, { ...o, tag });
+  if (m.userData.z3haze) return m;
+  m.userData.z3haze = true;
   const base = m.onBeforeCompile;
-  const haze = { value: new THREE.Color(Z3_HAZE) };
+  const col = { value: new THREE.Color(haze) };
+  const capU = { value: cap };
   m.onBeforeCompile = (shader, r) => {
     base.call(m, shader, r);
-    shader.uniforms.uZ3Haze = haze;
-    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uZ3Haze;').replace(
+    shader.uniforms.uZ3Haze = col;
+    shader.uniforms.uZ3HazeCap = capU;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uZ3Haze;\nuniform float uZ3HazeCap;').replace(
       '#include <fog_fragment>',
       `#ifdef USE_FOG
   #ifdef FOG_EXP2
@@ -557,11 +732,11 @@ function rockMaterial(atlas: PwAtlas): THREE.MeshLambertMaterial {
   #else
     float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
   #endif
-  gl_FragColor.rgb = mix( gl_FragColor.rgb, uZ3Haze, fogFactor );
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, uZ3Haze, min( fogFactor, uZ3HazeCap ) );
 #endif`,
     );
   };
   const key = m.customProgramCacheKey.bind(m);
-  m.customProgramCacheKey = () => `${key()}|z3rock`;
+  m.customProgramCacheKey = () => `${key()}|z3haze`;
   return m;
 }

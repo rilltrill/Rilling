@@ -120,6 +120,49 @@ describe('z3 HIGHWAY TO HELL in PIXEL WORLD', () => {
     Kit.disposeAll();
   });
 
+  it('keeps the letters of its signs whole down the levels (sign fit)', { timeout: 60_000 }, async () => {
+    // The story signs, painted alone: after the ink pass, every ink texel of the board's letters at
+    // level 0 still has an ink parent at levels 1 and 2 (no bar of an E / Z dropped: "SAFT 7ONE").
+    const { PwAtlas } = await import('../../src/content/pixelworld/atlas');
+    const { z3HighwaySign, z3KeepOut } = await import('../../src/content/pixelworld/z3structures');
+    const { z3FlammableBand } = await import('../../src/content/pixelworld/z3trucks');
+    const { z3BillboardFace } = await import('../../src/content/pixelworld/z3buildings');
+    const { z3InkLevels, Z3_INK_DEBUG } = await import('../../src/content/pixelworld/z3levels');
+    clearPwCache();
+    const a = new PwAtlas('z3-signfit');
+    const tiles = [
+      z3HighwaySign(a, ['SAFE ZONE', 'MILITARY CHECKPOINT'], 15.5, 2.9, 0x1a3a1a),
+      z3HighwaySign(a, ['BRIDGE 3 MI', 'SAFE ZONE ^'], 7.4, 2.6, 0x1d6a3c),
+      z3BillboardFace(a, 'repent'),
+      z3KeepOut(a),
+      z3FlammableBand(a),
+    ];
+    const data = a.build();
+    z3InkLevels(data, tiles, undefined, true);
+    for (const t of tiles) {
+      const lv = Z3_INK_DEBUG.get(t.key);
+      expect(lv, t.key).toBeTruthy();
+      const m0 = lv![0];
+      let ink = 0;
+      for (let i = 0; i < m0.mask.length; i++) ink += m0.mask[i];
+      expect(ink, t.key).toBeGreaterThan(50);
+      for (const L of [1, 2]) {
+        const ml = lv![L];
+        let kept = 0;
+        for (let y = 0; y < m0.h; y++) for (let x = 0; x < m0.w; x++) {
+          if (!m0.mask[y * m0.w + x]) continue;
+          const px = x >> L;
+          const py = y >> L;
+          if (px < ml.w && py < ml.h && ml.mask[py * ml.w + px]) kept++;
+        }
+        const recall = kept / ink;
+        // (Two-texel letters — the plates — are three texels tall at level 2: their corners go.)
+        const small = /keepout|flammable/.test(t.key);
+        expect(recall, `${t.key} level ${L}`).toBeGreaterThan(L === 2 && small ? 0.85 : 0.95);
+      }
+    }
+  });
+
   it('plays exactly like PIXEL CAST (stage simulator)', { timeout: 600_000 }, () => {
     const a = simulateStage(stage('z3'), { art: 'sprites', maxTime: 400 });
     const b = simulateStage(stage('z3'), { art: 'pixel', maxTime: 400 });

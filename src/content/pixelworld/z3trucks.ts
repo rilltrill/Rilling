@@ -3,6 +3,7 @@ import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { drawText, FONT_3x5, FONT_BOLD, textWidth } from './font';
 import { hash2 } from './surfaces';
 import { dith, fill, G, h6, rivet, rustRun, sootBloom, wscatter } from './z3kit';
+import { z3Ink, z3SnapGlyph } from './z3levels';
 
 /**
  * HIGHWAY TO HELL (z3) big vehicles for ART: PIXEL WORLD — the jackknifed
@@ -96,6 +97,49 @@ export function z3SemiCabBack(atlas: PwAtlas, hex: number, burnt: boolean): PwTi
     for (let y = 50; y < 60; y += 3) c.hline(32, y, 16, black, 1.6);
     for (let i = 0; i < 8; i++) rustRun(c, rng, rng.int(2, 78), rng.int(30, 70), rng.int(6, 14), rust);
     if (burnt) sootBloom(c, 40, 84, 44, 80, 2.4);
+  });
+}
+
+/** Roof air deflector (module 64 × 72 over the 2.1 m fairing): paint with a lit lip, a livery stripe, a riveted rim, bug splats and grime. */
+export function z3Deflector(atlas: PwAtlas, hex: number, burnt: boolean): PwTile {
+  return atlas.tile(`z3deflector|${h6(hex)}|${burnt ? 1 : 0}`, 64, 72, (c, k) => {
+    const rng = k.rng;
+    const p = k.ramp(burnt ? 0x6e5c56 : hex, { light: 0.5, sat: 0.95 });
+    const stripe = k.ramp(burnt ? 0x3a3034 : 0xe8e0c8, { light: 0.45 });
+    const stripe2 = k.ramp(burnt ? 0x3a3034 : 0xe0a020, { light: 0.45 });
+    const grime = k.ramp(0x2e2628, { light: 0.4 });
+    fill(c, p, 3);
+    // The lip at the front (top of the module: the high end), the shoulder shading down the sides.
+    c.rect(0, 0, 64, 3, p, 4.4);
+    c.hline(0, 3, 64, p, 1.8);
+    for (let y = 4; y < 72; y++) {
+      c.set(0, y, p, 2);
+      c.set(1, y, p, 2.4);
+      c.set(62, y, p, 3.6);
+      c.set(63, y, p, 2.2);
+    }
+    // Livery: two bands sweeping across.
+    for (let x = 2; x < 62; x++) {
+      const y0 = 26 + Math.round((x - 32) * 0.12);
+      for (let t = 0; t < 4; t++) c.set(x, y0 + t, stripe, t === 0 ? 4 : 3.2);
+      for (let t = 0; t < 2; t++) c.set(x, y0 + 6 + t, stripe2, 3.4);
+    }
+    for (let y = 6; y < 70; y += 8) ((rivet(c, 3, y, p, 3), rivet(c, 60, y, p, 3)));
+    // Bug splats and road grime toward the lip, a rust run.
+    for (let i = 0; i < 14; i++) c.set(rng.int(4, 59), rng.int(4, 18), grime, 1.6);
+    for (let x = 2; x < 62; x++) for (let y = 60; y < 72; y++) if (dith(x, y, (y - 60) / 14)) c.set(x, y, grime, 2);
+    if (burnt) sootBloom(c, 32, 72, 30, 70, 2);
+  });
+}
+
+/** Cab marker lamp (module 8 × 6): an amber lens (glow) in a black bezel. */
+export function z3MarkerLamp(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3marker', 8, 6, (c, k) => {
+    const black = k.ramp(0x18181c, { light: 0.4 });
+    const amber = k.ramp(0xffa030, { light: 0.55 });
+    fill(c, black, 1.6);
+    c.rect(1, 1, 6, 4, amber, 4, G);
+    c.hline(2, 1, 4, amber, 5, G);
   });
 }
 
@@ -254,8 +298,10 @@ export function z3FlammableBand(atlas: PwAtlas): PwTile {
     c.hline(0, 15, 192, red, 1.8);
     // Letters filling the band (legible from the road at a distance).
     const tw = textWidth('FLAMMABLE', FONT_BOLD, { scale: 2, spacing: 2 });
-    drawText(c, 'FLAMMABLE', Math.round((192 - tw) / 2), 1, FONT_BOLD, white, 4, { scale: 2, spacing: 2 });
+    const [gx, gy] = z3SnapGlyph(Math.round((192 - tw) / 2), 2, 2, 16);
+    drawText(c, 'FLAMMABLE', gx, gy, FONT_BOLD, white, 4, { scale: 2, spacing: 2 });
     wscatter(c, k.rng, 0, 0, 192, 16, 30, 0, -1, { shapes: 2 });
+    z3Ink('z3flammable', c, [white]);
   });
 }
 
@@ -335,28 +381,45 @@ export function z3ArmyCabSide(atlas: PwAtlas): PwTile {
 
 /** Canvas cover side (wrap 64 × 84 = 2 m × 2.6 m): bows under the canvas, sag between, rope ties, dust, patches. */
 export function z3CanvasCover(atlas: PwAtlas): PwTile {
-  return atlas.tile('z3canvas', 64, 96, (c, k) => {
+  return atlas.tile('z3canvas2', 64, 96, (c, k) => {
     const rng = k.rng;
     const cv = k.ramp(0x66704a, { light: 0.45, sat: 0.85 });
     const rope = k.ramp(0xa89a70, { light: 0.4 });
     const patch = k.ramp(0x5a6440, { light: 0.4 });
+    const mud = k.ramp(0x4a3a28, { light: 0.4 });
     fill(c, cv, 3);
+    const sagX = new Float32Array(64);
+    for (let x = 0; x < 64; x++) sagX[x] = Math.sin(((x % 32) / 32) * Math.PI);
     for (let y = 0; y < 96; y++) {
       for (let x = 0; x < 64; x++) {
-        // Bows every 1 m (32 texels): the canvas taut over them (lit), sagging between (shaded).
+        // Hoops every 1 m (32 texels): taut and lit over them; between, the cloth sags into a
+        // belly with diagonal pull folds toward the hoops (not straight stripes).
         const u = (x % 32) / 32;
-        const sag = Math.sin(u * Math.PI);
+        const sag = sagX[x];
+        const fold = Math.sin((u * 2 + y / 40) * Math.PI * 2 + (x >> 5) * 1.7) * 0.35 * sag;
         const i = y * 64 + x;
-        c.tone[i] = u < 0.06 || u > 0.94 ? 4.2 : 3.2 - sag * 0.9 + (y < 6 ? 0.8 : 0);
+        c.tone[i] = u < 0.06 || u > 0.94 ? 4.2 : 3.2 - sag * 0.8 + fold + (y < 6 ? 0.8 : 0);
       }
     }
-    // Rope ties along the bottom hem, a stitched patch, dust.
+    // Rope ties lacing the hem, a stitched patch, mud thrown up from the wheels.
     for (let x = 0; x < 64; x++) c.set(x, 86, cv, 1.8);
-    for (let x = 4; x < 64; x += 16) for (let y = 84; y < 92; y++) c.set(x + ((y >> 1) & 1), y, rope, 3.4);
+    for (let x = 4; x < 64; x += 16) for (let y = 80; y < 92; y++) c.set(x + ((y >> 1) & 1), y, rope, 3.4);
     c.rect(40, 30, 12, 10, patch, 3);
     c.frame(40, 30, 12, 10, patch, 2);
-    wscatter(c, rng, 0, 60, 64, 36, 40, k.ramp(0x8a7a5a, { light: 0.4 }), 2.8, { shapes: 3 });
+    for (let y = 70; y < 96; y++) for (let x = 0; x < 64; x++) if (dith(x, y, ((y - 70) / 26) * (0.5 + hash2(x >> 2, 0, 5) * 0.6))) c.set(x, y, mud, y > 88 ? 1.8 : 2.4);
+    wscatter(c, rng, 0, 50, 64, 30, 30, mud, 2.2, { shapes: 3 });
   }, { wrap: true });
+}
+
+/** The army truck's stencilled unit marking (cut out, with ink): bumper code + a star in a ring. */
+export function z3UnitStencil(atlas: PwAtlas): PwTile {
+  const key = 'z3unit';
+  return atlas.tile(key, 96, 32, (c, k) => {
+    const w = k.ramp(0xe8e4d4, { light: 0.4 });
+    drawText(c, '3-41 INF', 2, 2, FONT_BOLD, w, 3.2, { scale: 2, spacing: 1 });
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 96; x++) if (c.ramp[y * 96 + x] === w && hash2(x >> 1, y >> 1, 3) > 0.88) c.set(x, y, 0, 0);
+    z3Ink(key, c, [w]);
+  });
 }
 
 /** Tank track (wrap 32 × 16): road wheels behind the skirt, track links. */

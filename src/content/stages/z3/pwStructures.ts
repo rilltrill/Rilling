@@ -5,8 +5,9 @@ import { hash2, hazardTile } from '../../pixelworld/surfaces';
 import { railingTile } from '../../pixelworld/props';
 import {
   z3BridgeSteel, z3CableTile, z3CastLetters, z3FanEnd, z3FanTile, z3FasciaTile, z3FloodHead, z3GraffitiWords, z3HighwaySign, z3PierTile, z3PortalTile, z3RiprapTile,
-  z3SandbagTile, z3SignBack, z3SoffitTile, z3SosMarker, z3SoundWallTile, z3TrussTile, z3TunnelCeil, z3TunnelWall,
+  z3SandbagTile, z3SignBack, z3SoffitTile, z3SosMarker, z3SoundWallTile, z3TrussTile, z3TunnelCeil, z3TunnelWall, z3LadderTile, z3ClampTile, z3TowerStencil,
 } from '../../pixelworld/z3structures';
+import { z3GrimeRuns } from '../../pixelworld/z3buildings';
 import { z3CobraHead, z3FootingTile, z3SteelPoleTile } from '../../pixelworld/z3roadside';
 import { z3ChromeTile } from '../../pixelworld/z3trucks';
 import { box, card, cylinder, type FaceTiles } from './pwShapes';
@@ -30,6 +31,8 @@ const _m = new THREE.Matrix4();
 
 export class Z3Structures {
   readonly t;
+  /** Towers painted so far (their stencils: A, B). */
+  private towerN = -1;
 
   constructor(readonly atlas: PwAtlas) {
     const a = atlas;
@@ -59,7 +62,11 @@ export class Z3Structures {
       footing: z3FootingTile(a),
       cobra: z3CobraHead(a, true),
       flood: z3FloodHead(a),
-      sandbag: [1, 2, 3, 4].map((r) => z3SandbagTile(a, r)),
+      // (Registered when a wall needs its course count: only three-course walls are built.)
+      sandbag: (rows: number) => z3SandbagTile(a, rows),
+      ladder: z3LadderTile(a),
+      clamp: z3ClampTile(a),
+      grime: z3GrimeRuns(a),
     };
   }
 
@@ -308,6 +315,8 @@ export class Z3Structures {
     const g = (m.geometry as THREE.CylinderGeometry).parameters;
     b.setMatrix(m.matrixWorld);
     cylinder(b, V(0, -g.height / 2, 0), V(0, g.height / 2, 0), g.radiusBottom, g.radiusTop, thin ? 4 : 6, thin ? this.t.steel : this.t.cable);
+    // Band clamps on the main cable where the hangers grip it (they break the long smooth tube).
+    if (!thin) for (const y of [-g.height / 4, g.height / 4]) cylinder(b, V(0, y - 0.24, 0), V(0, y + 0.24, 0), g.radiusTop + 0.12, g.radiusTop + 0.12, 8, this.t.clamp, { vLen: 16 });
     b.setMatrix(null);
   }
 
@@ -324,6 +333,7 @@ export class Z3Structures {
   /** A bridge tower: riveted red legs with bands, caps, open portal bracing, piers in the water. */
   tower(b: PwBatch, g: THREE.Object3D): THREE.Object3D[] {
     const out: THREE.Object3D[] = [];
+    this.towerN++;
     const t = this.t;
     for (const p of partsOf(g, true)) {
       const m = p.mesh;
@@ -336,16 +346,47 @@ export class Z3Structures {
         if (m.position.y > 45) box(b, 0, 0, 0, d.width, d.height, d.depth, all(t.bsteel));
         else this.trussBox(b, 0, 0, 0, d.width, d.height, d.depth, t.trussRed);
       } else if (near(d.height, 0.25) || near(d.height, 2)) box(b, 0, 0, 0, d.width, d.height, d.depth, all(t.bsteelDark));
-      else {
-        box(b, 0, 0, 0, d.width, d.height, d.depth, all(t.bsteel));
-        if (d.height > 30) {
+      else if (d.height > 30) {
+        // A leg: stacked so it can carry value — the splash-dark foot in the water, a grimy band
+        // at the deck, the clean steel above; rust weeping under every batten, a caged ladder up
+        // the face toward the road, the tower's stencil at the deck.
+        const yc = m.position.y;
+        const bot = -d.height / 2;
+        const deck = -yc;
+        const bands: [number, number, number][] = [
+          [bot, deck - 1, 0xd0c0c4],
+          [deck - 1, deck + 7, 0xb4a4a8],
+          [deck + 7, d.height / 2, 0xffffff],
+        ];
+        for (const [y0, y1, tint] of bands) box(b, 0, (y0 + y1) / 2, 0, d.width, y1 - y0, d.depth, { px: t.bsteel, nx: t.bsteel, pz: t.bsteel, nz: t.bsteel }, {}, { tint, v0: (y0 - bot) * 32 });
+        box(b, 0, d.height / 2 - 0.01, 0, d.width, 0.02, d.depth, { py: t.bsteel });
+        const hx = d.width / 2 + 0.03;
+        const hz = d.depth / 2 + 0.03;
+        for (let wy = -20; wy < 50; wy += 6) {
+          const ly = wy - yc - 0.15;
+          const gh = 1.6;
+          b.rect(V(-hx, ly - gh, hz), X, Y, d.width + 0.06, gh, t.grime, { u0: wy * 7, v0: 0 });
+          b.rect(V(hx, ly - gh, -hz), V(-1, 0, 0), Y, d.width + 0.06, gh, t.grime, { u0: wy * 5, v0: 0 });
+          b.rect(V(hx, ly - gh, hz), V(0, 0, -1), Y, d.depth + 0.06, gh, t.grime, { u0: wy * 3, v0: 0 });
+          b.rect(V(-hx, ly - gh, -hz), V(0, 0, 1), Y, d.depth + 0.06, gh, t.grime, { u0: wy * 11, v0: 0 });
+        }
+        // The face toward the road: −x for the right-hand leg, +x for the left.
+        const inner = m.position.x > 0 ? -1 : 1;
+        const ux = V(0, 0, -inner);
+        const lh = d.height / 2 - deck - 2.4;
+        card(b, V(inner * (d.width / 2 + 0.32), deck + 1.2, inner * 0.5), ux, Y, 1, lh, t.ladder);
+        // The tower's letter stencilled big on one half of the face (the pilaster splits it).
+        const st = z3TowerStencil(this.atlas, this.towerN === 0 ? 'A' : 'B');
+        const zc = inner * 1.15;
+        b.rect(V(inner * (d.width / 2 + 0.035), deck + 2.6, zc + inner * (st.wM / 2)), ux, Y, st.wM, st.hM, st.tile);
+        {
           // Corner angles running up the leg: relief that catches the dusk on one side.
           for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(b, sx * (d.width / 2 - 0.12), 0, sz * (d.depth / 2 - 0.12), 0.42, d.height, 0.42, all(t.bsteelDark));
           // Mid-face pilasters.
           for (const sz of [-1, 1]) box(b, 0, 0, sz * (d.depth / 2 + 0.08), 0.6, d.height, 0.2, all(t.bsteel));
           for (const sx of [-1, 1]) box(b, sx * (d.width / 2 + 0.08), 0, 0, 0.2, d.height, 0.6, all(t.bsteel));
         }
-      }
+      } else box(b, 0, 0, 0, d.width, d.height, d.depth, all(t.bsteel));
       out.push(m);
     }
     b.setMatrix(null);
@@ -356,7 +397,7 @@ export class Z3Structures {
   sandbags(b: PwBatch, g: THREE.Object3D, rec: { len: number; rows: number }) {
     g.updateMatrixWorld(true);
     b.setMatrix(g.matrixWorld);
-    const tile = this.t.sandbag[Math.max(1, Math.min(4, rec.rows)) - 1];
+    const tile = this.t.sandbag(Math.max(1, Math.min(4, rec.rows)));
     const H = 1.0;
     const L = rec.len + 0.3;
     // Front and back faces (the tile's top courses are cut out above `rows`).

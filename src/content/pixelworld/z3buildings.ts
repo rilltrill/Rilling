@@ -3,6 +3,7 @@ import { drawText, FONT_3x5, FONT_5x7, FONT_BOLD, FONT_TALL, textWidth } from '.
 import { neutral, NEUTRAL_HEX } from './retexture';
 import { hash2 } from './surfaces';
 import { dith, fill, G, h6, rivet, rustRun, sootBloom, wscatter, wset } from './z3kit';
+import { z3Ink, z3SnapGlyph } from './z3levels';
 
 /**
  * HIGHWAY TO HELL (z3) roadside buildings for ART: PIXEL WORLD: the suburb's
@@ -368,12 +369,17 @@ export function z3BillboardFace(atlas: PwAtlas, art: string): PwTile {
     const wood = k.ramp(0x5a4434, { light: 0.4 });
     if (art === 'repent') {
       fill(c, paper, 3);
-      const s = 5;
+      const s = 4;
       const tw = textWidth('REPENT', FONT_BOLD, { scale: s, spacing: 1 });
-      drawText(c, 'REPENT', Math.round((W - tw) / 2), 4, FONT_BOLD, red, 3, { scale: s, spacing: 1, shadow: { ramp: black, tone: 2 }, shadowD: 2 });
-      const t2 = textWidth('THE END IS NEAR', FONT_BOLD, { scale: 2, spacing: 1 });
-      drawText(c, 'THE END IS NEAR', Math.round((W - t2) / 2), 78, FONT_BOLD, black, 2, { scale: 2, spacing: 1 });
-      drawText(c, 'JOHN 3:16', W - 44, 108, FONT_3x5, black, 2);
+      const [rx, ry] = z3SnapGlyph(Math.round((W - tw) / 2), 8, s, H);
+      drawText(c, 'REPENT', rx, ry, FONT_BOLD, red, 3, { scale: s, spacing: 1, shadow: { ramp: k.ramp(0x141418, { light: 0.4 }), tone: 2 }, shadowD: 2 });
+      // The warning in strokes four texels wide, on the level grid (they still read when the board is small on screen).
+      const t2 = textWidth('THE END IS NEAR', FONT_5x7, { scale: 3, spacing: 0 });
+      const [sx, sy] = z3SnapGlyph(Math.round((W - t2) / 2), 72, 3, H);
+      drawText(c, 'THE END IS NEAR', sx, sy, FONT_5x7, black, 2, { scale: 3, spacing: 0 });
+      // (The small print in its own ink: it is not meant to read from the road.)
+      drawText(c, 'JOHN 3:16', W - 44, 108, FONT_3x5, k.ramp(0x1c1a1e, { light: 0.4 }), 2);
+      z3Ink(`z3bb|${art}`, c, [red, black]);
     } else if (art === 'burger') {
       fill(c, red, 3);
       // A big painted burger: bun dome, sesame, lettuce frills, cheese drip, patty, bottom bun.
@@ -397,6 +403,7 @@ export function z3BillboardFace(atlas: PwAtlas, art: string): PwTile {
       drawText(c, 'BURGER', 136, 8, FONT_BOLD, yel, 3.4, { scale: s, shadow: { ramp: black, tone: 1 }, shadowD: 2 });
       drawText(c, 'BARN', 150, 48, FONT_BOLD, yel, 3.4, { scale: s + 1, shadow: { ramp: black, tone: 1 }, shadowD: 2 });
       drawText(c, 'EXIT 9 >', 178, 102, FONT_BOLD, paper, 3.6);
+      z3Ink(`z3bb|${art}`, c, [yel, paper]);
     } else {
       // The burnt motel ad: charred planks, ghost of the old poster, holes burnt through (cut out).
       fill(c, wood, 2.4);
@@ -417,10 +424,15 @@ export function z3BillboardFace(atlas: PwAtlas, art: string): PwTile {
       return;
     }
     // Weathering: rain runs from the top, a torn strip showing the old ad's paper beneath, grime along the bottom.
+    const inkR = art === 'repent' ? [red, black] : [yel, paper];
     for (let i = 0; i < 30; i++) {
       const x = rng.int(0, W - 1);
       const len = rng.int(8, 52);
-      for (let j = 0; j < len; j++) if (dith(x, j, 1 - j / len)) c.tint(x, j, grime, 0.3);
+      for (let j = 0; j < len; j++) if (dith(x, j, 1 - j / len)) {
+        // Rain runs dull the lettering, they do not eat it.
+        if (inkR.includes(c.at(x, j))) c.shift(x, j, -0.4);
+        else c.tint(x, j, grime, 0.3);
+      }
     }
     const tx = rng.int(30, W - 90);
     for (let y = 92; y < H; y++) for (let x = tx; x < tx + 44 + Math.round(Math.sin(y * 0.3) * 5); x++) c.set(x, y, k.ramp(0x7a9ab8, { light: 0.4 }), 3);
@@ -447,3 +459,104 @@ export function z3BillboardBack(atlas: PwAtlas): PwTile {
   }, { wrap: true });
 }
 
+
+// ─── R2: what holds a building's shape in the dusk haze ─────────────────────
+
+/** A company name stencilled big on warehouse cladding (cut out): faded cream caps with a drop shadow, chipped. */
+export function z3CompanyName(atlas: PwAtlas, name: string): { tile: PwTile; wM: number; hM: number } {
+  const scale = 3;
+  const tw = textWidth(name, FONT_BOLD, { scale, spacing: 1 });
+  const W = Math.ceil((tw + 8) / 2) * 2;
+  const H = FONT_BOLD.h * scale + 8;
+  const key = `z3coname|${name}`;
+  const tile = atlas.tile(key, W, H, (c, k) => {
+    const paint = k.ramp(0xe0d4b8, { light: 0.4 });
+    const shadow = k.ramp(0x2a2428, { light: 0.4 });
+    const [gx, gy] = z3SnapGlyph(4, 3, scale, H);
+    drawText(c, name, gx, gy, FONT_BOLD, paint, 3.4, { scale, spacing: 1, shadow: { ramp: shadow, tone: 1.6 }, shadowD: 2 });
+    // Chipped: flakes of the letters gone back to the wall (cut out), a lit top edge.
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (c.ramp[i] !== paint) continue;
+      if (hash2(x >> 1, y >> 1, 7) > 0.86) c.set(x, y, 0, 0);
+      else if (y > 0 && c.ramp[i - W] !== paint) c.set(x, y, paint, 4.2);
+    }
+    z3Ink(key, c, [paint]);
+  });
+  return { tile, wM: W / 32, hM: H / 32 };
+}
+
+/** Rust and grime weeping down from a roof edge (cut-out wrap 64 × 96 = 2 × 3 m): sparse dark runs, a few orange. */
+export function z3GrimeRuns(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3grime', 64, 96, (c, k) => {
+    const rng = k.rng;
+    const grime = k.ramp(0x2e2628, { light: 0.4 });
+    const rust = k.ramp(0x8a4a24, { light: 0.45 });
+    // A dirty band right under the edge, then the runs.
+    for (let x = 0; x < 64; x++) for (let y = 0; y < 6; y++) if (dith(x, y, 1 - y / 6)) c.set(x, y, grime, 1.8);
+    for (let i = 0; i < 9; i++) {
+      const x = rng.int(0, 63);
+      const len = rng.int(20, 90);
+      const r = rng.chance(0.3) ? rust : grime;
+      for (let j = 0; j < len; j++) if (dith(x, j, 1 - j / len)) {
+        wset(c, x, j, r, r === rust ? 2.6 : 1.8);
+        if (j < len * 0.4) wset(c, x + 1, j, r, r === rust ? 3 : 2.2);
+      }
+    }
+  }, { wrap: true });
+}
+
+/** Soot plume up a wall over a burnt window (cut-out module 48 × 64): a black tongue fading up and out. */
+export function z3SootPlume(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3sootplume', 48, 64, (c, k) => {
+    const soot = k.ramp(0x1c1618, { light: 0.4 });
+    for (let y = 0; y < 64; y++) {
+      const up = 1 - y / 64;
+      const half = 9 + up * 13 + Math.sin(y * 0.3) * 2;
+      for (let x = 0; x < 48; x++) {
+        const u = Math.abs(x - 24) / half;
+        if (u > 1) continue;
+        const dens = (1 - up * 0.85) * (1 - u * u) * 1.5;
+        if (!dith(x, y, dens)) continue;
+        c.set(x, y, soot, dens > 0.9 ? 1 : 1.8);
+      }
+    }
+  });
+}
+
+/** A rooftop TV antenna (cut-out module 32 × 48 = 1 × 1.5 m): mast, three crossbars with elements, a guy wire. */
+export function z3Antenna(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3antenna', 32, 48, (c, k) => {
+    const m = k.ramp(0x7a7c84, { light: 0.5 });
+    c.vline(16, 4, 44, m, 2.6);
+    c.vline(17, 4, 44, m, 1.6);
+    for (const [y, w] of [[6, 12], [13, 10], [20, 7]] as const) {
+      c.hline(16 - w, y, w * 2 + 1, m, 3);
+      for (let x = 16 - w; x <= 16 + w; x += 3) ((c.set(x, y - 1, m, 2.4), c.set(x, y + 1, m, 2.4)));
+    }
+    c.line(16, 26, 2, 47, m, 1.8);
+  });
+}
+
+/** An open loading bay (module 128 × 144 = 4 × 4.5 m): the shutter rolled up into its hood, a dark interior, crates, a work lamp. */
+export function z3OpenBay(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3openbay', 128, 144, (c, k) => {
+    const s = k.ramp(0x5e6068, { light: 0.45, sat: 0.6 });
+    const dark = k.ramp(0x141218, { light: 0.4 });
+    const crate = k.ramp(0x5a4430, { light: 0.4 });
+    const lamp = k.ramp(0xffc070, { light: 0.55 });
+    fill(c, dark, 1.2);
+    c.rect(0, 0, 128, 20, s, 2.6);
+    c.hline(0, 0, 128, s, 4);
+    for (let y = 14; y < 20; y += 3) c.hline(4, y, 120, s, 3.4);
+    for (const x of [0, 124]) c.rect(x, 20, 4, 124, s, 2);
+    // A work lamp's pool on the floor and a stack of crates in it.
+    c.rect(60, 24, 8, 3, lamp, 4.6, G);
+    for (let y = 100; y < 144; y++) for (let x = 30; x < 98; x++) if (dith(x, y, 0.45 - Math.abs(x - 64) / 90)) c.set(x, y, dark, 2.2);
+    for (const [x, y, w, h] of [[36, 112, 26, 32], [64, 120, 22, 24], [44, 92, 18, 20]] as const) {
+      c.rect(x, y, w, h, crate, 2.4);
+      c.hline(x, y, w, crate, 3.4);
+      c.line(x, y, x + w - 1, y + h - 1, crate, 1.6);
+    }
+  });
+}

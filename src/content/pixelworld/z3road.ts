@@ -468,7 +468,9 @@ export function z3PotholeDecal(atlas: PwAtlas): PwTile {
 
 /** Dry dusk scrubland (wrap 256 × 256 = 8 m): cracked earth plates, dead grass tufts, pebbles, a tyre rut. */
 export function z3ScrubTile(atlas: PwAtlas, o: { hex: number; grass: number }): PwTile {
-  return atlas.tile(`z3scrub|${h6(o.hex)}|${h6(o.grass)}`, 256, 256, (c, k) => {
+  // 128 × 128 (4 m): the verges are seen at a glance from the moving truck; the clusters are
+  // scaled to the area (a quarter of the old 8 m tile's paint time).
+  return atlas.tile(`z3scrub|${h6(o.hex)}|${h6(o.grass)}|128`, 128, 128, (c, k) => {
     const rng = k.rng;
     const W = c.w;
     const H = c.h;
@@ -482,7 +484,7 @@ export function z3ScrubTile(atlas: PwAtlas, o: { hex: number; grass: number }): 
     // Darker earth in broad patches.
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        const v = hash2(x >> 5, y >> 5, 81) * 0.55 + hash2((x + 16) >> 5, (y + 16) >> 5, 82) * 0.45 + hash2(x >> 1, y >> 1, 83) * 0.1;
+        const v = hash2(x >> 5, y >> 5, 81) * 0.55 + hash2(((x + 16) >> 5) % (W >> 5), ((y + 16) >> 5) % (H >> 5), 82) * 0.45 + hash2(x >> 1, y >> 1, 83) * 0.1;
         if (v > 0.66) {
           const i = y * W + x;
           R[i] = E2;
@@ -491,7 +493,7 @@ export function z3ScrubTile(atlas: PwAtlas, o: { hex: number; grass: number }): 
       }
     }
     // Cracked earth: short dark crack walks (shifts of what is there).
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 15; i++) {
       let x = rng.int(0, W - 1);
       let y = rng.int(0, H - 1);
       let a = rng.next() * Math.PI * 2;
@@ -503,7 +505,7 @@ export function z3ScrubTile(atlas: PwAtlas, o: { hex: number; grass: number }): 
       }
     }
     // Pebbles: a lit top-left, a shadow below-right.
-    for (let i = 0; i < 160; i++) {
+    for (let i = 0; i < 40; i++) {
       const x = rng.int(0, W - 1);
       const y = rng.int(0, H - 1);
       wset(c, x, y, St, rng.chance(0.3) ? 4 : 3);
@@ -511,7 +513,7 @@ export function z3ScrubTile(atlas: PwAtlas, o: { hex: number; grass: number }): 
       wshift(c, x + 1, y + 1, -1);
     }
     // Dead grass tufts (fans of blades, lit tips), in clumps.
-    for (let i = 0; i < 70; i++) {
+    for (let i = 0; i < 18; i++) {
       const cx = rng.int(0, W - 1);
       const cy = rng.int(0, H - 1);
       const n = rng.int(1, 4);
@@ -525,8 +527,8 @@ export function z3ScrubTile(atlas: PwAtlas, o: { hex: number; grass: number }): 
         wshift(c, x, y + 1, -1);
       }
     }
-    wscatter(c, rng, 0, 0, W, H, 500, 0, 1, { shapes: 3, only: E });
-    wscatter(c, rng, 0, 0, W, H, 400, 0, -1, { shapes: 3 });
+    wscatter(c, rng, 0, 0, W, H, 125, 0, 1, { shapes: 3, only: E });
+    wscatter(c, rng, 0, 0, W, H, 100, 0, -1, { shapes: 3 });
   }, { wrap: true });
 }
 

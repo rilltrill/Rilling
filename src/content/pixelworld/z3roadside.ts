@@ -351,3 +351,61 @@ export function z3FootingTile(atlas: PwAtlas, hex = 0x6e6a66): PwTile {
     wscatter(c, rng, 0, 0, 64, 64, 30, 0, 0.6, { shapes: 2 });
   }, { wrap: true });
 }
+
+// ─── R2: the last classic glows ──────────────────────────────────────────────
+
+/** A road flare (wrap 16 × 16 round the stick): red paper, a white band, the striker end. */
+export function z3FlareStick(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3flarestick', 16, 16, (c, k) => {
+    const red = k.ramp(0xc8281c, { light: 0.5 });
+    const white = k.ramp(0xe8e4dc, { light: 0.4 });
+    fill(c, red, 3);
+    for (let x = 0; x < 16; x++) {
+      c.set(x, 6, white, 3.6);
+      c.set(x, 7, white, 3.2);
+      c.set(x, 0, red, 4);
+    }
+  }, { wrap: true });
+}
+
+/** The burning end of a flare (module 8 × 8, glow): a white-hot core in a red bloom. */
+export function z3FlareFire(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3flarefire', 8, 8, (c, k) => {
+    const hot = k.ramp(0xffe0d0, { light: 0.6 });
+    const red = k.ramp(0xff3020, { light: 0.5 });
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+      const d = Math.hypot(x - 3.5, y - 3.5);
+      if (d < 2) c.set(x, y, hot, 5, G);
+      else if (d < 4) c.set(x, y, red, d < 3 ? 4.6 : 3.6, G);
+    }
+  });
+}
+
+/** The red pool a flare throws on the asphalt (cut-out module 48 × 48): stepped rings, Bayer-thinned outward. */
+export function z3FlarePool(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3flarepool', 48, 48, (c, k) => {
+    const red = k.ramp(0xb02018, { light: 0.45 });
+    for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++) {
+      const d = Math.hypot(x - 23.5, y - 23.5) / 24;
+      if (d > 1) continue;
+      // Three steps of light, each thinner (an ordered dither, never a smooth disc).
+      const k2 = d < 0.3 ? 0.75 : d < 0.6 ? 0.45 : 0.2;
+      if (!dith(x, y, k2)) continue;
+      c.set(x, y, red, d < 0.3 ? 3.4 : d < 0.6 ? 2.6 : 2, G);
+    }
+  });
+}
+
+/** A tunnel light (module 16 × 64 over the 0.36 × 1.9 m lens): sodium tube behind a prismatic diffuser, end caps, louvres. */
+export function z3TunnelLamp(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3tunlamp', 16, 64, (c, k) => {
+    const hot = k.ramp(0xffc070, { light: 0.6 });
+    const amber = k.ramp(0xffa040, { light: 0.5 });
+    const cap = k.ramp(0x2a2a30, { light: 0.4 });
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 16; x++) {
+      if (y < 3 || y > 60 || x === 0 || x === 15) c.set(x, y, cap, y < 3 || y > 60 ? 2.4 : 1.8);
+      else if (y % 6 === 0) c.set(x, y, amber, 3.4, G);
+      else c.set(x, y, x > 5 && x < 10 ? hot : amber, x > 5 && x < 10 ? 5 : 4.2, G);
+    }
+  });
+}

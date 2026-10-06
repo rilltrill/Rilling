@@ -1,8 +1,9 @@
 import type { PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
-import { boldFont, drawText, FONT_3x5, FONT_BOLD, rasterText, textWidth, type PixelFont } from './font';
+import { boldFont, drawText, FONT_3x5, FONT_5x7, FONT_BOLD, rasterText, textWidth, type PixelFont } from './font';
 import { hash2 } from './surfaces';
 import { dith, fill, G, h6, rivet, rustRun, sootBloom, wscatter, wset, wshift } from './z3kit';
+import { z3Ink, z3SnapGlyph } from './z3levels';
 
 /**
  * HIGHWAY TO HELL (z3) structures for ART: PIXEL WORLD: highway signs in the
@@ -18,45 +19,66 @@ import { dith, fill, G, h6, rivet, rustRun, sootBloom, wscatter, wset, wshift } 
 
 // ─── Signs ───────────────────────────────────────────────────────────────────
 
+const ARROW = ['..#..', '.###.', '#####', '..#..', '..#..', '..#..', '..#..', '.....', '.....'];
+
 /** The sign font: the bold caps plus `^`, the up arrow the classic signs use. */
 const SIGN_FONT: PixelFont = (() => {
   const g = new Map(FONT_BOLD.glyphs);
-  const arrow = ['..#..', '.###.', '#####', '..#..', '..#..', '..#..', '..#..', '.....', '.....'];
-  g.set('^', boldFont({ w: 5, h: 9, base: 7, glyphs: new Map([['^', arrow]]), gap: 1, space: 3 }).glyphs.get('^')!);
+  g.set('^', boldFont({ w: 5, h: 9, base: 7, glyphs: new Map([['^', ARROW]]), gap: 1, space: 3 }).glyphs.get('^')!);
   return { ...FONT_BOLD, glyphs: g };
+})();
+
+/** The regular-weight sign font (a long legend at four texels a font pixel beats bold at three). */
+const SIGN_FONT_R: PixelFont = (() => {
+  const g = new Map(FONT_5x7.glyphs);
+  g.set('^', ARROW);
+  return { ...FONT_5x7, glyphs: g };
 })();
 
 /** A highway sign face (`wM` × `hM` m): reflective letters in rows, white border, bolts, dirt, bullet holes. */
 export function z3HighwaySign(atlas: PwAtlas, lines: string[], wM: number, hM: number, hex: number): PwTile {
   const W = Math.round(wM * 32);
   const H = Math.round(hM * 32);
-  return atlas.tile(`z3sign|${lines.join('/')}|${W}|${H}|${h6(hex)}`, W, H, (c, k) => {
+  const key = `z3sign|${lines.join('/')}|${W}|${H}|${h6(hex)}`;
+  return atlas.tile(key, W, H, (c, k) => {
     const rng = k.rng;
     const g = k.ramp(hex, { light: 0.45, sat: 1 });
     const white = k.ramp(0xf0f0e8, { light: 0.4, sat: 0.4 });
+    const rim = k.ramp(0xecece2, { light: 0.4, sat: 0.4 });
     const dirt = k.ramp(0x4a4a3a, { light: 0.4 });
     const steel = k.ramp(0x8a8c92, { light: 0.5 });
     fill(c, g, 3);
-    // Rounded white border inset 3 texels.
+    // Rounded white border inset 3 texels (its own ramp: only the letters are ink).
     for (let x = 4; x < W - 4; x++) {
-      c.set(x, 3, white, 3.6);
-      c.set(x, H - 4, white, 3.2);
+      c.set(x, 3, rim, 3.6);
+      c.set(x, H - 4, rim, 3.2);
     }
     for (let y = 4; y < H - 4; y++) {
-      c.set(3, y, white, 3.6);
-      c.set(W - 4, y, white, 3.2);
+      c.set(3, y, rim, 3.6);
+      c.set(W - 4, y, rim, 3.2);
     }
     for (const [x, y] of [[0, 0], [W - 1, 0], [0, H - 1], [W - 1, H - 1]]) c.set(x, y, 0, 0);
-    // Letters: the biggest whole scale of the bold font that fits rows and width.
-    const longest = Math.max(...lines.map((l) => textWidth(l, SIGN_FONT)));
-    const rowH = SIGN_FONT.base + 3;
-    let scale = 1;
-    while ((scale + 1) * longest <= W - 18 && (scale + 1) * rowH * lines.length <= H - 12) scale++;
+    // Letters: the biggest whole scale of the bold font that fits rows and width — unless that is
+    // an odd three, when the regular weight at four fits: a font pixel then fills a whole level-2
+    // texel (the legend stays a clean 1× font from far away instead of a misaligned blur).
+    const fit = (f: PixelFont) => {
+      const longest = Math.max(...lines.map((l) => textWidth(l, f)));
+      const rowH = f.base + 3;
+      let sc = 1;
+      while ((sc + 1) * longest <= W - 18 && (sc + 1) * rowH * lines.length <= H - 12) sc++;
+      return sc;
+    };
+    const sB = fit(SIGN_FONT);
+    const font = sB === 3 && fit(SIGN_FONT_R) >= 4 ? SIGN_FONT_R : SIGN_FONT;
+    const scale = font === SIGN_FONT ? sB : 4;
+    const rowH = font.base + 3;
     const total = lines.length * rowH * scale - 3 * scale;
     let y = Math.round((H - total) / 2) - 2 * scale;
     for (const line of lines) {
-      const tw = textWidth(line, SIGN_FONT, { scale });
-      drawText(c, line, Math.round((W - tw) / 2), y, SIGN_FONT, white, 3.6, { scale, shadeFn: (_u, v) => (v < 0.3 ? 0.6 : 0) });
+      const tw = textWidth(line, font, { scale });
+      // (Glyphs on the level grid: far away, a level texel is one font pixel.)
+      const [gx, gy] = z3SnapGlyph(Math.round((W - tw) / 2), y, scale, H);
+      drawText(c, line, gx, gy, font, white, 3.6, { scale, shadeFn: (_u, v) => (v < 0.3 ? 0.6 : 0) });
       y += rowH * scale;
     }
     // Bolts along the top / bottom, dirt running down from the top edge, a scrape.
@@ -67,7 +89,11 @@ export function z3HighwaySign(atlas: PwAtlas, lines: string[], wM: number, hM: n
     for (let i = 0; i < Math.round(W / 6); i++) {
       const x = rng.int(1, W - 2);
       const len = rng.int(3, Math.round(H * 0.5));
-      for (let j = 0; j < len; j++) if (dith(x, j, 1 - j / len)) c.tint(x, 1 + j, dirt, -0.5);
+      for (let j = 0; j < len; j++) if (dith(x, j, 1 - j / len)) {
+        // (Over the letters the dirt only dulls them a step: they stay letters.)
+        if (c.at(x, 1 + j) === white) c.shift(x, 1 + j, -0.6);
+        else c.tint(x, 1 + j, dirt, -0.5);
+      }
     }
     // Bullet holes: punched dark centres with lit bent-metal rims.
     for (let i = 0; i < Math.max(2, Math.round(W / 50)); i++) {
@@ -78,6 +104,8 @@ export function z3HighwaySign(atlas: PwAtlas, lines: string[], wM: number, hM: n
       c.set(x - 1, yy - 1, steel, 4.6);
       c.set(x + 1, yy + 1, steel, 2);
     }
+    // The letters hold their bars down the levels.
+    z3Ink(key, c, [white]);
   });
 }
 
@@ -301,7 +329,8 @@ export function z3GraffitiWords(atlas: PwAtlas, text: string, hex: number): { ti
   const tw = textWidth(text, FONT_BOLD, { scale, spacing: 1 });
   const W = tw + 12;
   const H = FONT_BOLD.h * scale + 12;
-  const tile = atlas.tile(`z3graffiti|${text}|${h6(hex)}`, W, H, (c, k) => {
+  const gkey = `z3graffiti|${text}|${h6(hex)}`;
+  const tile = atlas.tile(gkey, W, H, (c, k) => {
     const rng = k.rng;
     const col = k.ramp(hex, { light: 0.4, sat: 1.1 });
     const out = k.ramp(0x1a1a1e, { light: 0.4 });
@@ -335,6 +364,7 @@ export function z3GraffitiWords(atlas: PwAtlas, text: string, hex: number): { ti
       if (base < 0) continue;
       for (let j = 1; j < rng.int(3, 8); j++) c.set(dx, base + j, col, 2.6);
     }
+    z3Ink(gkey, c, [col]);
   });
   // Sized like the classic tag (0.12 m a font pixel): 0.06 m a texel at scale 2.
   return { tile, wM: (W * 0.12) / scale, hM: (H * 0.12) / scale };
@@ -529,9 +559,11 @@ export function z3CastLetters(atlas: PwAtlas, text: string): { tile: PwTile; wM:
   const tw = textWidth(text, f, { scale, spacing: 1 });
   const W = tw + 4;
   const H = f.h * scale + 6;
-  const tile = atlas.tile(`z3cast|${text}`, W, H, (c, k) => {
+  const ckey = `z3cast|${text}`;
+  const tile = atlas.tile(ckey, W, H, (c, k) => {
     const m = k.ramp(0xc8c0b0, { light: 0.45 });
     drawText(c, text, 2, 0, f, m, 3, { scale, spacing: 1, shadow: { ramp: k.ramp(0x2a2622, { light: 0.4 }), tone: 1 }, shadowD: 2, shadeFn: (_u, v) => (v < 0.2 ? 1.2 : v > 0.8 ? -0.6 : 0) });
+    z3Ink(ckey, c, [m]);
   });
   // The classic letters' size (0.16 m a font pixel).
   return { tile, wM: (W * 0.16) / scale, hM: (H * 0.16) / scale };
@@ -628,35 +660,50 @@ export function z3CableTile(atlas: PwAtlas, hex = 0xb8442a): PwTile {
 
 /** Sandbag wall face (wrap 64 × 32 = 2 m × 1 m, 4 courses; cut out above the top course's lumps). */
 export function z3SandbagTile(atlas: PwAtlas, rows: number): PwTile {
-  return atlas.tile(`z3sandbag|${rows}`, 64, 32, (c, k) => {
+  return atlas.tile(`z3sandbag2|${rows}`, 64, 32, (c, k) => {
     const rng = k.rng;
     const a = k.ramp(0x9a8858, { light: 0.45, sat: 0.9 });
     const b = k.ramp(0x847450, { light: 0.45, sat: 0.9 });
-    const tie = k.ramp(0x5a4a30, { light: 0.4 });
-    // Courses of 8 rows (0.25 m) from the bottom; bags 20 texels long, staggered.
+    const tie = k.ramp(0x4a3a24, { light: 0.4 });
+    const gap = k.ramp(0x2a2218, { light: 0.4 });
+    // Dark joints behind everything (the gaps between bags read as gaps).
+    for (let y = 32 - rows * 8; y < 32; y++) for (let x = 0; x < 64; x++) c.set(x, y, gap, 1.4);
+    // Courses of ~8 rows from the bottom, unevenly staggered; each bag a pillow: a rounded body
+    // swelling in the middle, a pinched tied end, a lit top, a dark sag crease, a shadowed belly.
     for (let r = 0; r < 4; r++) {
-      const y0 = 32 - (r + 1) * 8;
-      const off = (r & 1) * 10;
-      for (let bx = -20; bx < 64; bx += 20) {
-        const ramp = ((bx + off) / 20 + r) & 1 ? a : b;
-        for (let yy = 0; yy < 8; yy++) {
-          for (let xx = 0; xx < 20; xx++) {
-            // Lumpy pillow: rounded corners, bulging middle.
-            const u = (xx + 0.5) / 20 - 0.5;
-            const v = (yy + 0.5) / 8 - 0.5;
-            if (Math.abs(u) > 0.45 && Math.abs(v) > 0.3) continue;
-            if (r === rows - 1 && yy === 0 && hash2(bx + xx, r, 3) > 0.6) continue;
-            const t = v < -0.3 ? 4 : v > 0.3 ? 2 : u > 0.35 ? 2.4 : 3;
-            wset(c, bx + off + xx, y0 + yy, ramp, t);
+      const y0 = 32 - (r + 1) * 8 + (hash2(r, 1, 7) > 0.6 ? 1 : 0);
+      let bx = -24 + Math.floor(hash2(r, 2, 7) * 12);
+      let n = 0;
+      while (bx < 64) {
+        const L = 17 + Math.floor(hash2(r, n, 9) * 6);
+        const ramp = (n + r) & 1 ? a : b;
+        const dy = hash2(r, n, 11) > 0.7 ? -1 : 0;
+        for (let xx = 0; xx < L; xx++) {
+          const u = (xx + 0.5) / L - 0.5;
+          // The tied end (right) pinches in; the body swells.
+          const half = 4.2 * Math.sqrt(Math.max(0, 1 - (u / 0.5) ** 4)) * (u > 0.32 ? 1 - (u - 0.32) * 2.2 : 1);
+          for (let yy = 0; yy < 9; yy++) {
+            const v = yy + 0.5 - 4.5;
+            if (Math.abs(v) > half) continue;
+            if (r === rows - 1 && v < -half + 1 && hash2(bx + xx, r, 3) > 0.7) continue;
+            const vn = v / Math.max(1, half);
+            let t = vn < -0.65 ? 4.2 : vn < -0.25 ? 3.5 : vn > 0.6 ? 1.9 : 2.9;
+            // The sag crease running along the bag, a little below the crown.
+            if (Math.abs(vn + 0.05 - u * 0.2) < 0.12 && Math.abs(u) < 0.32) t = 2.3;
+            wset(c, bx + xx, y0 + 4 + Math.round(v) + dy, ramp, t);
           }
         }
-        wset(c, bx + off + 18, y0 + 3, tie, 2);
-        wset(c, bx + off + 18, y0 + 4, tie, 2);
+        // The tie: a dark knot at the pinched end, an ear of sacking past it.
+        wset(c, bx + L - 2, y0 + 4 + dy, tie, 2);
+        wset(c, bx + L - 2, y0 + 5 + dy, tie, 1.6);
+        wset(c, bx + L - 1, y0 + 3 + dy, ramp, 3.4);
+        bx += L - 1;
+        n++;
       }
     }
     // Courses above `rows` are cut out (the wall is `rows` courses tall).
     for (let y = 0; y < 32 - rows * 8; y++) for (let x = 0; x < 64; x++) c.set(x, y, 0, 0);
-    wscatter(c, rng, 0, 32 - rows * 8, 64, rows * 8, 40, 0, -0.8, { shapes: 2 });
+    wscatter(c, rng, 0, 32 - rows * 8, 64, rows * 8, 30, 0, -0.7, { shapes: 2 });
   }, { wrap: true });
 }
 
@@ -674,3 +721,93 @@ export function z3FloodHead(atlas: PwAtlas): PwTile {
   });
 }
 
+
+/**
+ * The barricade gate's warning plate (module 64 × 32 on the 1 × 0.5 m plate): KEEP / OUT in big
+ * bold caps on hazard yellow (the letters hold their bars down the levels), a black rule between,
+ * a riveted rim, rust weeping from the bolts, a dent.
+ */
+export function z3KeepOut(atlas: PwAtlas): PwTile {
+  const key = 'z3keepout';
+  return atlas.tile(key, 64, 32, (c, k) => {
+    const rng = k.rng;
+    const yel = k.ramp(0xe0b820, { light: 0.45, sat: 1 });
+    const ink = k.ramp(0x1a1a1a, { light: 0.4 });
+    const rust = k.ramp(0x7a4a2a, { light: 0.4 });
+    fill(c, yel, 3);
+    c.hline(0, 0, 64, yel, 4.2);
+    c.vline(0, 0, 32, yel, 4);
+    c.hline(0, 31, 64, yel, 1.8);
+    c.vline(63, 0, 32, yel, 2);
+    for (const [x, y] of [[0, 0], [63, 0], [0, 31], [63, 31]]) c.set(x, y, 0, 0);
+    for (const word of ['KEEP', 'OUT']) {
+      const tw = textWidth(word, FONT_BOLD, { scale: 2, spacing: 1 });
+      const [gx, gy] = z3SnapGlyph(Math.round((64 - tw) / 2), word === 'KEEP' ? 0 : 16, 2, 32);
+      drawText(c, word, gx, gy, FONT_BOLD, ink, 2, { scale: 2, spacing: 1 });
+    }
+    c.hline(5, 15, 54, ink, 2);
+    for (const [x, y] of [[3, 3], [60, 3], [3, 28], [60, 28]]) {
+      rivet(c, x, y, yel, 3);
+      rustRun(c, rng, x, y + 2, rng.int(3, 8), rust);
+    }
+    for (let i = 0; i < 18; i++) {
+      const x = rng.int(1, 62);
+      const y = rng.int(1, 30);
+      if (c.at(x, y) === yel) c.set(x, y, yel, rng.chance(0.5) ? 2.2 : 3.8);
+    }
+    z3Ink(key, c, [ink]);
+  });
+}
+
+// ─── R2: the boss arena's steel up close ─────────────────────────────────────
+
+/** A caged access ladder (cut-out wrap 32 × 32 = 1 m): two rails, rungs, a hoop of the safety cage. */
+export function z3LadderTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3ladder', 32, 32, (c, k) => {
+    const s = k.ramp(0x6a6e74, { light: 0.5 });
+    for (let y = 0; y < 32; y++) {
+      c.set(10, y, s, 3.8);
+      c.set(11, y, s, 2.4);
+      c.set(20, y, s, 3.4);
+      c.set(21, y, s, 2.2);
+      c.set(4, y, s, 2.8);
+      c.set(27, y, s, 2.4);
+    }
+    for (const y of [4, 15, 26]) {
+      c.hline(10, y, 12, s, 3.6);
+      c.hline(10, y + 1, 12, s, 1.8);
+    }
+    for (let x = 4; x < 28; x++) c.set(x, 0, s, x < 16 ? 3.6 : 2.6);
+  }, { wrap: true });
+}
+
+/** A main-cable band clamp (wrap 32 × 16 round the collar): dark steel, bolt heads, a lit rim. */
+export function z3ClampTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3clamp', 32, 16, (c, k) => {
+    const s = k.ramp(0x4a2a24, { light: 0.45 });
+    fill(c, s, 2.6);
+    c.hline(0, 0, 32, s, 4);
+    c.hline(0, 15, 32, s, 1.4);
+    for (let x = 2; x < 32; x += 8) ((rivet(c, x, 5, s, 3.4), rivet(c, x, 10, s, 3.4)));
+  }, { wrap: true });
+}
+
+/** A stencil painted on the tower leg (cut out): big white characters, chipped, with an ink mask. */
+export function z3TowerStencil(atlas: PwAtlas, text: string): { tile: PwTile; wM: number; hM: number } {
+  const scale = 6;
+  const tw = textWidth(text, FONT_BOLD, { scale, spacing: 1 });
+  const W = Math.ceil((tw + 4) / 2) * 2;
+  const H = FONT_BOLD.h * scale + 4;
+  const key = `z3stencil|${text}`;
+  const tile = atlas.tile(key, W, H, (c, k) => {
+    const w = k.ramp(0xe8e4dc, { light: 0.4 });
+    drawText(c, text, 2, 2, FONT_BOLD, w, 3.6, { scale, spacing: 1 });
+    // Stencil bridges (gaps across the strokes) and chips.
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (c.ramp[y * W + x] !== w) continue;
+      if ((y === Math.round(H * 0.5) && (x & 15) < 3) || hash2(x >> 1, y >> 1, 3) > 0.9) c.set(x, y, 0, 0);
+    }
+    z3Ink(key, c, [w]);
+  });
+  return { tile, wM: W / 32, hM: H / 32 };
+}

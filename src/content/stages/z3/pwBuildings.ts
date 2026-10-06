@@ -4,11 +4,12 @@ import { tintFor, type PwBatch, type PwRectOpts } from '../../pixelworld/batch';
 import { windowModule, WINDOW_M, shopfrontModule, SHOPFRONT_H_M, type WindowKind } from '../../pixelworld/facade';
 import { hash2 } from '../../pixelworld/surfaces';
 import { neonSign } from '../../pixelworld/signs';
-import { railingTile } from '../../pixelworld/props';
+import { picketFenceTile, railingTile } from '../../pixelworld/props';
 import {
   z3BillboardBack, z3BillboardFace, z3CanopyFascia, z3ChimneyTile, z3CladdingTile, z3FireWindow, z3GasSign, z3HouseDoor, z3LitStrip, z3MotelDoor, z3MotelWindow,
-  z3BrickTile, z3PumpFront, z3RollerDoor, z3ShingleTile, z3SidingTile, z3StuccoTile,
+  z3BrickTile, z3PumpFront, z3RollerDoor, z3ShingleTile, z3SidingTile, z3StuccoTile, z3Antenna, z3CompanyName, z3GrimeRuns, z3OpenBay, z3SootPlume,
 } from '../../pixelworld/z3buildings';
+import { z3TyreTile } from '../../pixelworld/z3cars';
 import { z3SteelPoleTile } from '../../pixelworld/z3roadside';
 import { z3FasciaTile, z3SoffitTile } from '../../pixelworld/z3structures';
 import { box, card, cylinder } from './pwShapes';
@@ -53,6 +54,12 @@ export class Z3Buildings {
       brick: z3BrickTile(a),
       bbBack: z3BillboardBack(a),
       railing: railingTile(a, { hex: 0xc8c0b0 }),
+      picket: picketFenceTile(a, { hex: 0xd8d0c0 }),
+      antenna: z3Antenna(a),
+      soot: z3SootPlume(a),
+      grime: z3GrimeRuns(a),
+      openBay: z3OpenBay(a),
+      tyre: z3TyreTile(a),
     };
   }
 
@@ -106,6 +113,31 @@ export class Z3Buildings {
     });
     const door = z3HouseDoor(a, hv > 0.5 ? 0x5a2a22 : 0x2a3a4a, !r.burning && hv > 0.3);
     b.rect(V(-0.56, 0, dpt / 2 + 0.03), X, Y, 1.125, 2.25, door);
+    // ── What makes it a house, not a box: corner boards, a concrete foundation, gutters under
+    // the eaves, a porch (posts, a little shingled roof, steps), soot climbing over the burnt
+    // windows, an antenna on the ridge, a picket fence and a tyre in the yard.
+    const trim = t.white;
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(b, sx * (w / 2), h / 2, sz * (dpt / 2), 0.16, h, 0.16, { px: trim, nx: trim, pz: trim, nz: trim });
+    box(b, 0, 0.2, 0, w + 0.08, 0.4, dpt + 0.08, { px: t.fascia, nx: t.fascia, pz: t.fascia, nz: t.fascia, py: t.fascia });
+    for (const s of [-1, 1]) box(b, 0, h + 0.02, s * (dpt / 2 + 0.38), w + 0.6, 0.12, 0.12, { py: t.steel, pz: t.steel, nz: t.steel, ny: t.steel, px: t.steel, nx: t.steel });
+    const pz = dpt / 2 + 1.2;
+    for (const px of [-1.0, 1.0]) box(b, px, 1.25, pz, 0.12, 2.5, 0.12, { px: trim, nx: trim, pz: trim, nz: trim });
+    _m.compose(V(0, 2.55, dpt / 2 + 0.6), new THREE.Quaternion().setFromEuler(new THREE.Euler(0.22, 0, 0)), V(1, 1, 1));
+    b.setMatrix(g.matrixWorld.clone().multiply(_m));
+    box(b, 0, 0, 0, 2.6, 0.1, 1.5, { py: sh, pz: t.fascia, px: t.fascia, nx: t.fascia, ny: t.soffit });
+    b.setMatrix(g.matrixWorld);
+    box(b, 0, 0.12, dpt / 2 + 0.55, 1.6, 0.24, 1.0, { py: t.fascia, pz: t.fascia, px: t.fascia, nx: t.fascia });
+    r.wins.forEach((kind, i) => {
+      if (kind !== 2) return;
+      const x = i === 0 ? -w / 3 : w / 3;
+      const top = h * 0.55 + 0.62;
+      const ph = Math.min(2.0, h + 0.1 - top);
+      if (ph > 0.4) b.rect(V(x - 0.75, top, dpt / 2 + 0.035), X, Y, 1.5, ph, t.soot, { sub: { x: 0, y: 0, w: 48, h: Math.max(1, Math.round((ph / 2.0) * 64)) } });
+    });
+    if (hv < 0.75) card(b, V(-w * 0.2 - 0.5, h + ridge * 0.55, 0), X, Y, 1, 1.5, t.antenna);
+    const fz = dpt / 2 + 3.2;
+    card(b, V(-w / 2 - 1, 0, fz), X, Y, w + 2, 1.0, t.picket);
+    if (hv > 0.3) cylinder(b, V(w * 0.3, 0.2, fz - 1.2), V(w * 0.3, 0.4, fz - 1.2), 0.38, 0.38, 8, t.tyre);
     b.setMatrix(null);
   }
 
@@ -161,8 +193,28 @@ export class Z3Buildings {
       if (glow) {
         const name = COMPANIES[r.i % COMPANIES.length];
         b.rect(V(-d.width / 2, -d.height / 2, d.depth / 2 + 0.01), X, Y, d.width, d.height, z3LitStrip(this.atlas, name, Math.round(d.width)));
-      } else if (near(d.width, r.w)) box(b, 0, 0, 0, d.width, d.height, d.depth, { px: t.cladding, nx: t.cladding, pz: t.cladding, nz: t.cladding }, {}, { tintRGB: tintFor(t.cladding, r.hex) });
-      else if (near(d.width, 4) && near(d.height, 4.5)) box(b, 0, 0, 0, d.width, d.height, d.depth, { pz: z3RollerDoor(this.atlas, 1 + (n++ % 3)), px: t.steel, nx: t.steel, py: t.steel });
+      } else if (near(d.width, r.w)) {
+        box(b, 0, 0, 0, d.width, d.height, d.depth, { px: t.cladding, nx: t.cladding, pz: t.cladding, nz: t.cladding }, {}, { tintRGB: tintFor(t.cladding, r.hex) });
+        // Grime weeping from the roof edge on every face; the company's name painted big on the
+        // front (unlit ones) or on the side.
+        const gH = Math.min(3, d.height * 0.45);
+        const top = d.height / 2 - gH;
+        b.rect(V(-d.width / 2, top, d.depth / 2 + 0.015), X, Y, d.width, gH, t.grime, { u0: 0, v0: 0 });
+        b.rect(V(d.width / 2, top, -d.depth / 2 - 0.015), V(-1, 0, 0), Y, d.width, gH, t.grime, { u0: 17, v0: 0 });
+        b.rect(V(d.width / 2 + 0.015, top, d.depth / 2), V(0, 0, -1), Y, d.depth, gH, t.grime, { u0: 31, v0: 0 });
+        b.rect(V(-d.width / 2 - 0.015, top, -d.depth / 2), V(0, 0, 1), Y, d.depth, gH, t.grime, { u0: 7, v0: 0 });
+        const name = z3CompanyName(this.atlas, COMPANIES[r.i % COMPANIES.length]);
+        const k = Math.min(1, (d.depth - 2) / name.wM);
+        if (r.lit) b.rect(V(d.width / 2 + 0.02, -0.2, (name.wM * k) / 2), V(0, 0, -1), Y, name.wM * k, name.hM * k, name.tile);
+        else {
+          const k2 = Math.min(1, (d.width - 4) / name.wM);
+          b.rect(V((-name.wM * k2) / 2, d.height / 2 - 1.6 - name.hM * k2, d.depth / 2 + 0.02), X, Y, name.wM * k2, name.hM * k2, name.tile);
+        }
+      } else if (near(d.width, 4) && near(d.height, 4.5)) {
+        const open = hash2(r.i, n, 41) > 0.62;
+        box(b, 0, 0, 0, d.width, d.height, d.depth, { pz: open ? t.openBay : z3RollerDoor(this.atlas, 1 + (n % 3)), px: t.steel, nx: t.steel, py: t.steel });
+        n++;
+      }
       else box(b, 0, 0, 0, d.width, d.height, d.depth, { px: t.steel, nx: t.steel, pz: t.steel, nz: t.steel, py: t.steel });
       out.push(m);
     }

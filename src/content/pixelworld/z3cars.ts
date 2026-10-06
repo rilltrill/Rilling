@@ -190,19 +190,51 @@ export function z3CarGlassSide(atlas: PwAtlas, kind: number, d: CarDims, burnt =
     const trim = k.ramp(0x16161a, { light: 0.4 });
     const sky = k.ramp(0xb87278, { light: 0.55, sat: 0.9 });
     const cab = k.ramp(0x2a2232, { light: 0.4 });
-    const char = k.ramp(0x1a1416, { light: 0.4 });
+    // (Burnt: the charred interior a value up from black, so a wreck up close still reads.)
+    const char = k.ramp(burnt ? 0x34282a : 0x1a1416, { light: 0.4 });
     const ash = k.ramp(0x6a625e, { light: 0.4 });
     fill(c, trim, 2);
     // Windows with a slanted front / rear edge (the trapezoid's own slant is in the geometry).
     const split = kind === 1 ? [0.55] : [0.5];
     const xs = [2, ...split.map((s) => Math.round(s * W)), W - 2];
+    const hole = k.ramp(0xa0606a, { light: 0.5, sat: 0.8 });
+    const rust = k.ramp(0x8a4222, { light: 0.45 });
     for (let wi = 0; wi < xs.length - 1; wi++) {
+      if (burnt) {
+        // Burnt out: no glass. Through the hole the far window's dusk (a solid shape with a
+        // ragged lower edge, never an even checker), a charred seat back rising into it (an ash
+        // rim on its top, broken spring lines across it), the scorched door card below with a
+        // few ash clumps.
+        const x0 = xs[wi] + (wi > 0 ? 2 : 0);
+        const x1 = xs[wi + 1] - 1;
+        const hh = H - 3;
+        const sx = (x0 + x1) / 2 + (hash2(wi, kind, 61) - 0.5) * (x1 - x0) * 0.3;
+        const sw = Math.max(3, (x1 - x0) * 0.3);
+        for (let x = x0; x < x1; x++) {
+          const edge = 2 + Math.round(hh * (0.46 + (hash2(x >> 2, wi, 62 + kind) - 0.5) * 0.14));
+          const dx = (x - sx) / sw;
+          const seat = Math.abs(dx) < 1 ? 2 + Math.round(hh * (0.24 + dx * dx * 0.2)) : 99;
+          for (let y = 2; y < H - 1; y++) {
+            if (y >= seat && y < H - 3) {
+              const sy = y - seat;
+              if (sy === 0) c.set(x, y, ash, 3.4);
+              else if (sy % 3 === 2 && hash2(x, y, 63) > 0.3) c.set(x, y, ash, 2.6);
+              else c.set(x, y, char, 2);
+            } else if (y < edge) c.set(x, y, hole, y - 2 < hh * 0.2 ? 3.4 : 2.8);
+            else if (y === edge && (x & 1)) c.set(x, y, hole, 2.4);
+            else if (hash2(x >> 1, y >> 1, 64 + wi) > 0.88) c.set(x, y, ash, 3);
+            else c.set(x, y, char, y > 2 + hh * 0.8 ? 1.6 : 2.2);
+          }
+        }
+        // The rusted frame: a lit top lip, a scorched sill.
+        for (let x = xs[wi]; x < xs[wi + 1]; x++) {
+          c.set(x, 1, rust, 3.8);
+          c.set(x, H - 1, rust, 2.4);
+        }
+        continue;
+      }
       for (let y = 2; y < H - 1; y++) {
         for (let x = xs[wi] + (wi > 0 ? 2 : 0); x < xs[wi + 1] - 1; x++) {
-          if (burnt) {
-            c.set(x, y, char, hash2(x, y, 3) > 0.85 ? 2 : 0.6);
-            continue;
-          }
           const r = (y - 2) / (H - 3);
           // Upper rows: the sky reflected (dithered into the cabin), a diagonal glint.
           const glint = (x + y * 2) % 40 < 3;
@@ -211,12 +243,10 @@ export function z3CarGlassSide(atlas: PwAtlas, kind: number, d: CarDims, burnt =
         }
       }
       // A headrest silhouette in each window.
-      if (!burnt) {
-        const hx = Math.round((xs[wi] + xs[wi + 1]) / 2);
-        for (let y = H - 6; y < H - 2; y++) for (let x = hx - 2; x <= hx + 2; x++) c.set(x, y, cab, 1);
-      } else for (let i = 0; i < 6; i++) c.set(xs[wi] + 3 + i * 3, H - 3, ash, 3);
+      const hx = Math.round((xs[wi] + xs[wi + 1]) / 2);
+      for (let y = H - 6; y < H - 2; y++) for (let x = hx - 2; x <= hx + 2; x++) c.set(x, y, cab, 1);
     }
-    c.hline(0, 0, W, trim, 3);
+    c.hline(0, 0, W, burnt ? rust : trim, 3);
   });
 }
 
@@ -227,12 +257,21 @@ export function z3CarScreen(atlas: PwAtlas, v: number): PwTile {
     const sky = k.ramp(0xc07a78, { light: 0.55, sat: 0.9 });
     const sky2 = k.ramp(0x6a4a6a, { light: 0.5 });
     const cab = k.ramp(0x2a2232, { light: 0.4 });
-    const char = k.ramp(0x1a1416, { light: 0.4 });
+    const char = k.ramp(v === 3 ? 0x34282a : 0x1a1416, { light: 0.4 });
+    const ash = v === 3 ? k.ramp(0x6a625e, { light: 0.4 }) : 0;
     fill(c, trim, 2);
     for (let y = 2; y < 22; y++) {
       for (let x = 2; x < 46; x++) {
         if (v === 3) {
-          c.set(x, y, char, hash2(x, y, 3) > 0.9 ? 2 : 0.6);
+          // Burnt hole: the dusk through the far window up top (a solid shape with a ragged
+          // edge), the steering wheel's charred ring against it, the scorched dash below, ash.
+          const edge = 2 + Math.round(20 * (0.5 + (hash2(x >> 2, 1, 65) - 0.5) * 0.16));
+          const wr = Math.hypot((x - 32) / 1.2, y - 12);
+          if (wr > 5.2 && wr < 7.2 && y < 18) c.set(x, y, char, y < 9 ? 2.6 : 2);
+          else if (y > 17 && y < 19) c.set(x, y, ash, x & 1 ? 2.8 : 3.2);
+          else if (y < edge) c.set(x, y, sky2, y < 7 ? 3.6 : 3);
+          else if (y === edge && (x & 1)) c.set(x, y, sky2, 2.4);
+          else c.set(x, y, char, y > 19 ? 1.6 : hash2(x >> 1, y >> 1, 3) > 0.86 ? 3 : 2.2);
           continue;
         }
         const r = (y - 2) / 20;
@@ -367,34 +406,113 @@ export function z3WheelFace(atlas: PwAtlas, v: number): PwTile {
   });
 }
 
-/** Burnt-out shell (wrap 64 × 64): charred black-brown, rust blooms, blistered paint ghosts, ash. */
+/**
+ * Burnt-out shell (wrap 64 × 64, roofs / hoods / ends): charred metal in readable mid values (ash
+ * grey, warm brown-black — never a black slab), blistered paint islands peeling to primer and rust
+ * with lit lips, white ash drifts, a few soot-black pits.
+ */
 export function z3BurntShell(atlas: PwAtlas): PwTile {
-  return atlas.tile('z3burnt', 64, 64, (c, k) => {
+  return atlas.tile('z3burnt2', 64, 64, (c, k) => {
     const rng = k.rng;
-    const ch = k.ramp(0x2a2226, { light: 0.45 });
-    const rust = k.ramp(0x6a3a22, { light: 0.45 });
-    const ghost = k.ramp(0x5a5a5e, { light: 0.4 });
-    fill(c, ch, 2.6);
-    for (let i = 0; i < 9; i++) {
+    const ch = k.ramp(0x6e5c56, { light: 0.45, dark: 0.45 });
+    const rust = k.ramp(0xb0582a, { light: 0.5 });
+    const primer = k.ramp(0x9a948a, { light: 0.45 });
+    const ash = k.ramp(0xb8b0a8, { light: 0.45 });
+    fill(c, ch, 2.8);
+    // Heat mottling in broad patches (two tones, ordered at the seams).
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      const v = hash2(x >> 3, y >> 3, 5) * 0.6 + hash2((x + 4) >> 2, (y + 4) >> 2, 6) * 0.4;
+      if (v > 0.62) c.set(x, y, ch, 3.4);
+      else if (v < 0.22) c.set(x, y, ch, 2.2);
+    }
+    for (let i = 0; i < 7; i++) {
       const cx = rng.int(0, 63);
       const cy = rng.int(0, 63);
-      const r = rng.int(4, 10);
-      for (let y = -r; y <= r; y++) for (let x = -r; x <= r; x++) {
-        const d = Math.hypot(x, y) + hash2(cx + x, cy + y, 3) * 3;
-        if (d > r) continue;
+      const r = rng.int(4, 9);
+      const isle = rng.chance(0.5) ? rust : primer;
+      for (let y = -r - 1; y <= r + 1; y++) for (let x = -r - 1; x <= r + 1; x++) {
+        const d = Math.hypot(x, y * 1.2) + hash2(cx + x, cy + y, 3) * 2.5;
+        if (d > r + 1) continue;
         const xx = (cx + x + 64) % 64;
         const yy = (cy + y + 64) % 64;
-        c.set(xx, yy, rust, d < r * 0.5 ? 3 : 2.4);
+        // The peeled island, its lit upper-left lip, the curled dark edge.
+        if (d > r) c.set(xx, yy, ch, 1.8);
+        else c.set(xx, yy, isle, x + y < -r * 0.6 ? 4 : d < r * 0.5 ? 3.2 : 2.7);
       }
     }
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       const x = rng.int(0, 63);
       const y = rng.int(0, 63);
-      for (let j = 0; j < rng.int(4, 9); j++) c.set((x + j) % 64, y, ghost, 2.4);
+      for (let j = 0; j < rng.int(4, 10); j++) c.set((x + j) % 64, (y + (j >> 2)) % 64, ash, j & 1 ? 3.6 : 4.2);
     }
-    wscatter(c, rng, 0, 0, 64, 64, 60, 0, -0.8, { shapes: 3 });
-    wscatter(c, rng, 0, 0, 64, 64, 30, 0, 1, { shapes: 2 });
+    wscatter(c, rng, 0, 0, 64, 64, 26, 0, -1.2, { shapes: 3 });
+    wscatter(c, rng, 0, 0, 64, 64, 30, 0, 0.8, { shapes: 2 });
   }, { wrap: true });
+}
+
+/**
+ * A burnt-out car's side (module, the body's length × height): the shoulder crease caught in ash
+ * grey with a lit rim, blistered paint peeling to primer and rust orange, soot climbing from the
+ * wheel wells and the sills, the door seams, a fire-warm glow along the sill. The darkest tones
+ * stay under a third of the face.
+ */
+export function z3BurntSide(atlas: PwAtlas, kind: number, d: CarDims): PwTile {
+  const W = px(d.len);
+  const H = px(d.bodyH);
+  return atlas.tile(`z3burntside|${kind}|${W}|${H}`, W, H, (c, k) => {
+    const rng = k.rng;
+    const ch = k.ramp(0x6e5c56, { light: 0.45, dark: 0.45 });
+    const rust = k.ramp(0xb0582a, { light: 0.5 });
+    const primer = k.ramp(0x9a948a, { light: 0.45 });
+    const ash = k.ramp(0xc0b8b0, { light: 0.45 });
+    const ember = k.ramp(0xc8501c, { light: 0.5 });
+    fill(c, ch, 3);
+    for (let y = 0; y < H; y++) {
+      const r = y / H;
+      for (let x = 0; x < W; x++) {
+        let t = r < 0.06 ? 4.4 : r < 0.12 ? 3.8 : r < 0.18 ? 1.9 : r < 0.6 ? 3 + (hash2(x >> 3, y >> 2, 3) - 0.5) * 0.6 : 2.6 - (r - 0.6) * 1.4;
+        if (y === 0) t = 4.8;
+        c.set(x, y, r < 0.12 ? ash : ch, t);
+      }
+    }
+    // Soot climbing from the wheel wells and the sill (dithered blooms).
+    const wr = (kind === 2 ? 0.42 : kind === 3 ? 0.38 : 0.34) * TPM;
+    for (const wz of [0.85, d.len - 0.85]) {
+      const cx = wz * TPM;
+      for (let y = 0; y < H; y++) for (let x = Math.floor(cx - wr * 2.2); x < cx + wr * 2.2; x++) {
+        const ax = (x - cx) / (wr * 2.1);
+        const ay = (H - y) / (wr * 2.4);
+        const dd = Math.sqrt(ax * ax + ay * ay);
+        if (dd > 1 || x < 0 || x >= W) continue;
+        // A solid core, then a ragged clumpy edge (2×2 clumps, no even checker up close).
+        if (dd < 0.55 || hash2(x >> 1, y >> 1, 66) < (1 - dd) * 2.2 - 0.5) c.shift(x, y, -0.9);
+      }
+    }
+    // Blistered islands: primer and rust, a lit upper-left lip, a dark curled edge.
+    for (let i = 0; i < Math.round(W / 28); i++) {
+      const cx = rng.int(4, W - 5);
+      const cy = rng.int(Math.round(H * 0.2), H - 4);
+      const r = rng.int(2, 5);
+      const isle = rng.chance(0.55) ? rust : primer;
+      for (let y = -r - 1; y <= r + 1; y++) for (let x = -r * 2 - 1; x <= r * 2 + 1; x++) {
+        const dd = Math.hypot(x / 2, y) + hash2(cx + x, cy + y, 7) * 1.5;
+        if (dd > r + 1) continue;
+        if (dd > r) c.set(cx + x, cy + y, ch, 1.8);
+        else c.set(cx + x, cy + y, isle, y < -r * 0.3 ? 4 : 3);
+      }
+    }
+    // Door seams (burnt open a texel), a handle stub.
+    for (const sz of kind === 1 ? [1.15, 2.35] : kind === 3 ? [0.95, 1.95, 3.6] : [1.2, 2.3, 3.35]) {
+      const x = Math.round(sz * TPM);
+      for (let y = 4; y < H - 3; y++) c.set(x, y, ch, 1.4);
+      c.set(x + 1, 5, ash, 4);
+    }
+    // Embers glowing along the sill under the soot.
+    for (let i = 0; i < Math.round(W / 10); i++) {
+      const x = rng.int(0, W - 1);
+      c.set(x, H - 2 - rng.int(0, 2), ember, 4, rng.chance(0.4) ? G : 0);
+    }
+  });
 }
 
 /** A rivet line helper for truck panels (kept here for the vehicles' painters). */

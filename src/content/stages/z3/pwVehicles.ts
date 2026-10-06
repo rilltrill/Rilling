@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import type { PwAtlas, PwTile } from '../../pixelworld/atlas';
-import { tintFor, type PwBatch } from '../../pixelworld/batch';
+import { tintFor, type PwBatch, type PwRectOpts } from '../../pixelworld/batch';
 import { hash2 } from '../../pixelworld/surfaces';
 import {
-  z3BumperTile, z3BurntShell, z3CarGlassSide, z3CarNose, z3CarPaintSide, z3CarPaintTop, z3CarScreen, z3CarShadow, z3CarSideDetail, z3CarTail, z3TyreTile, z3WheelFace,
+  z3BumperTile, z3BurntShell, z3BurntSide, z3CarGlassSide, z3CarNose, z3CarPaintSide, z3CarPaintTop, z3CarScreen, z3CarShadow, z3CarSideDetail, z3CarTail, z3TyreTile, z3WheelFace,
   type CarDims,
 } from '../../pixelworld/z3cars';
 import { box, cylinder } from './pwShapes';
@@ -22,6 +22,21 @@ import type { PwCarRecord } from './props';
 
 const _v = new THREE.Vector3();
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+/** Hex (sRGB) of a linear tint (the batch's triangles take a hex tint). */
+function linHex(rgb: readonly number[]): number {
+  return new THREE.Color().setRGB(rgb[0], rgb[1], rgb[2]).getHex();
+}
+
+/** Dark paint lifted a little (a near-black car at the lens reads as a slab, not a car). */
+export function liftPaint(hex: number): number {
+  const c = new THREE.Color(hex);
+  const hsl = { h: 0, s: 0, l: 0 };
+  c.getHSL(hsl, THREE.SRGBColorSpace);
+  if (hsl.l >= 0.38) return hex;
+  c.setHSL(hsl.h, hsl.s, 0.38 + (hsl.l - 0.38) * 0.3, THREE.SRGBColorSpace);
+  return c.getHex();
+}
+
 /** Detail layer offset off the paint (m). */
 const OFF = 0.012;
 
@@ -69,15 +84,14 @@ export class Z3Vehicles {
     const y1 = y0 + r.bodyH;
     const L = r.len / 2;
     const W = r.w / 2;
-    const paintHex = r.police ? 0xe8e8e8 : r.color;
-    const pSide = burnt ? this.burnt : this.paintSide(Math.max(4, Math.round(r.bodyH * 32)));
+    const paintHex = r.police ? 0xe8e8e8 : liftPaint(r.color);
+    const pSide = this.paintSide(Math.max(4, Math.round(r.bodyH * 32)));
     const tint = (t: PwTile) => (t.neutral !== undefined ? { tintRGB: tintFor(t, paintHex) } : {});
-    // ── Body: paint layer.
-    box(b, 0, (y0 + y1) / 2, 0, r.w, r.bodyH, r.len, { px: pSide, nx: pSide, pz: burnt ? this.burnt : this.top, nz: burnt ? this.burnt : this.top, py: burnt ? this.burnt : this.top }, {}, burnt ? {} : tint(pSide));
-    // ── Detail layer just outside it.
-    const det = z3CarSideDetail(a, kind, d, burnt ? 1 : r.police ? 2 : hv > 0.45 ? 1 : 0);
+    // ── Body: a real side profile (chamfered nose / tail, wheel arches cut up over the wheels),
+    // the paint layer on it and the detail layer just outside.
+    const det = burnt ? null : z3CarSideDetail(a, kind, d, r.police ? 2 : hv > 0.45 ? 1 : 0);
     const detL = r.police && !burnt ? z3CarSideDetail(a, kind, d, 3) : det;
-    box(b, 0, (y0 + y1) / 2, 0, r.w + OFF * 2, r.bodyH, r.len, { px: det, nx: detL }, { px: {}, nx: { flipU: true } });
+    this.profileBody(b, r, kind, burnt ? z3BurntSide(a, kind, d) : pSide, burnt ? this.burnt : this.top, det, detL, burnt ? null : tint(this.top), burnt ? null : tint(pSide));
     // Nose / tail (the van's nose module covers its lower front).
     const nose = z3CarNose(a, kind, d, r.lit, burnt);
     const tail = z3CarTail(a, kind, d, r.lit, burnt);
@@ -143,7 +157,8 @@ export class Z3Vehicles {
       const prev = b.matrix.clone();
       b.setMatrix(prev.clone().multiply(m));
       const dh = r.bodyH + r.cabH * 0.8;
-      box(b, 0, 0, 0, 0.08, dh, 1.05, { px: pSide, nx: pSide, pz: pSide, nz: pSide, py: pSide }, {}, burnt ? {} : tint(pSide));
+      const ds = burnt ? this.burnt : pSide;
+      box(b, 0, 0, 0, 0.08, dh, 1.05, { px: ds, nx: ds, pz: ds, nz: ds, py: ds }, {}, burnt ? {} : tint(pSide));
       const gl = z3CarGlassSide(a, kind, d, burnt);
       for (const sx of [1, -1]) b.rect(V(sx * 0.045, dh / 2 - r.cabH * 0.75, sx > 0 ? 0.5 : -0.5), new THREE.Vector3(0, 0, -sx), new THREE.Vector3(0, 1, 0), 1.0, r.cabH * 0.7, gl, { sub: { x: 0, y: 0, w: Math.round(gl.w / 2), h: gl.h } });
       b.setMatrix(prev);
@@ -157,6 +172,96 @@ export class Z3Vehicles {
       const yaw = Math.atan2(-fwd.x, -fwd.z);
       const up = V(0, 1, 0).applyQuaternion(q);
       if (up.y > 0.5) this.decal(ground, p, r.w + 0.5, r.len + 0.4, yaw, this.shadow, p.y + 0.011);
+    }
+  }
+
+  /**
+   * The body as an extruded side profile (in the car's frame, nose +z): side faces (paint `side`,
+   * a wrap tile or a module mapped from the nose) and the detail layer (`det` on +x, `detL` on −x,
+   * modules mapped from the nose), the perimeter (hood / roof line / trunk, nose, tail) in `top`,
+   * the arches and the underside dark.
+   */
+  private profileBody(b: PwBatch, r: PwCarRecord, kind: number, side: PwTile, top: PwTile, det: PwTile | null, detL: PwTile | null, topTint: PwRectOpts | null, sideTint: PwRectOpts | null) {
+    const L = r.len / 2;
+    const W = r.w / 2;
+    const y0 = r.baseY;
+    const y1 = y0 + r.bodyH;
+    // Chamfers [front top: drop, inset], [rear top: drop, inset], bottom.
+    const ch = kind === 3 ? [0.12, 0.22, 0.06, 0.06] : kind === 2 ? [0.08, 0.12, 0.06, 0.06] : kind === 1 ? [0.1, 0.16, 0.04, 0.05] : [0.1, 0.16, 0.08, 0.12];
+    const cb = 0.06;
+    type Seg = 'top' | 'nose' | 'tail' | 'dark';
+    const pts: [number, number][] = [];
+    const segs: Seg[] = [];
+    const add = (z: number, y: number, seg: Seg) => {
+      pts.push([z, y]);
+      segs.push(seg);
+    };
+    add(L - cb, y0, 'dark');
+    add(L, y0 + cb, 'nose');
+    add(L, y1 - ch[0], 'top');
+    add(L - ch[1], y1, 'top');
+    add(-L + ch[3], y1, 'top');
+    add(-L, y1 - ch[2], 'tail');
+    add(-L, y0 + cb, 'dark');
+    add(-L + cb, y0, 'dark');
+    // The bottom, tail to nose, with an arch over each wheel.
+    const ra = r.wheelR + 0.07;
+    const a0 = Math.asin(Math.min(0.99, (r.wheelR - y0) / ra));
+    for (const zc of [-(L - 0.85), L - 0.85]) {
+      const n = 7;
+      for (let i = 0; i <= n; i++) {
+        const t = Math.PI + a0 - (i / n) * (Math.PI + 2 * a0);
+        add(zc + ra * Math.cos(t), r.wheelR + ra * Math.sin(t), i === n ? 'dark' : 'dark');
+      }
+    }
+    // Perimeter strips across the width (outward by construction: see the ordering above).
+    const n = pts.length;
+    const dark = this.bumper[1];
+    let along = 0;
+    for (let i = 0; i < n; i++) {
+      const [za, ya] = pts[i];
+      const [zb, yb] = pts[(i + 1) % n];
+      const len = Math.hypot(zb - za, yb - ya);
+      if (len < 1e-4) continue;
+      const kindSeg = segs[i];
+      const t = kindSeg === 'dark' ? dark : top;
+      const u1 = r.w * t.density;
+      const v0 = along * t.density;
+      const v1 = v0 + len * t.density;
+      along += len;
+      if (kindSeg !== 'dark' && topTint?.tintRGB) {
+        const hx = linHex(topTint.tintRGB);
+        b.quad(V(-W, ya, za), V(W, ya, za), V(W, yb, zb), V(-W, yb, zb), t, [0, v0, u1, v0, u1, v1, 0, v1], hx);
+      } else b.quad(V(-W, ya, za), V(W, ya, za), V(W, yb, zb), V(-W, yb, zb), t, [0, v0, u1, v0, u1, v1, 0, v1]);
+    }
+    // Side faces: the profile triangulated, both sides, paint then detail.
+    const contour = pts.map(([z, y]) => new THREE.Vector2(z, y));
+    const tris = THREE.ShapeUtils.triangulateShape(contour, []);
+    const sideHex = sideTint?.tintRGB ? linHex(sideTint.tintRGB) : 0xffffff;
+    const uvOf = (t: PwTile, z: number, y: number): [number, number] =>
+      t.wrap ? [(L - z) * t.density, (y - y0) * t.density] : [((L - z) / r.len) * t.w, Math.min(t.h, ((y - y0) / r.bodyH) * t.h)];
+    const face = (x: number, sgn: number, t: PwTile, hex: number) => {
+      for (const [i0, i1, i2] of tris) {
+        const A = pts[i0];
+        const B = pts[i1];
+        const C = pts[i2];
+        // Winding: the face must look along ±x (2D signed area in (z, y) decides).
+        const area = (B[0] - A[0]) * (C[1] - A[1]) - (C[0] - A[0]) * (B[1] - A[1]);
+        const flip = (area > 0) === (sgn > 0);
+        const P = flip ? [A, C, B] : [A, B, C];
+        const uv: number[] = [];
+        for (const q of P) uv.push(...uvOf(t, q[0], q[1]));
+        b.tri(V(x, P[0][1], P[0][0]), V(x, P[1][1], P[1][0]), V(x, P[2][1], P[2][0]), t, uv, hex);
+      }
+    };
+    face(W, 1, side, side.wrap ? sideHex : 0xffffff);
+    face(-W, -1, side, side.wrap ? sideHex : 0xffffff);
+    if (det) face(W + OFF, 1, det, 0xffffff);
+    if (detL) face(-W - OFF, -1, detL, 0xffffff);
+    // Door mirrors and a roof-line lip break the box edges.
+    if (kind !== 3) {
+      const zm = r.cabZ + r.cabLen / 2 - 0.12;
+      for (const s of [1, -1]) box(b, s * (W + 0.07), y1 + 0.07, zm, 0.12, 0.09, 0.05, { px: dark, nx: dark, pz: dark, nz: dark, py: dark });
     }
   }
 

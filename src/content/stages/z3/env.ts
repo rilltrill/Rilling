@@ -12,6 +12,7 @@ import { BUSH, BUSH_WIDE, DEAD_TREE } from '../../pixel/floraSpecies';
 import { Z3_BIOME } from '../../pixel/floraBiomes';
 import { pixelWorld } from '../../../core/art';
 import { Z3PixelWorld } from './pixel';
+import { z3BeamGeometry, z3BeamMaterial } from '../../pixelworld/z3beam';
 
 /** Verge plants as pixel billboards (ART: SPRITES): dusk scrub and dead trees. */
 export const Z3_FLORA = [DEAD_TREE, BUSH, BUSH_WIDE];
@@ -466,7 +467,9 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
   if (pw) {
     const az = (v: THREE.Vector3) => ((Math.atan2(v.x, -v.z) * 180) / Math.PI + 360) % 360;
     const el = (Math.asin(SUN_DIR.y) * 180) / Math.PI;
-    root.add(pw.buildBackdrop(Math.round(az(SUN_DIR) * 10) / 10, Math.round(el * 10) / 10, Math.round(az(CITY_DIR) * 10) / 10));
+    // The ridge as the bridge sees it (looking back from mid-span at the tunnel's middle).
+    const ridge = ctx.at((D.TUNNEL_FROM + D.TUNNEL_TO) / 2, 0).sub(ctx.at((D.TOWER_A + D.TOWER_B) / 2, 0));
+    root.add(pw.buildBackdrop(Math.round(az(SUN_DIR) * 10) / 10, Math.round(el * 10) / 10, Math.round(az(CITY_DIR) * 10) / 10, Math.round(az(ridge) * 10) / 10));
   }
 
   // ─── Ground ───────────────────────────────────────────────────────────────
@@ -597,10 +600,12 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
     for (const x of [-16, 17]) {
       const pivot = new THREE.Group();
       ctx.put(pivot, D.END - 6, x, 10.5, 0, root);
-      const cone = Kit.mesh(Kit.cyl(0.4, 4.5, 90, 10, ), beamMat);
-      cone.position.y = 45;
+      // ART: PIXEL WORLD: a stepped, dithered beam strip turning to the camera (z3beam.ts).
+      const cone = pw ? new THREE.Mesh(z3BeamGeometry(), z3BeamMaterial()) : Kit.mesh(Kit.cyl(0.4, 4.5, 90, 10, ), beamMat);
+      cone.position.y = pw ? 0 : 45;
       cone.renderOrder = 3;
       cone.frustumCulled = false;
+      if (pw) cone.raycast = () => {};
       pivot.add(cone);
       z.beams.push(pivot);
     }
@@ -608,6 +613,8 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
 
   // ─── Bake chunks + landmarks ──────────────────────────────────────────────
   const lights = tunnel.lights;
+  // ART: PIXEL WORLD: the lamps painted (their group still flickers off during the stall).
+  pw?.convert(lights);
   bake(lights);
   root.add(lights);
   z.tunnelLights = lights;
@@ -648,6 +655,8 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
     for (const g of [...chunksOf(ctx).values(), ...ctx.landmarks]) pw.convert(g);
     pw.bayRoot(root);
     pw.finish();
+    // Scrub and dead trees on the painted rock's ledges.
+    for (const p of pw.plants) flora2d.add(p.key, p.x, p.y, p.z, p.h, { sway: p.key === 'deadTree' ? 0.02 : 0.05 });
   }
   for (const g of all) {
     bake(g);
@@ -684,6 +693,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
     update(dt: number, w: World) {
       sky.update(z.t + dt, w.camera.position);
       pw?.backdrop?.update(w.camera.position);
+      pw?.view(w.rig.d > D.BARRICADE - 6);
       pw?.tick(dt);
       z.update(dt);
     },

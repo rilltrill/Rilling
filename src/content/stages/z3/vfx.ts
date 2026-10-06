@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
-import { FLAME, pwSpriteMaterial, spriteGeometry, spriteTick, type Z3FxAtlas } from '../../pixelworld/z3fx';
+import { FLAME, PUFF_CELLS, PUFF_COLS, pwSpriteMaterial, spriteGeometry, spriteTick, type Z3FxAtlas } from '../../pixelworld/z3fx';
 
 /**
  * Burning wrecks: every fire on the interstate shares two instanced meshes —
@@ -35,6 +35,12 @@ const SMOKE_A = new THREE.Color(0x40363c);
 const SMOKE_B = new THREE.Color(0x7a6a74);
 const SMOKE_FIRE = new THREE.Color(0x9a4a30);
 const SMOKE_PURPLE = new THREE.Color(0x5a4660);
+/** ART: PIXEL WORLD smoke by height: soot at the fire, grey-brown body, lilac where it thins. */
+const SMOKE_SOOT = new THREE.Color(0x2a2024);
+const SMOKE_BODY = new THREE.Color(0x5c4c46);
+const SMOKE_THIN = new THREE.Color(0x6c5c7a);
+/** ART: PIXEL WORLD: how many of the nearest fires carry a smoke column. */
+const SPRITE_SMOKERS = 7;
 
 const byDist = (a: FireEmitter, b: FireEmitter) => a.dist - b.dist;
 
@@ -95,7 +101,7 @@ export class FireField {
     const n = this.flames.count;
     void n;
     const flames = new THREE.InstancedMesh(spriteGeometry(true), pwSpriteMaterial(fx.atlas, fx.flame[0], { frames: FLAME.frames, fps: 12, glow: true }), this.maxEmitters * 3);
-    const smoke = new THREE.InstancedMesh(spriteGeometry(false), pwSpriteMaterial(fx.atlas, fx.puff, { cells: 3, gain: 1.7 }), this.maxEmitters * PUFFS_PER);
+    const smoke = new THREE.InstancedMesh(spriteGeometry(false), pwSpriteMaterial(fx.atlas, fx.puff, { cells: PUFF_CELLS, cols: PUFF_COLS, gain: 1.7 }), this.maxEmitters * PUFFS_PER);
     for (const im of [flames, smoke]) {
       im.frustumCulled = false;
       im.count = 0;
@@ -178,6 +184,8 @@ export class FireField {
         fi++;
       }
       if (e.smoke <= 0) continue;
+      // (Painted smoke: only the nearest few fires smoke, so the sky is not stamped with clusters.)
+      if (this.sprites && near.indexOf(e) >= SPRITE_SMOKERS) continue;
       for (let j = 0; j < PUFFS_PER; j++) {
         const ph = fract(t * 0.16 + j / PUFFS_PER + e.seed * 0.37);
         const ss = Math.pow(s, 0.7);
@@ -187,11 +195,20 @@ export class FireField {
         const grow = ss * (0.5 + ph * 1.7) * e.smoke;
         const fade = ph < 0.1 ? ph / 0.1 : ph > 0.8 ? (1 - ph) / 0.2 : 1;
         _s.setScalar(Math.max(0.001, grow * fade * (this.sprites ? 2.3 : 1)));
+        if (this.sprites) {
+          // A stable variant per puff (z scale = 1 + cell): dense cores low, wisps and sheared tops high.
+          const cell = ph < 0.3 ? (j % 2 ? 3 : j % 3) : ph > 0.65 ? 4 + (j & 1) : (j + Math.round(e.seed * 7)) % 3;
+          _s.z = 1 + cell;
+        }
         _e.set(j * 0.7 + t * 0.1, j * 1.3, 0);
         _q.setFromEuler(_e);
         _m.compose(_p, _q, _s);
         this.smoke.setMatrixAt(si, _m);
-        _c.copy(SMOKE_A).lerp(SMOKE_B, ph);
+        if (this.sprites) {
+          // Near-black at the fire, grey-brown in the body, lilac where it thins out.
+          if (ph < 0.35) _c.copy(SMOKE_SOOT).lerp(SMOKE_BODY, ph / 0.35);
+          else _c.copy(SMOKE_BODY).lerp(SMOKE_THIN, Math.min(1, (ph - 0.35) / 0.5));
+        } else _c.copy(SMOKE_A).lerp(SMOKE_B, ph);
         this.smoke.setColorAt(si, _c);
         si++;
       }
@@ -232,7 +249,7 @@ export class Plumes {
 
   /** ART: PIXEL WORLD: the columns as painted pixel puffs (same instances, cut-out sprites). Returns the new mesh. */
   pixelArt(fx: Z3FxAtlas): THREE.InstancedMesh {
-    const m = new THREE.InstancedMesh(spriteGeometry(false), pwSpriteMaterial(fx.atlas, fx.puff, { cells: 3, gain: 0.75, fog: false }), this.mesh.count || this.bases.length * this.per);
+    const m = new THREE.InstancedMesh(spriteGeometry(false), pwSpriteMaterial(fx.atlas, fx.puff, { cells: PUFF_CELLS, cols: PUFF_COLS, gain: 0.75, fog: false }), this.mesh.count || this.bases.length * this.per);
     m.frustumCulled = false;
     m.renderOrder = -1;
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -263,6 +280,7 @@ export class Plumes {
           _p.x += (hj - 0.5) * size * 0.9;
           _p.y += (fract(hj * 7.31) - 0.5) * size * 0.35;
           _s.setScalar(Math.max(0.01, size * (1.05 + hj * 0.35)));
+          _s.z = 1 + (ph > 0.6 ? 4 + (j & 1) : ph < 0.15 ? 3 : (j + b) % 3);
         } else _s.setScalar(Math.max(0.01, size));
         _s.y *= 0.8;
         _e.set(j, b + j * 0.5, 0);
