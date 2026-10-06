@@ -178,10 +178,10 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'gift shop',
     look: { at: W(0, 1.6, -71), world: true, blend: 1.2 },
-    // (In through the atrium doorway to cower by the giant plush T-rex, in the open at the back on the
-    // left: clear of the vents' drop lanes down the middle, the stock-room raptor's run comes out in
-    // front of her and the tan pair come in on the right and through the doorway after she's down.)
-    civilians: [{ pos: W(-3.25, 0, -76.0), from: W(1.2, 0, -80.6), world: true, variant: 'scientist', t: 0.3, act: 'cower' }],
+    // (In from the shop's front along the right-hand aisle, to cower in the gap between the display
+    // tables: out at the side of the view, where the vents' compys never pounce across her — at the
+    // back of the shop, by the plush T-rex, they did.)
+    civilians: [{ pos: W(6.65, 0, -70.55), from: W(6.4, 0, -62.5), world: true, variant: 'tech', t: 0.3, act: 'cower' }],
     pickups: [{ kind: 'bomb', pos: W(-3.7, 1.35, -66.5), world: true, t: 1 }],
     onStart: (w) => w.later(1.0, () => popup(w, "DON'T SHOOT THE SCIENTIST!", 0.6, 0.26)),
     waves: [
@@ -281,7 +281,10 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'hatchery',
     look: { at: W(0, 1.6, -144), world: true, blend: 1.2 },
-    civilians: [{ pos: W(1.7, 0, -142.6), world: true, variant: 'scientist', t: 0.3, act: 'cower' }],
+    // (Runs in past the camera down the right-hand aisle and ducks by the far benches, out at the side
+    // of the view; once the raptors are out she bolts back the way she came — not left cowering in
+    // the middle of the aisle, in the room they're about to roam.)
+    civilians: [{ pos: W(7.6, 0, -143.0), from: W(8.6, 0, -127.5), to: W(8.6, 0, -127.5), world: true, variant: 'tech', t: 0.3, act: 'flee' }],
     pickups: [{ kind: 'magnum', pos: W(-2.2, 1.35, -137.5), world: true, t: 1 }],
     waves: [
       {

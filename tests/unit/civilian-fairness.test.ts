@@ -11,6 +11,7 @@ import { Kit } from '../../src/content/kit/ModelKit';
 import { Enemy } from '../../src/gameplay/Enemy';
 import { Civilian } from '../../src/gameplay/Civilian';
 import { PerchedCivilian } from '../../src/content/stages/d3/civilian';
+import { Grabber } from '../../src/gameplay/civGrab';
 import type { ShotTag } from '../../src/gameplay/Shootables';
 import { nullHud } from './sim';
 
@@ -163,6 +164,23 @@ function runStage(id: string, seed: number): { civs: CivRec[]; completed: boolea
     }
     // Hidden behind scenery that doesn't stop bullets?
     if (frame % 10 !== 1) continue;
+    const behind = (o: THREE.Object3D): boolean => {
+      const m = o as THREE.Mesh;
+      if (!m.geometry) return false;
+      if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+      ctr.copy(m.geometry.boundingSphere!.center).applyMatrix4(m.matrixWorld);
+      const d = ctr.distanceTo(eye);
+      ray.set(eye, q.copy(ctr).sub(eye).normalize());
+      ray.far = d - 0.05;
+      const hits = ray.intersectObjects(scenery, false);
+      ray.far = Infinity;
+      return hits.some((x) => !stops.has(x.object) && !(x.face && x.point.y - world.groundAt(x.point.x, x.point.z) < 0.25 && nrm.copy(x.face.normal).transformDirection(x.object.matrixWorld).y > 0.7));
+    };
+    /** Is any of this civilian's head / torso hitboxes behind such scenery? */
+    const hiddenCore = (c: Civilian): boolean => active.some((o) => {
+      const tg = o.userData.shot as ShotTag;
+      return tg.owner === c && tg.part !== 'limb' && behind(o);
+    });
     for (const o of active) {
       const tg = o.userData.shot as ShotTag;
       if (!(tg.owner instanceof Civilian) || tg.owner instanceof PerchedCivilian) continue;
@@ -187,6 +205,9 @@ function runStage(id: string, seed: number): { civs: CivRec[]; completed: boolea
         }
         return true;
       });
+      // (A leg behind a display table or a toy on the floor, the head and chest in plain view: the
+      // player sees who it is — and a hostile by those legs is the blocked-shot check's business.)
+      if (h && tg.part === 'limb' && !hiddenCore(tg.owner)) continue;
       if (h) {
         const p = tg.owner.root.position;
         recs.get(tg.owner)?.hidden.push(`t=${t.toFixed(1)} ${tg.part} behind ${h.object.name || h.object.parent?.name || 'mesh'} at ${h.point.x.toFixed(1)},${h.point.y.toFixed(1)},${h.point.z.toFixed(1)} (${tg.owner.state} at ${p.x.toFixed(1)},${p.z.toFixed(1)})`);
@@ -210,6 +231,199 @@ describe('civilians never block a fair shot at an enemy, and are never hidden be
       }
       // Every civilian of the stage got its act going (and none is stuck in a pose).
       expect(r.civs.length).toBeGreaterThan(0);
+    });
+  }
+});
+
+/**
+ * A slow player who holds fire: each civilian beat on its own (the rig jumped to
+ * it, as ?beat= does), god mode, NO shots for its first HOLD_FIRE seconds, while
+ * the hostiles do whatever they do — prowl, pace, walk in, wind up. On screen
+ * (projected hitbox boxes; either one in front: a miss by the aim error carries
+ * on into whatever is behind), a hostile's head / torso / weak point never
+ * comes within BOX_PX of a civilian's hitboxes
+ *
+ * - while it winds up or strikes (the player must shoot it NOW), nor
+ * - for longer than LINGER s at a stretch (a dino prowling across them is a
+ *   moment's wait for a clear shot; one pacing about in front of them is not);
+ *
+ * and a zombie holding a civilian keeps GRAB_PX of clear aim round its head
+ * and chest centres throughout.
+ */
+const HOLD_FIRE = 12;
+const BOX_PX = 16;
+const LINGER = 0.3;
+const GRAB_PX = 25;
+
+interface HoldRec {
+  beat: string;
+  /** Closest any hostile came while attacking (px). */
+  attack: number;
+  attackAt: string;
+  /** Longest stretch a hostile stayed within BOX_PX (s). */
+  linger: number;
+  lingerAt: string;
+  /** Closest at all (px, for the record). */
+  minBox: number;
+  minGrab: number;
+  grabAt: string;
+  frames: number;
+}
+
+const _c = new THREE.Vector3();
+
+function rectOf(o: THREE.Object3D, camera: THREE.Camera, out: number[]): boolean {
+  const m = o as THREE.Mesh;
+  if (!m.geometry) return false;
+  if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+  const b = m.geometry.boundingBox!;
+  out[0] = out[1] = Infinity;
+  out[2] = out[3] = -Infinity;
+  for (let i = 0; i < 8; i++) {
+    _c.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).applyMatrix4(m.matrixWorld).project(camera);
+    if (_c.z > 1) return false;
+    const x = (_c.x * 0.5 + 0.5) * 844;
+    const y = (-_c.y * 0.5 + 0.5) * 390;
+    out[0] = Math.min(out[0], x);
+    out[1] = Math.min(out[1], y);
+    out[2] = Math.max(out[2], x);
+    out[3] = Math.max(out[3], y);
+  }
+  return out[2] >= 0 && out[0] <= 844 && out[3] >= 0 && out[1] <= 390;
+}
+
+function rectGap(a: number[], b: number[]): number {
+  const dx = Math.max(0, a[0] - b[2], b[0] - a[2]);
+  const dy = Math.max(0, a[1] - b[3], b[1] - a[3]);
+  return Math.hypot(dx, dy);
+}
+
+function holdFire(id: string, beat: number, seed: number, secs = HOLD_FIRE): HoldRec | null {
+  const stage = ALL_STAGES.find((s) => s.id === id)!;
+  const dt = 1 / 30;
+  const camera = new THREE.PerspectiveCamera(58, 844 / 390, 0.05, 400);
+  const world = new World(camera, new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS, haptics: false }, seed);
+  world.viewport = { width: 844, height: 390 };
+  world.player.god = true;
+  const runner = new StageRunner(world, stage);
+  runner.start(beat);
+  const rec: HoldRec = { beat: runner.label, attack: Infinity, attackAt: '', linger: 0, lingerAt: '', minBox: Infinity, minGrab: Infinity, grabAt: '', frames: 0 };
+  const active: THREE.Object3D[] = [];
+  const civRects: number[][] = [];
+  const r = [0, 0, 0, 0];
+  const ray = new THREE.Raycaster();
+  const ndc = new THREE.Vector2();
+  const ctr = new THREE.Vector3();
+  const q = new THREE.Vector3();
+  const eye = new THREE.Vector3();
+  const near = new Map<Enemy, number>();
+  let t = 0;
+  while (t < secs && runner.index === beat) {
+    const sdt = world.update(dt);
+    runner.update(sdt);
+    world.scene.updateMatrixWorld();
+    t += dt;
+    world.shootables.active(active);
+    camera.getWorldPosition(eye);
+    civRects.length = 0;
+    for (const o of active) {
+      const tg = o.userData.shot as ShotTag;
+      if (!(tg.owner instanceof Civilian) || tg.owner instanceof PerchedCivilian) continue;
+      if (rectOf(o, camera, r)) civRects.push(r.slice());
+    }
+    if (!civRects.length) {
+      near.clear();
+      continue;
+    }
+    rec.frames++;
+    for (const e of world.entities) {
+      if (!(e instanceof Enemy) || !e.hostile || e.removed || e.state === 'dying') continue;
+      if (e.root.getWorldPosition(q).distanceTo(eye) > 120) continue;
+      const holding = e instanceof Grabber && e.holding;
+      let gap = Infinity;
+      for (const o of active) {
+        const tg = o.userData.shot as ShotTag;
+        if (tg.owner !== e || (tg.part !== 'head' && tg.part !== 'torso' && tg.part !== 'weak')) continue;
+        if (holding) {
+          // Clear aim round its head / chest centre (rays: what a shot there hits first).
+          const m = o as THREE.Mesh;
+          if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+          ctr.copy(m.geometry.boundingSphere!.center).applyMatrix4(m.matrixWorld).project(camera);
+          let best = 99;
+          rings: for (let rr = 0; rr <= 40; rr += 2) {
+            const nd = rr === 0 ? 1 : 16;
+            for (let k = 0; k < nd; k++) {
+              const a = (k / nd) * Math.PI * 2;
+              ndc.set(ctr.x + (Math.cos(a) * rr) / 422, ctr.y + (Math.sin(a) * rr) / 195);
+              ray.setFromCamera(ndc, camera);
+              const h = ray.intersectObjects(active, false)[0];
+              if (h && (h.object.userData.shot as ShotTag).owner instanceof Civilian) {
+                best = rr;
+                break rings;
+              }
+            }
+          }
+          if (best < rec.minGrab) {
+            rec.minGrab = best;
+            rec.grabAt = `t=${t.toFixed(2)} ${tg.part}`;
+          }
+          continue;
+        }
+        if (!rectOf(o, camera, r)) continue;
+        for (const c of civRects) gap = Math.min(gap, rectGap(r, c));
+      }
+      if (holding || gap === Infinity) {
+        near.delete(e);
+        continue;
+      }
+      const what = `t=${t.toFixed(2)} ${e.name} ${e.state} ${gap.toFixed(1)} px`;
+      rec.minBox = Math.min(rec.minBox, gap);
+      if (e.telegraph && gap < rec.attack) {
+        rec.attack = gap;
+        rec.attackAt = what;
+      }
+      if (gap < BOX_PX) {
+        const s = (near.get(e) ?? 0) + dt;
+        near.set(e, s);
+        if (s > rec.linger) {
+          rec.linger = s;
+          rec.lingerAt = what;
+        }
+      } else near.delete(e);
+    }
+  }
+  world.dispose();
+  Kit.disposeAll();
+  return rec.frames ? rec : null;
+}
+
+/** Beats with civilians on the ground (the d3 mud's driver is perched on his truck by the beat script). */
+function civBeats(id: string): number[] {
+  const stage = ALL_STAGES.find((s) => s.id === id)!;
+  const out: number[] = [];
+  stage.beats.forEach((b, i) => {
+    if ((b as { civilians?: unknown[] }).civilians?.length) out.push(i);
+  });
+  return out;
+}
+
+describe('hold fire: a slow player who doesn\'t shoot yet never finds a civilian in the way of a hostile', () => {
+  const seeds = (process.env.CIV_HOLD_SEEDS ?? '1,2,3,4,5,6').split(',').map(Number);
+  for (const s of ALL_STAGES) {
+    it(`${s.id}: every civilian beat, ${HOLD_FIRE} s without a shot, seeds ${seeds.join(' ')}`, { timeout: 900_000 }, () => {
+      const fails: string[] = [];
+      for (const b of civBeats(s.id)) {
+        for (const seed of seeds) {
+          const r = holdFire(s.id, b, seed);
+          if (!r) continue;
+          if (process.env.CIV_HOLD_LOG)
+            process.stderr.write(`HOLD ${s.id} ${r.beat} seed ${seed}: attacking ${r.attack.toFixed(1)} px (${r.attackAt}) linger ${r.linger.toFixed(2)} s (${r.lingerAt}) min ${r.minBox.toFixed(1)} px grab ${r.minGrab} px (${r.grabAt})\n`);
+          if (r.attack < BOX_PX) fails.push(`${r.beat} seed ${seed}: attacking ${r.attackAt}`);
+          if (r.linger > LINGER) fails.push(`${r.beat} seed ${seed}: lingers ${r.linger.toFixed(2)} s — ${r.lingerAt}`);
+          if (r.minGrab < GRAB_PX) fails.push(`${r.beat} seed ${seed}: grabber ${r.minGrab} px — ${r.grabAt}`);
+        }
+      }
+      expect(fails).toEqual([]);
     });
   }
 });

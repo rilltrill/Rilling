@@ -97,7 +97,14 @@ describe('coming on', () => {
       const { world } = makeWorld();
       const c = spawnCiv(world, side * 4, -7, 'cower');
       expect(c.state).toBe('arrive');
+      // (A moment out of sight and no target while the camera is still: then on.)
+      expect(c.root.visible).toBe(false);
+      expect(world.shootables.objects.some((o) => (o.userData.shot as ShotTag).owner === c)).toBe(false);
+      let wait = 0;
+      while (!c.root.visible && wait++ < 30) step(world, DT);
+      expect(wait / 60).toBeLessThan(0.2);
       expect(c.speech).toBe(CIV_STAMP.bubble.help);
+      expect(world.shootables.objects.some((o) => (o.userData.shot as ShotTag).owner === c)).toBe(true);
       step(world, DT);
       // Starts out of view on its own side.
       expect(Math.abs(ndc(world, rigOf(c).chest.getWorldPosition(new THREE.Vector3())).x)).toBeGreaterThan(1);
@@ -107,7 +114,45 @@ describe('coming on', () => {
       expect(frames / 60, 'there within ~2.5 s').toBeLessThan(2.5);
       expect(c.root.position.distanceTo(new THREE.Vector3(side * 4, 0, -7))).toBeLessThan(0.3);
       expect(c.state).toBe('cower');
+      // Already turned to the act's facing on arrival: no spin on the knees.
+      const cam = Math.atan2(-c.root.position.x, -c.root.position.z);
+      const yaw0 = c.root.rotation.y;
+      step(world, 1);
+      expect(Math.abs(Math.atan2(Math.sin(c.root.rotation.y - yaw0), Math.cos(c.root.rotation.y - yaw0))), 'turn after landing').toBeLessThan(0.3);
+      void cam;
     }
+  });
+
+  it('they wait (out of sight, no target) for the camera to stop turning to the scene before running in — 1.2 s at most', { timeout: 30_000 }, () => {
+    const { world, camera } = makeWorld();
+    const c = spawnCiv(world, 4, -7, 'cower');
+    // The camera swinging to and fro at 1 rad/s (it ends up where it was).
+    let f = 0;
+    const pan = () => {
+      camera.rotation.y += (Math.floor(f++ / 15) % 2 ? -1 : 1) / 60;
+      camera.updateMatrixWorld();
+    };
+    world.rig.update = () => {};
+    for (let i = 0; i < 60; i++) {
+      pan();
+      step(world, DT);
+    }
+    expect(c.root.visible, 'still waiting while it turns').toBe(false);
+    expect(world.shootables.objects.some((o) => (o.userData.shot as ShotTag).owner === c)).toBe(false);
+    // It stops: on they come.
+    let n = 0;
+    while (!c.root.visible && n++ < 60) step(world, DT);
+    expect(n / 60).toBeLessThan(0.4);
+    expect(c.state).toBe('arrive');
+    // Never more than 1.2 s, however long it turns.
+    const d = spawnCiv(world, -4, -7, 'cower');
+    let t = 0;
+    while (!d.root.visible && t < 4) {
+      pan();
+      step(world, DT);
+      t += DT;
+    }
+    expect(t).toBeLessThan(1.3);
   });
 
   it('from a doorway when the stage says so; out of view or far in, they are simply there', { timeout: 30_000 }, () => {
@@ -115,6 +160,7 @@ describe('coming on', () => {
     const door = new THREE.Vector3(-1, 0, -16);
     const c = spawnCiv(world, 1.5, -12, 'cower', 'scientist', { from: door });
     expect(c.state).toBe('arrive');
+    while (!c.root.visible) step(world, DT);
     expect(c.root.position.distanceTo(door)).toBeLessThan(0.01);
     // Behind the camera: no run-in.
     const b = spawnCiv(world, 0, 6, 'cower');
@@ -168,18 +214,27 @@ describe('civilian acts', () => {
       expect(Math.min(handOf(r.armL).distanceTo(mouth), handOf(r.armR).distanceTo(mouth))).toBeLessThan(0.16);
     });
     expect(checks).toBeGreaterThan(30);
-    // A far-off civilian (or one up on a truck) waves the whole arm, up high.
+    expect(nearTop).toBeLessThan(0.05);
+    // A far-off civilian (or one up on a truck) crouches lower and bounces on the
+    // knees as they call — still no arm up over the head (no "dab").
     const far = placeCiv(world, -4, -22, 'plead', 'cop');
     let farTop = -Infinity;
+    let hipLo = Infinity;
+    let hipHi = -Infinity;
     step(world, 1.5, () => {
       const fr = rigOf(far);
       const top = fr.head.localToWorld(new THREE.Vector3(0, 0.26, 0)).y;
-      if (far.state === 'plead') farTop = Math.max(farTop, handOf(fr.armL).y - top, handOf(fr.armR).y - top);
+      if (far.state !== 'plead') return;
+      farTop = Math.max(farTop, handOf(fr.armL).y - top, handOf(fr.armR).y - top);
+      const y = fr.hips.getWorldPosition(new THREE.Vector3()).y;
+      hipLo = Math.min(hipLo, y);
+      hipHi = Math.max(hipHi, y);
     });
-    expect(farTop).toBeGreaterThan(nearTop + 0.1);
+    expect(farTop).toBeLessThan(0.05);
+    expect(hipHi - hipLo, 'bouncing').toBeGreaterThan(0.03);
   });
 
-  it('cower: down on one knee, peeks up between ducks (HELP! the first times), shakes visibly, flinches at a shot close by', { timeout: 30_000 }, () => {
+  it('cower: down on both knees, peeks up between ducks (HELP! the first times), shakes visibly, flinches at a shot close by', { timeout: 30_000 }, () => {
     const { world } = makeWorld();
     const c = placeCiv(world, 3.5, -8, 'cower');
     const head = rigOf(c).head;
@@ -301,6 +356,33 @@ describe('civilian acts', () => {
     // Escaped: paid at the clear, not before.
     expect(events.rescued).toBe(0);
     void z;
+  });
+
+  it('backaway: falls only when startled (a shot or kill close by, something lunging) — and only ever once; no trip at all left alone', { timeout: 60_000 }, () => {
+    let falls = 0;
+    for (let seed = 1; seed <= 10; seed++) {
+      for (const shoot of [false, true]) {
+        const { world } = makeWorld(seed);
+        const c = placeCiv(world, 3.2, -8, 'backaway', 'cop');
+        spawnEnemy(world, 'walker', -1.5, -14);
+        const seq: string[] = [];
+        let t = 0;
+        step(world, 6, () => {
+          t += DT;
+          if (seq[seq.length - 1] !== c.state) seq.push(c.state);
+          if (shoot && Math.abs(t - 0.8) < DT / 2 && c.state === 'backaway') {
+            const sp = ndc(world, rigOf(c).head.getWorldPosition(new THREE.Vector3()));
+            world.events.emit('shot', { hit: false, x: (sp.x * 0.5 + 0.5) * 844 + 40, y: (-sp.y * 0.5 + 0.5) * 390 });
+          }
+        });
+        const downs = seq.filter((s) => s === 'fall' || s === 'stumble').length;
+        expect(downs, `seed ${seed} ${shoot ? 'shot' : 'quiet'}: ${seq.join('>')}`).toBeLessThanOrEqual(1);
+        if (!shoot) expect(seq.includes('fall'), `seed ${seed}: tripped over nothing`).toBe(false);
+        if (seq.includes('fall')) falls++;
+      }
+    }
+    // (Half of them are the kind who trip: some did, startled.)
+    expect(falls).toBeGreaterThan(0);
   });
 
   it('plead: calls for help again and again, cowering in between', { timeout: 30_000 }, () => {

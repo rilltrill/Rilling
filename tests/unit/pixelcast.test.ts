@@ -246,9 +246,11 @@ describe('PixelCast alignment (sprite parts land on the hitboxes)', () => {
     const { world, camera } = makeWorld();
     const c = new Civilian(world, new THREE.Vector3(-0.3, 0, -4), 'world', 'worker');
     world.add(c);
-    // (In plain view a civilian runs in from the edge: hold this one on the spot.)
+    // (In plain view a civilian runs in from the edge: hold this one on the spot, calling out.)
+    c.debugPose('plead', 0);
     c.root.position.set(-0.3, 0, -4);
     run(c, 0.4);
+    expect(c.state).toBe('plead');
     expectAligned(check(world, camera, c), 'civilian');
   });
 

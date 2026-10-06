@@ -16,6 +16,7 @@ import {
   applyArms,
   applyPose,
   blendPose,
+  fidget,
   grabArms,
   poseBackAway,
   poseBuf,
@@ -49,6 +50,9 @@ interface CivLook {
   ponytail?: boolean;
 }
 
+/** The d2 lab staff's polo. */
+const TECH_POLO = 0xe8601c;
+
 /**
  * Bright, clean, saturated arcade palette with warm skin and hair: civilians
  * must read as "alive — don't shoot" next to the grey-green, blood-soaked
@@ -68,15 +72,19 @@ const VARIANTS: Record<string, CivLook> = {
   cop: { shirt: 0x7cacea, pants: 0x232c4a, skin: 0xb98060, hair: 0x1a1414, short: true },
   nurse: { shirt: 0xa04cc8, pants: 0xa04cc8, skin: 0xf0c8a0, hair: 0x6b3a1a, short: true },
   worker: { shirt: 0xc4382a, pants: 0x3a5a8a, skin: 0xa8714e, hair: 0x1a1a1a, short: true, shirtTex: ZT.PLAID },
+  // The park's lab staff (d2): the lab coat worn open over a safety-orange polo — a
+  // broad bold front that reads on pale shop and lab walls (a white coat alone vanished there).
+  tech: { shirt: 0xf4f4f0, pants: 0x6a5a3c, skin: 0xd9a77f, hair: 0x5a4632, ponytail: true },
 };
 
 /**
  * What a civilian does (a stage's `CivilianDef.act`, else `auto`):
  *
- *   cower     down on one knee, folded over, hands clasped over the head,
- *             shaking; peeks out between the forearms now and then (calling
- *             HELP! to the player the first times), tucks in harder at a shot
- *             nearby, a kill close by, anything winding up.
+ *   cower     down on both knees, folded over, hands clasped over the head,
+ *             shaking, the head turning under the arms now and then; peeks
+ *             out over the forearms (calling HELP! to the player the first
+ *             times, a hand at the mouth), tucks in harder at a shot nearby,
+ *             a kill close by, anything winding up.
  *   hide      crouched among foliage / low cover with the back to the camera,
  *             a hand braced on the floor and one over the mouth, peeking out
  *             and glancing back for help. Only where the stage put cover in
@@ -85,14 +93,17 @@ const VARIANTS: Record<string, CivLook> = {
  *             attack starting), then runs for it — across and out of the view
  *             (or to `to`), looking back over the shoulder, maybe tripping once
  *             on screen and scrambling up.
- *   backaway  edges back from the nearest threat for a moment, forearm up over
- *             the face, then turns and runs — sometimes tripping onto the seat
- *             first and scooting back.
+ *   backaway  edges back from the nearest threat for a moment, recoiling, a
+ *             hand up at it in front of the face, then turns and runs —
+ *             startled on the way, sometimes tripping onto the seat first and
+ *             scooting back (one fall per civilian).
  *   grabbed   held by a zombie (spawned with it): a tug of war, the zombie
- *             yanking them in, them hauling back on the held wrist with both
- *             hands. Shoot the zombie (or its holding arm off) and they're free.
- *   plead     calls HELP! — leaning in, a hand at the mouth, waving from the
- *             elbow — on and off, cowering in between.
+ *             hauling on the arm with both hands, yanking them two stumbling
+ *             steps in, them hauling back on the held wrist with both hands.
+ *             Shoot the zombie (or its holding arm off) and they're free.
+ *   plead     calls HELP! — in a crouching stance, a hand at the mouth, the
+ *             other forearm waving beside the head — on and off, cowering in
+ *             between.
  *   auto      a short HELP!, then cowers; backs away and runs if a threat gets close.
  */
 export type CivAct = 'auto' | 'cower' | 'hide' | 'flee' | 'backaway' | 'grabbed' | 'plead';
@@ -115,13 +126,13 @@ type Phase = CivPhase;
 
 /**
  * Root-to-root distance (m) a grabbing zombie keeps, toward the middle of the
- * view: arm's length — the two hands meet on the held wrist — with both leaning
- * hard away from each other, so the heads end up ~1.7 m apart and its head and
- * chest are clear shots well away from the civilian on screen (≈ 3.5 aim-error
- * σ of the human-like bot at the z2 ER, civilian 7.0 m and zombie 6.3 m from the
- * camera; still > 3 σ on a yank).
+ * view: arm's length — its two hands on the held arm, hers hauling on her own
+ * wrist — with the civilian leaning hard away and the zombie hunched over the
+ * arm or thrown back on a yank, so its head and chest stay clear shots well
+ * away from her on screen (≥ 25 px of clear aim round each at the z2 ER,
+ * civilian 7.0 m and zombie 6.3 m from the camera; on a yank too).
  */
-export const GRAB_SEP = 1.25;
+export const GRAB_SEP = 1.4;
 /** Seconds of HELP! before each act (when the stage doesn't say). Cowering and backing off call out from inside the act. */
 const HELP_FIRST: Record<CivAct, number> = { auto: 1.5, cower: 0, hide: 0, flee: 0, backaway: 0, grabbed: 0, plead: 2.2 };
 /** A threat this close (m, ground) panics an `auto` civilian into backing off / running. */
@@ -133,7 +144,7 @@ const DUCK_DIST = 4;
 const FLEE_NEAR_ZOMBIE = 7;
 const FLEE_NEAR_DINO = 12;
 const FLEE_WAIT = 8;
-const STUMBLE_TIME = 1.35;
+const STUMBLE_TIME = 0.9;
 const FALL_TIME = 1.7;
 const RUN_SPEED = 2.8;
 /** Seconds a run aims to stay on screen (Operation Wolf civilians cross the view). */
@@ -142,14 +153,27 @@ const STARTLE_TIME = 0.12;
 const FLINCH_TIME = 0.22;
 /** The yank: the civilian lurches this far toward the zombie (m), the zombie steps back this far. */
 const YANK_LURCH = 0.22;
-const YANK_STEP = 0.08;
-/** Waving the whole arm overhead only from this far off (m) — or perched up on something. */
+const YANK_STEP = 0.15;
+/** From this far off (m) — or perched up on something — the HELP! is bigger: a deeper crouch bouncing on the knees. */
 const FAR_WAVE = 15;
 /** A shot landing within this many screen px of the head makes them flinch. */
 const FLINCH_PX = 110;
 /** Longest run in from the edge of the view (m) for a civilian who'd otherwise pop up in plain sight. */
 const ARRIVE_MAX = 7.5;
 const ARRIVE_SPEED = 3.4;
+/** Running in waits (out of sight) until the rail camera turns slower than this (rad/s)… */
+const ARRIVE_CAM_RATE = 0.3;
+/** …or this long (s). */
+const ARRIVE_WAIT_MAX = 1.2;
+/** A runner who has just run in ducks down this long (s) before bolting again (unless something's right on them). */
+const ARRIVE_SETTLE = 1.5;
+/** The last metres of the run in turn toward the act's facing (no spin on the knees once there). */
+const ARRIVE_TURN = 1.4;
+
+/** 0 → 1 → 0 (a half sine) as `k` goes from `a` to `b`; 0 outside. */
+function bump(k: number, a: number, b: number): number {
+  return k <= a || k >= b ? 0 : Math.sin((Math.PI * (k - a)) / (b - a));
+}
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -234,6 +258,8 @@ export class Civilian extends Entity {
   private glanceAmt = 0;
   private flinchT = 0;
   private flinchDir = 1;
+  /** A shot or a kill close by just now (s left): what trips a civilian backing off. */
+  private jumpT = 0;
   /** Which knee goes down cowering (+1 left), which forearm guards the face backing off. */
   private readonly kneel: number;
   private readonly guard: number;
@@ -265,6 +291,11 @@ export class Civilian extends Entity {
   private yankT = 0;
   private yankPeriod = 1.3;
   private yankAmt = 0;
+  /** The feet in the tug of war (m toward the zombie from where they braced), and the stepping foot's lift. */
+  private nearFoot = 0;
+  private farFoot = 0;
+  private nearUp = 0;
+  private farUp = 0;
   /** Where the zombie holding on stands (world), its extra turn, and where the hands meet. */
   readonly grabSpot = new THREE.Vector3();
   grabTurn = 0;
@@ -273,6 +304,14 @@ export class Civilian extends Entity {
   private readonly grabRoot = new THREE.Vector3();
   /** Where the stage put them (they run in to it from off screen). */
   private readonly spot = new THREE.Vector3();
+  /** Waiting out of sight for the camera to stop turning before running in (s waited; −1 not waiting). */
+  private waitCam = -1;
+  private camYaw = 0;
+  private camRate = 0;
+  /** Has fallen over once already (one fall per civilian: no slapstick). */
+  private fell = false;
+  /** Just ran in: seconds before they'd bolt again. */
+  private settleT = 0;
   // Speech bubble, gestures.
   private bubble = -1;
   private bubbleT = 0;
@@ -341,11 +380,8 @@ export class Civilian extends Entity {
   }
 
   override onAdded(): void {
-    const z = this.baked.zones;
-    for (const m of z.head) this.hitbox(m, 'head');
-    for (const m of z.torso) this.hitbox(m, 'torso');
-    for (const m of z.limb) this.hitbox(m, 'limb');
     this.view();
+    this.camYaw = Math.atan2(_right.z, _right.x);
     // The screen side decides which way is "outward".
     this.side = this.viewX(this.root.position) >= 0 ? 1 : -1;
     this.sense();
@@ -353,8 +389,33 @@ export class Civilian extends Entity {
     this.offKill = this.world.events.on('kill', (e) => this.nearKill(e.enemy));
     if (this.main === 'grabbed') this.startGrab();
     this.spot.copy(this.root.position);
+    if (this.runsIn()) {
+      // Running in from the edge of the view (or the stage's way in) — once the
+      // camera has stopped turning to the scene: out of sight (and no target)
+      // until then, so the run is seen, and painted at the full sprite rate.
+      this.waitCam = 0;
+      this.root.visible = false;
+      this.enter('arrive', 0.01);
+      this.speed = 0;
+      this.dest.copy(this.spot);
+      return;
+    }
+    this.appear(false);
+  }
+
+  /** On stage: a target from now on, into the act (or running in to it). */
+  private appear(run: boolean) {
+    this.waitCam = -1;
+    this.root.visible = true;
+    const z = this.baked.zones;
+    for (const m of z.head) this.hitbox(m, 'head');
+    for (const m of z.torso) this.hitbox(m, 'torso');
+    for (const m of z.limb) this.hitbox(m, 'limb');
     // Not popping up out of nowhere in plain sight: run in from the edge of the view.
-    if (!this.arriving()) this.enter(this.helpTime > 0 ? 'plead' : this.afterHelp(), 0.01);
+    if (!run || !this.arriving()) {
+      this.root.position.copy(this.spot);
+      this.enter(this.helpTime > 0 ? 'plead' : this.afterHelp(), 0.01);
+    }
     // Already turned the way the act faces (no spin on the spot as they appear).
     if (this.phase === 'flee') this.pickDest(FLEE_SCREEN);
     if (this.phase === 'arrive') this.dest.copy(this.spot);
@@ -383,6 +444,13 @@ export class Civilian extends Entity {
   rescue(run = false) {
     if (this.shot || this.rescued) return;
     this.rescued = true;
+    if (this.waitCam >= 0) {
+      // Cleared before they ever came on: safe where they were, paid all the same.
+      this.root.position.copy(this.spot);
+      this.world.onCivilianRescued(this);
+      this.removed = true;
+      return;
+    }
     if (this.escaped) {
       this.edgePoint(this.root.position);
       this.world.onCivilianRescued(this);
@@ -418,7 +486,7 @@ export class Civilian extends Entity {
    * runners (they run anyway) or spots too far in.
    */
   private arriving(): boolean {
-    if (this.perched || this.main === 'grabbed') return false;
+    if (!this.runsIn()) return false;
     const p = this.root.position;
     let run = 0;
     if (this.comeFrom) {
@@ -426,16 +494,25 @@ export class Civilian extends Entity {
       run = this.comeFrom.distanceTo(p);
       p.copy(this.comeFrom);
     } else {
-      if (this.main === 'flee' || !this.onScreen(1.05)) return false;
+      // (Level with the spot, from just past the nearer edge of the view as it is now.)
+      this.side = this.viewX(p) >= 0 ? 1 : -1;
       run = this.edgeTan() * Math.max(0.5, this.viewZ(p)) - Math.abs(this.viewX(p)) + 0.5;
-      if (run > ARRIVE_MAX) return false;
-      p.addScaledVector(_right, this.side * run);
+      p.addScaledVector(_right, this.side * Math.min(run, ARRIVE_MAX * 1.4));
     }
     p.y = this.world.groundAt(p.x, p.z);
     this.enter('arrive', 0.01);
     this.say(CIV_STAMP.bubble.help, Math.min(1.6, run / ARRIVE_SPEED + 0.3));
     this.speed = ARRIVE_SPEED;
     return true;
+  }
+
+  /** Would come on running in (from the edge of the view, or the stage's `from`) rather than start in place? */
+  private runsIn(): boolean {
+    if (this.perched || this.main === 'grabbed') return false;
+    if (this.comeFrom) return true;
+    if (this.main === 'flee' || !this.onScreen(1.05, this.spot)) return false;
+    const p = this.spot;
+    return this.edgeTan() * Math.max(0.5, this.viewZ(p)) - Math.abs(this.viewX(p)) + 0.5 <= ARRIVE_MAX;
   }
 
   // ─── Grabbed ──────────────────────────────────────────────────────────────
@@ -468,10 +545,16 @@ export class Civilian extends Entity {
     if (g && !g.removed && g.state !== 'dying') g.release();
   }
 
-  /** World position of our shoulder on the grabbed side (the zombie claws at it). */
+  /** World position of our shoulder on the grabbed side. */
   shoulderPoint(out: THREE.Vector3): THREE.Vector3 {
     const a = this.grabSide > 0 ? this.rig.armL : this.rig.armR;
     return a.shoulder.getWorldPosition(out);
+  }
+
+  /** World position of the held arm's elbow (the zombie's other hand hauls on the forearm there). */
+  elbowPoint(out: THREE.Vector3): THREE.Vector3 {
+    const a = this.grabSide > 0 ? this.rig.armL : this.rig.armR;
+    return a.elbow.getWorldPosition(out);
   }
 
   /** The zombie's jerk on the arm right now (0..1): it leans back into it. */
@@ -494,6 +577,19 @@ export class Civilian extends Entity {
     }
     this.phaseT += dt;
     this.view();
+    if (this.waitCam >= 0) {
+      // Waiting out of sight for the camera to settle on the scene.
+      const yaw = Math.atan2(_right.z, _right.x);
+      const rate = dt > 0 ? Math.abs(angleDelta(this.camYaw, yaw)) / dt : 0;
+      this.camYaw = yaw;
+      this.camRate += (rate - this.camRate) * (1 - Math.exp(-12 * dt));
+      this.waitCam += dt;
+      if ((this.waitCam > 0.1 && this.camRate < ARRIVE_CAM_RATE) || this.waitCam > ARRIVE_WAIT_MAX) {
+        this.phaseT = 0;
+        this.appear(true);
+      }
+      return;
+    }
     this.senseT -= dt;
     if (this.senseT <= 0) {
       this.senseT = 0.1;
@@ -504,6 +600,8 @@ export class Civilian extends Entity {
       if (this.bubbleT <= 0) this.bubble = -1;
     }
     if (this.flinchT > 0) this.flinchT -= dt;
+    if (this.jumpT > 0) this.jumpT -= dt;
+    if (this.settleT > 0) this.settleT -= dt;
     this.think(dt);
     if (this.removed || this.escaped) return;
     // Turn (quick when running; otherwise a shuffle, never a spin on the spot).
@@ -579,13 +677,19 @@ export class Civilian extends Entity {
       case 'arrive': {
         _n.copy(this.spot).sub(this.root.position).setY(0);
         const d = _n.length();
-        this.stride += dt * 10.5;
+        // (Slowing over the last metre, the stride with it.)
+        const slow = clamp(d / 1.1, 0.4, 1);
+        this.stride += dt * 10.5 * slow;
         if (d > 0.25) {
           _n.divideScalar(d);
-          this.yawGoal = Math.atan2(_n.x, _n.z);
-          this.step(_n, Math.min(d, this.speed * dt));
+          // The last steps turn toward the act's facing: there, they drop straight into it.
+          const head = Math.atan2(_n.x, _n.z);
+          const w = smoothstep(0, 1, 1 - (d - 0.25) / ARRIVE_TURN);
+          this.yawGoal = head + angleDelta(head, this.phaseYaw(this.helpTime > 0 ? 'plead' : this.afterHelp())) * w;
+          this.step(_n, Math.min(d, this.speed * slow * dt));
         } else {
           // There: into the act (diving down into a crouch, or calling out).
+          this.settleT = ARRIVE_SETTLE;
           const n = this.helpTime > 0 ? 'plead' : this.afterHelp();
           this.enter(n, n === 'cower' || n === 'hide' ? 0.35 : 0.25);
         }
@@ -634,11 +738,14 @@ export class Civilian extends Entity {
         // (Steps sized to the ground covered: the feet don't skate.)
         this.stride += ((dt * this.speed) / (1.8 * Math.sin(this.amp))) * Math.PI;
         this.step(_n, this.speed * dt);
-        if (this.threatDist < 1.7 || (slow ? t > this.backTime : t > 1.4)) {
-          // (Tripping onto the seat only with the danger still a way off: close up, they just run.)
-          if (this.act === 'backaway' && this.fallOver && this.threatDist > 8 && !this.alarm && t > 0.8) this.enter('fall', 0.15);
-          else this.enter('flee', 0.2);
-        }
+        if (this.act === 'backaway' && this.fallOver && !this.fell && this.jumpT > 0 && t > 0.5 && this.threatDist > 6 && !this.alarm) {
+          // Startled (a shot or a kill close by) while edging back, the danger
+          // still a way off: they trip over their own heels onto the seat. Once, ever.
+          // (Nothing winding up: on the floor in an attack's path they'd be in its lane.)
+          this.fell = true;
+          this.stumbleAt = -1;
+          this.enter('fall', 0.12);
+        } else if (this.threatDist < 1.7 || (slow ? t > this.backTime : t > 1.4)) this.enter('flee', 0.2);
         break;
       }
       case 'fall': {
@@ -680,8 +787,9 @@ export class Civilian extends Entity {
           this.lookBack = this.threatAng >= 0 ? 1 : -1;
         }
         if (this.lookBackT < 0.75) this.lookBack = 0;
-        if (this.phase === 'flee' && this.stumbleAt > 0 && this.runT > this.stumbleAt) {
+        if (this.phase === 'flee' && this.stumbleAt > 0 && !this.fell && this.runT > this.stumbleAt) {
           this.stumbleAt = -1;
+          this.fell = true;
           // (Only where the player sees it.)
           if (this.onScreen(0.8)) {
             this.enter('stumble', 0.12);
@@ -726,8 +834,14 @@ export class Civilian extends Entity {
         }
         const k = this.yankT;
         this.yankAmt = k < 0.08 ? 1 - (1 - k / 0.08) ** 2 : k < 0.3 ? 1 : 1 - smoothstep(0.3, 0.8, k);
+        // Dragged two stumbling steps toward it (the near foot, then the other),
+        // then two steps back as they haul themselves away again.
+        this.nearFoot = YANK_LURCH * (smoothstep(0, 0.1, k) - smoothstep(0.65, 0.85, k));
+        this.farFoot = YANK_LURCH * (smoothstep(0.1, 0.2, k) - smoothstep(0.45, 0.65, k));
+        this.nearUp = bump(k, 0, 0.1) + bump(k, 0.65, 0.85);
+        this.farUp = bump(k, 0.1, 0.2) + bump(k, 0.45, 0.65);
         _n.copy(this.grabBase).sub(this.grabRoot).setY(0).normalize();
-        this.root.position.copy(this.grabRoot).addScaledVector(_n, YANK_LURCH * this.yankAmt);
+        this.root.position.copy(this.grabRoot).addScaledVector(_n, (this.nearFoot + this.farFoot) / 2);
         this.root.position.y = this.world.groundAt(this.root.position.x, this.root.position.z);
         this.grabSpot.copy(this.grabBase).addScaledVector(_n, YANK_STEP * this.yankAmt);
         this.grabTurn = -this.side * 0.8;
@@ -735,6 +849,7 @@ export class Civilian extends Entity {
         if (t > this.grabTime) {
           // Wrenched free (they get away; paid with the rest at the clear).
           this.yankAmt = 0;
+          this.nearFoot = this.farFoot = this.nearUp = this.farUp = 0;
           this.letGo();
           this.enter('flee', 0.15);
         }
@@ -751,15 +866,17 @@ export class Civilian extends Entity {
   }
 
   /** Where the act faces (yaw). */
-  private phaseYaw(): number {
+  private phaseYaw(ph: Phase = this.phase): number {
     const cam = this.faceCamYaw();
-    switch (this.phase) {
+    switch (ph) {
       case 'plead':
-        return cam + this.side * 0.15;
+        // A little turned toward the screen edge: the knee bend and the lean
+        // show in silhouette (square to the camera they foreshorten away).
+        return cam + this.side * 0.42;
       case 'cower':
-        // Three-quarters away toward the screen edge (a crouch reads in a 3/4 view;
-        // head-on it looks like standing on bent knees).
-        return cam + this.side * 0.6;
+        // Turned a touch toward the screen edge, kneeling (further round, the
+        // folded figure reads as a sprinter in the blocks).
+        return cam + this.side * 0.3;
       case 'hide':
         return cam + Math.PI + this.side * 0.6;
       case 'backaway': {
@@ -790,8 +907,13 @@ export class Civilian extends Entity {
     return this.main;
   }
 
-  /** FLEE goes once a threat is close, something winds up an attack, or it has waited long enough. */
+  /**
+   * FLEE goes once a threat is close, something winds up an attack, or it has
+   * waited long enough — not the moment they've run in (no running in only to
+   * turn round and run straight out), unless it's right on them.
+   */
   private fleeReady(): boolean {
+    if (this.settleT > 0 && this.threatDist > DUCK_DIST) return false;
     return this.alarm || this.threatDist < (this.dino ? FLEE_NEAR_DINO : FLEE_NEAR_ZOMBIE) || this.age > FLEE_WAIT;
   }
 
@@ -823,7 +945,10 @@ export class Civilian extends Entity {
     const vp = this.world.viewport;
     const sx = (_v.x * 0.5 + 0.5) * vp.width;
     const sy = (-_v.y * 0.5 + 0.5) * vp.height;
-    if (_v.z < 1 && Math.hypot(sx - x, sy - y) < FLINCH_PX) this.flinch();
+    if (_v.z < 1 && Math.hypot(sx - x, sy - y) < FLINCH_PX) {
+      this.flinch();
+      this.jumpT = FLINCH_TIME;
+    }
   }
 
   /** Something killed close by. */
@@ -831,7 +956,10 @@ export class Civilian extends Entity {
     if (this.shot || this.rescued || this.escaped || this.removed) return;
     e.root.getWorldPosition(_v);
     const p = this.root.position;
-    if (Math.hypot(_v.x - p.x, _v.z - p.z) < 4) this.flinch();
+    if (Math.hypot(_v.x - p.x, _v.z - p.z) < 4) {
+      this.flinch();
+      this.jumpT = FLINCH_TIME;
+    }
   }
 
   /** Cower / hide: duck while anything is close or attacking, peek up in between (0.4–0.8 s up, a 0.1 s duck back). */
@@ -921,11 +1049,12 @@ export class Civilian extends Entity {
         break;
       case 'plead': {
         const big = this.perched || this.camDist() > FAR_WAVE;
-        // Seen from a side, the waving arm is the near one (the hand calling at
-        // the mouth stays round the far side of the face) — swapped smoothly.
-        const view = angleDelta(this.root.rotation.y, this.faceCamYaw());
-        if (Math.abs(view) > 0.6 && Math.sign(view) !== this.waveSide) {
-          this.waveSide = -this.waveSide;
+        // Turned three-quarters: the hand nearer the camera cups the mouth (in
+        // front of the face), the far one waves beside the head — out past the
+        // silhouette where it reads (swapped smoothly if the view swings round).
+        const wave = this.farSide();
+        if (wave !== this.waveSide) {
+          this.waveSide = wave;
           this.reblend(0.25);
         }
         // At the player; a quick look at the threat now and then.
@@ -946,8 +1075,10 @@ export class Civilian extends Entity {
       case 'cower': {
         const curl = Math.max(this.threatDist < 2.4 ? 1 : this.alarm ? 0.5 : 0, flinch);
         const look = this.peekCam ? angleDelta(this.root.rotation.y, this.faceCamYaw()) : this.threatAng;
-        poseCower(p, t, this.peek, clamp(look, -1.2, 1.2), curl, this.kneel, this.peekCam && calling ? this.waveSide : 0);
+        // (Calling HELP!: the hand nearer the camera comes down to the mouth.)
+        poseCower(p, t, this.peek, clamp(look, -1.2, 1.2), curl, this.kneel, this.peekCam && calling ? -this.farSide() : 0);
         p[J.HEAD_Y] += this.flinchDir * 0.15 * flinch;
+        fidget(p, t + this.seed, (1 - this.peek) * (1 - curl));
         const shake = 0.7 + (this.alarm ? 0.3 : 0);
         shiver(p, t, shake, this.seed);
         tremble(p, t, 0.3);
@@ -962,6 +1093,7 @@ export class Civilian extends Entity {
         this.glanceAmt += (this.glance - this.glanceAmt) * (1 - Math.exp(-7 * dt));
         poseHide(p, t, this.peek, this.side, -this.glanceAmt * this.side);
         p[J.HEAD_Y] += this.flinchDir * 0.25 * flinch;
+        fidget(p, t + this.seed, (1 - this.peek) * (1 - this.glanceAmt) * 0.7);
         shiver(p, t, 0.45, this.seed);
         ph.face = 'terror';
         ph.jaw = calling ? 0.7 : 0.3 + 0.2 * Math.abs(Math.sin(t * 3.7));
@@ -1016,7 +1148,8 @@ export class Civilian extends Entity {
       case 'grabbed': {
         // Straining back at the zombie just after a yank; screaming to the player in between.
         const look = this.yankT < 0.85 ? -1 : 1;
-        poseGrabbed(p, t, this.grabSide, this.yankAmt, look);
+        const mid = (this.nearFoot + this.farFoot) / 2;
+        poseGrabbed(p, t, this.grabSide, this.yankAmt, look, this.nearFoot - mid, this.farFoot - mid, this.nearUp, this.farUp);
         shiver(p, t, 0.35, this.seed);
         ph.face = look > 0 ? 'scream' : 'strain';
         ph.jaw = look > 0 ? 0.8 + 0.15 * Math.sin(t * 7) : 0.2;
@@ -1088,6 +1221,16 @@ export class Civilian extends Entity {
 
   private viewZ(p: THREE.Vector3): number {
     return (p.x - _cam.x) * _fwd.x + (p.z - _cam.z) * _fwd.z;
+  }
+
+  /**
+   * The arm on the side turned away from the camera (+1 = the left): the one
+   * that shows beside the silhouette rather than in front of it. Kept while
+   * the civilian faces the camera nearly square.
+   */
+  private farSide(): number {
+    const view = angleDelta(this.root.rotation.y, this.faceCamYaw());
+    return Math.abs(view) < 0.12 ? this.waveSide : view > 0 ? -1 : 1;
   }
 
   private faceCamYaw(): number {
@@ -1183,8 +1326,9 @@ export class Civilian extends Entity {
   }
 
   /** The chest well inside the view (|NDC x| < `margin`). */
-  private onScreen(margin: number): boolean {
-    this.rig.chest.getWorldPosition(_v);
+  private onScreen(margin: number, at?: THREE.Vector3): boolean {
+    if (at) _v.copy(at).setY(at.y + 1.2);
+    else this.rig.chest.getWorldPosition(_v);
     if (this.viewZ(_v) < 0.6) return false;
     _v.project(this.world.camera);
     return _v.z < 1 && Math.abs(_v.x) < margin && _v.y > -0.9;
@@ -1246,6 +1390,7 @@ export class Civilian extends Entity {
     o: { peek?: number; glance?: number; look?: number; thumb?: boolean; bubble?: number; yank?: number; flinch?: boolean; far?: boolean; peekCam?: boolean } = {},
   ) {
     this.view();
+    if (this.waitCam >= 0) this.appear(false);
     this.phase = phase;
     this.phaseT = seconds;
     this.age = seconds;
@@ -1307,6 +1452,8 @@ function civilianLook(variant: string, v: CivLook): HumanLook {
       return { ...base, outfit: 'nurse', inner: null, bun: true, hat: 0xf6f6f2, pantsPat: 'cloth' };
     case 'worker':
       return { ...base, outfit: 'flannel', inner: 0xeeeae0, belt: 0x6a4424 };
+    case 'tech':
+      return { ...base, outfit: 'scientist', jacket: v.shirt, inner: TECH_POLO, innerW: 2.3, pantsPat: 'cloth', badge: 0xf8f8f8 };
     default:
       return base;
   }
@@ -1412,6 +1559,14 @@ function dressCivilian(r: HumanoidRig, variant: string, v: CivLook) {
       part(r.hips, 0.07, 0.08, 0.04, 0x5a3a1e, 0.12, 0.0, 0.11, ZT.LEATHER); // pouch
       part(r.hips, 0.024, 0.18, 0.024, 0x9a6c3a, -0.12, -0.06, 0.125, ZT.LEATHER); // hammer handle
       part(r.hips, 0.09, 0.03, 0.03, 0x60646c, -0.12, 0.04, 0.125, ZT.FLAT); // hammer head
+      break;
+    }
+    case 'tech': {
+      // Lab coat open wide over a safety-orange polo (the collar trim and an ID card on it).
+      part(sp, 0.27, 0.46, 0.012, TECH_POLO, 0, 0.22, cz + 0.002, ZT.CLOTH, 0.1);
+      for (const s of [1, -1]) part(sp, 0.016, 0.46, 0.014, 0xc8c8c0, s * 0.137, 0.22, cz + 0.004); // lapel edges
+      part(sp, 0.08, 0.025, 0.014, 0xf4f0e8, 0, 0.44, cz + 0.006, ZT.FLAT, 0.1);
+      part(sp, 0.05, 0.06, 0.012, 0xf8f8f8, 0.07, 0.32, cz + 0.008, ZT.FLAT, 0.2);
       break;
     }
     default: {

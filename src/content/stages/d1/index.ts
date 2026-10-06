@@ -155,7 +155,9 @@ const beats: Beat[] = [
         if (!jungle()?.treeBlasted) w.hud.prompt('SHOOT THE FUEL DRUMS!');
       });
     },
-    civilians: [{ pos: [-4.6, 0, 5.4], variant: 'ranger', act: 'hide' }],
+    // (Cowering in the ferns on the left until the dilos step out of the bushes, then she bolts out of
+    // the view to the left — left hiding there, a dilo's prowl took it right across her.)
+    civilians: [{ pos: [-4.6, 0, 5.4], variant: 'ranger', act: 'flee' }],
     pickups: [{ kind: 'health', pos: [-2.2, 2.4, 13.6] }],
     waves: [
       {

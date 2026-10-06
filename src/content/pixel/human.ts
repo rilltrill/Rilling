@@ -68,6 +68,8 @@ export interface HumanLook {
   beard: number | null;
   /** Under-shirt / tee showing at the collar or open front. */
   inner: number | null;
+  /** How wide an open jacket shows the under-shirt (× the usual strip; living civilians' bold tops). */
+  innerW?: number;
   badge: number | null;
   // Face.
   mouthOpen: boolean;
@@ -590,7 +592,7 @@ function torsoDetails(f: PixelFigure, r: HumanoidRig, L: HumanLook, M: Mats, fro
     }
     if (M.inner) {
       // Under-shirt in an open front / at the collar.
-      if (L.jacket !== null) f.decal(f.at(sp, 0, 0.455, fz), f.at(sp, 0, 0.2, fz), 0.062 * s, 0.01 * s, M.inner).flag(D);
+      if (L.jacket !== null) f.decal(f.at(sp, 0, 0.455, fz), f.at(sp, 0, 0.2, fz), 0.062 * (L.innerW ?? 1) * s, 0.01 * s, M.inner).flag(D);
       else if (o === 'biker' || o === 'casual') f.decal(f.at(sp, 0, 0.46, fz), f.at(sp, 0, 0.04, fz), 0.055 * s, 0.045 * s, M.inner).flag(D);
       else f.decal(f.at(sp, -0.04, 0.455, fz), f.at(sp, 0.04, 0.455, fz), 0.022 * s, 0.022 * s, M.inner).flag(D);
     }

@@ -142,6 +142,7 @@ function expectAligned(c: Check, label: string) {
 function civ(world: World, variant: string, act: Civilian['act'], x = -0.3, z = -4.2): Civilian {
   const c = world.add(new Civilian(world, new THREE.Vector3(x, 0, z), 'world', variant, { act }));
   // (In plain view they'd run in from the edge: hold them on their spot.)
+  c.debugPose('cower', 0);
   c.root.position.set(x, 0, z);
   return c;
 }
@@ -166,17 +167,18 @@ const POSES: [CivPhase, number, Parameters<Civilian['debugPose']>[2], string, nu
   ['cower', 1.7, { peek: 1, peekCam: true, bubble: CIV_STAMP.bubble.help }, 'cowering, calling HELP! to the player', FRONT],
   ['hide', 0.8, { peek: 0 }, 'hiding, braced, hand over the mouth', REAR],
   ['hide', 1.3, { peek: 1, glance: 1 }, 'hiding, peeking, glancing back', REAR],
-  ['backaway', 0.6, {}, 'backing away, forearm over the face', ALL],
-  ['backaway', 1.4, { bubble: CIV_STAMP.bubble.help }, 'backing away, HELP! over the shoulder', ALL],
+  // (Backing away keeps within 0.7 rad of facing the camera: never seen from behind.)
+  ['backaway', 0.6, {}, 'backing away, hand up at it', FRONT],
+  ['backaway', 1.4, { bubble: CIV_STAMP.bubble.help }, 'backing away, HELP! over the shoulder', FRONT],
   ['fall', 0.15, {}, 'tripping backwards', ALL],
   ['fall', 0.6, {}, 'on the seat, scooting back', ALL],
   ['fall', 1.25, {}, 'rolling over', ALL],
   ['fall', 1.55, {}, 'scrambling up', ALL],
   ['flee', 0.4, { look: 0 }, 'running', ALL],
   ['flee', 0.7, { look: 1 }, 'running, looking back', ALL],
-  ['stumble', 0.15, {}, 'tripping', ALL],
-  ['stumble', 0.55, {}, 'on all fours', ALL],
-  ['stumble', 1.1, {}, 'scrambling up', ALL],
+  ['stumble', 0.1, {}, 'tripping', ALL],
+  ['stumble', 0.4, {}, 'on all fours', ALL],
+  ['stumble', 0.7, {}, 'scrambling up', ALL],
   // (Rescued civilians — thanking, jogging off — have no hitboxes left; see below.)
   ['thanks', 0.6, { thumb: true, bubble: CIV_STAMP.bubble.thanks }, 'thumbs-up, THANKS!', FRONT],
   ['thanks', 0.7, { thumb: false }, 'waving thanks', FRONT],

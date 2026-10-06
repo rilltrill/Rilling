@@ -168,6 +168,28 @@ export function shiver(p: PoseBuf, t: number, amt: number, seed = 0) {
   p[J.CHEST_X] += 0.025 * s * a;
 }
 
+/** −1, 0 or +1 for segment `k` (a hash: deterministic, allocation-free). */
+function pick3(k: number): number {
+  const h = (Math.imul(k | 0, 0x9e3779b1) >>> 0) / 4294967296;
+  return h < 0.34 ? -1 : h < 0.67 ? 0 : 1;
+}
+
+/**
+ * Ducked down and keeping still is not frozen: every 1.25 s the head turns to
+ * look out under an arm one way or the other (or back), and the weight shifts
+ * with it — held, eased over 0.15 s, never rising. `amt` 0..1 (0 while peeking).
+ */
+export function fidget(p: PoseBuf, t: number, amt: number) {
+  if (amt <= 0) return;
+  const x = t / 1.25;
+  const k = Math.floor(x);
+  const v = pick3(k - 1) + (pick3(k) - pick3(k - 1)) * smoothstep(0, 0.12, x - k);
+  p[J.HEAD_Y] += 0.38 * v * amt;
+  p[J.NECK_Y] += 0.12 * v * amt;
+  p[J.HIPS_X] += 0.03 * v * amt;
+  p[J.SPINE_Z] -= 0.06 * v * amt;
+}
+
 // ─── IK ──────────────────────────────────────────────────────────────────────
 
 const UPPER = 0.3;
@@ -188,18 +210,21 @@ const _hp = new THREE.Vector3();
 const _hp2 = new THREE.Vector3();
 
 /**
- * Two-bone IK: set arm `side`'s (+1 left) shoulder and elbow in the pose so its
- * hand lands on `target` (chest frame, rig units), the elbow bending toward the
- * pole (px, py, pz). Out of reach: the arm points straight at it.
+ * Two-bone IK core: the shoulder rotation (into `_eu`, XYZ) and the elbow flex
+ * (returned) that put the end of an arm `upper` + `fore` long at `a` (from the
+ * shoulder, in its parent's frame), the elbow bending toward the pole (px, py,
+ * pz). Out of reach: the arm points straight at it.
  */
-export function ikArm(p: PoseBuf, side: number, target: THREE.Vector3, px: number, py: number, pz: number) {
-  const a = _a.set(target.x - side * SH_OX, target.y - SH_OY, target.z);
+function solveArm(a: THREE.Vector3, upper: number, fore: number, px: number, py: number, pz: number): number {
   let d = a.length();
-  if (d < 1e-4) return;
+  if (d < 1e-4) {
+    _eu.set(0, 0, 0);
+    return 0;
+  }
   a.divideScalar(d);
-  d = clamp(d, 0.12, (UPPER + FORE) * 0.999);
-  const flex = -(Math.PI - Math.acos(clamp((UPPER * UPPER + FORE * FORE - d * d) / (2 * UPPER * FORE), -1, 1)));
-  const th = Math.acos(clamp((UPPER * UPPER + d * d - FORE * FORE) / (2 * UPPER * d), -1, 1));
+  d = clamp(d, 0.4 * upper, (upper + fore) * 0.999);
+  const flex = -(Math.PI - Math.acos(clamp((upper * upper + fore * fore - d * d) / (2 * upper * fore), -1, 1)));
+  const th = Math.acos(clamp((upper * upper + d * d - fore * fore) / (2 * upper * d), -1, 1));
   const pole = _pole.set(px, py, pz);
   pole.addScaledVector(a, -pole.dot(a));
   if (pole.lengthSq() < 1e-8) pole.set(0, -1, 0).addScaledVector(a, a.y);
@@ -216,6 +241,18 @@ export function ikArm(p: PoseBuf, side: number, target: THREE.Vector3, px: numbe
   const x = _x.crossVectors(y, w);
   _m4.makeBasis(x, y, w);
   _eu.setFromRotationMatrix(_m4, 'XYZ');
+  return flex;
+}
+
+/**
+ * Two-bone IK: set arm `side`'s (+1 left) shoulder and elbow in the pose so its
+ * hand lands on `target` (chest frame, rig units), the elbow bending toward the
+ * pole (px, py, pz). Out of reach: the arm points straight at it.
+ */
+export function ikArm(p: PoseBuf, side: number, target: THREE.Vector3, px: number, py: number, pz: number) {
+  const a = _a.set(target.x - side * SH_OX, target.y - SH_OY, target.z);
+  if (a.lengthSq() < 1e-8) return;
+  const flex = solveArm(a, UPPER, FORE, px, py, pz);
   if (side > 0) {
     p[J.SH_L_X] = _eu.x;
     p[J.SH_L_Y] = _eu.y;
@@ -227,6 +264,29 @@ export function ikArm(p: PoseBuf, side: number, target: THREE.Vector3, px: numbe
     p[J.SH_R_Z] = _eu.z;
     p[J.EL_R_X] = flex;
   }
+}
+
+const _lq = new THREE.Quaternion();
+const _lp = new THREE.Vector3();
+
+/**
+ * Two-bone IK on a rig's arm in WORLD space (the zombie holding a civilian):
+ * its hand onto `target`, the elbow bending toward world direction `pole`;
+ * writes the shoulder rotation and the elbow flex straight onto the rig (its
+ * parent's matrices must be current). Arm lengths are read off the rig.
+ */
+export function ikLimb(arm: Limb, target: THREE.Vector3, pole: THREE.Vector3) {
+  const parent = arm.shoulder.parent;
+  if (!parent) return;
+  const upper = Math.abs(arm.elbow.position.y);
+  const fore = Math.abs(arm.end.position.y);
+  const a = _a.copy(target);
+  parent.worldToLocal(a).sub(arm.shoulder.position);
+  parent.getWorldQuaternion(_lq).invert();
+  _lp.copy(pole).applyQuaternion(_lq);
+  const flex = solveArm(a, upper, fore, _lp.x, _lp.y, _lp.z);
+  arm.shoulder.rotation.copy(_eu);
+  arm.elbow.rotation.set(flex, 0, 0);
 }
 
 /** A point on the head (head frame, rig units) in the chest frame of pose `p`. */
@@ -252,60 +312,135 @@ export function rootToChest(p: PoseBuf, x: number, y: number, z: number, out: TH
   return out;
 }
 
-/** Hand cupped beside the mouth (calling out), arm `side`. */
+/** Where the hand cups the mouth (chest frame), arm `side`: just in front of the chin, a little to that side. */
+function mouthPoint(p: PoseBuf, side: number, out: THREE.Vector3): THREE.Vector3 {
+  return headPoint(p, side * 0.05, 0.05, 0.2, out);
+}
+
+/** Clamp how far an arm is raised out sideways (|shoulder z| ≤ `max`): the elbow kept in. */
+function elbowIn(p: PoseBuf, side: number, max: number) {
+  const z = side > 0 ? J.SH_L_Z : J.SH_R_Z;
+  p[z] = clamp(p[z], -max, max);
+}
+
+/**
+ * Hand cupped at the mouth (calling out), arm `side`: the elbow DOWN by the ribs
+ * and a little forward, the forearm up in front of the chest to the chin — a
+ * shape that reads on a 40-texel sprite (an elbow lifted out to shoulder height
+ * with the forearm folded back at the face paints as an arm straight out).
+ */
 function handAtMouth(p: PoseBuf, side: number) {
-  headPoint(p, side * 0.075, 0.06, 0.17, _hp);
-  ikArm(p, side, _hp, side * 0.8, -1, -0.1);
+  mouthPoint(p, side, _hp);
+  ikArm(p, side, _hp, side * 0.25, -1, 0.6);
+  elbowIn(p, side, 0.5);
+}
+
+const _fq = new THREE.Quaternion();
+const _fe = new THREE.Euler();
+
+/**
+ * Forward kinematics of arm `side` in pose `p` (chest frame, rig units): where
+ * its elbow and hand are — to blend a hand's TARGET from where a fitted pose put
+ * it to somewhere else and solve the IK every frame (blending the joint angles
+ * instead swings the arm out through the air on the way).
+ */
+export function armFK(p: PoseBuf, side: number, elbow: THREE.Vector3, hand: THREE.Vector3) {
+  const l = side > 0;
+  _fq.setFromEuler(_fe.set(p[l ? J.SH_L_X : J.SH_R_X], p[l ? J.SH_L_Y : J.SH_R_Y], p[l ? J.SH_L_Z : J.SH_R_Z]));
+  elbow.set(0, -UPPER, 0).applyQuaternion(_fq);
+  hand
+    .set(0, -FORE, 0)
+    .applyEuler(_fe.set(p[l ? J.EL_L_X : J.EL_R_X], 0, 0))
+    .applyQuaternion(_fq)
+    .add(elbow);
+  elbow.x += side * SH_OX;
+  elbow.y += SH_OY;
+  hand.x += side * SH_OX;
+  hand.y += SH_OY;
+}
+
+const _e0 = new THREE.Vector3();
+const _h0 = new THREE.Vector3();
+const _e1 = new THREE.Vector3();
+
+/**
+ * Move arm `side`'s hand from where pose `p` has it now to `target` (chest
+ * frame) by `w` 0..1 — the hand travels on a straight line and the elbow swings
+ * from where it is toward pole (px, py, pz): two-bone IK every frame.
+ */
+function handTo(p: PoseBuf, side: number, target: THREE.Vector3, w: number, px: number, py: number, pz: number) {
+  if (w <= 0) return;
+  armFK(p, side, _e0, _h0);
+  // (The elbow's current bend direction, off the shoulder→hand line.)
+  _e0.x -= side * SH_OX;
+  _e0.y -= SH_OY;
+  _e1.set(px, py, pz).normalize();
+  const n = _e0.length();
+  if (n > 1e-4) _e0.divideScalar(n);
+  _e0.lerp(_e1, w);
+  _h0.lerp(target, w);
+  ikArm(p, side, _h0, _e0.x, _e0.y, _e0.z);
 }
 
 // ─── Acts ────────────────────────────────────────────────────────────────────
 
 /**
  * HELP!: crouched forward toward the camera, knees bent, calling out with one
- * hand cupped at the mouth while the other waves from the elbow beside the head
- * (`side` +1 = the left arm waves) — two held positions, 2.5 waves a second.
- * `big`: a far-off or perched civilian waves the whole arm overhead instead (the
- * only time a hand goes up over the head). `look` turns the head (radians).
+ * hand cupped at the mouth (elbow down) while the other waves beside the head
+ * from an elbow held in front at chest height (`side` +1 = the left arm waves) —
+ * two held positions, 2.5 waves a second. Never an arm out to the side, never a
+ * hand over the head. `big` (far off, or perched up on something): a deeper
+ * crouch bouncing on the knees and a bigger swing of the forearm. `look` turns
+ * the head (radians). The caller turns the body 0.35–0.5 rad off the camera so
+ * the knee bend and the lean show in silhouette.
  */
 export function posePlead(p: PoseBuf, t: number, side: number, big: boolean, look: number) {
   poseStand(p);
   const k = key2(t, 2.5);
-  p[J.HIP_L_X] = p[J.HIP_R_X] = -0.36 - 0.05 * k;
-  p[J.KNEE_L] = p[J.KNEE_R] = 0.62 + 0.1 * k;
-  p[J.HIP_L_Z] = 0.1;
-  p[J.HIP_R_Z] = -0.1;
+  // (Far / perched: bouncing on the knees, 3 a second, held at each end.)
+  const b = big ? key2(t + 0.07, 3, 0.2) : 0;
+  const bend = big ? 0.2 : 0;
+  // The waving side's foot a short step forward, the other back: a stance, not a soldier at attention.
+  const fx = side > 0 ? J.HIP_L_X : J.HIP_R_X;
+  const bx = side > 0 ? J.HIP_R_X : J.HIP_L_X;
+  const fk = side > 0 ? J.KNEE_L : J.KNEE_R;
+  const bk = side > 0 ? J.KNEE_R : J.KNEE_L;
+  p[fx] = -0.62 - bend - 0.12 * b - 0.04 * k;
+  p[fk] = 0.95 + bend + 0.2 * b + 0.06 * k;
+  p[bx] = -0.18 - bend * 0.8 - 0.1 * b;
+  p[bk] = 0.85 + bend + 0.2 * b;
+  p[J.HIP_L_Z] = 0.12;
+  p[J.HIP_R_Z] = -0.12;
   p[J.HIPS_Y] = legsHeight(p);
-  p[J.HIPS_Z] = -0.03;
+  p[J.HIPS_Z] = -0.06;
   // Leaning in toward the player, face up to them.
-  p[J.SPINE_X] = 0.34;
-  p[J.CHEST_X] = 0.08;
-  p[J.SPINE_Z] = -0.07 * side;
-  p[J.SPINE_Y] = 0.1 * side;
-  p[J.NECK_X] = -0.22;
-  p[J.HEAD_X] = -0.24 + 0.06 * k;
+  p[J.SPINE_X] = 0.42 + 0.06 * b;
+  p[J.CHEST_X] = 0.06;
+  p[J.SPINE_Z] = -0.05 * side;
+  p[J.SPINE_Y] = 0.12 * side;
+  p[J.NECK_X] = -0.3;
+  p[J.HEAD_X] = -0.26 + 0.06 * k;
   p[J.HEAD_Y] = look;
   p[J.HEAD_Z] = 0.1 * side - 0.06 * side * k;
   handAtMouth(p, -side);
-  if (big) {
-    // Up and out to the side, swinging from the elbow (two held positions).
-    p[side > 0 ? J.SH_L_Z : J.SH_R_Z] = side * (2.3 + 0.35 * k);
-    p[side > 0 ? J.SH_L_X : J.SH_R_X] = -0.25;
-    p[side > 0 ? J.EL_L_X : J.EL_R_X] = -0.2 - 0.6 * k;
-  } else {
-    // Hand beside the head, the forearm swinging out and back from the elbow.
-    _hp2.set(side * (0.42 + 0.2 * k), 0.34 - 0.13 * k, 0.22 - 0.1 * k);
-    ikArm(p, side, _hp2, side, -0.55, -0.2);
-  }
+  // The wave: elbow in front at chest height, a little out; the forearm up
+  // beside the face, swinging out and back from the elbow.
+  // (Elbow BELOW the shoulder: an upper arm level with it reads as an arm held
+  // out sideways once the body turns.)
+  const sw = big ? 0.17 : 0.13;
+  _hp2.set(side * (0.27 + sw * k), 0.24 - 0.07 * k, 0.22 - 0.03 * k);
+  ikArm(p, side, _hp2, side * 0.1, -1, 0.15);
+  elbowIn(p, side, 1.1);
 }
 
 /**
- * COWER: down on one knee (`kneel` +1 = the left knee), folded over the other,
- * head tucked down, hands clasped over the back of the head, elbows by the
- * face. `peek` 0..1 lifts only the neck and head to look out between the
- * forearms (toward `look`, radians in the body frame) — the forearms stay up by
- * the face, spreading a little; `call` ±1: that hand comes round to the mouth,
- * calling HELP! — and `curl` 0..1 tucks in harder (something lunging, a shot
- * nearby). Add `shiver`. (Arm angles fitted to the rig so the painted arms and
+ * COWER: down on both knees (`kneel` +1 = the left one a little further
+ * forward), folded over them, head tucked down, hands clasped over the back of
+ * the head, elbows in front of the face. `peek` 0..1 lifts only the neck and
+ * head (never the hips) to look out over the forearms (toward `look`, radians in
+ * the body frame) — the forearms come down hugging the chest; `call` ±1: that
+ * hand comes down to the mouth instead, elbow by the ribs, calling HELP! — and
+ * `curl` 0..1 tucks in harder (something lunging, a shot nearby). Add `shiver`. (Arm angles fitted to the rig so the painted arms and
  * the hitboxes agree from the front, three-quarter and side views.)
  */
 export function poseCower(p: PoseBuf, t: number, peek: number, look: number, curl: number, kneel: number, call = 0) {
@@ -314,15 +449,15 @@ export function poseCower(p: PoseBuf, t: number, peek: number, look: number, cur
   const kk = kneel > 0 ? J.KNEE_L : J.KNEE_R;
   const fx = kneel > 0 ? J.HIP_R_X : J.HIP_L_X;
   const fk = kneel > 0 ? J.KNEE_R : J.KNEE_L;
-  // Kneeling leg: thigh down and back, shin along the floor; the other foot planted in front.
-  p[kx] = -0.5 - 0.08 * curl;
-  p[kk] = 2.05;
-  p[fx] = -1.45 - 0.1 * curl;
-  p[fk] = 2.15 + 0.1 * curl;
-  p[J.HIP_L_Z] = 0.2;
-  p[J.HIP_R_Z] = -0.2;
-  // (A touch high: the kneeling foot's toes stay over the floor, tucked in harder too.)
-  p[J.HIPS_Y] = Math.max(kneelY(p[kx]), footY(p[fx], p[fk])) + 0.015 - 0.02 * curl;
+  // Down on both knees, sitting back toward the heels, knees a little apart (one
+  // knee up with the other foot planted reads, turned, as a sprinter in the blocks).
+  p[kx] = -0.75 - 0.08 * curl;
+  p[kk] = 2.2 + 0.08 * curl;
+  p[fx] = -0.9 - 0.08 * curl;
+  p[fk] = 2.35 + 0.08 * curl;
+  p[J.HIP_L_Z] = 0.16;
+  p[J.HIP_R_Z] = -0.16;
+  p[J.HIPS_Y] = Math.max(kneelY(p[kx]), kneelY(p[fx])) + 0.01 - 0.02 * curl;
   p[J.HIPS_Z] = -0.03;
   // Folded down over the front knee, panting.
   // (Tucking in harder drops the hips and the head, not the back: the arms stay fitted.)
@@ -342,20 +477,11 @@ export function poseCower(p: PoseBuf, t: number, peek: number, look: number, cur
   p[J.SH_R_Z] = 0.07 + 0.3 * peek;
   p[J.EL_L_X] = p[J.EL_R_X] = -1.83 + 0.35 * peek;
   if (call !== 0 && peek > 0) {
-    // That hand round to the mouth, calling out (blended in with the peek).
-    const x = call > 0 ? J.SH_L_X : J.SH_R_X;
-    const y = call > 0 ? J.SH_L_Y : J.SH_R_Y;
-    const z = call > 0 ? J.SH_L_Z : J.SH_R_Z;
-    const e = call > 0 ? J.EL_L_X : J.EL_R_X;
-    const a0 = p[x];
-    const a1 = p[y];
-    const a2 = p[z];
-    const a3 = p[e];
-    handAtMouth(p, call);
-    p[x] = a0 + (p[x] - a0) * peek;
-    p[y] = a1 + (p[y] - a1) * peek;
-    p[z] = a2 + (p[z] - a2) * peek;
-    p[e] = a3 + (p[e] - a3) * peek;
+    // That hand comes down off the head to the mouth, calling out, the elbow
+    // dropping by the ribs (the hand's target blended with the peek, IK each frame).
+    mouthPoint(p, call, _hp);
+    handTo(p, call, _hp, smoothstep(0, 1, peek), call * 0.25, -1, 0.6);
+    elbowIn(p, call, 0.5 + 0.6 * (1 - peek));
   }
 }
 
@@ -418,31 +544,37 @@ export function poseHide(p: PoseBuf, t: number, peek: number, lean: number, glan
 }
 
 /**
- * BACK AWAY: stepping backwards (walk `phase`, hip swing `amp`) knees soft,
- * leaning back from the threat it faces, one forearm across the face (`guard`
- * +1 = the left), the other hand reaching back behind for a way out; `fear`
- * 0..1 turns the face away behind the guard.
+ * BACK AWAY: stepping backwards (walk `phase`, hip swing `amp`) on bent knees,
+ * recoiling from the threat it faces — leaning back, chin tucked, the face
+ * turned away — one hand up in front of the face, palm out at it, elbow down
+ * (`guard` +1 = the left), the other reaching back behind for a way out;
+ * `fear` 0..1 recoils harder.
  */
 export function poseBackAway(p: PoseBuf, phase: number, amp: number, fear: number, guard: number) {
   poseStand(p);
   const s = Math.sin(phase);
   const c = Math.cos(phase);
-  p[J.HIP_L_X] = -s * amp - 0.14;
-  p[J.HIP_R_X] = s * amp - 0.14;
-  p[J.KNEE_L] = 0.45 + Math.max(0, c) * 0.35;
-  p[J.KNEE_R] = 0.45 + Math.max(0, -c) * 0.35;
-  p[J.HIP_L_Z] = 0.06;
-  p[J.HIP_R_Z] = -0.06;
+  p[J.HIP_L_X] = -s * amp - 0.2;
+  p[J.HIP_R_X] = s * amp - 0.2;
+  p[J.KNEE_L] = 0.5 + Math.max(0, c) * 0.35;
+  p[J.KNEE_R] = 0.5 + Math.max(0, -c) * 0.35;
+  p[J.HIP_L_Z] = 0.16;
+  p[J.HIP_R_Z] = -0.16;
   p[J.HIPS_Y] = legsHeight(p);
+  p[J.HIPS_Z] = -0.04;
   p[J.HIPS_RY] = 0.08 * s;
-  p[J.SPINE_X] = -0.2 - 0.08 * fear;
+  // Recoiling: the hips back under a torso leaning away from it.
+  p[J.SPINE_X] = -0.24 - 0.1 * fear;
   p[J.SPINE_Y] = -0.15 * guard;
-  p[J.NECK_X] = 0.2;
-  p[J.HEAD_X] = 0.12 + 0.1 * fear;
-  p[J.HEAD_Y] = -0.4 * fear * guard;
-  // Forearm up in front of the face on its own side, elbow out (shielding).
-  headPoint(p, guard * 0.08, 0.24, 0.2, _hp);
-  ikArm(p, guard, _hp, guard, 0.3, 0.3);
+  // Chin tucked, the face turned away behind the raised hand.
+  p[J.NECK_X] = 0.28;
+  p[J.NECK_Y] = -0.15 * guard;
+  p[J.HEAD_X] = 0.22 + 0.08 * fear;
+  p[J.HEAD_Y] = -guard * (0.3 + 0.25 * fear);
+  // The hand up in front of the face, at nose height a forearm out, palm toward it; elbow down.
+  headPoint(p, guard * 0.04, 0.1, 0.3, _hp);
+  ikArm(p, guard, _hp, guard * 0.45, -1, 0.15);
+  elbowIn(p, guard, 0.9);
   // The other hand reaching back.
   const shX = guard > 0 ? J.SH_R_X : J.SH_L_X;
   const shZ = guard > 0 ? J.SH_R_Z : J.SH_L_Z;
@@ -581,14 +713,17 @@ export function poseStumble(p: PoseBuf, u: number, t: number) {
 
 /**
  * GRABBED: a tug of war with the zombie on `side` (+1 = at the character's
- * left): leaning hard away from it, weight on the bent far leg, the near leg
- * straight and its heel dug in, chest turned toward it so BOTH hands can pull on
- * the held wrist (the caller puts the hands there with `ikArm`). `yank` 0..1 is
- * the zombie's jerk: dragged upright toward it, the near foot stumbling a step,
- * the head snapping; `look` −1..1 turns the head from the zombie (−) to the
- * camera (+, screaming for help).
+ * left): weight dropped low and leaning hard away from it, the far leg bent
+ * deep under the weight, the near leg out toward it with the heel dug in, the
+ * chest turned toward it so BOTH hands haul on the held wrist (the caller puts
+ * the hands there with `ikArm`). `yank` 0..1 is the zombie's jerk: dragged up
+ * and toward it, the head snapping. The feet: `nearX` / `farX` (m, + toward the
+ * zombie, from the hips) are where the caller has put each foot — the yank
+ * drags them two stumbling steps toward it, they step back as they haul — and
+ * `nearUp` / `farUp` 0..1 lift the foot that's stepping. `look` −1..1 turns the
+ * head from the zombie (−) to the camera (+, screaming for help).
  */
-export function poseGrabbed(p: PoseBuf, t: number, side: number, yank: number, look: number) {
+export function poseGrabbed(p: PoseBuf, t: number, side: number, yank: number, look: number, nearX = 0, farX = 0, nearUp = 0, farUp = 0) {
   poseStand(p);
   const nx = side > 0 ? J.HIP_L_X : J.HIP_R_X;
   const nz = side > 0 ? J.HIP_L_Z : J.HIP_R_Z;
@@ -597,21 +732,21 @@ export function poseGrabbed(p: PoseBuf, t: number, side: number, yank: number, l
   const fz = side > 0 ? J.HIP_R_Z : J.HIP_L_Z;
   const fk = side > 0 ? J.KNEE_R : J.KNEE_L;
   const y = yank;
-  // Near leg out toward the zombie, straight, heel dug in (a stumbling step on a yank).
-  p[nz] = side * (0.36 - 0.12 * y);
-  p[nx] = -0.12 - 0.45 * y;
-  p[nk] = 0.06 + 0.7 * y;
-  // Far leg bent under the weight, out the other way.
-  p[fz] = -side * (0.2 - 0.08 * y);
-  p[fx] = -0.45 + 0.25 * y;
-  p[fk] = 0.85 - 0.45 * y;
-  p[J.HIPS_Y] = legsHeight(p) - 0.03;
-  p[J.HIPS_X] = -side * (0.15 - 0.12 * y);
-  p[J.HIPS_RZ] = side * 0.08 * (1 - y);
+  // Near leg out toward the zombie, nearly straight, heel dug in.
+  p[nz] = side * (0.34 - 0.1 * y + nearX / 0.88);
+  p[nx] = -0.3 - 0.25 * y - 0.35 * nearUp;
+  p[nk] = 0.45 + 0.25 * y + 0.75 * nearUp;
+  // Far leg bent deep under the weight, out the other way.
+  p[fz] = side * (-0.16 + 0.06 * y + farX / 0.88);
+  p[fx] = -0.85 + 0.3 * y - 0.3 * farUp;
+  p[fk] = 1.2 - 0.4 * y + 0.7 * farUp;
+  p[J.HIPS_Y] = legsHeight(p) - 0.02;
+  p[J.HIPS_X] = -side * (0.12 - 0.1 * y);
+  p[J.HIPS_RZ] = side * 0.1 * (1 - y);
   // Leaning hard away (z > 0 leans toward −X) — dragged upright on the yank.
-  p[J.SPINE_Z] = side * (0.5 - 0.32 * y);
+  p[J.SPINE_Z] = side * (0.5 - 0.3 * y);
   p[J.CHEST_Z] = side * 0.08 * (1 - y);
-  p[J.SPINE_X] = 0.1 + 0.12 * y;
+  p[J.SPINE_X] = 0.2 + 0.1 * y;
   p[J.SPINE_Y] = side * 0.35;
   p[J.NECK_X] = -0.08;
   // Head: to the camera screaming, or back at the zombie straining; snapped on a yank.
@@ -661,9 +796,11 @@ export function poseThanks(p: PoseBuf, t: number, side: number, thumb: boolean, 
     _hp2.set(side * 0.3, 0.06 + 0.03 * nod, 0.38);
     ikArm(p, side, _hp2, side, -1, -0.2);
   } else {
+    // (Elbow down in front, the forearm up beside the face — as the HELP! wave.)
     const k = key2(t, 2.4);
-    _hp2.set(side * (0.42 + 0.14 * k), 0.16 - 0.05 * k, 0.17);
-    ikArm(p, side, _hp2, side, -0.8, -0.2);
+    _hp2.set(side * (0.28 + 0.1 * k), 0.28 - 0.03 * k, 0.22);
+    ikArm(p, side, _hp2, side * 0.35, -1, 0.75);
+    elbowIn(p, side, 1.1);
   }
   // The other hand on the chest (phew).
   _hp2.set(-side * 0.04, -0.14, 0.15);
@@ -688,29 +825,4 @@ export function poseJog(p: PoseBuf, phase: number) {
   p[J.SH_L_Z] = 0.15;
   p[J.SH_R_Z] = -0.15;
   p[J.EL_L_X] = p[J.EL_R_X] = -1.35;
-}
-
-// ─── Reaching ──────────────────────────────────────────────────────────────
-
-const _t = new THREE.Vector3();
-
-/**
- * Point an arm at a world point: sets its shoulder's x / z so the arm hangs
- * straight toward `target` (the rig's matrices must be current up to the chest),
- * leaving the elbow as posed. The zombie holding a grabbed civilian reaches with
- * it.
- */
-export function aimArm(arm: Limb, target: THREE.Vector3) {
-  const chest = arm.shoulder.parent;
-  if (!chest) return;
-  chest.updateWorldMatrix(true, false);
-  _t.copy(target);
-  chest.worldToLocal(_t).sub(arm.shoulder.position);
-  const len = _t.length();
-  if (len < 1e-4) return;
-  _t.divideScalar(len);
-  // Euler XYZ on (0, −1, 0): (sin z, −cos z·cos x, −cos z·sin x).
-  const z = Math.asin(Math.max(-1, Math.min(1, _t.x)));
-  const x = Math.atan2(-_t.z, -_t.y);
-  arm.shoulder.rotation.set(x, 0, z);
 }

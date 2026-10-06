@@ -5,17 +5,19 @@ import { angleDelta } from '../core/math';
 import type { EnemySpawn } from './Enemy';
 import type { World } from './World';
 import type { Civilian } from './Civilian';
-import { aimArm } from './civPoses';
+import { ikLimb } from './civPoses';
 import type { HumanoidRig } from '../content/kit/humanoid';
 
 const _p = new THREE.Vector3();
 const _q = new THREE.Vector3();
+const _pole = new THREE.Vector3();
 
 /**
  * A zombie that has caught a civilian (the civilian's GRABBED act spawns it, at
- * the spot the civilian picks — see `Civilian`): it stands its ground at arm's
- * length, one hand clamped on the civilian's wrist, the other clawing at them,
- * lunging in to bite. House of the Dead rules: shoot it and they're free.
+ * the spot the civilian picks — see `Civilian`): a tug of war at arm's length,
+ * both hands on the civilian's arm (the wrist, the forearm by the elbow),
+ * hunched in snapping at it, then throwing its weight back on each yank.
+ * House of the Dead rules: shoot it and they're free.
  *
  * Fairness: while it holds on it never attacks the player (no warning ring, no
  * attack slot) and stays where the civilian put it — level with them, an arm's
@@ -89,7 +91,6 @@ export class Grabber extends Walker {
     const yaw = Math.atan2(_p.x - this.root.position.x, _p.z - this.root.position.z);
     this.root.rotation.y += angleDelta(this.root.rotation.y, yaw + v.grabTurn) * (1 - Math.exp(-8 * dt));
     this.moveSpeed = 0;
-    this.bite = Math.max(0, Math.sin(this.age * 2.3 + 1));
   }
 
   protected override pixelJaw(): number {
@@ -107,44 +108,48 @@ export class Grabber extends Walker {
     restPose(r, this.hipsY);
     const t = this.age;
     const g = this.gripSide;
-    // A tug of war: feet braced, leaning back AWAY from the civilian (dragging
-    // them in) — its head and chest stay clear of them on screen — throwing its
-    // weight back on each yank, the head snapping at them now and then.
-    const lunge = this.bite;
+    // The zombie does the pulling: hunched in over the held arm between yanks,
+    // the head darting at it (trying to bite), then on each yank it throws its
+    // weight back, a step back with the rear foot, hauling with BOTH hands — one
+    // clamped on the wrist, the other on the forearm by the elbow. (Leaning away
+    // from the civilian on the yank keeps its head and chest well clear of them.)
     const y = v.yank;
-    r.legL.hip.rotation.x = g > 0 ? -0.35 - 0.15 * y : 0.2 + 0.1 * y;
-    r.legR.hip.rotation.x = g > 0 ? 0.2 + 0.1 * y : -0.35 - 0.15 * y;
-    r.legL.knee.rotation.x = g > 0 ? 0.45 + 0.2 * y : 0.2;
-    r.legR.knee.rotation.x = g > 0 ? 0.2 : 0.45 + 0.2 * y;
-    r.legL.hip.rotation.z = 0.12 + (g > 0 ? 0.08 : 0);
-    r.legR.hip.rotation.z = -0.12 - (g < 0 ? 0.08 : 0);
-    r.hips.position.y = this.hipsY - 0.06 - 0.04 * y;
+    const bite = y < 0.15 ? key(t * 0.75) : 0;
+    this.bite = bite;
+    const front = g > 0 ? r.legL : r.legR;
+    const rear = g > 0 ? r.legR : r.legL;
+    front.hip.rotation.set(-0.4 + 0.2 * y, 0, g * 0.14);
+    front.knee.rotation.x = 0.45 - 0.15 * y;
+    rear.hip.rotation.set(0.12 + 0.38 * y, 0, -g * 0.1);
+    rear.knee.rotation.x = 0.3 + 0.25 * y;
+    r.hips.position.y = this.hipsY - 0.07 - 0.05 * y;
     // (z > 0 leans toward −X: away from a civilian at its left when g = +1.)
-    r.spine.rotation.z = g * (0.16 + 0.18 * y + 0.03 * Math.sin(t * 2.6));
-    r.spine.rotation.x = 0.1 + 0.08 * lunge * (1 - y) - 0.12 * y;
-    r.spine.rotation.y = g * 0.2;
-    r.neck.rotation.x = -0.2 - 0.15 * lunge;
-    r.head.rotation.x = -0.1 + 0.1 * lunge;
-    r.head.rotation.y = g * 0.45;
-    r.head.rotation.z = this.headTilt - g * (0.1 + 0.15 * y) + Math.sin(t * 7) * 0.06 * lunge;
-    // Gripping hand (straight arm) on the civilian's wrist; the other claws
-    // toward them at shoulder height (never up over its head).
+    r.spine.rotation.x = 0.38 * (1 - y) - 0.06 * y + 0.05 * bite;
+    r.spine.rotation.z = g * (0.02 * (1 - y) + 0.45 * y);
+    r.spine.rotation.y = g * 0.3;
+    r.chest.rotation.x = 0.12 * (1 - y);
+    r.neck.rotation.x = -0.2 + 0.3 * bite;
+    r.head.rotation.x = -0.12 + 0.15 * bite;
+    r.head.rotation.y = g * (0.45 + 0.15 * bite);
+    r.head.rotation.z = this.headTilt - g * (0.08 + 0.12 * y);
+    // Both hands on the held arm (two-bone IK on the rig), elbows down.
+    this.root.updateWorldMatrix(true, true);
     const hold = g > 0 ? r.armL : r.armR;
-    const claw = g > 0 ? r.armR : r.armL;
-    hold.elbow.rotation.x = -0.08;
-    claw.elbow.rotation.x = -0.6 - 0.3 * key(t);
-    aimArm(hold, v.grabHand);
-    v.shoulderPoint(_q);
-    r.chest.getWorldPosition(_p);
-    _q.lerp(_p, 0.2);
-    _q.y += 0.04 * key(t + 0.2);
-    aimArm(claw, _q);
+    const other = g > 0 ? r.armR : r.armL;
+    _pole.set(0, -1, 0);
+    ikLimb(hold, v.grabHand, _pole);
+    // The other hand on the forearm by the elbow — as near the elbow as it reaches.
+    other.shoulder.getWorldPosition(_p);
+    const reach = (Math.abs(other.elbow.position.y) + Math.abs(other.end.position.y)) * r.scale * 0.97;
+    v.elbowPoint(_q);
+    for (let i = 0; i < 4 && _q.distanceTo(_p) > reach; i++) _q.lerp(v.grabHand, 0.35);
+    ikLimb(other, _q, _pole);
     // (Tremor of effort in the holding arm.)
-    hold.shoulder.rotation.z += Math.sin(t * 23) * 0.03;
+    hold.shoulder.rotation.z += Math.sin(t * 23) * 0.025;
   }
 }
 
-/** A clawing swipe, held at each end for a few sprite frames (0 / 1, 2.2 a second). */
+/** A snap, held at each end for a few sprite frames (0 / 1, 2.2 a second). */
 function key(t: number): number {
   const u = t * 2.2 - Math.floor(t * 2.2);
   return u < 0.5 ? 0 : 1;
