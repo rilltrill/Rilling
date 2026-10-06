@@ -1,4 +1,4 @@
-import { bayer, type PwCanvas } from './canvas';
+import { bayer, PWF, type PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { crack, hash2, smooth } from './surfaces';
 
@@ -614,20 +614,22 @@ export function d3GravelTile(atlas: PwAtlas, o: { hex: number; silt: number }): 
 
 /**
  * A rain puddle (animated module, 64 × 48 a frame, cut out): a ragged muddy
- * rim, calm dark water a step darker toward the middle, the storm sky caught in
- * a few broken 2-texel reflection dashes (LIT, tone ≤ 2.2: they brighten with the
- * lightning instead of glowing all night) and at most three rain rings as 2-texel
- * arcs on their near half, opening over the frames (lit, tone ≤ 3). No unlit
- * texels, no 1-texel rings: at a distance the puddle stays a calm dark pool (the
- * puddle material also takes its levels a step early, see `D3PixelWorld.puddle`).
+ * rim (lit), and water that MIRRORS THE STORM SKY — unlit, so a night pool reads
+ * as water rather than a hole in the ground (lit water went near-black under
+ * the storm's light): the body at the sky ramp's tone 1 (≈ the fog colour, a
+ * shade under the mud), a few broken 2-texel reflection dashes and at most
+ * three rain rings (2-texel arcs on their near half, opening over the frames) a
+ * single step brighter (tone 2: dim storm blue, never near a telegraph ring's
+ * brightness). No 1-texel detail, two tones only: at a distance the puddle stays
+ * a calm pool (its material takes its levels a step early, and its glow follows
+ * the lightning flash — see `D3PixelWorld.puddle` / `update`).
  */
-export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; sky: number }, variant = 0): PwTile {
+export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; sky: number }, variant = 0): PwTile {
   const F = D3_ANIM_FRAMES;
   const W = 64;
   const FH = 48;
-  return atlas.tile(`d3puddle4|${h6(o.rim)}|${h6(o.water)}|${h6(o.sky)}|${variant}|${F}`, W, FH * F, (c, k) => {
+  return atlas.tile(`d3puddle5|${h6(o.rim)}|${h6(o.sky)}|${variant}|${F}`, W, FH * F, (c, k) => {
     const rim = k.ramp(o.rim, { light: 0.42 });
-    const wat = k.ramp(o.water, { light: 0.45, sat: 0.9 });
     const sky = k.ramp(o.sky, { light: 0.4, sat: 0.8 });
     // Shape (shared by every frame).
     const shape = new Float32Array(W * FH);
@@ -651,15 +653,12 @@ export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; s
       }
       // Reflection dashes: 2 rows in every 12, 6–12 texels long, drifting a texel a frame (the wind).
       const band = Math.floor(ly / 2);
-      if (band % 6 === 1 && d < 0.78) {
-        const dash = hash2((x + f) >> 3, band, 152 + variant);
-        if (dash > 0.5) {
-          c.set(x, y, sky, dash > 0.8 ? 2.2 : 2, 0);
-          return;
-        }
+      if (band % 6 === 1 && d < 0.78 && hash2((x + f) >> 3, band, 152 + variant) > 0.5) {
+        c.set(x, y, sky, 2, PWF.GLOW);
+        return;
       }
-      // Calm water: a step darker in the middle (2 tones, no dither speckle).
-      c.set(x, y, wat, d > 0.6 ? 2.3 : 1.9, 0);
+      // Calm water: the storm sky mirrored, one flat tone (no dither speckle).
+      c.set(x, y, sky, 1, PWF.GLOW);
     });
     // Rain rings: three, each a near-half arc (2-texel dashes) opening over the frames.
     for (let i = 0; i < 3; i++) {
@@ -677,7 +676,8 @@ export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; s
           const x = Math.round(rx + Math.cos(a) * rr * 1.3 - 0.5);
           const ly = Math.round(ry + Math.sin(a) * rr - 0.5);
           if (x < 0 || x >= W || ly < 0 || ly >= FH || shape[ly * W + x] > 0.8) continue;
-          c.set(x, y0 + ly, sky, age === F - 1 ? 2.2 : 2.8, 0);
+          // A fading ring (its last frame) sinks back to the water's tone.
+          c.set(x, y0 + ly, sky, age === F - 1 ? 1 : 2, PWF.GLOW);
         }
       }
     }

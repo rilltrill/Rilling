@@ -1091,8 +1091,9 @@ PIXEL CAST) over frames.
   terrain as ONE planar batch (floor sward / mud / gorge strata `d3RockTile` / river bed,
   tinted per vertex from the classic colours), the road per 60 m chunk (`d3RoadTile` 8 × 10 m:
   wear patches with lobed outlines, tar snakes, pothole, chipped dashes; `d3VergeTile`;
-  `d3MudRoadTile`), animated puddles / pools / river (`d3PuddleDecal`: deep water darker than
-  the ground, a wet rim, the sky caught in broken unlit reflection streaks, rain rings),
+  `d3MudRoadTile`), animated puddles / pools / river (`d3PuddleDecal`: a wet lit rim round
+  water that mirrors the storm sky — unlit, a shade under the mud — with broken reflection
+  streaks and rain rings one step brighter, the glow following the lightning flash),
   footprints, skids; boulders as FLORA-style billboards (`stones`). Panorama (`d3Sky.ts`): the
   sky band is the FOG colour up to 7° then the classic dome's darker steps, every seam a Bayer
   transition; storm heaps built from overlapping lobes + cauliflower bumps (each texel owned
@@ -1185,9 +1186,14 @@ PIXEL CAST) over frames.
   server-room door (shelves, canteen notices, a stopped clock, an extinguisher, a rail); more
   clutter cards (mixer and plates, mugs) on the islands and wall counters; floor drains, grease
   trodden out from the ranges.
-- **d3 puddles**: calm dark water (two lit tones, no unlit texels), reflection dashes 2 rows in
-  12 lit at tone ≤ 2.2 (they brighten with the lightning), ≤ 3 rain rings as 2-texel arcs on
-  the near half; their own material with levels a step early (`bias 1`); half the road puddles
+- **d3 puddles**: water that mirrors the storm sky, two tones only: the body UNLIT at the sky
+  ramp's tone 1 (≈ the fog colour) — lit water went near-black under the storm's light and
+  read as holes in the road (measured (8, 7, 11) on screen against mud at (70, 43, 31)) —
+  reflection dashes 2 rows in 12 and ≤ 3 rain rings (2-texel arcs on the near half) one step
+  brighter; a lit muddy rim. Their own material with levels a step early (`bias 1`) and a glow
+  gain `PUDDLE_GLOW` 1.8 × (1 + 1.6 × flash): between the mud and the fog on screen (≈ (19, 26,
+  44)), flaring with each strike (a mild swell with reduced flashing). Brighter (tone 2) read
+  as a pale patch at the Tyrant's feet, pulling the eye off telegraphs. Half the road puddles
   (by hash: the classic draws unchanged), five of the nine mud-stretch pools. The rain splash
   rings dim to storm blue (opacity 0.26) so the telegraph rings stay the only bright ellipses.
 - **d3 mud-hold truck**: a sun visor, an amber beacon, mirrors out on arms, rubber fender arches

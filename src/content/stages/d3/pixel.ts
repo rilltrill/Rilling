@@ -83,6 +83,12 @@ export const D3C = {
 } as const;
 
 const CHUNK = 60;
+/**
+ * Gain of the puddles' mirrored sky (unlit, × the lightning flash): tone 1 of the sky ramp at
+ * ×1.8 sits between the mud and the fog — water, not a hole, and not a pale patch that pulls
+ * the eye off a telegraph.
+ */
+const PUDDLE_GLOW = 1.8;
 /** The park's tour cars (white, red livery: the d1 painters, d3's night-storm grime). */
 const CAR: CarPaint = { white: 0xb4ae9c, red: 0xb8302a, glass: 0x2a3a52, tyre: 0x1c1c1e, steel: 0x8a8a86, mud: 0x5a4630 };
 const Z = new THREE.Vector3(0, 0, 1);
@@ -177,7 +183,7 @@ export class D3PixelWorld {
   readonly terrain: PwBatch;
   /** Animated strips (water, foam, flames). */
   readonly anim: PwBatch;
-  /** Rain puddles: animated, on their own material (levels a step early: calm dark pools at a distance). */
+  /** Rain puddles: animated, on their own material (levels a step early: calm pools at a distance; the glow follows the flash). */
   readonly puddles: PwBatch;
   /** Static painted scenery per 60 m chunk (fog-culled with the classic chunks). */
   private chunks = new Map<number, PwBatch>();
@@ -295,7 +301,7 @@ export class D3PixelWorld {
   /** A rain puddle (the classic disc: radius r, stretched `sz` along its local z, turned `yaw`). */
   puddle(p: THREE.Vector3, yaw: number, rx: number, rz: number, variant: number, muddy = false) {
     // (One painted puddle per kind; `variant` mirrors it so neighbours differ.)
-    const t = d3PuddleDecal(this.atlas, muddy ? { rim: 0x2a2018, water: 0x1e2430, sky: 0x52627e } : { rim: 0x24221e, water: 0x1a2232, sky: D3C.sky }, 0);
+    const t = d3PuddleDecal(this.atlas, muddy ? { rim: 0x2a2018, sky: 0x52627e } : { rim: 0x24221e, sky: D3C.sky }, 0);
     const sub = { x: 0, y: 0, w: t.w, h: t.h / D3_ANIM_FRAMES };
     const ax = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     const az = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
@@ -1334,7 +1340,7 @@ export class D3PixelWorld {
     this.animMat = pwMaterial(this.atlas, { anim: { frames: D3_ANIM_FRAMES, fps: 8 } });
     const an = this.anim.build(this.animMat);
     if (an) root.add(an);
-    this.puddleMat = pwMaterial(this.atlas, { anim: { frames: D3_ANIM_FRAMES, fps: 8 }, bias: 1, tag: 'puddle' });
+    this.puddleMat = pwMaterial(this.atlas, { anim: { frames: D3_ANIM_FRAMES, fps: 8 }, bias: 1, glow: PUDDLE_GLOW, tag: 'puddle' });
     const pu = this.puddles.build(this.puddleMat);
     if (pu) {
       pu.name = 'pw:d3-puddles';
@@ -1368,7 +1374,11 @@ export class D3PixelWorld {
   update(dt: number, cam: THREE.Vector3, flash: number, gust = 0) {
     this.time += dt;
     if (this.animMat) pwTick(this.animMat, dt);
-    if (this.puddleMat) pwTick(this.puddleMat, dt);
+    if (this.puddleMat) {
+      pwTick(this.puddleMat, dt);
+      // The mirrored sky (unlit) flares with the lightning, as the classic puddles' emissive does.
+      (this.puddleMat.userData.pw as { uPwGlow: { value: number } }).uPwGlow.value = PUDDLE_GLOW * (1 + flash * 1.6);
+    }
     for (const sk of this.socks) {
       const t = this.time;
       sk.rotation.y = -0.45 + Math.sin(t * 0.7) * 0.22 - gust * 0.2;
