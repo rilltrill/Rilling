@@ -3,9 +3,9 @@ import type { PwAtlas, PwTile } from '../../pixelworld/atlas';
 import { tintFor, type PwBatch } from '../../pixelworld/batch';
 import { PW_TPM } from '../../pixelworld/canvas';
 import { NEUTRAL_HEX, neutral } from '../../pixelworld/retexture';
-import { metalTile } from '../../pixelworld/surfaces';
+import { metalTile, roofTile } from '../../pixelworld/surfaces';
 import { z1SquareTiles, type Z1SquareTiles } from '../../pixelworld/z1square';
-import { boxFaces } from './pwDiner';
+import { boxFaces, cylinder } from './pwDiner';
 import type { PwPart } from './setpieces';
 
 /**
@@ -25,14 +25,30 @@ const NZ = new THREE.Vector3(0, 0, -1);
 const _o = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 
+/** A flat n-gon disc at height `y` (wrap tile mapped at world density), facing up or down. */
+function disc(b: PwBatch, r: number, y: number, seg: number, tile: PwTile, up: boolean) {
+  const c = new THREE.Vector3(0, y, 0);
+  for (let i = 0; i < seg; i++) {
+    const a0 = (i / seg) * Math.PI * 2;
+    const a1 = ((i + 1) / seg) * Math.PI * 2;
+    const p0 = new THREE.Vector3(Math.sin(a0) * r, y, Math.cos(a0) * r);
+    const p1 = new THREE.Vector3(Math.sin(a1) * r, y, Math.cos(a1) * r);
+    const uv = (p: THREE.Vector3) => [(p.x + r) * PW_TPM, (p.z + r) * PW_TPM];
+    if (up) b.tri(c.clone(), p0, p1, tile, [...uv(c), ...uv(p0), ...uv(p1)]);
+    else b.tri(c.clone(), p1, p0, tile, [...uv(c), ...uv(p1), ...uv(p0)]);
+  }
+}
+
 export class Z1Square {
   readonly t: Z1SquareTiles;
   private kiosk: PwTile;
   private signMetal: PwTile;
+  private roof: PwTile;
   constructor(atlas: PwAtlas) {
     this.t = z1SquareTiles(atlas);
     this.kiosk = neutral(this.t.kioskWall, NEUTRAL_HEX);
     this.signMetal = metalTile(atlas, { hex: 0x1c1c22, rust: 0.2 });
+    this.roof = roofTile(atlas, { hex: 0x2a2b31 });
   }
 
   /** Paint the tagged square meshes under `zone`; returns the classic meshes replaced. */
@@ -83,6 +99,35 @@ export class Z1Square {
         case 'kioskBody': {
           const tint = { tintRGB: tintFor(this.kiosk, (m.material as THREE.MeshLambertMaterial).color.getHex()) };
           boxFaces(b, p.width, p.height, p.depth, { px: this.kiosk, nx: this.kiosk, pz: this.kiosk, nz: this.kiosk }, { px: tint, nx: tint, pz: tint, nz: tint });
+          // Bills pasted on the three faces without the hatch (the front one under the sign), the evening
+          // paper's bundles stacked at the front corner.
+          const hatch = o.parent!.children.find((c) => c.userData.pwSq === 'newsHatch' || c.userData.pwSq === 'coffeeHatch');
+          const facing = hatch && hatch.position.x < 0 ? -1 : 1;
+          const bw = t.bills.w / PW_TPM;
+          const bh = t.bills.h / PW_TPM;
+          const hw = p.width / 2 + 0.008;
+          const hd = p.depth / 2 + 0.008;
+          const y0 = -p.height / 2 + 0.28;
+          // (Damp paper in the dark: a shade under full white.)
+          const bt = 0xa8a4a0;
+          b.rect(_o.set(-bw / 2 - 0.1, y0, hd), X, Y, bw, bh, t.bills, { tint: bt });
+          b.rect(_o.set(bw / 2 + 0.15, y0 + 0.1, -hd), NX, Y, bw, bh, t.bills, { tint: bt });
+          if (facing > 0) b.rect(_o.set(-hw, y0 - 0.05, -bw / 2 + 0.1), Z, Y, bw, bh, t.bills, { tint: bt });
+          else b.rect(_o.set(hw, y0 - 0.05, bw / 2), NZ, Y, bw, bh, t.bills, { tint: bt });
+          if (hatch?.userData.pwSq === 'newsHatch') {
+            const uw = t.bundle.w / PW_TPM;
+            const uh = t.bundle.h / PW_TPM;
+            b.rect(_o.set(-p.width / 2 + 0.15, -p.height / 2, hd + 0.2), X, Y, uw, uh, t.bundle);
+            b.rect(_o.set(p.width / 2 - 0.2 - uw, -p.height / 2, hd + 0.12), X, Y, uw, uh, t.bundle, { flipU: true });
+          }
+          break;
+        }
+        case 'kioskRoof': {
+          // Tar-paper top, a painted fascia board with the scalloped tin drip edge all round.
+          const green = o.parent!.children.some((c) => c.userData.pwSq === 'newsHatch');
+          const f = green ? t.fasciaGreen : t.fasciaRed;
+          const v = { u0: 0, v0: 0 };
+          boxFaces(b, p.width, p.height, p.depth, { py: this.roof, ny: this.roof, px: f, nx: f, pz: f, nz: f }, { px: v, nx: v, pz: v, nz: v });
           break;
         }
         case 'newsHatch':
@@ -117,6 +162,58 @@ export class Z1Square {
           b.rect(_o.set(-0.1, -0.7, 0.4), Z, Y, 2.4, 1.4, t.cleaverL);
           for (const c of [...o.children]) o.remove(c);
           continue;
+        }
+        case 'bandPost':
+          cylinder(b, 0.1, 2.8, 6, t.bandPost, null, 0, t.bandPost.h);
+          break;
+        case 'bandRail': {
+          // The rail (rail space: x along it, y up) becomes a spindle balustrade down to the plinth, seen from both sides.
+          const h = 0.83;
+          b.rect(_o.set(-1.2, 0.03 - h, 0), X, Y, 2.4, h, t.balustrade);
+          b.rect(_o.set(1.2, 0.03 - h, 0), NX, Y, 2.4, h, t.balustrade, { flipU: true });
+          break;
+        }
+        case 'bandRoof':
+          // Fish-scale shingles round the edge and over the top.
+          cylinder(b, 3.9, 0.3, 8, t.shingles, null, 0, 10);
+          disc(b, 3.9, 0.15, 8, t.shingles, true);
+          break;
+        case 'bandEave': {
+          // White eave board, beadboard soffit, and the gingerbread lace hung all round under it.
+          cylinder(b, 3.95, 0.12, 8, t.eave, null, 3, 7);
+          disc(b, 3.7, -0.06, 8, t.beadboard, false);
+          const r = 3.86;
+          const y1 = -0.06;
+          const y0 = y1 - 12 / PW_TPM;
+          let u = 0;
+          for (let i = 0; i < 8; i++) {
+            const a0 = (i / 8) * Math.PI * 2;
+            const a1 = ((i + 1) / 8) * Math.PI * 2;
+            const p0 = new THREE.Vector3(Math.sin(a0) * r, y0, Math.cos(a0) * r);
+            const p1 = new THREE.Vector3(Math.sin(a1) * r, y0, Math.cos(a1) * r);
+            const len = p0.distanceTo(p1) * PW_TPM;
+            const q0 = p0.clone().setY(y1);
+            const q1 = p1.clone().setY(y1);
+            b.quad(p0, p1, q1, q0, t.lace, [u, 0, u + len, 0, u + len, 12, u, 12]);
+            b.quad(p1.clone(), p0.clone(), q0.clone(), q1.clone(), t.lace, [u + len, 0, u, 0, u, 12, u + len, 12]);
+            u += len;
+          }
+          break;
+        }
+        case 'bandCone': {
+          // The cupola: shingled cone (ConeGeometry: base at -h/2, apex at +h/2).
+          const r = 0.9;
+          const h = 1.0;
+          const sl = Math.hypot(r, h) * PW_TPM;
+          const circ = 2 * Math.PI * r * PW_TPM;
+          for (let i = 0; i < 8; i++) {
+            const a0 = (i / 8) * Math.PI * 2;
+            const a1 = ((i + 1) / 8) * Math.PI * 2;
+            const u0 = (i / 8) * circ;
+            const u1 = ((i + 1) / 8) * circ;
+            b.tri(new THREE.Vector3(Math.sin(a0) * r, -h / 2, Math.cos(a0) * r), new THREE.Vector3(Math.sin(a1) * r, -h / 2, Math.cos(a1) * r), new THREE.Vector3(0, h / 2, 0), t.shingles, [u0, 0, u1, 0, (u0 + u1) / 2, sl]);
+          }
+          break;
         }
         case 'drop':
           break;

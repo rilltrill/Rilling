@@ -227,6 +227,8 @@ export interface Z1GasTiles {
   pillar: PwTile;
   ad: PwTile;
   tape: PwTile;
+  /** The GAS & GO store window bay (wrap along u, 128 × 112 = one 4 m shop bay). */
+  store: PwTile;
 }
 
 export function z1GasTiles(a: PwAtlas): Z1GasTiles {
@@ -239,7 +241,102 @@ export function z1GasTiles(a: PwAtlas): Z1GasTiles {
     pillar: a.tile('z1gas|pillar', 16, 32, paintPillar, { wrap: true }),
     ad: a.tile('z1gas|ad', 35, 54, paintAd),
     tape: a.tile('z1gas|tape', 96, 16, paintTape, { wrap: true }),
+    store: a.tile('z1gas|store', 128, 112, paintStore, { wrap: true }),
   };
+}
+
+/**
+ * The gas station's store window, one 4 m bay: steel fascia band and kick
+ * plate, a mullion, and through the glass a night-lit convenience store —
+ * fluorescent tubes, the cooler wall at the back (lit doors, bottles in rows),
+ * a snack aisle end-on, the counter with its lotto sign — with sale bills taped
+ * to the inside of the glass and a reflection streak across it. Muted goods
+ * colours so the bay stays calm when minified.
+ */
+function paintStore(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const H = c.h;
+  const F = PWF.GLOW;
+  const steel = k.ramp(0x8a8c90, { light: 0.45, sat: 0.5 });
+  const riser = k.ramp(0x7a2a24, { light: 0.42, sat: 0.9 });
+  const back = k.ramp(0xd8f0e0, { light: 0.45, sat: 0.6 });
+  const tube = k.ramp(0xf0fff8, { light: 0.3 });
+  const cooler = k.ramp(0x9ab8c8, { light: 0.45, sat: 0.6 });
+  const shelf = k.ramp(0x5a6a70, { light: 0.4 });
+  const ink = k.ramp(0x1a1c22, { light: 0.4 });
+  const red = k.ramp(0xc8382a, { light: 0.45 });
+  const yel = k.ramp(0xe0c040, { light: 0.45 });
+  const blue = k.ramp(0x3a6ab8, { light: 0.45 });
+  const goods = [0xa85a4a, 0x5a7aa8, 0xb8a85a, 0x6a9a6a, 0xc8c0b0].map((h) => k.ramp(h, { light: 0.4, sat: 0.7 }));
+  const transomH = 14;
+  const gy0 = transomH + 1;
+  const riserH = 21;
+  const gy1 = H - riserH - 3;
+  // Fascia band and transom bar; kick plate.
+  c.rect(0, 0, W, transomH + 1, steel, 2);
+  c.hline(0, 0, W, steel, 4);
+  c.rect(0, transomH - 3, W, 3, steel, 3);
+  c.hline(0, transomH, W, steel, 1);
+  c.rect(0, gy1 + 1, W, H - gy1 - 1, riser, 3);
+  c.hline(0, gy1 + 1, W, steel, 4);
+  c.hline(0, gy1 + 2, W, steel, 2);
+  for (let x = 6; x < W; x += 32) c.rect(x, gy1 + 7, 24, riserH - 9, riser, 2);
+  c.hline(0, H - 1, W, riser, 1);
+  // Interior: back wall, falloff from the tubes.
+  for (let y = gy0; y <= gy1; y++) for (let x = 2; x < W; x++) c.set(x, y, back, y < gy0 + 8 ? 4 : y > gy1 - 14 ? 2 : 3, F | PWF.DITHER);
+  for (let x = 10; x < W - 20; x += 44) c.rect(x, gy0 + 1, 26, 2, tube, 5, F);
+  // The cooler wall: lit glass doors with bottles in rows, dark door frames.
+  const cy0 = gy0 + 8;
+  const cy1 = gy0 + 40;
+  for (let d = 0; d < 5; d++) {
+    const x0 = 6 + d * 24;
+    c.rect(x0, cy0, 22, cy1 - cy0, cooler, 4, F);
+    c.frame(x0, cy0, 22, cy1 - cy0, shelf, 2, F);
+    c.vline(x0 + 19, cy0 + 10, 8, shelf, 1, F);
+    for (let r = 0; r < 4; r++) {
+      const ry = cy0 + 3 + r * 7;
+      c.hline(x0 + 1, ry + 5, 20, shelf, 2, F);
+      for (let bx = x0 + 2; bx < x0 + 19; bx += 3) {
+        const col = goods[Math.floor(hash2(bx, r + d * 4, 7) * goods.length)];
+        c.rect(bx, ry + 1, 2, 4, col, 3, F);
+        c.set(bx, ry, col, 2, F);
+      }
+    }
+  }
+  // Snack aisle end-on (centre-left) and the counter (right) with the LOTTO sign above it.
+  const ay = cy1 + 4;
+  c.rect(18, ay, 30, gy1 - ay, shelf, 2, F);
+  for (let r = 0; r < 4; r++) {
+    c.hline(18, ay + 3 + r * 6, 30, shelf, 3, F);
+    for (let x = 19; x < 47; x += 4) c.rect(x, ay + r * 6, 3, 3, goods[Math.floor(hash2(x, r, 11) * goods.length)], 3, F);
+  }
+  c.rect(72, gy1 - 18, 50, 18, shelf, 2, F);
+  c.hline(72, gy1 - 18, 50, shelf, 4, F);
+  c.rect(98, gy1 - 26, 14, 8, ink, 1, F);
+  c.rect(99, gy1 - 25, 12, 5, k.ramp(0x4aa8ff, { light: 0.4 }), 3, F);
+  c.rect(78, cy1 + 2, 30, 8, yel, 4, F);
+  drawText(c, 'LOTTO', 80, cy1 + 3, FONT_3x5, ink, 1, { flag: F });
+  // Bills taped inside the glass (backs to the street: lit through, non-glowing fronts).
+  const bill = (x: number, y: number, w: number, h: number, bg: number, fg: number, text: string, text2?: string) => {
+    c.rect(x, y, w, h, bg, 3);
+    c.hline(x, y, w, bg, 4);
+    drawText(c, text, x + 2, y + 2, FONT_3x5, fg, 4);
+    if (text2) drawText(c, text2, x + 2, y + 8, FONT_3x5, fg, 4);
+    c.set(x, y, k.ramp(0xd8d0a0, { light: 0.3 }), 4);
+    c.set(x + w - 1, y, k.ramp(0xd8d0a0, { light: 0.3 }), 4);
+  };
+  bill(54, gy0 + 46, 22, 14, red, yel, 'COLD', 'BEER');
+  bill(8, gy0 + 50, 16, 8, blue, tube, 'ICE');
+  // Reflection streak across the glass (lit, not glowing).
+  const refl = k.ramp(0xb8c8d8, { light: 0.35 });
+  for (let y = gy0; y <= gy1; y++) {
+    const x = Math.round(84 + (gy1 - y) * 0.6);
+    for (let j = 0; j < 3; j++) if (x + j < W && hash2(x + j, y, 3) > 0.25) c.set(x + j, y, refl, 4);
+  }
+  // Mullion (left edge of the bay).
+  c.rect(0, gy0, 3, gy1 - gy0 + 1, steel, 3);
+  c.vline(0, gy0, gy1 - gy0 + 1, steel, 4);
+  c.vline(2, gy0, gy1 - gy0 + 1, steel, 2);
 }
 
 /** Canopy fascia: white enamel panels with seams, rain streaks, a lit lip. */

@@ -34,6 +34,13 @@ export interface Z1SquareTiles {
   cleaverL: PwTile;
   butcherTiles: PwTile;
   kioskWall: PwTile;
+  /** Bills pasted over a kiosk's boards (cut-out collage, its own colours). */
+  bills: PwTile;
+  /** Two tied bundles of the evening paper (cut-out). */
+  bundle: PwTile;
+  /** Kiosk roof fascia (wrap; the board in the bottom 8 rows): green newsstand / red coffee stand. */
+  fasciaGreen: PwTile;
+  fasciaRed: PwTile;
   newsHatch: PwTile;
   coffeeHatch: PwTile;
   ashlar: PwTile;
@@ -46,6 +53,13 @@ export interface Z1SquareTiles {
   statue: PwTile;
   booksWindow: PwTile;
   toysWindow: PwTile;
+  /** The bandstand: a turned white post, a spindle balustrade and a gingerbread lace valance (cut-outs), fish-scale shingles, beadboard soffit, its white eave board. */
+  bandPost: PwTile;
+  balustrade: PwTile;
+  lace: PwTile;
+  shingles: PwTile;
+  beadboard: PwTile;
+  eave: PwTile;
 }
 
 export function z1SquareTiles(a: PwAtlas): Z1SquareTiles {
@@ -59,6 +73,10 @@ export function z1SquareTiles(a: PwAtlas): Z1SquareTiles {
     cleaverL: a.tile('z1sq|cleaver|l', 77, 45, (c, k) => paintCleaver(c, k, true)),
     butcherTiles: a.tile('z1sq|btiles', 64, 32, paintButcherTiles, { wrap: true }),
     kioskWall: a.tile('z1sq|kiosk', 64, 64, paintKioskWall, { wrap: true }),
+    bills: a.tile('z1sq|bills', 80, 48, paintBills),
+    bundle: a.tile('z1sq|bundle', 24, 14, paintBundle),
+    fasciaGreen: a.tile('z1sq|fascia|g', 64, 16, (c, k) => paintFascia(c, k, 0x3a6a52, 0xe8d8a0), { wrap: true }),
+    fasciaRed: a.tile('z1sq|fascia|r', 64, 16, (c, k) => paintFascia(c, k, 0x7a3434, 0xe8d8a0), { wrap: true }),
     newsHatch: a.tile('z1sq|news', 61, 32, (c, k) => paintHatch(c, k, 'news')),
     coffeeHatch: a.tile('z1sq|coffee', 61, 32, (c, k) => paintHatch(c, k, 'coffee')),
     ashlar: a.tile('z1sq|ashlar', 64, 64, paintAshlar, { wrap: true }),
@@ -71,6 +89,12 @@ export function z1SquareTiles(a: PwAtlas): Z1SquareTiles {
     statue: a.tile('z1sq|statue', 40, 80, paintStatue),
     booksWindow: a.tile('z1sq|books', 208, 74, (c, k) => paintShopWindow(c, k, 'books')),
     toysWindow: a.tile('z1sq|toys', 208, 74, (c, k) => paintShopWindow(c, k, 'toys')),
+    bandPost: a.tile('z1sq|bpost', 21, 90, paintBandPost),
+    balustrade: a.tile('z1sq|balus', 77, 26, paintBalustrade),
+    lace: a.tile('z1sq|lace', 64, 16, paintLace, { wrap: true }),
+    shingles: a.tile('z1sq|shingle', 64, 32, paintShingles, { wrap: true }),
+    beadboard: a.tile('z1sq|bead', 64, 64, paintBeadboard, { wrap: true }),
+    eave: a.tile('z1sq|fascia|w', 64, 16, (c, k) => paintFascia(c, k, 0xe0dccf, 0x8a2a2a), { wrap: true }),
   };
 }
 
@@ -377,6 +401,117 @@ function paintKioskWall(c: PwCanvas, k: PwKit) {
   for (let y = c.h - 10; y < c.h; y++) for (let x = 0; x < c.w; x++) if (hash2(x, y, 4) < (y - (c.h - 10)) / 10) c.shift(x, y, -1);
 }
 
+/**
+ * Bills on a kiosk (80 × 48, cut-out): the evening paper's EXTRA, a MISSING
+ * poster with its photo, a gig bill for THE GHOULS, a torn cola ad — overlapping,
+ * corners lifting, paste runs and rain streaks; the boards show between them.
+ */
+function paintBills(c: PwCanvas, k: PwKit) {
+  const rng = k.rng;
+  const paper = k.ramp(0xe8e0c8, { light: 0.4, sat: 0.5 });
+  const white = k.ramp(0xf0f0ea, { light: 0.35, sat: 0.3 });
+  const ink = k.ramp(0x1e1e24, { light: 0.4 });
+  const red = k.ramp(0xc8302a, { light: 0.45, sat: 1.1 });
+  const yel = k.ramp(0xe8c83a, { light: 0.45 });
+  const blue = k.ramp(0x2a5aa8, { light: 0.45 });
+  const photo = k.ramp(0x8a8478, { light: 0.5, sat: 0.3 });
+  const skin = k.ramp(0xc89878, { light: 0.4 });
+  const tape = k.ramp(0xd8c890, { light: 0.3 });
+  /** A sheet with a ragged torn bottom edge (or right edge) and a lifted top corner. */
+  const sheet = (x: number, y: number, w: number, h: number, ramp: number, seed: number) => {
+    for (let yy = 0; yy < h; yy++) {
+      for (let xx = 0; xx < w; xx++) {
+        const torn = yy > h - 4 && hash2(xx >> 1, seed, 9) * 4 < yy - (h - 4);
+        if (torn) continue;
+        c.set(x + xx, y + yy, ramp, xx === 0 || yy === 0 ? 4 : 3);
+      }
+    }
+    // Lifted corner: the back of the paper (darker) folded over.
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4 - i; j++) c.set(x + w - 1 - j, y + i, ramp, 1);
+    c.rect(x + 1, y, 3, 2, tape, 3);
+  };
+  // Torn remains of older bills underneath (strips).
+  for (let i = 0; i < 5; i++) {
+    const x = rng.int(0, 70);
+    const y = rng.int(2, 40);
+    c.rect(x, y, rng.int(4, 9), rng.int(3, 7), [paper, yel, white][i % 3], 2);
+  }
+  // EXTRA — the evening paper's bill.
+  sheet(0, 6, 31, 36, paper, 1);
+  drawText(c, 'EXTRA', 1, 11, FONT_5x7, ink, 1);
+  c.hline(2, 19, 27, ink, 1);
+  drawText(c, 'DEAD', 3, 21, FONT_5x7, red, 2);
+  drawText(c, 'WALK', 3, 29, FONT_5x7, red, 2);
+  for (let l = 0; l < 2; l++) c.hline(3, 37 + l * 2, 22 - (l % 2) * 6, ink, 3);
+  // MISSING with a photo.
+  sheet(31, 2, 29, 30, white, 2);
+  drawText(c, 'MISSING', 32, 4, FONT_3x5, ink, 1);
+  c.rect(38, 10, 15, 12, photo, 2);
+  c.ellipse(45, 15, 3, 3.5, skin, 2);
+  c.rect(41, 19, 8, 3, photo, 1);
+  c.rect(43, 13, 4, 1, ink, 1);
+  for (let l = 0; l < 3; l++) c.hline(34, 24 + l * 2, 20 - l * 4, ink, 2);
+  // THE GHOULS — a gig bill, red and yellow, pasted over the MISSING poster's corner.
+  sheet(56, 10, 24, 34, red, 3);
+  c.rect(57, 13, 22, 9, yel, 3);
+  drawText(c, 'THE', 62, 15, FONT_3x5, red, 1);
+  drawText(c, 'GHOULS', 57, 24, FONT_3x5, yel, 4);
+  c.ellipse(68, 33, 5, 4, white, 4);
+  c.set(66, 32, ink, 0);
+  c.set(70, 32, ink, 0);
+  c.hline(66, 35, 5, ink, 0);
+  drawText(c, 'FRI', 58, 38, FONT_3x5, white, 4);
+  // A torn strip of cola ad across the corner.
+  sheet(20, 36, 18, 10, blue, 4);
+  drawText(c, 'COLA', 22, 38, FONT_3x5, white, 4);
+  // Paste runs and rain streaks down the lower edges.
+  for (let i = 0; i < 16; i++) {
+    const x = rng.int(0, 79);
+    const y0 = rng.int(20, 40);
+    for (let y = y0; y < Math.min(47, y0 + rng.int(3, 9)); y++) if (c.at(x, y)) c.shift(x, y, -1);
+  }
+}
+
+/** Two bundles of the evening paper, tied with string (24 × 14, cut-out). */
+function paintBundle(c: PwCanvas, k: PwKit) {
+  const paper = k.ramp(0xd8d0bc, { light: 0.4, sat: 0.4 });
+  const ink = k.ramp(0x2a2a30, { light: 0.4 });
+  const string = k.ramp(0xa87a4a, { light: 0.3 });
+  for (const [x, y, w, h] of [
+    [1, 6, 14, 8],
+    [10, 1, 13, 6],
+  ] as const) {
+    c.rect(x, y, w, h, paper, 3);
+    c.hline(x, y, w, paper, 4);
+    for (let yy = y + 2; yy < y + h; yy += 2) c.hline(x + 1, yy, w - 2, paper, 2);
+    c.rect(x + 2, y + 1, w - 4, 1, ink, 2);
+    c.vline(x + (w >> 1), y, h, string, 3);
+    c.frame(x, y, w, h, paper, 1);
+  }
+}
+
+/** Kiosk fascia: a painted board in the stand's colour with a cream pinstripe and a scalloped tin drip edge. */
+function paintFascia(c: PwCanvas, k: PwKit, hex: number, cream: number) {
+  const b = k.ramp(hex, { light: 0.45 });
+  const s = k.ramp(cream, { light: 0.35 });
+  const tin = k.ramp(0x9a9a9e, { light: 0.5, sat: 0.3 });
+  const W = c.w;
+  // Rows 8…15 (the bottom 8 rows; texture v 0…8): board, stripe, scallops.
+  c.rect(0, 8, W, 8, b, 3);
+  c.hline(0, 8, W, b, 4);
+  c.hline(0, 10, W, s, 3);
+  for (let x = 0; x < W; x++) {
+    const p = x % 8;
+    const d = Math.abs(p - 3.5);
+    c.set(x, 13, tin, 3);
+    if (d < 3) c.set(x, 14, tin, d < 1.5 ? 4 : 2);
+    if (d < 1.5) c.set(x, 15, tin, 1);
+    else if (d >= 3) c.set(x, 15, b, 1);
+  }
+  for (let x = 2; x < W; x += 16) c.set(x, 12, b, 1);
+  c.rect(0, 0, W, 8, b, 2);
+}
+
 /** The serving hatch (GLOW): papers and magazines on racks / the coffee urn, cups and doughnuts. */
 function paintHatch(c: PwCanvas, k: PwKit, kind: 'news' | 'coffee') {
   const W = c.w;
@@ -416,6 +551,119 @@ function paintHatch(c: PwCanvas, k: PwKit, kind: 'news' | 'coffee') {
     drawText(c, 'DONUT', 35, 10, FONT_3x5, back, 4, { flag: F });
   }
   c.rect(0, H - 3, W, 3, shelf, 3, F);
+}
+
+// ─── The bandstand ──────────────────────────────────────────────────────────
+
+const PAINT_WHITE = 0xe4e0d4;
+
+/** A turned bandstand post (21 × 90: round the 0.1 m post, its 2.8 m): white paint, rings and a vase near the foot and head, chips to the grey wood. */
+function paintBandPost(c: PwCanvas, k: PwKit) {
+  const rng = k.rng;
+  const W = c.w;
+  const H = c.h;
+  const p = k.ramp(PAINT_WHITE, { light: 0.45, sat: 0.4 });
+  const wood = k.ramp(0x6a6458, { light: 0.4 });
+  // Round shading: lit down one side of the wrap, shadow down the other.
+  for (let x = 0; x < W; x++) {
+    const t = Math.cos(((x + 0.5) / W) * Math.PI * 2);
+    c.rect(x, 0, 1, H, p, t > 0.5 ? 4 : t > -0.3 ? 3 : 2);
+  }
+  // Turned details: collar rings at the head, a vase and rings at the foot (a rail meets it at ~0.8 m).
+  for (const y of [3, 4, 9, 10, H - 4, H - 3, H - 22, H - 21]) c.shade(0, y, W, 1, -2);
+  for (const y of [5, 11, H - 23]) c.shade(0, y, W, 1, 1);
+  for (let y = H - 20; y < H - 6; y++) if (y % 4 === 0) c.shade(0, y, W, 1, -1);
+  // Chips and grime.
+  for (let i = 0; i < 14; i++) c.cluster(rng.int(0, W - 2), rng.int(0, H - 2), rng.int(0, 4), wood, 2);
+  for (let y = H - 8; y < H; y++) for (let x = 0; x < W; x++) if (hash2(x, y, 5) < (y - (H - 8)) / 9) c.shift(x, y, -1);
+}
+
+/** A spindle balustrade between two posts (77 × 26 ≈ 2.4 × 0.8 m, cut-out): moulded top rail, bottom rail, turned spindles. */
+function paintBalustrade(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const H = c.h;
+  const p = k.ramp(PAINT_WHITE, { light: 0.45, sat: 0.4 });
+  // Top rail (lit top, shadow lip), bottom rail.
+  c.rect(0, 0, W, 4, p, 3);
+  c.hline(0, 0, W, p, 5);
+  c.hline(0, 3, W, p, 1);
+  c.rect(0, H - 5, W, 3, p, 3);
+  c.hline(0, H - 5, W, p, 4);
+  c.hline(0, H - 3, W, p, 1);
+  // Spindles: 2 texels wide with a bulb in the middle, every 6.
+  for (let x = 3; x < W - 2; x += 6) {
+    for (let y = 4; y < H - 5; y++) {
+      const m = Math.abs(y - (H - 1) / 2);
+      c.set(x, y, p, 4);
+      c.set(x + 1, y, p, 2);
+      if (m < 3) {
+        c.set(x - 1, y, p, 3);
+        c.set(x + 2, y, p, 1);
+      }
+    }
+  }
+}
+
+/** Gingerbread lace hanging under the eave (wrap 64 × 16; rows 4…15 used): a fret band, drops and pierced roundels (cut-out). */
+function paintLace(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const p = k.ramp(PAINT_WHITE, { light: 0.45, sat: 0.4 });
+  c.rect(0, 4, W, 2, p, 4);
+  c.hline(0, 6, W, p, 2);
+  for (let x = 0; x < W; x++) {
+    const q = x % 16;
+    const d = Math.abs(q - 7.5);
+    // Scalloped arches between drops, a pierced roundel in each.
+    const depth = Math.round(2 + Math.sqrt(Math.max(0, 64 - d * d)) * 0.7);
+    for (let y = 7; y < 7 + depth && y < 16; y++) {
+      const rx = q - 7.5;
+      const ry = y - 10.5;
+      if (rx * rx + ry * ry < 5 && y > 8) continue;
+      c.set(x, y, p, y === 6 + depth ? 2 : 3);
+    }
+    if (q === 0 || q === 15) for (let y = 7; y < 16; y++) c.set(x, y, p, 3);
+  }
+}
+
+/** Fish-scale cedar shingles (wrap 64 × 32): staggered courses of round-butted shingles, each course lapping the one below, weathered brown, moss. */
+function paintShingles(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const H = c.h;
+  const s = k.ramp(0x6a4232, { light: 0.45, sat: 0.9 });
+  const moss = k.ramp(0x3e5a32, { light: 0.4 });
+  const put = (x: number, y: number, t: number) => c.set(((x % W) + W) % W, ((y % H) + H) % H, s, t);
+  // Courses 8 texels apart; draw bottom-up so each course's round butts lie over the course below.
+  for (let row = H / 8 - 1; row >= 0; row--) {
+    for (let i = 0; i < W / 8; i++) {
+      const cx = i * 8 + (row % 2) * 4 + 3.5;
+      const y0 = row * 8;
+      const tone = 3 + (hash2(i, row, 3) < 0.25 ? 1 : hash2(i, row, 4) < 0.2 ? -1 : 0);
+      for (let yy = 0; yy < 11; yy++) {
+        for (let xx = -4; xx < 4; xx++) {
+          const x = Math.floor(cx + xx + 0.5);
+          // The butt: square above, a half-round below (radius 4 about yy = 6).
+          const dy = yy - 6;
+          const d = Math.hypot(xx + 0.5, Math.max(0, dy));
+          if (d > 4) continue;
+          let t = tone;
+          if (d > 3.2 && dy > 0) t = 1;
+          else if (xx === -4) t = tone - 1;
+          else if (xx === -3 && yy < 5) t = tone + 1;
+          put(x, y0 + yy, t);
+        }
+      }
+      // The shadow the butt casts on the course below.
+      for (let xx = -2; xx < 2; xx++) put(Math.floor(cx + xx + 0.5), y0 + 11, 1);
+    }
+  }
+  for (let i = 0; i < 6; i++) c.cluster(Math.floor(hash2(i, 1, 9) * (W - 3)), Math.floor(hash2(i, 2, 9) * (H - 3)), i % 6, moss, 2);
+}
+
+/** Beadboard soffit (wrap 64 × 64): narrow white boards with a bead line, a little damp. */
+function paintBeadboard(c: PwCanvas, k: PwKit) {
+  const p = k.ramp(0xd8d4c8, { light: 0.4, sat: 0.4 });
+  for (let x = 0; x < c.w; x++) c.rect(x, 0, 1, c.h, p, x % 4 === 0 ? 1 : x % 4 === 1 ? 4 : 3);
+  for (let i = 0; i < 40; i++) c.shift(Math.floor(hash2(i, 3, 2) * c.w), Math.floor(hash2(i, 4, 2) * c.h), -1);
 }
 
 // ─── The courthouse ─────────────────────────────────────────────────────────

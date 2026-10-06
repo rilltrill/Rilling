@@ -339,7 +339,8 @@ export class Z1PixelWorld {
       const sw = rec.shopW + 0.3;
       const bays = Math.max(1, Math.round(sw / SHOP_BAY_M));
       const goods = GOODS[shop.board?.text ?? shop.blade?.text ?? ''] ?? 'generic';
-      const t = shopfrontModule(a, {
+      // (The GAS & GO store gets its own night-lit convenience store bay.)
+      const t = shop.board?.text === 'GAS & GO' ? this.street.gas.store : shopfrontModule(a, {
         widthM: SHOP_BAY_M,
         goods,
         lit: shop.interior,

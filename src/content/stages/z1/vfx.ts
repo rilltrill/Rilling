@@ -179,9 +179,11 @@ export class LightBeams {
   }
 
   /**
-   * `pixel` (ART: PIXEL WORLD): the shaft's falloff is drawn in three flat
-   * steps with an ordered (Bayer) dither between them on the retro pixel grid —
-   * a painted light cone, not a smooth gradient.
+   * `pixel` (ART: PIXEL WORLD): a painted light shaft, not a lit cone. Its
+   * brightness follows the depth of light the eye looks through — full down the
+   * middle, nothing at the silhouette (the hollow cone's wall seen edge-on) — and
+   * fades out well above the ground; that falloff is drawn in flat steps with an
+   * ordered (Bayer) dither between them on the retro pixel grid.
    */
   build(pixel = false): THREE.InstancedMesh {
     const mat = Kit.track(
@@ -199,10 +201,25 @@ export class LightBeams {
     if (pixel) {
       mat.onBeforeCompile = (sh) => {
         sh.vertexShader = sh.vertexShader
-          .replace('#include <common>', '#include <common>\nvarying float vPwGrad;')
-          .replace('#include <color_vertex>', '#include <color_vertex>\n  vPwGrad = color.r;');
+          .replace('#include <common>', '#include <common>\nvarying float vPwGrad;\nvarying vec3 vPwN;\nvarying vec3 vPwV;')
+          .replace('#include <color_vertex>', '#include <color_vertex>\n  vPwGrad = color.r;')
+          .replace(
+            '#include <project_vertex>',
+            `#include <project_vertex>
+  {
+    // The wall's normal (inverse-transpose of the instance's rotation × scale) and the eye ray, in view space.
+    vec3 pwN = normal;
+    #ifdef USE_INSTANCING
+      mat3 pwIm = mat3(instanceMatrix);
+      vec3 pwSc = vec3(dot(pwIm[0], pwIm[0]), dot(pwIm[1], pwIm[1]), dot(pwIm[2], pwIm[2]));
+      pwN = pwIm * (normal / pwSc);
+    #endif
+    vPwN = normalMatrix * pwN;
+    vPwV = -mvPosition.xyz;
+  }`,
+          );
         sh.fragmentShader = sh.fragmentShader
-          .replace('#include <common>', '#include <common>\nvarying float vPwGrad;')
+          .replace('#include <common>', '#include <common>\nvarying float vPwGrad;\nvarying vec3 vPwN;\nvarying vec3 vPwV;')
           .replace(
             '#include <color_fragment>',
             `#include <color_fragment>
@@ -211,11 +228,15 @@ export class LightBeams {
     int bi = bp.y * 4 + bp.x;
     float bt = float(bi == 0 ? 0 : bi == 1 ? 8 : bi == 2 ? 2 : bi == 3 ? 10 : bi == 4 ? 12 : bi == 5 ? 4 : bi == 6 ? 14 : bi == 7 ? 6 : bi == 8 ? 3 : bi == 9 ? 11 : bi == 10 ? 1 : bi == 11 ? 9 : bi == 12 ? 15 : bi == 13 ? 7 : bi == 14 ? 13 : 5);
     float g = max(vPwGrad, 1e-3);
-    // Three flat steps, dithered only in a narrow seam between them.
-    float s = g * 3.0;
+    // Depth of light along the eye ray: 0 at the silhouette, 1 down the middle; gone in the lower third.
+    float ndv = abs(dot(normalize(vPwN), normalize(vPwV)));
+    float core = smoothstep(0.08, 0.75, ndv);
+    float b = g * core * smoothstep(0.04, 0.32, g);
+    // Four flat steps, ordered-dithered across the seam between them.
+    float s = b * 4.0;
     float f = fract(s);
-    float q = floor(s) + (f > 0.65 ? step((bt + 0.5) / 16.0, (f - 0.65) / 0.35) : 0.0);
-    diffuseColor.rgb *= (q / 3.0) / g;
+    float q = floor(s) + (f > 0.45 ? step((bt + 0.5) / 16.0, (f - 0.45) / 0.55) : 0.0);
+    diffuseColor.rgb *= 0.85 * (q / 4.0) / g;
   }`,
           );
       };

@@ -932,7 +932,7 @@ export function buildTown(): Town {
       const green = pad.x0 < -58;
       const body = Kit.tex('planks', green ? 0x2e5040 : 0x602e2e, 1.2);
       Kit.add(g, Kit.box(w - 0.3, 2.6, d - 0.3), body, 0, 1.3, 0).userData.pwSq = 'kioskBody';
-      Kit.add(g, Kit.box(w + 0.2, 0.25, d + 0.2), M.trimDark, 0, pad.y - 0.12, 0);
+      Kit.add(g, Kit.box(w + 0.2, 0.25, d + 0.2), M.trimDark, 0, pad.y - 0.12, 0).userData.pwSq = 'kioskRoof';
       // Serving hatch facing the rail, lit, with magazines / cups.
       const facing = green ? 1 : -1;
       Kit.add(g, Kit.box(0.06, 1.0, d - 0.9), Kit.glow(green ? 0xfff0c0 : 0xffd8a0, 0.55), facing * (w / 2 - 0.13), 1.5, 0).userData.pwSq = green ? 'newsHatch' : 'coffeeHatch';
@@ -1065,13 +1065,13 @@ export function buildTown(): Town {
       Kit.add(g, Kit.cyl(3.8, 3.9, 0.8, 8), M.concrete, 0, 0.4, 0);
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
-        Kit.add(g, Kit.cyl(0.1, 0.1, 2.8, 6), M.white, Math.cos(a) * 3.3, 2.2, Math.sin(a) * 3.3);
-        Kit.add(g, Kit.box(2.4, 0.06, 0.06), M.white, Math.cos(a + Math.PI / 8) * 3.2, 1.6, Math.sin(a + Math.PI / 8) * 3.2, 0, -(a + Math.PI / 8) + Math.PI / 2, 0);
+        Kit.add(g, Kit.cyl(0.1, 0.1, 2.8, 6), M.white, Math.cos(a) * 3.3, 2.2, Math.sin(a) * 3.3).userData.pwSq = 'bandPost';
+        Kit.add(g, Kit.box(2.4, 0.06, 0.06), M.white, Math.cos(a + Math.PI / 8) * 3.2, 1.6, Math.sin(a + Math.PI / 8) * 3.2, 0, -(a + Math.PI / 8) + Math.PI / 2, 0).userData.pwSq = 'bandRail';
       }
       const shingles = Kit.tex('planks', 0x5e3e30, 1.2);
-      Kit.add(g, Kit.cyl(3.9, 3.9, 0.3, 8), shingles, 0, 3.6, 0);
-      Kit.add(g, Kit.cyl(3.7, 3.95, 0.12, 8), M.white, 0, 3.4, 0);
-      Kit.add(g, Kit.cone(0.9, 1.0, 8), shingles, 0, 4.25, 0);
+      Kit.add(g, Kit.cyl(3.9, 3.9, 0.3, 8), shingles, 0, 3.6, 0).userData.pwSq = 'bandRoof';
+      Kit.add(g, Kit.cyl(3.7, 3.95, 0.12, 8), M.white, 0, 3.4, 0).userData.pwSq = 'bandEave';
+      Kit.add(g, Kit.cone(0.9, 1.0, 8), shingles, 0, 4.25, 0).userData.pwSq = 'bandCone';
       // String lights around the eave.
       const bulbs = Kit.glow(0xffe2a0, 1.5);
       for (let i = 0; i < 24; i++) {

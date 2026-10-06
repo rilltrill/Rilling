@@ -1,6 +1,6 @@
 import { PWF, type PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
-import { drawText, FONT_3x5, FONT_BOLD, FONT_5x7, textWidth } from './font';
+import { drawText, FONT_3x5, FONT_5x7, textWidth } from './font';
 import { hash2, smooth } from './surfaces';
 
 /**
@@ -72,7 +72,7 @@ function paintRoof(c: PwCanvas, k: PwKit) {
   c.hline(0, 1, W, y, 5);
   c.hline(0, H - 2, W, y, 2);
   c.hline(0, H - 1, W, y, 1);
-  for (let x = 6; x < W; x += 19) {
+  for (let x = 6; x < W; x += 38) {
     c.vline(x, 2, H - 4, y, 4);
     c.vline(x + 1, 2, H - 4, y, 2);
     for (let r = 4; r < H - 4; r += 5) c.set(x + 3, r, y, 5);
@@ -87,11 +87,6 @@ function paintRoof(c: PwCanvas, k: PwKit) {
     for (let yy = y0 + 4; yy < y0 + 26; yy += 3) c.hline(x0 + 4, yy, 22, steel, 1);
     c.rect(x0 + 12, y0 + 26, 6, 3, red, 3);
   }
-  // SCHOOL BUS, black, a little worn.
-  const txt = 'SCHOOL BUS';
-  const tw = textWidth(txt, FONT_BOLD, { scale: 2 });
-  drawText(c, txt, ((W - tw) >> 1) + 2, (H >> 1) - 7, FONT_BOLD, ink, 2, { scale: 2 });
-  drawText(c, 'MILLBROOK SCHOOL DIST 7', (W >> 1) - 50, H - 12, FONT_3x5, ink, 2);
   // Scrapes from the slide: long lit scratches (bare metal), a few dents (dark crease, lit lip).
   for (let i = 0; i < 14; i++) {
     const x0 = rng.int(0, W - 60);
@@ -112,6 +107,22 @@ function paintRoof(c: PwCanvas, k: PwKit) {
     c.set(hx + 1, hy, ink, 1);
     c.set(hx - 1, hy - 1, steel, 5);
   }
+  // SCHOOL BUS, big black block letters on a clean painted band (legible from the far end of the
+  // block), drop-shadowed, then scuffed by a couple of the slide's scrapes.
+  const txt = 'SCHOOL BUS';
+  const tw = textWidth(txt, FONT_5x7, { scale: 3 });
+  const tx = (W - tw) >> 1;
+  const ty = (H >> 1) - 13;
+  c.rect(tx - 5, ty - 4, tw + 10, 29, y, 3);
+  c.hline(tx - 5, ty - 5, tw + 10, y, 5);
+  c.hline(tx - 5, ty + 25, tw + 10, y, 2);
+  drawText(c, txt, tx, ty, FONT_5x7, ink, 1, { scale: 3, shadow: { ramp: y, tone: 1 }, shadowD: 1 });
+  for (let i = 0; i < 3; i++) {
+    const sy = ty + 4 + i * 7;
+    const sx = tx + rng.int(0, tw - 50);
+    for (let j = 0; j < rng.int(24, 46); j++) if (hash2(sx + j, sy, 3) > 0.3) c.set(sx + j, sy + (j > 20 ? 1 : 0), steel, 4);
+  }
+  drawText(c, 'MILLBROOK SCHOOL DIST 7', (W - textWidth('MILLBROOK SCHOOL DIST 7', FONT_3x5)) >> 1, H - 11, FONT_3x5, ink, 2);
   // Rust blooms along the rolled edges, a bloody hand smear by the rear hatch.
   for (let i = 0; i < 22; i++) c.cluster(rng.int(0, W - 3), rng.chance(0.5) ? rng.int(1, 4) : rng.int(H - 6, H - 3), rng.int(0, 6), rust, 2);
   for (let j = 0; j < 4; j++) c.line(56 + j * 2, 18, 62 + j * 3, 36, blood, 2);
