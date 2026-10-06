@@ -19,16 +19,17 @@ import {
   papersDecal, pictureGhostDecal, pillsDecal, puddleDecal, spatterDecal, trayDecal, wallCrackDecal, waterStainDecal,
 } from '../../pixelworld/z2decals';
 import {
-  bedBoard, clockFace, drawerFace, emergencyLampFace, extinguisherMod, fixture, hospitalWindow, monitorFace, nightWindow, redCross, troffer, tvBroadcast, vendingFront,
+  bedBoard, bedHeadUnit, clockFace, drawerFace, shelfFront, emergencyLampFace, extinguisherMod, fixture, hospitalWindow, monitorFace, nightWindow, redCross, troffer, tvBroadcast, vendingFront,
   whiteboardFace, xrayFace, copingTile, doorLeaf, roofUnit, type FixtureKind, type HospWindowKind, type RoofKind,
 } from '../../pixelworld/z2modules';
 import { Z2Billboards } from '../../pixelworld/z2billboard';
-import { columnTile, doorwayModule, dripTile, glassRailTile, membraneTile, officeWindow, pustuleDecal, skylightTile, veinTile } from '../../pixelworld/z2atrium';
+import { columnTile, doorwayModule, fasciaTile, dripTile, glassRailTile, membraneTile, officeWindow, pustuleDecal, skylightTile, veinTile } from '../../pixelworld/z2atrium';
 import { ambulanceCabSide, ambulanceDoor, ambulanceFront, ambulanceSide, carCabin, carEnd, carSide } from '../../pixelworld/z2vehicles';
 import type { Ambulance } from './props';
 import { PwBackdrop } from '../../pixelworld/backdrop';
 import { z2CityTile, z2StormSkyTile } from '../../pixelworld/z2sky';
 import { bedsideSprite, binSprite, bodyBagSprite, coneSprite, drumSprite, filingSprite, corpseSprite, crashCartSprite, ivSprite, laundrySprite, potSprite, trolleySprite, wheelchairSprite } from '../../pixelworld/z2props';
+import { anesthesiaFront, autopsyTop, chairBack, chairEdge, chairSeat, chairShell, counterFront, deadArmSprite, drapeTop, hemTile, openCavity, sheetTile, toeTag } from '../../pixelworld/z2furniture';
 import { z2ExitSign, z2LitSign, z2PlateSign, z2Poster, z2Stencil, type PosterKind } from '../../pixelworld/z2signs';
 
 /**
@@ -96,6 +97,19 @@ const _rel = new THREE.Matrix4();
 const _inv = new THREE.Matrix4();
 const _box = new THREE.Box3();
 const _p = new THREE.Vector3();
+const _mm = new THREE.Matrix4();
+const _t4 = new THREE.Matrix4();
+const _r4 = new THREE.Matrix4();
+const _q = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+
+/**
+ * A body under a sheet, head to foot (gurney frame: head at z −0.52, feet at
+ * z 0.86, the sheet at y 0.97): sections [z, height above the sheet, half
+ * width] for the draped mounds (head, then shoulders → chest → hips → knees →
+ * toes pushing the sheet up → the end).
+ */
+const BODY_HEAD = [[-0.66, 0.07, 0.06], [-0.62, 0.15, 0.12], [-0.5, 0.18, 0.14], [-0.4, 0.13, 0.1], [-0.36, 0.06, 0.06]];
+const BODY_TORSO = [[-0.38, 0.02, 0.12], [-0.3, 0.15, 0.24], [-0.05, 0.18, 0.24], [0.25, 0.14, 0.22], [0.5, 0.09, 0.18], [0.7, 0.07, 0.15], [0.8, 0.14, 0.15], [0.88, 0.11, 0.12], [0.92, 0.01, 0.1]];
 
 
 /** ST. MERCY HOSPITAL's PIXEL WORLD converter (one per stage build). */
@@ -338,6 +352,48 @@ export class Z2PixelWorld {
       const drop = this.handle(o, b, _rel.clone(), root);
       if (drop) o.parent?.remove(o);
     }
+  }
+
+  /**
+   * A draped mound (a body under a sheet) in frame `m`: hexagonal sections
+   * [z, height above `base`, half width] joined by quads, the ends capped;
+   * the sheet tile mapped at world scale across and along it. `zf` maps the
+   * section z (gurney frame) into the object's frame.
+   */
+  private mound(b: PwBatch, m: THREE.Matrix4, tile: PwTile, base: number, secs: number[][], zf: (z: number) => number) {
+    const XS = [-1, -0.75, -0.4, 0.4, 0.75, 1];
+    const YS = [0, 0.7, 1, 1, 0.7, 0];
+    const pt = (s: number[], i: number, out: THREE.Vector3) => out.set(XS[i] * s[2], base + YS[i] * s[1], zf(s[0]));
+    b.setMatrix(m);
+    for (let k = 0; k + 1 < secs.length; k++) {
+      const s0 = secs[k];
+      const s1 = secs[k + 1];
+      const v0 = zf(s0[0]) * PW_TPM;
+      const v1 = zf(s1[0]) * PW_TPM;
+      let ua = 0;
+      let ub = 0;
+      for (let i = 0; i + 1 < XS.length; i++) {
+        pt(s0, i, _q[0]);
+        pt(s1, i, _q[1]);
+        pt(s1, i + 1, _q[2]);
+        pt(s0, i + 1, _q[3]);
+        const la = _q[0].distanceTo(_q[3]) * PW_TPM;
+        const lb = _q[1].distanceTo(_q[2]) * PW_TPM;
+        b.quad(_q[0], _q[1], _q[2], _q[3], tile, [ua, v0, ub, v1, ub + lb, v1, ua + la, v0]);
+        ua += la;
+        ub += lb;
+      }
+    }
+    // End caps (fans): the first faces −z, the last +z.
+    for (const [s, rev] of [[secs[0], false], [secs[secs.length - 1], true]] as const) {
+      for (let i = 1; i + 1 < XS.length; i++) {
+        pt(s, 0, _q[0]);
+        pt(s, rev ? i + 1 : i, _q[1]);
+        pt(s, rev ? i : i + 1, _q[2]);
+        b.tri(_q[0], _q[1], _q[2], tile, [_q[0].x * PW_TPM, _q[0].y * PW_TPM, _q[1].x * PW_TPM, _q[1].y * PW_TPM, _q[2].x * PW_TPM, _q[2].y * PW_TPM]);
+      }
+    }
+    b.setMatrix(null);
   }
 
   /** Lay a module rect in an object's frame. */
@@ -632,6 +688,14 @@ export class Z2PixelWorld {
       case 'bed': {
         this.lay(b, m, _o.set(-0.5, 0.42, 1.047), X, Y, 1.0, 0.45, bedBoard(a, true));
         this.lay(b, m, _o.set(-0.5, 0.4, -0.988), X, Y, 1.0, 0.78, bedBoard(a, false));
+        // Against the wall (yaw 0 / π): the bed-head gas and power unit on the wall behind it.
+        const yaw = Math.atan2(m.elements[8], m.elements[10]);
+        if (Math.abs(Math.sin(yaw)) < 0.05) this.lay(b, m, _o.set(-0.81, 1.2, -1.064), X, Y, 52 / PW_TPM, 0.5, bedHeadUnit(a));
+        return false;
+      }
+      case 'shelf': {
+        // (The tagged mesh's origin is the box centre: 1.1 × 2.0 × 0.45, front at local +z.)
+        this.lay(b, m, _o.set(-0.55, -1.0, 0.228), X, Y, 1.1, 2.0, shelfFront(a, info.v as number));
         return false;
       }
       case 'morgueWall': {
@@ -724,6 +788,125 @@ export class Z2PixelWorld {
       }
       case 'nosing':
         return true;
+      case 'chairs': {
+        const hex = info.color as number;
+        const n = info.n as number;
+        const missing = info.missing as number[];
+        // The classic cushions go (boxes in the chairs' cloth); the steel beam and legs stay.
+        for (const c of [...o.children]) if (((c as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined)?.color?.getHex() === hex) o.remove(c);
+        const w = 0.56;
+        const x0 = (-(n - 1) * w) / 2;
+        const edge = chairEdge(a, hex);
+        const side = z2LinenTile(a, { hex });
+        const shell = chairShell(a);
+        for (let i = 0; i < n; i++) {
+          if (missing.includes(i)) continue;
+          const cx = x0 + i * w;
+          const v = Math.floor(hash2(Math.round(m.elements[12] * 5) + i * 7, Math.round(m.elements[14] * 5), 71) * 5);
+          b.setMatrix(m);
+          b.box(cx, 0.45, 0.02, 0.5, 0.06, 0.46, { py: chairSeat(a, hex, v === 3 ? 1 : v === 4 ? 2 : 0), pz: edge, px: side, nx: side, nz: side });
+          // Back rest: painted front and shell, cut-out rounded shoulders; thin sides and top.
+          _mm.copy(m).multiply(_t4.makeTranslation(cx, 0.72, -0.22)).multiply(_r4.makeRotationX(-0.12));
+          b.setMatrix(_mm);
+          b.rect(_o.set(-0.25, -0.24, 0.026), X, Y, 0.5, 0.48, chairBack(a, hex, v % 3));
+          b.rect(_o.set(0.25, -0.24, -0.026), NX, Y, 0.5, 0.48, shell);
+          b.rect(_o.set(0.25, -0.24, 0.026), NZ, Y, 0.052, 0.42, side);
+          b.rect(_o.set(-0.25, -0.24, -0.026), Z, Y, 0.052, 0.42, side);
+          b.rect(_o.set(-0.22, 0.24, 0.026), X, NZ, 0.44, 0.052, side);
+          b.setMatrix(null);
+        }
+        return false;
+      }
+      case 'gurney': {
+        // (Tipped: the frame hangs under a rotated child group.)
+        const r = info.tipped ? o.children[0] : o;
+        const mr = new THREE.Matrix4().multiplyMatrices(_inv, r.matrixWorld);
+        const hex = (info.sheet as number | undefined) ?? 0xc8d2cc;
+        const body = !!info.body;
+        const bloody = !!info.blood;
+        // Sheet, lumps, blood slabs and the grey arm go; the frame, mattress and pillow stay.
+        for (const c of [...r.children]) {
+          const hx = ((c as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined)?.color?.getHex();
+          if (hx !== undefined && (hx === hex || hx === 0x8a9488 || BLOOD_HEX.has(hx))) r.remove(c);
+        }
+        const plain = sheetTile(a, hex, false);
+        const soaked = bloody ? sheetTile(a, hex, true) : plain;
+        b.setMatrix(mr);
+        b.rect(_o.set(-0.3, 0.97, 0.92), X, NZ, 0.6, 1.6, soaked, { u0: Math.floor(hsh * 64) });
+        if (!info.tipped) {
+          const hem = hemTile(a, hex);
+          b.rect(_o.set(0.302, 0.69, 0.92), NZ, Y, 1.6, 0.28, hem, { v0: 7 });
+          b.rect(_o.set(-0.302, 0.69, -0.68), Z, Y, 1.6, 0.28, hem, { v0: 7, u0: 23 });
+          b.rect(_o.set(-0.302, 0.69, 0.922), X, Y, 0.604, 0.28, hem, { v0: 7, u0: 41 });
+        }
+        b.setMatrix(null);
+        if (body) {
+          this.mound(b, mr, plain, 1.0, BODY_HEAD, (z) => z);
+          this.mound(b, mr, soaked, 0.97, BODY_TORSO, (z) => z);
+          if (!info.tipped) {
+            _p.set(0.33, 0.55, 0.1).applyMatrix4(mr);
+            this.bills.add(_p.x, _p.y, _p.z, deadArmSprite(a), 14 / PW_TPM);
+          }
+        }
+        return false;
+      }
+      case 'autopsy': {
+        const sheetHex = 0xb8c4c0;
+        if (info.body) {
+          for (const c of [...o.children]) {
+            const hx = ((c as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined)?.color?.getHex();
+            if (hx === sheetHex || hx === 0xd8d0c0 || hx === 0x7e0d0d) o.remove(c);
+          }
+        }
+        this.lay(b, m, _o.set(-0.44, 0.8805, 1.0), X, NZ, 0.88, 2.0, autopsyTop(a));
+        if (info.body) {
+          // Head at z −0.72, feet at 0.82 on the table (top 0.88, inside the rims).
+          const zf = (z: number) => -0.72 + (z + 0.52) * (1.54 / 1.38);
+          const sheet = sheetTile(a, sheetHex, false);
+          this.mound(b, m, sheet, 0.9, BODY_HEAD, zf);
+          this.mound(b, m, sheet, 0.89, BODY_TORSO, zf);
+          b.setMatrix(m);
+          b.rect(_o.set(0.04, 0.9, 1.0), X, Y, 0.19, 0.125, toeTag(a));
+          if (info.open) {
+            // The Y-cut on the chest: on the mound's flat top between its chest sections.
+            const [s0, s1] = [BODY_TORSO[2], BODY_TORSO[3]];
+            const y0 = 0.89 + s0[1] + 0.004;
+            const y1 = 0.89 + s1[1] + 0.004;
+            const w0 = s0[2] * 0.4;
+            const w1 = s1[2] * 0.4;
+            _q[0].set(-w1, y1, zf(s1[0]));
+            _q[1].set(w1, y1, zf(s1[0]));
+            _q[2].set(w0, y0, zf(s0[0]));
+            _q[3].set(-w0, y0, zf(s0[0]));
+            b.quad(_q[0], _q[1], _q[2], _q[3], openCavity(a), [0, 0, 16, 0, 16, 16, 0, 16]);
+          }
+          b.setMatrix(null);
+        }
+        return false;
+      }
+      case 'opTable': {
+        const drape = 0x6a9a8a;
+        for (const c of [...o.children]) {
+          const hx = ((c as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined)?.color?.getHex();
+          if (hx !== undefined && BLOOD_HEX.has(hx)) o.remove(c);
+        }
+        b.setMatrix(m);
+        b.rect(_o.set(-0.36, 0.931, 1.05), X, NZ, 0.72, 2.0, drapeTop(a, drape));
+        const hem = hemTile(a, drape);
+        b.rect(_o.set(0.362, 0.65, 1.05), NZ, Y, 2.0, 0.28, hem, { v0: 7 });
+        b.rect(_o.set(-0.362, 0.65, -0.95), Z, Y, 2.0, 0.28, hem, { v0: 7, u0: 29 });
+        b.setMatrix(null);
+        return false;
+      }
+      case 'anesthesia':
+        // Cabinet 0.7 × 1.2 × 0.6 from y 0.1, front at z 0.3 (its screen block above stays).
+        this.lay(b, m, _o.set(-0.35, 0.1, 0.302), X, Y, 0.7, 1.2, anesthesiaFront(a));
+        return false;
+      case 'counter': {
+        const w = info.w as number;
+        this.lay(b, m, _o.set(-w / 2, 0, 0.462), X, Y, w, 1.1, counterFront(a, 0x5c7a74));
+        return false;
+      }
       case 'corpse':
       case 'bodyBag': {
         _p.setFromMatrixPosition(m);
@@ -985,6 +1168,7 @@ export class Z2PixelWorld {
       }
       case 'stucco|1|0.65':
         if (hex === 0x86968a || hex === 0x94a690) return own(z2PaintTile(a, { hex }));
+        if (hex === 0xc8c8be) return own(fasciaTile(a, hex));
         return neutral(z2PaintTile(a, { hex: NEUTRAL_HEX }));
       case 'wallpaper|1|0.4':
         if (hex === 0x8e8670) return own(z2WallpaperTile(a, { hex }));
@@ -1113,13 +1297,13 @@ const ZONE_FLOOR: Record<string, number> = {
 };
 
 /** Wainscot / wall tiles per material colour. */
-const GLAZED: Record<number, { tw?: number; th?: number; bond?: boolean; grime?: number; grout?: number }> = {
+const GLAZED: Record<number, { tw?: number; th?: number; bond?: boolean; grime?: number; grout?: number; calm?: boolean; foot?: boolean }> = {
   0x2a6258: { grime: 0.6 },
   0x2e6a5e: { grime: 0.5 },
   0x587478: { tw: 16, th: 12, grime: 0.8 },
-  0x9fb2b4: { tw: 16, th: 12, grime: 0.4, grout: 0x7a8486 },
-  0x2a6a56: { tw: 16, th: 16, grime: 0.5 },
-  0x3a7462: { tw: 16, th: 16, grime: 0.3 },
+  0x9fb2b4: { tw: 16, th: 12, grime: 0.4, grout: 0x7a8486, foot: false },
+  0x2a6a56: { tw: 16, th: 16, grime: 0.5, calm: true },
+  0x3a7462: { grime: 0.45, calm: true, foot: false },
 };
 
 /** Blood colours (C.blood, C.bloodFresh, C.bloodDark, the flesh-dark smears). */

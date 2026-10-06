@@ -756,13 +756,38 @@ load skips painting), paint the one-level sky atlas after the first frame.
   `tests/unit/pixel-world-d1.test.ts` (occluders, raycasts, budget, full-stage simulator),
   `D1_SIG=1 … d1-sig.test.ts` (CLASSIC / PIXEL CAST scene signature), `d1-lab.test.ts`
   (tile / stone / herd dumps, paint benches).
-- **z2 HOSPITAL** (interior, z2/bake.ts colour baker, zones in zonesUpper/Lower.ts):
-  `paintedWallTile` / `labPanelTile` walls with wainscot and scuffs, `ceilingTile` with
-  light panels as glow modules, `terrazzoTile` / sheet-vinyl floors, `bloodTrailDecal`,
-  `noticeModule` (WARD signs, room numbers in 3×5), curtains as `fabricTile`, the
-  ambulance bay exterior (night: reuse z1's asphalt, night sky + skyline backdrop),
-  morgue drawers as metal modules, OR lamps as glow. Convert per zone before `bake(g)`;
-  keep curtains / drawers / vents (animated set pieces) classic or re-paint them in place.
+- **z2 ST. MERCY HOSPITAL** (converted end to end; `stages/z2/pixel.ts` = `Z2PixelWorld`;
+  painters `pixelworld/z2surfaces.ts`, `z2decals.ts`, `z2signs.ts`, `z2modules.ts`,
+  `z2props.ts`, `z2billboard.ts`, `z2furniture.ts`, `z2vehicles.ts`, `z2atrium.ts`,
+  `z2sky.ts`). Every zone is converted before its `bake(g)` (`convertZone`, called from
+  env.ts `addZone`) and every `bakeInto` set piece before its bake (`setBakeHook` →
+  `convertInto`); the builders only RECORD what painting replaces (`pwTag`: kind + data in
+  `userData.pw`), so CLASSIC and PIXEL CAST are byte-identical (scene hash). Walls by
+  material preset and colour (glazed wainscots per colour, the OR's calm glaze, painted
+  plaster with cluster mottle, regency wallpaper, painted block, stone panels, skirting,
+  bumper rails, the atrium's balcony fascias), floors (VCT, sheet vinyl, quarry tile,
+  marble, terrazzo, trowelled concrete, wet asphalt), ceilings (tile grid; troffers as glow
+  modules, the flickering panels re-painted on / off); decals by rule, never in the repeat
+  (water stains, picture ghosts, cracks, broken tiles on the tile grid, hand prints, wipes,
+  spatter, blood words, pools, drag trails as ribbons, papers, puddles, ceiling holes);
+  signage (channel letters with dead tubes, plates with arrows, EXIT boxes, stencils,
+  posters); modules (monitors, TV, clocks, whiteboards, x-ray boxes, vending, extinguishers,
+  morgue drawers, medicine shelving, bed boards and bed-head units, the anaesthesia
+  machine); small props as yaw-facing sprites (`Z2Billboards`, one draw per zone:
+  wheelchairs, drips, bins, carts, cones, drums, bodies); furniture parts (waiting-chair
+  cushions and cut-out backs, sheets draped over bodies as low mounds with hems, autopsy
+  tops, surgical drapes, counter fronts); ambulances (the crashing one too) and cars;
+  roofline cut-outs; the atrium (skylight, glass balustrades, doorways, office windows,
+  fluted columns, veins / pustules / drips / membranes); a storm-sky + burning-city
+  panorama whose gain follows the lightning. Breakable doors are re-painted in place
+  (same triangles: same hit boxes). Still classic (re-textured only): the steel frames of
+  gurneys / beds / tables, the surgical lamp, pipes and cable trays, bollards and lamp
+  posts, canopy pillars, the fountain ring, benches, pendant lamps, the cocoon, the boiler
+  wall's breakables, glass, light bars, FX. Budgets: world atlas 1024×1056 (5.5 MB with
+  mips) + sky 1024×224 (0.9 MB); paint 74 ms world + 16 ms sky (node, min of 12; ≈ 124 ms
+  with the box at load 13); ≤ 95 draw calls at the heaviest beat (the bay; PIXEL CAST 160). Checks:
+  `tests/unit/pixel-world-z2.test.ts` (budget, occluders, ground, set pieces,
+  destructibles, RNG, full-stage simulator in both styles).
 - **z3 HIGHWAY** (dusk exterior, z3/bake.ts per-50 m chunk baker): `duskSkyTile` panorama
   + burning-city skyline layer (`skylineTile` with fire glow) + hills; `asphaltTile` road
   with lane paint, `guardRailTile`, jersey barriers as concrete, billboards

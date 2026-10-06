@@ -817,3 +817,52 @@ export function doorLeaf(atlas: PwAtlas, hex: number): PwTile {
     for (let j = 0; j < 9; j++) for (let i = 0; i < 4; i++) if ((i + j) % 4 !== 3) c.set(32 + i, 26 + j, blood, j < 2 ? 4 : 3);
   });
 }
+
+/**
+ * Medicine shelving seen from the front (1.1 × 2.0 m → 36 × 64): steel uprights
+ * and five shelves of pill bottles, boxes, binders and drip bags, gaps where
+ * things were grabbed, one bottle knocked over, a label strip on each shelf.
+ */
+export function shelfFront(atlas: PwAtlas, variant = 0): PwTile {
+  return atlas.tile(`z2shelf|${variant}`, 36, 64, (c, k) => {
+    const rng = k.rng;
+    const steel = k.ramp(0xb8bcb4, { light: 0.5, sat: 0.4 });
+    const back = k.ramp(0x2a2e2c, { light: 0.4 });
+    const goods = [0xd8d0b0, 0x9ab8d8, 0xd89a9a, 0xe8e4d8, 0x6a9a6a, 0xc8a050].map((h) => k.ramp(h, { light: 0.4, sat: 0.9 }));
+    const label = k.ramp(0xe8e8e0, { light: 0.25 });
+    c.rect(0, 0, 36, 64, back, 2);
+    for (const x of [0, 35]) c.vline(x, 0, 64, steel, x ? 2 : 4);
+    for (let sh = 0; sh < 5; sh++) {
+      const y = 12 + sh * 12;
+      // Items standing on the shelf (bottom at y - 1).
+      let x = 2;
+      while (x < 33) {
+        const w = rng.int(2, 5);
+        if (rng.chance(0.18)) {
+          x += w + 1;
+          continue;
+        }
+        const h = rng.int(4, 9);
+        const g = goods[rng.int(0, goods.length - 1)];
+        const top = y - 1 - h;
+        if (rng.chance(0.08) && x + h < 33) {
+          // Knocked over.
+          c.rect(x, y - 1 - w, h, w, g, 3);
+          c.hline(x, y - 1 - w, h, g, 4);
+          x += h + 1;
+          continue;
+        }
+        c.rect(x, top, w, h, g, 3);
+        c.vline(x, top, h, g, 4);
+        c.hline(x, top, w, g, w > 2 ? 4 : 3);
+        if (h > 5) c.hline(x, top + 3, w, label, 3);
+        x += w + (rng.chance(0.3) ? 1 : 0);
+      }
+      c.rect(0, y, 36, 2, steel, 3);
+      c.hline(0, y, 36, steel, 4);
+      for (let lx = 4; lx < 32; lx += 9) c.hline(lx, y + 1, 4, label, 3);
+    }
+    c.rect(0, 0, 36, 2, steel, 3);
+    void variant;
+  });
+}

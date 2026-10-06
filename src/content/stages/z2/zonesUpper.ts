@@ -627,8 +627,8 @@ export function buildHub(ctx: ZoneCtx): THREE.Group {
   counter(g, 84.4, 0, -40.4, Math.PI, 3.2, rng, 1);
   // Back wall: medicine shelves, whiteboard, sign.
   for (let i = 0; i < 4; i++) {
-    blk(g, 1.1, 2.0, 0.45, T(0xb8bcb4, TX.paint), 88.5, 0, -47 + i * 1.2, -Math.PI / 2);
-    for (let k = 0; k < 3; k++) blk(g, 0.9, 0.12, 0.3, M(rng.pick([0xd8d0b0, 0x9ab8d8, 0xd89a9a])), 88.4, 0.5 + k * 0.5, -47 + i * 1.2, -Math.PI / 2);
+    pwTag(blk(g, 1.1, 2.0, 0.45, T(0xb8bcb4, TX.paint), 88.5, 0, -47 + i * 1.2, -Math.PI / 2), 'shelf', { v: i });
+    for (let k = 0; k < 3; k++) pwTag(blk(g, 0.9, 0.12, 0.3, M(rng.pick([0xd8d0b0, 0x9ab8d8, 0xd89a9a])), 88.4, 0.5 + k * 0.5, -47 + i * 1.2, -Math.PI / 2), 'coneBase');
   }
   whiteboard(g, 88.8, 1.7, -41.6, -Math.PI / 2, rng);
   sign(g, 'NURSES', 84.4, 2.95, -44, -Math.PI / 2, 0.06, 0x8affd0, 0x101814, 1.3);

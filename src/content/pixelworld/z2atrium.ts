@@ -239,3 +239,44 @@ export function pustuleDecal(atlas: PwAtlas): PwTile {
     c.ellipse(5, 5, 1.2, 1, n, 4, G);
   });
 }
+
+/**
+ * Balcony fascia (wrap 80 × 16 = 2.5 m × 0.5 m, v from the slab's underside):
+ * the painted edge band of each storey — a lit nosing, a drip groove and the
+ * shadowed underside lip, dirty-water dribbles and rust runs from the rail
+ * posts above, a hairline crack, soot rising from the bottom edge.
+ */
+export function fasciaTile(atlas: PwAtlas, hex: number): PwTile {
+  return atlas.tile(`z2fascia|${hex.toString(16)}`, 80, 16, (c, k) => {
+    const rng = k.rng;
+    const p = k.ramp(hex, { light: 0.42, sat: 0.7 });
+    const rust = k.ramp(0x7a4a2a, { light: 0.4, sat: 0.8 });
+    for (let y = 0; y < 16; y++) {
+      for (let x = 0; x < 80; x++) {
+        const t = y === 0 ? 4 : y === 13 ? 1 : y >= 14 ? 2 : 3;
+        c.set(x, y, p, t);
+      }
+    }
+    // Patchy repaint: broad clusters a step darker / lighter.
+    for (let i = 0; i < 14; i++) c.cluster(rng.int(0, 77), rng.int(2, 11), rng.int(0, 9), 0, rng.chance(0.6) ? -1 : 1);
+    // Dribbles from the nosing down the band (dirty rainwater), longer where they pool.
+    for (let i = 0; i < 9; i++) {
+      const x = rng.int(0, 79);
+      const len = rng.int(3, 11);
+      for (let y = 1; y < 1 + len && y < 13; y++) c.shift(x, y, -1);
+      if (rng.chance(0.4)) for (let y = 1; y < 1 + (len >> 1); y++) c.shift((x + 1) % 80, y, -1);
+    }
+    // Rust runs (two per bay, under where the rail posts stand).
+    for (const x0 of [6, 46]) {
+      const len = rng.int(6, 11);
+      for (let y = 1; y < 1 + len; y++) c.tint(x0 + (y > 6 ? 1 : 0), y, rust, y < 3 ? 0 : -0.6);
+    }
+    // Hairline crack across the band, soot along the drip edge.
+    let cx = rng.int(20, 60);
+    for (let y = 2; y < 13; y++) {
+      c.shift(cx, y, -1);
+      if (hash2(cx, y, 5) > 0.6) cx += 1;
+    }
+    for (let x = 0; x < 80; x++) if (hash2(x >> 1, 0, 8) < 0.45) c.shift(x, 12, -1);
+  }, { wrap: true });
+}

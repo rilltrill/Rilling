@@ -63,6 +63,10 @@ export interface GlazedOpts {
   bond?: boolean;
   /** Tile height (multiple of 16; default 48). */
   h?: number;
+  /** Calm glaze (big tiled rooms: the OR): grout close to the tile, few odd tiles, few lit lips. */
+  calm?: boolean;
+  /** Dirt at the foot of the tile (default true; off for walls that only start above a wainscot — it would band every repeat). */
+  foot?: boolean;
 }
 
 /**
@@ -73,7 +77,7 @@ export interface GlazedOpts {
  */
 export function z2GlazedTile(atlas: PwAtlas, o: GlazedOpts): PwTile {
   const H = o.h ?? 48;
-  const key = `z2glazed|${h6(o.hex)}|${h6(o.grout ?? 0)}|${o.tw ?? 8}x${o.th ?? 8}|${o.grime ?? 0.5}|${o.bond ? 1 : 0}|${H}`;
+  const key = `z2glazed|${h6(o.hex)}|${h6(o.grout ?? 0)}|${o.tw ?? 8}x${o.th ?? 8}|${o.grime ?? 0.5}|${o.bond ? 1 : 0}|${H}|${o.calm ? 1 : 0}|${o.foot === false ? 0 : 1}`;
   return atlas.tile(key, 128, H, (c, k) => paintGlazed(c, k, o), { wrap: true });
 }
 
@@ -86,7 +90,8 @@ function paintGlazed(c: PwCanvas, k: PwKit, o: GlazedOpts) {
   const t2 = k.ramp(shiftHue(o.hex, 0.015, 1.06), { light: 0.52, sat: 0.95 });
   // Grout: pale cement on coloured tiles, a grey a little darker than white tiles.
   const light = (((o.hex >> 16) & 255) + ((o.hex >> 8) & 255) + (o.hex & 255)) / 3 > 140;
-  const grout = k.ramp(o.grout ?? (light ? darken(o.hex, 0.72) : mixHex(o.hex, 0xb8b8ac, (o.tw ?? 8) > 8 ? 0.4 : 0.7)), { light: 0.3, sat: 0.5 });
+  const calm = !!o.calm;
+  const grout = k.ramp(o.grout ?? (light ? darken(o.hex, 0.72) : mixHex(o.hex, 0xb8b8ac, calm ? 0.3 : (o.tw ?? 8) > 8 ? 0.4 : 0.7)), { light: 0.3, sat: 0.5 });
   const W = c.w;
   const H = c.h;
   const cols = Math.ceil(W / TW);
@@ -100,20 +105,21 @@ function paintGlazed(c: PwCanvas, k: PwKit, o: GlazedOpts) {
       const col = Math.floor(xx / TW) % cols;
       const lx = xx % TW;
       if (lx === 0 || ly === TH - 1) {
-        c.set(x, y, grout, light ? 3 : ly === TH - 1 ? 3 : 2);
+        c.set(x, y, grout, light || calm ? 3 : ly === TH - 1 ? 3 : 2);
         continue;
       }
       const hsh = hash2(col, row, 11);
-      const r = hsh < 0.14 ? t1 : hsh > 0.9 ? t2 : t0;
+      const r = hsh < (calm ? 0.06 : 0.14) ? t1 : hsh > (calm ? 0.96 : 0.9) ? t2 : t0;
       let t = 3;
       // Glaze: a lit top lip on about half the tiles (set a hair proud), glints on a few.
-      if (ly === TH - 2 && lx < TW - 2 && hash2(col, row, 23) > 0.45) t = 4;
-      else if (ly === 0 && hash2(col, row, 29) > 0.6) t = 2;
+      if (ly === TH - 2 && lx < TW - 2 && hash2(col, row, 23) > (calm ? 0.8 : 0.45)) t = 4;
+      else if (ly === 0 && !calm && hash2(col, row, 29) > 0.6) t = 2;
       if (hash2(col, row, 17) > 0.78 && ly === TH - 3 && lx === 2) t = 5;
       c.set(x, y, r, t);
     }
   }
   // Foot: the bottom course a step dirtier, grout darker in the lowest rows, splash clusters thinning upward.
+  if (o.foot === false) return;
   for (let x = 0; x < W; x++) {
     for (let v = 0; v < TH; v++) {
       const y = rowUp(c, v);
@@ -445,18 +451,21 @@ export function z2FloorTileTile(atlas: PwAtlas, o: { hex: number; grout?: number
         const ly = y & 7;
         const tx = x >> 3;
         const ty = y >> 3;
+        // Flat quarry tiles: a soft grout line (dirtier on some joints), no pillow bevel — a
+        // floor of raised squares reads as a uniform grid from across the room.
         if (lx === 0 || ly === 0) {
-          c.set(x, y, gr, hash2(tx, ty, 2) > 0.85 ? 1 : 2);
+          c.set(x, y, gr, hash2(tx, ty, 2) > 0.8 ? 2 : 3);
           continue;
         }
-        const r = hash2(tx, ty, 6) > 0.86 ? t2 : t;
+        const r = hash2(tx, ty, 6) > 0.88 ? t2 : t;
         let tone = 3;
-        if (ly === 1 || lx === 1) tone = 4;
-        else if (ly === 7 || lx === 7) tone = 2;
-        if (hash2(tx, ty, 9) > 0.8 && lx === 3 && ly === 2) tone = 5;
+        if (ly === 1 && lx > 1 && lx < 6 && hash2(tx, ty, 4) > 0.7) tone = 4;
+        if (hash2(tx, ty, 9) > 0.85 && lx === 3 && ly === 2) tone = 5;
         c.set(x, y, r, tone);
       }
     }
+    // Traffic wear and mop marks: broad darker clusters over tiles and grout alike.
+    mottle(c, 4, 57, 0.3, -1, 0, 0.6);
   }, { wrap: true });
 }
 
@@ -868,12 +877,14 @@ export function z2TreadTile(atlas: PwAtlas, o: { hex: number }): PwTile {
         if (v < 7) {
           // Trodden middle a step darker (feet keep to the centre of each 1 m), pits.
           const mid = Math.abs(((x + 16) % 32) - 16) < 9;
-          c.set(x, y, s, v === 0 ? 2 : mid && hash2(x >> 1, v, 3) > 0.35 ? 2 : 3);
+          c.set(x, y, s, mid && hash2(x >> 1, v, 3) > 0.35 ? 2 : 3);
         } else if (v < 10) {
-          // Nosing: grooves along the edge, the front lip lit; yellow paint mostly worn off.
+          // Nosing: a groove along the edge, the front lip a step lighter; yellow paint mostly
+          // worn off. (Low contrast on purpose: seen from the head of the flight every tread is
+          // a few pixels tall, and hard light/dark bands per step shimmer.)
           const groove = v === 8;
           const paint = !groove && v === 9 && hash2(x >> 2, v, 9) > 0.55;
-          c.set(x, y, paint ? yel : metal, groove ? 1 : v === 9 ? 4 : 3);
+          c.set(x, y, paint ? yel : metal, groove ? 2 : 3);
         } else c.set(x, y, s, 3);
       }
     }
