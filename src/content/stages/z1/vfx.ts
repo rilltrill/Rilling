@@ -87,7 +87,7 @@ export class LightPools {
    * replaces the soft radial falloff and `light` screens the pool over what it
    * lands on (ART: PIXEL WORLD: stepped pixel rings).
    */
-  build(surface?: (x: number, z: number, wall: boolean) => RetroParams, map?: THREE.Texture, light = false): THREE.InstancedMesh {
+  build(surface?: (x: number, z: number, wall: boolean) => RetroParams, map?: THREE.Texture, light = false, wallSquash = 1): THREE.InstancedMesh {
     const mat = Kit.track(
       new THREE.MeshBasicMaterial({
         map: map ?? radialTexture(),
@@ -121,7 +121,8 @@ export class LightPools {
       if (d.wallYaw !== undefined) _e.set(0, d.wallYaw, 0);
       else _e.set(-Math.PI / 2, 0, 0);
       _q.setFromEuler(_e);
-      _s.set(d.r * 2, d.r * 2, 1);
+      // (`wallSquash` < 1: wall splashes wider than tall — they stay on the wall instead of haloing into the sky.)
+      _s.set(d.r * 2, d.r * 2 * (d.wallYaw !== undefined ? wallSquash : 1), 1);
       _m.compose(_p.set(d.x, d.y, d.z), _q, _s);
       mesh.setMatrixAt(i, _m);
       mesh.setColorAt(i, _c.setHex(d.color).multiplyScalar(d.k));

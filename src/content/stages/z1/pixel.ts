@@ -20,6 +20,11 @@ import { Z1Ground } from './pwGround';
 import { Z1Cars } from './pwCars';
 import { Z1FacadeExtras } from './pwFacade';
 import { Z1Diner } from './pwDiner';
+import { Z1Bus } from './pwBus';
+import { Z1Square } from './pwSquare';
+import { Z1Street } from './pwStreet';
+import { PW_PARTS, type PwPart } from './setpieces';
+import { repaintable } from '../../pixelworld/retexture';
 import type { Town } from './town';
 import { Kit } from '../../kit/ModelKit';
 import { M, type FacadeRecord } from './props';
@@ -89,13 +94,18 @@ export class Z1PixelWorld {
   readonly skyAtlas = new PwAtlas('z1-sky', { levels: 1 });
   private batches = new Map<ZoneId, PwBatch>();
   private rule: TileRule;
+  /** Per-material tile rules (the Kit-texture mapping's exceptions). */
+  private overrides!: Map<THREE.Material, TileRule>;
   private groundMats: Set<THREE.Material>;
   readonly ground: Z1Ground;
   readonly cars: Z1Cars;
   private extras: Z1FacadeExtras;
   private diner: Z1Diner;
   /** PixelWorld meshes for dynamic objects (built in `finish`): batch, parent, world → parent matrix. */
-  private dynBatches: { b: PwBatch; parent: THREE.Object3D }[] = [];
+  private dynBatches: { b: PwBatch; parent: THREE.Object3D; local?: boolean; swap?: boolean }[] = [];
+  private bus: Z1Bus;
+  private square: Z1Square;
+  private street: Z1Street;
   backdrop: PwBackdrop | null = null;
 
   constructor() {
@@ -115,12 +125,19 @@ export class Z1PixelWorld {
     for (const m of roadMaterials()) ov.set(m, () => this.asphalt());
     // The town square's stone flags.
     ov.set(SQUARE_FLAGS(), () => z1PavingTile(a, { brick: 0x6e4636, granite: 0x6a6862 }));
+    this.overrides = ov;
     this.rule = kitTileRule(a, { overrides: ov, paint: new Set([M.yellowPaint, M.whitePaint]) });
     this.groundMats = new Set<THREE.Material>([sidewalk, curb, SQUARE_FLAGS(), ...roadMaterials()]);
     this.ground = new Z1Ground(a);
     this.cars = new Z1Cars(a);
     this.extras = new Z1FacadeExtras(a);
     this.diner = new Z1Diner(a);
+    this.bus = new Z1Bus(a, this.cars.t);
+    this.square = new Z1Square(a);
+    this.street = new Z1Street(a, this.extras);
+    // The courthouse: rusticated ashlar (tower too), fluted columns.
+    for (const mat of [Kit.tex('brick', 0x7a7468, 0.45), Kit.tex('brick', 0x6a645a, 0.45)]) this.overrides.set(mat, () => this.square.t.ashlar);
+    this.overrides.set(Kit.tex('stucco', 0x8a847a, 1.5), () => this.square.t.column);
   }
 
   /** The street asphalt (roads and the base ground under the town). */
@@ -153,6 +170,10 @@ export class Z1PixelWorld {
     for (const m of this.cars.convert(b, zone)) m.parent?.remove(m);
     // The chrome diner and its lit interior.
     for (const m of this.diner.convert(b, zone)) m.parent?.remove(m);
+    // The town square: PRIME MEATS, kiosks, courthouse, shop windows, the memorial.
+    for (const m of this.square.convert(b, zone)) m.parent?.remove(m);
+    // Street hardware and the alley walls: lamps, news boxes, dumpsters, bags, graffiti, fire escapes…
+    for (const m of this.street.convert(b, zone)) m.parent?.remove(m);
     zone.updateMatrixWorld(true);
     retexture(zone, b, this.rule, { world: (m) => this.groundMats.has(m.material as THREE.Material) });
   }
@@ -168,6 +189,28 @@ export class Z1PixelWorld {
     town.zones.A.traverse((o) => {
       if ((o.userData.pwSign as { text?: string } | undefined)?.text === 'Diner') sign = o;
     });
+    // The overturned bus (body and emergency door are separate animated groups).
+    const busGroups: THREE.Object3D[] = [];
+    town.bus.group.traverse((o) => {
+      if (o.userData.pwBus) busGroups.push(o);
+    });
+    for (const g of busGroups) this.repaintGroup(g, (b, parts) => this.bus.emit(b, parts, this.generic));
+    // PRIME MEATS' door panels (they burst open before the boss).
+    for (const p of town.doors.panels) this.repaintGroup(p, (b, parts) => this.square.door(b, parts, p.userData.pwMeatDoor as number), false);
+    // The gas station: canopy (its under-lights stay), price sign faces, pillars (their own meshes, re-skinned).
+    town.gas.canopy.traverse((o) => {
+      if (o.userData.pwCanopy) this.repaintGroup(o, (b, parts) => this.street.canopy(b, parts), false);
+    });
+    for (const d of Object.values(town.dynZones)) {
+      for (const o of d.children) if (o.userData.pwPrice !== undefined) this.repaintGroup(o, (b) => this.street.price(b), false);
+    }
+    for (const p of town.gas.pillars) {
+      const m = p.mesh as THREE.Mesh;
+      const g = (m.geometry as THREE.BoxGeometry).parameters;
+      const b = new PwBatch(this.atlas);
+      this.street.pillar(b, g.width, g.height, g.depth);
+      this.dynBatches.push({ b, parent: m, swap: true });
+    }
     for (const d of Object.values(town.dynZones)) {
       for (const o of [...d.children]) {
         if (!o.userData.pwDinerR || !sign) continue;
@@ -179,6 +222,28 @@ export class Z1PixelWorld {
     }
   }
 
+  /** Re-paint one recorded part with the stage's Kit-texture rule (neutral tiles tinted by its material). */
+  private generic = (b: PwBatch, p: PwPart) => {
+    const mat = p.mesh.material as THREE.MeshLambertMaterial;
+    if (Array.isArray(mat) || !repaintable(mat)) return;
+    if (!this.rule(mat, 0, 1, 0) && !this.rule(mat, 0, 0, 1)) return;
+    const hex = mat.color.getHex();
+    b.geometry(p.mesh.geometry, p.rel, (nx, ny, nz) => this.rule(mat, nx, ny, nz), { tintRGB: (t) => (t.neutral !== undefined ? tintFor(t, hex) : null) });
+  };
+
+  /** Replace a merged animated group's classic meshes (glows stay) by a PixelWorld mesh painted by `paint`. */
+  private repaintGroup(g: THREE.Object3D, paint: (b: PwBatch, parts: PwPart[]) => void, keepGlow = true) {
+    const parts = PW_PARTS.get(g);
+    if (!parts) return;
+    const b = new PwBatch(this.atlas);
+    paint(b, parts);
+    for (const c of [...g.children]) {
+      const m = c as THREE.Mesh;
+      if (m.isMesh && (!keepGlow || !(m.material as THREE.MeshBasicMaterial).isMeshBasicMaterial)) g.remove(m);
+    }
+    this.dynBatches.push({ b, parent: g, local: true });
+  }
+
   /** Build the atlases and the zone meshes (adds each zone's PixelWorld mesh to its group). */
   finish(zones: Record<ZoneId, THREE.Group>) {
     this.atlas.build();
@@ -187,11 +252,20 @@ export class Z1PixelWorld {
       if (mesh) zones[id].add(mesh);
     }
     // Dynamic pieces: world-space geometry under a moving / toggled parent (undo the parent's transform).
-    for (const { b, parent } of this.dynBatches) {
+    for (const { b, parent, local, swap } of this.dynBatches) {
       const mesh = b.build(undefined, { gain: 1 });
       if (!mesh) continue;
+      if (swap) {
+        // Re-skin an animated mesh in place (same object, same transform): the painted geometry and material.
+        const target = parent as THREE.Mesh;
+        target.geometry = mesh.geometry;
+        target.material = mesh.material;
+        target.userData.pixelWorld = true;
+        continue;
+      }
       parent.updateMatrixWorld(true);
-      mesh.matrix.copy(parent.matrixWorld).invert();
+      // World-space geometry: undo the parent's transform; group-local geometry rides with it as is.
+      if (!local) mesh.matrix.copy(parent.matrixWorld).invert();
       mesh.matrixWorldNeedsUpdate = true;
       parent.add(mesh);
     }
@@ -245,7 +319,7 @@ export class Z1PixelWorld {
     // String courses between the upper floors, the parapet and its crown, roof clutter.
     this.extras.courses(b, rec, stone);
     this.extras.crown(b, rec, index, wallSet, stone, wallKind);
-    if (rec.fireEscapeX !== null) this.extras.fireEscape(b, rec, rec.fireEscapeX);
+    if (rec.fireEscapeX !== null) this.extras.fireEscape(b, rec.spec.floors, rec.fireEscapeX);
     // Upper windows.
     rec.windows.forEach((wr, i) => {
       const v = Math.floor(hash2(index, i, 7) * 2);
@@ -481,8 +555,8 @@ export function pwPoolTexture(): THREE.DataTexture {
   const data = new Uint8Array(n * n * 4);
   const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   const edges = [0.24, 0.42, 0.6, 0.8, 1.0];
-  const level = [1.0, 0.74, 0.5, 0.3, 0.13, 0];
-  const SEAM = 0.045;
+  const level = [0.86, 0.62, 0.4, 0.22, 0.09, 0];
+  const SEAM = 0.06;
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {
       const dx = (x + 0.5) / n - 0.5;

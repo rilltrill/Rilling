@@ -44,7 +44,7 @@ export function boxFaces(b: PwBatch, w: number, h: number, d: number, faces: Par
 }
 
 /** A cylinder along its local Y: `side` wrapped round it (v rows `v0…v1`), `cap` mapped across the top disc. */
-export function cylinder(b: PwBatch, r: number, h: number, seg: number, side: PwTile, cap: PwTile | null, v0 = 0, v1 = side.h) {
+export function cylinder(b: PwBatch, r: number, h: number, seg: number, side: PwTile, cap: PwTile | null, v0 = 0, v1 = side.h, bothCaps = false) {
   const circ = 2 * Math.PI * r * PW_TPM;
   for (let i = 0; i < seg; i++) {
     const a0 = (i / seg) * Math.PI * 2;
@@ -62,6 +62,7 @@ export function cylinder(b: PwBatch, r: number, h: number, seg: number, side: Pw
       const [ua, va] = uv(a0);
       const [ub, vb] = uv(a1);
       b.tri(new THREE.Vector3(0, h / 2, 0), p3.clone(), p2.clone(), cap, [W / 2, W / 2, ua, va, ub, vb]);
+      if (bothCaps) b.tri(new THREE.Vector3(0, -h / 2, 0), p1.clone(), p0.clone(), cap, [W / 2, W / 2, ub, vb, ua, va]);
     }
   }
 }

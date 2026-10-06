@@ -403,38 +403,52 @@ export function addFireEscape(g: THREE.Object3D, floors: number, x: number, out 
 
 /** Windows, doors, pipes on a plain wall (alley sides). Wall plane z = 0 facing +Z, from x0 to x1. */
 export function wallDetails(g: THREE.Object3D, x0: number, x1: number, floors: number, rng: Rng, opts: { fireEscapes?: number[]; doors?: number[] } = {}) {
+  // ART: PIXEL WORLD paints what each tagged mesh records (`userData.pwAlley`, z1/pwAlley.ts); the rng draws are unchanged.
+  g.userData.pwWall = { x0, x1, floors };
+  const tag = <T extends THREE.Object3D>(o: T, rec: Record<string, unknown>) => {
+    o.userData.pwAlley = rec;
+    return o;
+  };
   for (let f = 1; f < floors; f++) {
     const y = GROUND_H + 0.35 + (f - 1) * FLOOR_H + 1.0;
     for (let x = x0 + 2; x < x1 - 1.5; x += rng.range(3.2, 5)) {
-      box(g, 1.1, 1.5, 0.08, M.winFrame, x, y, 0.03);
+      tag(box(g, 1.1, 1.5, 0.08, M.winFrame, x, y, 0.03), { kind: 'drop' });
       const lit = rng.chance(0.18);
-      box(g, 0.9, 1.3, 0.1, lit ? M.winDim : M.winDark, x, y, 0.04);
-      if (!lit && rng.chance(0.3)) boardUp(g, x, y, 1.0, 1.4, 0.1);
+      const glass = tag(box(g, 0.9, 1.3, 0.1, lit ? M.winDim : M.winDark, x, y, 0.04), { kind: 'win', x, y, lit, boarded: false });
+      if (!lit && rng.chance(0.3)) {
+        pwTagNew(g, () => boardUp(g, x, y, 1.0, 1.4, 0.1), 'alley');
+        (glass.userData.pwAlley as { boarded: boolean }).boarded = true;
+      }
     }
   }
   for (const dx of opts.doors ?? []) {
-    box(g, 1.2, 2.5, 0.1, M.metal, dx, 1.25, 0.04);
-    box(g, 1.6, 0.12, 0.6, M.metal, dx, 2.85, 0.3);
+    tag(box(g, 1.2, 2.5, 0.1, M.metal, dx, 1.25, 0.04), { kind: 'door', x: dx });
+    tag(box(g, 1.6, 0.12, 0.6, M.metal, dx, 2.85, 0.3), { kind: 'canopy', x: dx });
   }
-  for (const fx of opts.fireEscapes ?? []) addFireEscape(g, floors, fx, 1.2);
+  for (const fx of opts.fireEscapes ?? []) pwTagNew(g, () => addFireEscape(g, floors, fx, 1.2), 'alley');
+  (g.userData.pwWall as { fireEscapes?: number[] }).fireEscapes = opts.fireEscapes ?? [];
   // Drain pipes and AC units.
   for (let x = x0 + rng.range(1, 4); x < x1; x += rng.range(7, 11)) {
-    box(g, 0.14, GROUND_H + FLOOR_H * (floors - 1), 0.14, M.metal, x, (GROUND_H + FLOOR_H * (floors - 1)) / 2, 0.1);
+    tag(box(g, 0.14, GROUND_H + FLOOR_H * (floors - 1), 0.14, M.metal, x, (GROUND_H + FLOOR_H * (floors - 1)) / 2, 0.1), { kind: 'pipe', x, h: GROUND_H + FLOOR_H * (floors - 1) });
   }
   for (let i = 0; i < floors; i++) {
     if (!rng.chance(0.6)) continue;
     const x = rng.range(x0 + 2, x1 - 2);
     const y = GROUND_H + 0.6 + rng.int(0, floors - 2) * FLOOR_H;
-    box(g, 0.8, 0.55, 0.6, M.metalLight, x, y, 0.32);
+    tag(box(g, 0.8, 0.55, 0.6, M.metalLight, x, y, 0.32), { kind: 'ac', x, y });
   }
   // Spray-painted tags and messages.
   const gcol = [0xc83a8a, 0x3ac8d8, 0xd8c83a, 0x4ad86a, 0xe8e8e8, 0xc83a3a];
   const words = ['HELP', 'RUN', 'ZED', 'NO EXIT', 'THEY BITE', 'GOD HELP US', 'KZ', 'DEAD END'];
   for (let i = 0; i < 3; i++) {
     const x = rng.range(x0 + 3, x1 - 3);
-    const t = addText(g, rng.pick(words), Kit.mat(rng.pick(gcol)), { size: rng.range(0.35, 0.6), depth: 0.02, stroke: 0.07 });
+    const word = rng.pick(words);
+    const col = rng.pick(gcol);
+    const size = rng.range(0.35, 0.6);
+    const t = addText(g, word, Kit.mat(col), { size, depth: 0.02, stroke: 0.07 });
     t.position.set(x, rng.range(1.2, 2.4), 0.05);
     t.rotation.z = rng.spread(0.12);
+    tag(t, { kind: 'graffiti', word, col, size });
   }
 }
 
@@ -443,10 +457,11 @@ export function wallDetails(g: THREE.Object3D, x0: number, x1: number, floors: n
 /** Sodium street lamp. Pole at origin, arm reaches toward +Z (the road). Lamp head at (0, 6.4, 2.2). */
 export function streetLamp(): THREE.Group {
   const g = new THREE.Group();
-  cyl(g, 0.08, 0.13, 6.6, 6, M.metal, 0, 3.3, 0);
+  // (ART: PIXEL WORLD paints the tagged pole and head — z1/pwStreet.ts.)
+  cyl(g, 0.08, 0.13, 6.6, 6, M.metal, 0, 3.3, 0).userData.pwPart = 'pole';
   box(g, 0.34, 0.5, 0.34, M.metal, 0, 0.25, 0);
   box(g, 0.1, 0.1, 2.3, M.metal, 0, 6.5, 1.1);
-  box(g, 0.5, 0.2, 0.95, M.metal, 0, 6.42, 2.2);
+  box(g, 0.5, 0.2, 0.95, M.metal, 0, 6.42, 2.2).userData.pwPart = 'lampHead';
   box(g, 0.38, 0.05, 0.75, M.sodiumGlow, 0, 6.3, 2.2);
   return g;
 }
@@ -471,8 +486,8 @@ export function trashCan(): THREE.Group {
 
 export function newsBox(color: number): THREE.Group {
   const g = new THREE.Group();
-  box(g, 0.5, 0.95, 0.45, Kit.tex('metal', color, 2, 0.5), 0, 0.6, 0);
-  box(g, 0.4, 0.3, 0.02, M.winDark, 0, 0.8, 0.23);
+  box(g, 0.5, 0.95, 0.45, Kit.tex('metal', color, 2, 0.5), 0, 0.6, 0).userData.pwPart = 'newsBox';
+  box(g, 0.4, 0.3, 0.02, M.winDark, 0, 0.8, 0.23).userData.pwPart = 'drop';
   box(g, 0.08, 0.25, 0.08, M.metal, 0, 0.1, 0);
   return g;
 }
@@ -489,7 +504,7 @@ export function bench(): THREE.Group {
 export function mailbox(): THREE.Group {
   const g = new THREE.Group();
   const blue = Kit.tex('metal', 0x2a4888, 2, 0.5);
-  box(g, 0.5, 0.75, 0.5, blue, 0, 0.75, 0);
+  box(g, 0.5, 0.75, 0.5, blue, 0, 0.75, 0).userData.pwPart = 'mailbox';
   cyl(g, 0.25, 0.25, 0.5, 8, blue, 0, 1.12, 0, Math.PI / 2, 0, 0);
   box(g, 0.08, 0.4, 0.08, M.metal, 0, 0.2, 0);
   return g;
@@ -549,14 +564,16 @@ export function utilityPole(): THREE.Group {
 export function dumpster(color = 0x2a4a32): THREE.Group {
   const g = new THREE.Group();
   const m = Kit.tex('metal', color, 1);
-  box(g, 2.2, 1.25, 1.3, m, 0, 0.75, 0);
-  box(g, 2.3, 0.1, 1.4, Kit.tex('metal', 0x24302a, 1.2), 0, 1.42, -0.05, -0.25);
+  box(g, 2.2, 1.25, 1.3, m, 0, 0.75, 0).userData.pwPart = 'dumpBody';
+  box(g, 2.3, 0.1, 1.4, Kit.tex('metal', 0x24302a, 1.2), 0, 1.42, -0.05, -0.25).userData.pwPart = 'dumpLid';
   for (const sx of [-0.9, 0.9]) cyl(g, 0.1, 0.1, 0.1, 6, M.tire, sx, 0.1, 0.5, Math.PI / 2);
   return g;
 }
 
 export function trashBags(rng: Rng, n = 4): THREE.Group {
   const g = new THREE.Group();
+  // ART: PIXEL WORLD stands a painted heap of bags (crossed cut-outs) in their place.
+  g.userData.pwBags = n;
   const m = Kit.tex('hide', 0x24262c, 1.5, 0.8);
   for (let i = 0; i < n; i++) {
     const s = rng.range(0.32, 0.45);
@@ -652,42 +669,47 @@ export function car(o: CarOptions): THREE.Group {
 /** Yellow school bus, front toward +Z, ≈ 11 × 2.5 × 3 m (upright). */
 export function schoolBus(): THREE.Group {
   const g = new THREE.Group();
+  // ART: PIXEL WORLD paints the tagged parts (z1/pwBus.ts).
+  const t = <T extends THREE.Object3D>(m: T, part: string) => {
+    m.userData.pwPart = part;
+    return m;
+  };
   const yellow = Kit.tex('metal', 0xd29a16, 1, 0.6);
   const black = Kit.tex('metal', 0x1c1c1f, 1.5, 0.6);
-  box(g, 2.5, 2.1, 9.6, yellow, 0, 1.75, -0.6);
-  box(g, 2.3, 1.0, 1.6, yellow, 0, 1.15, 4.9);
-  box(g, 2.52, 0.18, 9.6, black, 0, 1.5, -0.6);
-  box(g, 2.52, 0.12, 9.6, black, 0, 1.0, -0.6);
-  box(g, 2.4, 0.2, 9.4, yellow, 0, 2.9, -0.6);
+  t(box(g, 2.5, 2.1, 9.6, yellow, 0, 1.75, -0.6), 'body');
+  t(box(g, 2.3, 1.0, 1.6, yellow, 0, 1.15, 4.9), 'nose');
+  t(box(g, 2.52, 0.18, 9.6, black, 0, 1.5, -0.6), 'band');
+  t(box(g, 2.52, 0.12, 9.6, black, 0, 1.0, -0.6), 'band');
+  t(box(g, 2.4, 0.2, 9.4, yellow, 0, 2.9, -0.6), 'roofBand');
   // Windows along both sides.
   for (let i = 0; i < 8; i++) {
     const z = 3.4 - i * 1.15;
-    for (const sx of [1, -1]) box(g, 0.06, 0.75, 0.95, M.carGlass, sx * 1.26, 2.25, z);
+    for (const sx of [1, -1]) t(box(g, 0.06, 0.75, 0.95, M.carGlass, sx * 1.26, 2.25, z), 'window');
   }
-  box(g, 2.3, 0.85, 0.08, M.carGlass, 0, 2.25, 4.15, -0.2);
-  box(g, 2.5, 0.35, 0.2, black, 0, 0.75, 5.7);
+  t(box(g, 2.3, 0.85, 0.08, M.carGlass, 0, 2.25, 4.15, -0.2), 'windshield');
+  t(box(g, 2.5, 0.35, 0.2, black, 0, 0.75, 5.7), 'bumper');
   for (const z of [3.6, -3.4]) {
-    for (const sx of [1.15, -1.15]) Kit.add(g, Kit.cyl(0.5, 0.5, 0.35, 10), M.tire, sx, 0.5, z, 0, 0, Math.PI / 2);
+    for (const sx of [1.15, -1.15]) t(Kit.add(g, Kit.cyl(0.5, 0.5, 0.35, 10), M.tire, sx, 0.5, z, 0, 0, Math.PI / 2), 'wheel');
   }
   // Stop sign arm + lights.
-  box(g, 0.06, 0.5, 0.5, Kit.tex('metal', 0x8a1a14, 2, 0.5), 1.3, 1.9, 3.2);
-  box(g, 0.3, 0.2, 0.06, Kit.mat(0x8a2a10), 0.8, 2.75, 4.3);
-  box(g, 0.3, 0.2, 0.06, Kit.mat(0x8a2a10), -0.8, 2.75, 4.3);
+  t(box(g, 0.06, 0.5, 0.5, Kit.tex('metal', 0x8a1a14, 2, 0.5), 1.3, 1.9, 3.2), 'stop');
+  t(box(g, 0.3, 0.2, 0.06, Kit.mat(0x8a2a10), 0.8, 2.75, 4.3), 'lamp');
+  t(box(g, 0.3, 0.2, 0.06, Kit.mat(0x8a2a10), -0.8, 2.75, 4.3), 'lamp');
   // Rear frame around the emergency door (the door itself is a separate animated prop).
-  box(g, 2.5, 0.2, 0.1, black, 0, 2.75, -5.42);
+  t(box(g, 2.5, 0.2, 0.1, black, 0, 2.75, -5.42), 'band');
   // Underbody: chassis rails, axles, fuel tank, exhaust (it ends up facing the street).
   const chassis = Kit.tex('metal', 0x1e1e21, 1.5);
-  box(g, 2.3, 0.08, 10.6, chassis, 0, 0.68, -0.2);
-  for (const x of [-0.6, 0.6]) box(g, 0.2, 0.25, 10.4, Kit.tex('metal', 0x2e2e31, 2), x, 0.55, -0.2);
-  for (const z of [3.6, -3.4]) cyl(g, 0.1, 0.1, 2.3, 6, M.metal, 0, 0.5, z, 0, 0, Math.PI / 2);
-  box(g, 0.7, 0.4, 1.4, Kit.tex('metal', 0x3a3a3e, 2), 0.7, 0.45, 0.6);
-  cyl(g, 0.07, 0.07, 6, 6, M.metalLight, -0.85, 0.45, -1.5, Math.PI / 2, 0, 0);
+  t(box(g, 2.3, 0.08, 10.6, chassis, 0, 0.68, -0.2), 'chassis');
+  for (const x of [-0.6, 0.6]) t(box(g, 0.2, 0.25, 10.4, Kit.tex('metal', 0x2e2e31, 2), x, 0.55, -0.2), 'chassis');
+  for (const z of [3.6, -3.4]) t(cyl(g, 0.1, 0.1, 2.3, 6, M.metal, 0, 0.5, z, 0, 0, Math.PI / 2), 'axle');
+  t(box(g, 0.7, 0.4, 1.4, Kit.tex('metal', 0x3a3a3e, 2), 0.7, 0.45, 0.6), 'chassis');
+  t(cyl(g, 0.07, 0.07, 6, 6, M.metalLight, -0.85, 0.45, -1.5, Math.PI / 2, 0, 0), 'axle');
   // SCHOOL BUS lettering on the roof edges front and back.
   for (const z of [4.22, -5.42]) {
-    const t = paintedText('SCHOOL BUS', 0x111111, 0.28);
-    t.position.set(0, 2.62, z + (z > 0 ? 0.06 : -0.06));
-    if (z < 0) t.rotation.y = Math.PI;
-    g.add(t);
+    const tx = paintedText('SCHOOL BUS', 0x111111, 0.28);
+    tx.position.set(0, 2.62, z + (z > 0 ? 0.06 : -0.06));
+    if (z < 0) tx.rotation.y = Math.PI;
+    g.add(t(tx, 'text'));
   }
   return g;
 }

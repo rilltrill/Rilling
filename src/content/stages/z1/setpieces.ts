@@ -354,8 +354,32 @@ export class BurstDoors {
   }
 }
 
+/**
+ * The parts a merged group was built from (each mesh with its matrix relative to
+ * the group), recorded before the merge for ART: PIXEL WORLD, which re-paints
+ * animated groups from them (z1/pixel.ts `convertDyn`). Record-only: the merge
+ * and the scene are the same in every ART style.
+ */
+export const PW_PARTS = new WeakMap<THREE.Object3D, PwPart[]>();
+/** A recorded part: the mesh, its matrix relative to the merged group, the nearest `userData.pwPart` tag up its ancestry. */
+export interface PwPart {
+  mesh: THREE.Mesh;
+  rel: THREE.Matrix4;
+  tag: string | undefined;
+}
+
 /** Merge a prop group but keep it as a standalone object (animated as a whole). */
 export function mergedGroup(g: THREE.Group): THREE.Group {
+  g.updateMatrixWorld(true);
+  const inv = g.matrixWorld.clone().invert();
+  const parts: PwPart[] = [];
+  g.traverse((o) => {
+    if (!(o as THREE.Mesh).isMesh) return;
+    let tag: string | undefined;
+    for (let a: THREE.Object3D | null = o; a && !tag; a = a === g ? null : a.parent) tag = a.userData.pwPart as string | undefined;
+    parts.push({ mesh: o as THREE.Mesh, rel: inv.clone().multiply(o.matrixWorld), tag });
+  });
+  PW_PARTS.set(g, parts);
   bakeMerge(g);
   return g;
 }

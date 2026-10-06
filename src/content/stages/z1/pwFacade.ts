@@ -172,14 +172,13 @@ export class Z1FacadeExtras {
   }
 
   /** A fire escape as cut-out ironwork at facade x `fx` (replaces the classic bar stacks). */
-  fireEscape(b: PwBatch, rec: FacadeRecord, fx: number, out = 1.1) {
+  fireEscape(b: PwBatch, floors: number, fx: number, out = 1.1) {
     const a = this.atlas;
     const hex = 0x34363d;
     const rail = z1FeRail(a, hex);
     const floor = z1FeFloor(a, hex);
     const stair = z1FeStair(a, hex);
     const ladder = z1FeLadder(a, hex);
-    const floors = rec.spec.floors;
     for (let f = 1; f < floors; f++) {
       const y = GROUND_H + (f - 1) * FLOOR_H + 0.2;
       // Front railing (the platform edge in its bottom rows), the two ends, the slatted floor from below.

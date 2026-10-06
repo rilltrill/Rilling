@@ -152,7 +152,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   vegPx.add(flora2d.build());
   root.add(veg3D, vegPx);
   const untoggle = floraArtToggle(scene, [vegPx], [veg3D]);
-  const pools = pw ? town.pools.build(undefined, pwPoolTexture(), true) : town.pools.build(poolSurface);
+  const pools = pw ? town.pools.build(undefined, pwPoolTexture(), true, 0.5) : town.pools.build(poolSurface);
   const beams = town.beams.build(!!pw);
   root.add(pools, beams);
   const rain = new Rain(420);

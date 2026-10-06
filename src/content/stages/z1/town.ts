@@ -532,6 +532,7 @@ export function buildTown(): Town {
     zones.A.add(down);
     // ROAD CLOSED board.
     const sign = new THREE.Group();
+    sign.userData.pwRoadClosed = true;
     Kit.add(sign, Kit.box(2.5, 0.55, 0.05), M.white, 0, 0, 0);
     Kit.add(sign, Kit.box(2.56, 0.6, 0.03), M.orange, 0, 0, -0.03);
     // 11 letters at 0.22 m ≈ 2.2 m wide: fits the 2.5 m board with a margin.
@@ -542,7 +543,7 @@ export function buildTown(): Town {
     // Police tape between the outer sawhorses and the lamp.
     const tape = Kit.mat(0xd8b818);
     for (const [x0, x1] of [[-8.6, -5.9], [6.2, 8.6]] as const) {
-      boxAt(Math.abs(x1 - x0), 0.07, 0.01, tape, (x0 + x1) / 2, 1.0, z, rng.spread(0.05));
+      boxAt(Math.abs(x1 - x0), 0.07, 0.01, tape, (x0 + x1) / 2, 1.0, z, rng.spread(0.05)).userData.pwPart = 'tape';
     }
     for (let i = 0; i < 7; i++) put(trafficCone(), rng.range(-6, 6), z + rng.range(-1.5, 2.5), 0);
     // Police cruisers angled into a V.
@@ -624,6 +625,7 @@ export function buildTown(): Town {
     pools.add(fireX, fireZ, 4, 0xff7a2a, 0.6);
     // Chain-link fence at the corner lot.
     const fence = new THREE.Group();
+    fence.userData.pwFence = true;
     const fm = Kit.mat(0x5a5e64, { transparent: true, opacity: 0.45 });
     Kit.add(fence, Kit.box(3.6, 2.4, 0.03), fm, 0, 1.2, 0);
     for (const x of [-1.8, 0, 1.8]) Kit.add(fence, Kit.cyl(0.04, 0.04, 2.5, 5), M.metalLight, x, 1.25, 0);
@@ -702,7 +704,7 @@ export function buildTown(): Town {
       Kit.add(g, Kit.box(3.2, 0.08, 1.4), M.metal, 0, 2.4, 0);
       for (const x of [-1.5, 1.5]) Kit.add(g, Kit.box(0.08, 2.4, 0.08), M.metal, x, 1.2, -0.6);
       Kit.add(g, Kit.box(3.0, 1.8, 0.04), Kit.mat(0x8fa8b8, { transparent: true, opacity: 0.3 }), 0, 1.3, -0.62);
-      Kit.add(g, Kit.box(1.1, 1.7, 0.05), Kit.glow(0xe8e0c8, 0.5), 1.0, 1.3, -0.58);
+      Kit.add(g, Kit.box(1.1, 1.7, 0.05), Kit.glow(0xe8e0c8, 0.5), 1.0, 1.3, -0.58).userData.pwPart = 'adPanel';
       g.add(bench());
       put(g, SECOND_E - 1.3, -236, -Math.PI / 2);
     }
@@ -718,8 +720,9 @@ export function buildTown(): Town {
     const pivot = new THREE.Vector3(-82, 5.2, cz);
     cg.position.copy(pivot);
     const can = new THREE.Group();
-    Kit.add(can, Kit.box(12, 0.75, 18), Kit.tex('metal', 0xd2cec4, 1, 0.5), 0, 0, 0);
-    Kit.add(can, Kit.box(12.05, 0.32, 18.05), Kit.tex('metal', 0xa82a22, 2, 0.4), 0, -0.05, 0);
+    Kit.add(can, Kit.box(12, 0.75, 18), Kit.tex('metal', 0xd2cec4, 1, 0.5), 0, 0, 0).userData.pwPart = 'canopy';
+    Kit.add(can, Kit.box(12.05, 0.32, 18.05), Kit.tex('metal', 0xa82a22, 2, 0.4), 0, -0.05, 0).userData.pwPart = 'canopyBand';
+    can.userData.pwCanopy = true;
     // Under-canopy lights: baked into their own mesh so they can go dark after the blast.
     const under = Kit.glow(0xf2f6ff, 1.25);
     const ug = new THREE.Group();
@@ -731,6 +734,7 @@ export function buildTown(): Town {
     gas.underGlow.push(ug);
     // GAS letters on the fascia (facing the street, +X).
     const t = addText(can, 'GAS', Kit.glow(0xffffff, 1.4), { size: 0.5, depth: 0.05 });
+    t.userData.pwPart = 'text';
     t.rotation.y = Math.PI / 2;
     t.position.set(6.05, 0.0, 0);
     can.position.set(6, 0, 0);
@@ -776,6 +780,7 @@ export function buildTown(): Town {
       put(g, -69.5, GAS_Z0 - 1.5, 0, 0, 'D');
       for (const side of [1, -1]) {
         const brand = new THREE.Group();
+        brand.userData.pwPrice = side;
         Kit.add(brand, Kit.box(2.2, 1.0, 0.04), Kit.glow(0xc8281e, 1.1), 0, 0.7, 0);
         const lt = addText(brand, 'GAS', Kit.glow(0xffffff, 1.3), { size: 0.5, depth: 0.04 });
         lt.position.set(0, 0.7, 0.04);
@@ -825,21 +830,22 @@ export function buildTown(): Town {
     // It lies with its ROOF toward the street: big yellow face with roof lettering
     // and hatches (the dark underside would read as a black slab at night).
     const roofText = paintedText('SCHOOL BUS', 0x141414, 0.55);
+    roofText.userData.pwPart = 'text';
     // Text X → bus +Z (reads left→right from the street), text up → bus +X (world up), normal → bus +Y.
     roofText.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0)));
     roofText.position.set(0.05, 3.02, -0.7);
     body.add(roofText);
     for (const z of [2.75, -4.2]) {
-      Kit.add(body, Kit.box(0.95, 0.07, 0.95), Kit.tex('metal', 0xb8b4a8, 2, 0.6), 0, 3.03, z);
-      Kit.add(body, Kit.box(0.75, 0.08, 0.75), Kit.tex('grate', 0x8a8678, 2.5, 0.5), 0, 3.04, z);
+      Kit.add(body, Kit.box(0.95, 0.07, 0.95), Kit.tex('metal', 0xb8b4a8, 2, 0.6), 0, 3.03, z).userData.pwPart = 'hatch';
+      Kit.add(body, Kit.box(0.75, 0.08, 0.75), Kit.tex('grate', 0x8a8678, 2.5, 0.5), 0, 3.04, z).userData.pwPart = 'hatchGrate';
     }
-    Kit.add(body, Kit.box(2.42, 0.04, 0.12), Kit.mat(0x18181a), 0, 3.01, 4.0);
-    Kit.add(body, Kit.box(2.42, 0.04, 0.12), Kit.mat(0x18181a), 0, 3.01, -5.2);
+    Kit.add(body, Kit.box(2.42, 0.04, 0.12), Kit.mat(0x18181a), 0, 3.01, 4.0).userData.pwPart = 'strip';
+    Kit.add(body, Kit.box(2.42, 0.04, 0.12), Kit.mat(0x18181a), 0, 3.01, -5.2).userData.pwPart = 'strip';
     mergedGroup(body);
     const door = new THREE.Group();
-    Kit.add(door, Kit.box(1.9, 1.9, 0.12), Kit.tex('metal', 0xd29a16, 1.5, 0.6), 0, 0, 0);
-    Kit.add(door, Kit.box(1.3, 0.7, 0.14), M.carGlass, 0, 0.4, 0);
-    Kit.add(door, Kit.box(1.5, 0.12, 0.16), Kit.mat(0x18181a), 0, -0.45, 0);
+    Kit.add(door, Kit.box(1.9, 1.9, 0.12), Kit.tex('metal', 0xd29a16, 1.5, 0.6), 0, 0, 0).userData.pwPart = 'door';
+    Kit.add(door, Kit.box(1.3, 0.7, 0.14), M.carGlass, 0, 0.4, 0).userData.pwPart = 'doorGlass';
+    Kit.add(door, Kit.box(1.5, 0.12, 0.16), Kit.mat(0x18181a), 0, -0.45, 0).userData.pwPart = 'doorBar';
     Kit.add(door, Kit.box(0.3, 0.2, 0.18), Kit.glow(0xff2a1a, 1), 0.7, 0.75, 0);
     mergedGroup(door);
     // Door sits on the bus's rear face (local -Z) — in bus space.
@@ -861,6 +867,8 @@ export function buildTown(): Town {
     holder.rotation.set(0, yaw, Math.PI / 2);
     holder.position.set(BUS_POS[0], 1.25, BUS_POS[2]).addScaledVector(roofDir, 3.0);
     const engineFire = new FirePlume({ scale: 0.55, embers: 14, smoke: 10, spreadX: 0.5, spreadZ: 0.5, seed: 21 });
+    body.userData.pwBus = 'body';
+    door.userData.pwBus = 'door';
     bus = new BusWreck(new THREE.Group(), door, engineFire);
     bus.group.add(holder);
     addDyn(bus.group, 'D');
@@ -903,7 +911,7 @@ export function buildTown(): Town {
       Kit.add(g, Kit.box(20.2, 0.12, 16.2), M.roof, 0, h + 0.04, -8);
       Kit.add(g, Kit.box(20.3, 0.5, 0.35), M.trimLight, 0, h + 0.25, 0.05);
       for (const [lx, c, txt] of [[-5, 0xffd8a0, 'BOOKS'], [5, 0, 'TOYS']] as const) {
-        Kit.add(g, Kit.box(6.5, 2.3, 0.1), c ? Kit.glow(c, 0.4) : M.winDark, lx, 1.8, 0.04);
+        Kit.add(g, Kit.box(6.5, 2.3, 0.1), c ? Kit.glow(c, 0.4) : M.winDark, lx, 1.8, 0.04).userData.pwSq = c ? 'books' : 'toys';
         const s = boardSign(txt, c ? C.neonOrange : C.neonPink, 0.45, { pad: 0.5 });
         s.position.set(lx, 3.6, 0.15);
         g.add(s);
@@ -923,13 +931,13 @@ export function buildTown(): Town {
       const d = pad.z1 - pad.z0;
       const green = pad.x0 < -58;
       const body = Kit.tex('planks', green ? 0x2e5040 : 0x602e2e, 1.2);
-      Kit.add(g, Kit.box(w - 0.3, 2.6, d - 0.3), body, 0, 1.3, 0);
+      Kit.add(g, Kit.box(w - 0.3, 2.6, d - 0.3), body, 0, 1.3, 0).userData.pwSq = 'kioskBody';
       Kit.add(g, Kit.box(w + 0.2, 0.25, d + 0.2), M.trimDark, 0, pad.y - 0.12, 0);
       // Serving hatch facing the rail, lit, with magazines / cups.
       const facing = green ? 1 : -1;
-      Kit.add(g, Kit.box(0.06, 1.0, d - 0.9), Kit.glow(green ? 0xfff0c0 : 0xffd8a0, 0.55), facing * (w / 2 - 0.13), 1.5, 0);
+      Kit.add(g, Kit.box(0.06, 1.0, d - 0.9), Kit.glow(green ? 0xfff0c0 : 0xffd8a0, 0.55), facing * (w / 2 - 0.13), 1.5, 0).userData.pwSq = green ? 'newsHatch' : 'coffeeHatch';
       Kit.add(g, Kit.box(0.5, 0.06, d - 0.6), M.wood, facing * (w / 2 + 0.05), 1.0, 0);
-      for (let i = 0; i < 4; i++) Kit.add(g, Kit.box(0.04, 0.3, 0.22), Kit.mat([0xc83a3a, 0x3a8ac8, 0xe8d83a, 0xe8e8e8][i]), facing * (w / 2 - 0.05), 1.25, -0.6 + i * 0.4);
+      for (let i = 0; i < 4; i++) Kit.add(g, Kit.box(0.04, 0.3, 0.22), Kit.mat([0xc83a3a, 0x3a8ac8, 0xe8d83a, 0xe8e8e8][i]), facing * (w / 2 - 0.05), 1.25, -0.6 + i * 0.4).userData.pwSq = 'drop';
       const sign = boardSign(green ? 'NEWS' : 'COFFEE', green ? C.neonYellow : C.neonOrange, 0.36, { pad: 0.3 });
       sign.rotation.y = facing * Math.PI / 2;
       sign.position.set(facing * (w / 2 + 0.02), 2.35, 0);
@@ -951,24 +959,26 @@ export function buildTown(): Town {
       const g = bld({ w: 0, d: 16, floors: 2, color: 0x6e5a52, tex: 'brick', trim: M.trimLight, shop: { interior: 0, noWindow: true } }, x0, x1, SQ_Z1, 'S');
       const red = Kit.glow(0xff3a2a, 0.55);
       // Display windows either side of the doors with hanging carcasses.
+      // (ART: PIXEL WORLD paints the parts tagged `pwSq` — z1/pwSquare.ts.)
+      g.userData.pwButcher = true;
       for (const lx of [-5, 5]) {
-        Kit.add(g, Kit.box(4.2, 2.4, 0.1), red, lx, 1.85, 0.02);
-        Kit.add(g, Kit.box(4.2, 0.06, 0.06), M.metal, lx, 2.85, 0.12);
+        Kit.add(g, Kit.box(4.2, 2.4, 0.1), red, lx, 1.85, 0.02).userData.pwSq = 'meatWindow';
+        Kit.add(g, Kit.box(4.2, 0.06, 0.06), M.metal, lx, 2.85, 0.12).userData.pwSq = 'drop';
         for (let i = 0; i < 3; i++) {
           const cx = lx - 1.3 + i * 1.3;
-          Kit.add(g, Kit.capsule(0.28, 0.9, 2, 6), Kit.tex('skin', 0x4a140e, 1), cx, 2.0, 0.12);
-          Kit.add(g, Kit.box(0.03, 0.4, 0.03), M.metal, cx, 2.75, 0.12);
+          Kit.add(g, Kit.capsule(0.28, 0.9, 2, 6), Kit.tex('skin', 0x4a140e, 1), cx, 2.0, 0.12).userData.pwSq = 'drop';
+          Kit.add(g, Kit.box(0.03, 0.4, 0.03), M.metal, cx, 2.75, 0.12).userData.pwSq = 'drop';
         }
         for (let i = 1; i < 3; i++) Kit.add(g, Kit.box(0.08, 2.4, 0.16), M.winFrame, lx - 2.1 + i * 1.4, 1.85, 0.07);
       }
       // Doorway (dark interior lit red) — the doors burst open before the boss.
-      Kit.add(g, Kit.box(3.2, 3.4, 0.06), Kit.glow(0x7a1810, 0.6), 0, 1.7, 0.03);
+      Kit.add(g, Kit.box(3.2, 3.4, 0.06), Kit.glow(0x7a1810, 0.6), 0, 1.7, 0.03).userData.pwSq = 'meatDoorway';
       Kit.add(g, Kit.box(0.35, 3.6, 0.5), M.trimLight, -1.75, 1.8, 0.25);
       Kit.add(g, Kit.box(0.35, 3.6, 0.5), M.trimLight, 1.75, 1.8, 0.25);
       Kit.add(g, Kit.box(3.9, 0.4, 0.5), M.trimLight, 0, 3.6, 0.25);
       // Striped awning.
       for (let i = 0; i < 10; i++) {
-        Kit.add(g, Kit.box(1.4, 0.08, 1.8), Kit.tex('cloth', i % 2 ? 0xe8e0d8 : 0x9a1a1a, 0.5), -6.3 + i * 1.4, 3.85, 0.85, 0.34);
+        Kit.add(g, Kit.box(1.4, 0.08, 1.8), Kit.tex('cloth', i % 2 ? 0xe8e0d8 : 0x9a1a1a, 0.5), -6.3 + i * 1.4, 3.85, 0.85, 0.34).userData.pwSq = 'awning';
       }
       const sign = boardSign('PRIME MEATS', C.neonRed, 0.62, { pad: 0.8 });
       sign.position.set(0, 5.05, 0.25);
@@ -982,16 +992,18 @@ export function buildTown(): Town {
         Kit.add(cl, Kit.box(0.05, 0.22, 0.9), cg, sx * 0.12, -0.15, 0.8);
       }
       cl.position.set(6.8, 7.5, 0);
+      cl.userData.pwSq = 'cleaver';
       g.add(cl);
       // Door panels (world space, animated).
       const dm = Kit.tex('planks', 0x4a301f, 1.2);
       const dg = Kit.glow(0xff5a3a, 0.5);
       for (const sx of [-1, 1]) {
         const p = new THREE.Group();
-        Kit.add(p, Kit.box(1.55, 3.2, 0.12), dm, 0, 0, 0);
-        Kit.add(p, Kit.box(0.9, 1.2, 0.14), dg, 0, 0.6, 0);
-        Kit.add(p, Kit.box(0.1, 0.4, 0.2), M.chrome, -sx * 0.6, -0.1, 0.06);
+        Kit.add(p, Kit.box(1.55, 3.2, 0.12), dm, 0, 0, 0).userData.pwPart = 'door';
+        Kit.add(p, Kit.box(0.9, 1.2, 0.14), dg, 0, 0.6, 0).userData.pwPart = 'drop';
+        Kit.add(p, Kit.box(0.1, 0.4, 0.2), M.chrome, -sx * 0.6, -0.1, 0.06).userData.pwPart = 'drop';
         p.position.set((x0 + x1) / 2 + sx * 0.79, 1.6, SQ_Z1 + 0.1);
+        p.userData.pwMeatDoor = sx;
         mergedGroup(p);
         addDyn(p, 'E');
         doors.panels.push(p);
@@ -1011,7 +1023,8 @@ export function buildTown(): Town {
       Kit.add(g, Kit.box(36, h, 18), stone, 0, h / 2, -9);
       Kit.add(g, Kit.box(36.5, 0.8, 18.5), M.trimLight, 0, h, -9);
       // Portico.
-      Kit.add(g, Kit.box(14, 0.8, 4), M.trimLight, 0, 7.2, 2);
+      Kit.add(g, Kit.box(14, 0.8, 4), M.trimLight, 0, 7.2, 2).userData.pwSq = 'frieze';
+      g.userData.pwCourt = true;
       Kit.add(g, Kit.cone(8.2, 2.2, 3), M.trimLight, 0, 8.7, 2, 0, Math.PI / 2, 0, 1, 1, 0.3);
       for (let i = 0; i < 6; i++) Kit.add(g, Kit.cyl(0.38, 0.45, 6.8, 8), Kit.tex('stucco', 0x8a847a, 1.5), -6 + i * 2.4, 3.4, 3.4);
       for (let i = 0; i < 3; i++) Kit.add(g, Kit.box(14 - i * 0.6, 0.2, 1.2), M.concrete, 0, 0.1 + i * 0.2, 4.8 - i * 0.4);
@@ -1020,10 +1033,10 @@ export function buildTown(): Town {
         for (let i = 0; i < 10; i++) {
           const lx = -16 + i * 3.55;
           if (Math.abs(lx) < 7.5) continue;
-          Kit.add(g, Kit.box(1.4, 2.4, 0.1), (i + f) % 3 === 0 ? M.winDim : M.winDark, lx, 2.5 + f * 4.5, 0.05);
+          Kit.add(g, Kit.box(1.4, 2.4, 0.1), (i + f) % 3 === 0 ? M.winDim : M.winDark, lx, 2.5 + f * 4.5, 0.05).userData.pwSq = (i + f) % 3 === 0 ? 'courtWinLit' : 'courtWinDark';
         }
       }
-      Kit.add(g, Kit.box(3, 4.2, 0.1), Kit.glow(0xffd8a0, 0.35), 0, 2.4, 0.05);
+      Kit.add(g, Kit.box(3, 4.2, 0.1), Kit.glow(0xffd8a0, 0.35), 0, 2.4, 0.05).userData.pwSq = 'courtDoor';
       // Clock tower.
       const tw = new THREE.Group();
       Kit.add(tw, Kit.box(6, 14, 6), stone, 0, 7, 0);
@@ -1035,9 +1048,9 @@ export function buildTown(): Town {
       for (let k = 0; k < 4; k++) {
         const a = (k * Math.PI) / 2;
         const cf = new THREE.Group();
-        Kit.add(cf, Kit.cyl(1.7, 1.7, 0.1, 16), face, 0, 0, 0, Math.PI / 2);
-        Kit.add(cf, Kit.box(0.12, 1.2, 0.05), hands, 0, 0.5, 0.08);
-        Kit.add(cf, Kit.box(0.1, 0.9, 0.05), hands, 0.35, -0.2, 0.08, 0, 0, 2.2);
+        Kit.add(cf, Kit.cyl(1.7, 1.7, 0.1, 16), face, 0, 0, 0, Math.PI / 2).userData.pwSq = 'clock';
+        Kit.add(cf, Kit.box(0.12, 1.2, 0.05), hands, 0, 0.5, 0.08).userData.pwSq = 'drop';
+        Kit.add(cf, Kit.box(0.1, 0.9, 0.05), hands, 0.35, -0.2, 0.08, 0, 0, 2.2).userData.pwSq = 'drop';
         cf.position.set(Math.sin(a) * 3.06, 11, Math.cos(a) * 3.06);
         cf.rotation.y = a;
         tw.add(cf);
@@ -1081,9 +1094,9 @@ export function buildTown(): Town {
       const bronze = Kit.tex('metal', 0x3e6050, 2, 0.6);
       Kit.add(st, Kit.box(2, 2.2, 2), Kit.tex('brick', 0x6a665e, 1), 0, 1.1, 0);
       Kit.add(st, Kit.box(1.4, 0.4, 1.4), bronze, 0, 2.4, 0);
-      Kit.add(st, Kit.capsule(0.32, 0.9, 2, 6), bronze, 0, 3.3, 0);
-      Kit.add(st, Kit.box(0.3, 0.3, 0.3), bronze, 0, 4.1, 0);
-      Kit.add(st, Kit.box(0.12, 1.2, 0.12), bronze, 0.4, 3.8, 0, 0, 0, -0.5);
+      Kit.add(st, Kit.capsule(0.32, 0.9, 2, 6), bronze, 0, 3.3, 0).userData.pwSq = 'statue';
+      Kit.add(st, Kit.box(0.3, 0.3, 0.3), bronze, 0, 4.1, 0).userData.pwSq = 'drop';
+      Kit.add(st, Kit.box(0.12, 1.2, 0.12), bronze, 0.4, 3.8, 0, 0, 0, -0.5).userData.pwSq = 'drop';
       put(st, -70, -296, 0.4, 0, 'E');
     }
     // Ornate lamp posts with globes + string lights across the square.
