@@ -155,7 +155,7 @@ const beats: Beat[] = [
         if (!jungle()?.treeBlasted) w.hud.prompt('SHOOT THE FUEL DRUMS!');
       });
     },
-    civilians: [{ pos: [-4.6, 0, 5.4], variant: 'ranger' }],
+    civilians: [{ pos: [-4.6, 0, 5.4], variant: 'ranger', act: 'hide' }],
     pickups: [{ kind: 'health', pos: [-2.2, 2.4, 13.6] }],
     waves: [
       {
@@ -235,7 +235,7 @@ const beats: Beat[] = [
     label: 'trike charge',
     look: { at: [1.5, 1.9, 20], blend: 0.8 },
     onStart: (w) => w.later(0.3, () => jungle()?.flipCar(w)),
-    civilians: [{ pos: [-6.4, 0, 8.5], variant: 'default' }],
+    civilians: [{ pos: [-6.4, 0, 8.5], variant: 'default', act: 'flee', help: 1.2 }],
     pickups: [{ kind: 'bomb', pos: [-3.5, 2.2, 12], t: 2 }],
     waves: [
       {
@@ -291,7 +291,7 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'river ford',
     look: { at: [0, 1.3, 12], blend: 0.8 },
-    civilians: [{ pos: [5.4, 0, 7], variant: 'scientist' }],
+    civilians: [{ pos: [5.4, 0, 7], variant: 'scientist', act: 'cower' }],
     pickups: [{ kind: 'health', pos: [-3.5, 2.6, 11], t: 1 }],
     waves: [
       {

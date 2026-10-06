@@ -81,7 +81,8 @@ A `StageDef` = rail points + `buildEnvironment()` + ordered `beats`:
 
 Every beat may set `look` (camera target), `mode` ('walk' | 'drive'),
 `weapon` ('turret' for vehicle mounted guns, null to clear), `pickups`,
-`civilians`, `onStart`, `onEnd`.
+`civilians` (with an `act`: cower, hide, flee, backaway, grabbed, plead — see
+Civilians below), `onStart`, `onEnd`.
 
 Waves: each starts when the previous wave is cleared, or by `start.after`
 (seconds into the beat), `start.remaining` (≤ N hostiles left) or `start.atD`
@@ -142,6 +143,72 @@ attack must be telegraphed (ring) and avoidable by shooting. When a boss's
 (`WeaponSystem.vent()`: heat ≤ 35 %, lockout cleared) so a turret player can
 always answer the windup. Register the boss
 id from the stage folder (e.g. `registerEnemy('butcher', …)`).
+
+## Civilians (see `gameplay/Civilian.ts`, `civPoses.ts`, `civGrab.ts`)
+
+Innocent bystanders: shooting one costs a life (and 1000 points), a rescue pays
+1500 (sometimes +1 life). They are rescued when the encounter is cleared, when
+the zombie holding them is shot, or the moment they get away off screen.
+
+**Acts.** A beat's `civilians` entry picks what they do with `act` (default
+`auto`); the arcade light-gun games are the reference (House of the Dead,
+Time Crisis, Virtua Cop, Operation Wolf, Jurassic Park):
+
+| act | what they do |
+|---|---|
+| `cower` | squats low, hands clasped on the back of the head, trembling; between attacks the hands come down onto the knees and the head comes up to peek (toward the threat); ducks again whenever anything winds up an attack or comes within 4 m |
+| `hide` | crouched with the back three-quarters to the camera, hands on the cover's edge, peeking up and out toward the middle of the view; glances back over the shoulder for help (HELP! the first times); drops down when a threat is near |
+| `flee` | runs for it — toward the camera and out past the nearer side of the screen (or to `to`), looking back over the shoulder, tripping once (¾ of the time) onto hands and knees and scrambling up; safe off screen = rescued |
+| `backaway` | edges back from the nearest threat, facing it with the palms up, then turns and runs (when it's within ~3 m, or after 4.5–6.5 s) |
+| `grabbed` | spawns with a zombie (`attacker`: its outfit) holding their wrist — a tug of war; shoot the zombie and they're free on the spot (THANKS!, a rescue); left ~7–8.5 s they wrench free and run, and the zombie walks on at you; shooting its holding arm off frees them too |
+| `plead` | waves for help (HELP!), pointing at the threat, then cowers, and waves again when it's calm |
+| `auto` | a short HELP!, then cowers; a zombie within 2.6 m (a dino within 4.2 m) and they back off and run |
+
+`help` (seconds) puts a HELP! wave before the act (defaults per act). Rescued
+civilians give a relieved thumbs-up or wave (THANKS!) and jog off screen.
+Civilians standing on something raised (the d3 truck bed: `PerchedCivilian`)
+only plead or cower. Each civilian takes ONE draw from the world RNG (as
+before) and seeds its own: adding acts never shifts a stage's random stream.
+
+**Fairness (hard rules).** Civilians never stand in an enemy's attack lane:
+they stay where the stage put them — out at the side of the frame, away from
+where the attacks come in — or move only *outward* (a running civilian's screen
+x only grows: away from the middle of the view, toward the near screen edge).
+Which side is "outward" is tracked while they stand their ground, so a camera
+still turning to the scene doesn't send them across it. A grabbing zombie
+stands level with its victim, `GRAB_SEP` (1.55 m: both arms straight) toward
+the middle of the view, turned to the camera and leaning back (dragging them
+in): its head and chest are clear shots well away from the civilian on screen,
+and while it holds on it never attacks (no ring, no attack slot); a hit makes
+it flinch but not let go. Stage a grab near the camera (the z2 ER's is ~6 m
+out): the bigger on screen, the less a near miss can land on the victim. `civilian-fairness.test.ts`
+plays every stage and checks, every other frame, that a ray through the centre
+of any hostile's head / torso / weak point never hits a civilian first;
+`civilian.test.ts` covers each act (outward runs, the grab, rescues paying once,
+the hit penalty once, perched civilians, the RNG draw). Measure changes with
+the human-like bot (`humanbot.test.ts`: civilian shots and damage per stage).
+
+**Poses.** Each act writes joint values into a flat pose buffer
+(`civPoses.ts`: `poseCower`, `poseHide`, `poseFlee`, `poseStumble`,
+`poseGrabbed`, `poseThanks`, …, plus `tremble`); the civilian blends from the
+pose it is leaving over 0.1–0.3 s and `applyPose` writes it onto the rig, so
+ART: 3D (baked meshes) and ART: SPRITES (PixelCast paints from the joints) show
+the same thing. Crouches keep the shoes on the floor (`legsHeight`); the
+cowering arms were fitted to the rig (hands on the back of the head / on the
+knees). `aimArm` points an arm at a world point (the tug of war's meeting hands).
+`Civilian.debugPose(phase, t, …)` holds a pose for tests and look-dev.
+
+**Pixel art.** The human painter (`content/pixel/human.ts`) has three more
+living expressions — `terror` (brows up, whites round a small pupil, a gasp),
+`relief` (eyes shut in a smile, an open smile) and `strain` (eyes squeezed
+shut, gritted teeth) — per-hand poses (`handL` / `handR`, the `HAND.THUMB`
+thumbs-up), a swinging `ponytail` (`hairSwing` jolts it) and a pixel speech
+bubble (`bubble`: `CIV_STAMP.bubble.help` / `.thanks`) — a solid stamp two retro
+pixels a cell over the head, on a layer of its own, never a target. ART: 3D
+shows the same bubble as a camera-facing sprite (`civBubble.ts`). Stamps may
+now reach further than 8 cells from their anchor (`stampReach`; everything
+older lays out exactly as before). `civilian-align.test.ts` checks every pose
+(and the grabbing zombie) against the hitboxes in the views it is seen in.
 
 ## Model kit rules (see `content/kit/ModelKit.ts`)
 

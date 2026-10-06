@@ -141,7 +141,7 @@ const beats: Beat[] = toughen([
     kind: 'hold',
     label: 'pile-up',
     look: { at: [0, 1.3, 12], blend: 0.8 },
-    civilians: [{ pos: [6.3, 0, 9.5], variant: 'default' }],
+    civilians: [{ pos: [6.3, 0, 9.5], variant: 'default', act: 'plead' }],
     pickups: [{ kind: 'bomb', pos: [-4.4, 2.4, 11], t: 3 }],
     waves: [
       {
@@ -420,7 +420,7 @@ const beats: Beat[] = toughen([
       w.hud.prompt('GO GO GO!');
       w.later(1.6, () => w.hud.prompt(null));
     },
-    civilians: [{ pos: [5.6, 0, 8], variant: 'nurse', t: 0.5 }],
+    civilians: [{ pos: [5.6, 0, 8], variant: 'nurse', t: 0.5, act: 'cower' }],
     pickups: [{ kind: 'bomb', pos: [-3, 2.8, 10], t: 2 }],
     waves: [
       {
@@ -491,7 +491,7 @@ const beats: Beat[] = toughen([
     kind: 'hold',
     label: 'army barricade',
     look: { at: [0, 1.6, 14], blend: 0.8 },
-    civilians: [{ pos: [6.4, 0, 6.5], variant: 'cop' }],
+    civilians: [{ pos: [6.4, 0, 6.5], variant: 'cop', act: 'hide' }],
     pickups: [
       { kind: 'health', pos: [4.6, 2.3, 10], t: 1 },
       { kind: 'bomb', pos: [-3, 2.6, 12], t: 5 },

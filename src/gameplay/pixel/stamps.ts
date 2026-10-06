@@ -235,8 +235,133 @@ export const STAMP = {
   hand: HANDS.map((p) => p.right.map((r, i) => hand8(r, p.diag[i]))),
 };
 
-/** Hand poses. */
-export const HAND = { CLAW: 0, OPEN: 1, FIST: 2 } as const;
+/** Hand poses (`THUMB`: a thumbs-up fist — rescued civilians). */
+export const HAND = { CLAW: 0, OPEN: 1, FIST: 2, THUMB: 3 } as const;
+
+// ─── Civilians: more faces, a thumbs-up, speech bubbles ─────────────────────
+// (Added after the stamps above, so their atlas cells never move.)
+
+/** Living eye, terrified: brows pulled up at the inner end, whites all round a small pupil. */
+const TEYE: StampDef[] = [
+  { rows: ['.t', 'kk', 'n.'], ax: 0, ay: 1 },
+  { rows: ['..t', 'tt.', 'knk', '.k.'], ax: 1, ay: 2 },
+  { rows: ['...t', '.tt.', 't...', 'kknk', '.kk.'], ax: 1, ay: 3 },
+];
+/** Living eye, relieved: shut in a smiling arc (^), brows relaxed. */
+const HEYE: StampDef[] = [
+  { rows: ['.t', '22'], ax: 0, ay: 1 },
+  { rows: ['.tt', '...', '.2.', '2.2'], ax: 1, ay: 2 },
+  { rows: ['.ttt', '....', '.22.', '2..2'], ax: 1, ay: 2 },
+];
+/** Living eye, squeezed shut (straining, flinching): a `>` toward the nose, brows knitted down. */
+const QEYE: StampDef[] = [
+  { rows: ['tt', '22'], ax: 0, ay: 1 },
+  { rows: ['tt.', '2.t', '.22', '2..'], ax: 1, ay: 2 },
+  { rows: ['tt..', '..tt', '2...', '.222', '2...'], ax: 1, ay: 3 },
+];
+/** Living mouths: gasp (a small O), open smile, gritted teeth. [state][size], like LMOUTH. */
+const LMOUTH2: StampDef[][] = [
+  [
+    { rows: ['aa'], ax: 0, ay: 0 },
+    { rows: ['.a.', 'aaa', '.a.'], ax: 1, ay: 0 },
+    { rows: ['.aa.', 'aaaa', 'aaaa', '.aa.'], ax: 1, ay: 0 },
+  ],
+  [
+    { rows: ['2.2', '.2.'], ax: 1, ay: 0 },
+    { rows: ['2...2', '.kkk.', '..a..'], ax: 2, ay: 0 },
+    { rows: ['2....2', '.kkkk.', '.aaaa.', '..aa..'], ax: 2, ay: 0 },
+  ],
+  [
+    { rows: ['kk'], ax: 0, ay: 0 },
+    { rows: ['2kjk2', '.111.'], ax: 2, ay: 0 },
+    { rows: ['2kjjk2', '.1111.'], ax: 2, ay: 0 },
+  ],
+];
+/** Thumbs-up: a fist, the thumb standing up off it (authored like HANDS: pointing right / up-right). */
+const THUMB_HAND: { right: StampDef[]; diag: StampDef[] } = {
+  right: [
+    { rows: ['...d.', '...d.', '.dddd', 'ddedd', 'ddddd', 'cdcc.'], ax: 0, ay: 4 },
+    { rows: ['....dd.', '....de.', '....dd.', '.dddddd', 'ddeeddd', 'ddddddd', 'cddcdc.'], ax: 0, ay: 5 },
+  ],
+  diag: [
+    { rows: ['..d..', '..d..', '.ddd.', 'dddd.', 'ddc..', 'c....'], ax: 0, ay: 5 },
+    { rows: ['...dd..', '...dd..', '..dddd.', '.ddeddd', 'ddddddc', 'dddddc.', 'cdc....', 'c......'], ax: 0, ay: 7 },
+  ],
+};
+
+/** 3×5 pixel font (4 wide where it reads better) for the speech bubbles. */
+const GLYPH: Record<string, string[]> = {
+  H: ['X.X', 'X.X', 'XXX', 'X.X', 'X.X'],
+  E: ['XXX', 'X..', 'XX.', 'X..', 'XXX'],
+  L: ['X..', 'X..', 'X..', 'X..', 'XXX'],
+  P: ['XXX', 'X.X', 'XXX', 'X..', 'X..'],
+  T: ['XXX', '.X.', '.X.', '.X.', '.X.'],
+  A: ['.X.', 'X.X', 'XXX', 'X.X', 'X.X'],
+  N: ['X..X', 'XX.X', 'X.XX', 'X..X', 'X..X'],
+  K: ['X.X', 'X.X', 'XX.', 'X.X', 'X.X'],
+  S: ['.XX', 'X..', '.X.', '..X', 'XX.'],
+  '!': ['X', 'X', 'X', '.', 'X'],
+};
+
+/**
+ * A speech bubble: dark letters on a pale fill inside a dark 1-cell border with
+ * rounded corners, and a tail under the middle. Slot 0 = fill (`f`, its lightest
+ * step), slot 1 = ink (`g`, its darkest). Anchor = the tail's tip.
+ */
+function bubbleDef(text: string): StampDef {
+  const glyphs = [...text].map((ch) => GLYPH[ch]);
+  const tw = glyphs.reduce((n, g) => n + g[0].length, 0) + glyphs.length - 1;
+  const w = tw + 4;
+  const rows: string[] = [];
+  const line = (cell: (x: number) => string) => {
+    let s = '';
+    for (let x = 0; x < w; x++) s += cell(x);
+    rows.push(s);
+  };
+  const mid = w >> 1;
+  line((x) => (x === 0 || x === w - 1 ? '.' : 'g'));
+  line((x) => (x === 0 || x === w - 1 ? 'g' : 'f'));
+  for (let y = 0; y < 5; y++) {
+    let s = 'gf';
+    glyphs.forEach((g, i) => {
+      s += g[y].replace(/X/g, 'g').replace(/\./g, 'f');
+      if (i < glyphs.length - 1) s += 'f';
+    });
+    rows.push(s + 'fg');
+  }
+  line((x) => (x === 0 || x === w - 1 ? 'g' : 'f'));
+  line((x) => (x === 0 || x === w - 1 ? '.' : x === mid ? 'f' : 'g'));
+  line((x) => (x === mid - 1 || x === mid + 1 ? 'g' : x === mid ? 'f' : '.'));
+  line((x) => (x === mid ? 'g' : '.'));
+  return { rows, ax: mid, ay: rows.length - 1 };
+}
+
+/** Civilian faces and speech bubbles (stamp ids, like STAMP's). */
+export const CIV_STAMP = {
+  /** Eyes [size]: terror, relief (^), squeezed shut. */
+  teye: TEYE.map(add),
+  heye: HEYE.map(add),
+  qeye: QEYE.map(add),
+  /** Mouths [state][size]: 0 gasp, 1 smile, 2 gritted teeth. */
+  lmouth: LMOUTH2.map((s) => s.map(add)),
+  /** Speech bubbles. */
+  bubble: { help: add(bubbleDef('HELP!')), thanks: add(bubbleDef('THANKS!')) },
+};
+// The thumbs-up joins the hand poses (STAMP.hand[HAND.THUMB]).
+STAMP.hand.push(THUMB_HAND.right.map((r, i) => hand8(r, THUMB_HAND.diag[i])));
+
+/**
+ * How far (in cells) a stamp may reach from its anchor, for the figure's bounds:
+ * 8 — the reach every stamp always had — for all that fit in it (eyes, mouths,
+ * hands: their figures lay out exactly as before); a speech bubble gets its real
+ * extent, with room for its cells rounding up to whole texels on a close figure.
+ */
+export function stampReach(id: number): number {
+  const s = stamps[id];
+  if (!s) return 8;
+  const e = Math.max(s.ax + 1, s.w - s.ax, s.ay + 1, s.h - s.ay);
+  return e <= 8 ? 8 : Math.ceil(e * 1.6) + 1;
+}
 
 export function stampInfo(id: number): Stamp {
   return stamps[id];

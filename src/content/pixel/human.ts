@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { HumanoidRig } from '../kit/humanoid';
 import { PART, PF, type PixelFigure } from '../../gameplay/pixel/figure';
 import { Mat } from '../../gameplay/pixel/materials';
-import { HAND, STAMP, dir8, stampSize } from '../../gameplay/pixel/stamps';
+import { CIV_STAMP, HAND, STAMP, dir8, stampSize } from '../../gameplay/pixel/stamps';
 
 /**
  * ─── PixelCast humanoid painter ────────────────────────────────────────────
@@ -84,6 +84,8 @@ export interface HumanLook {
   blood: number;
   /** Per-character randomness for the painter (never the world RNG). */
   seed: number;
+  /** A ponytail that swings with the head (living civilians). */
+  ponytail?: boolean;
 }
 
 export function humanLook(o: Partial<HumanLook> = {}): HumanLook {
@@ -137,8 +139,12 @@ export interface HumanPose {
   headless: boolean;
   /** Jaw 0 shut … 1 gaping. */
   jaw: number;
-  /** Expression. */
-  face: 'zombie' | 'scream' | 'calm';
+  /**
+   * Expression. The living: `scream`, `calm`, `terror` (brows up, whites round a
+   * small pupil, a gasp), `relief` (eyes shut in a smile, an open smile) and
+   * `strain` (eyes squeezed shut, gritted teeth).
+   */
+  face: 'zombie' | 'scream' | 'calm' | 'terror' | 'relief' | 'strain';
   /** Squash on a hit (0..1). */
   squash: number;
   /** Seconds (secondary motion: rags, hair). */
@@ -147,8 +153,15 @@ export interface HumanPose {
   speed: number;
   /** Legs gone (crawlers: torso drags on the ground). */
   legless?: boolean;
-  /** Hand stamps: `HAND.CLAW` (default for the dead), `OPEN` (the living), `FIST`. */
+  /** Hand stamps: `HAND.CLAW` (default for the dead), `OPEN` (the living), `FIST`, `THUMB` (thumbs-up). */
   hand?: number;
+  /** Per-hand overrides of `hand` (a thumbs-up on one hand only). */
+  handL?: number;
+  handR?: number;
+  /** Ponytail swing (radians, + toward the character's left) on top of its own sway — trembling, a jolt. */
+  hairSwing?: number;
+  /** A speech bubble over the head: a `CIV_STAMP.bubble` stamp id (−1 / undefined = none). */
+  bubble?: number;
   /** Motion smears (0..1) behind a fast head / hand — lunges, swipes. Needs `mem`. */
   smear?: number;
   /** Per-character memory (smears): from `humanMem()`, owned by the character. */
@@ -401,7 +414,11 @@ export function paintHuman(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: Hum
   const untucked = L.outfit === 'casual' || L.outfit === 'worker' || L.outfit === 'flannel' || L.outfit === 'biker' || L.outfit === 'patient' || L.outfit === 'nurse';
   if (untucked) {
     const hy = L.outfit === 'patient' || L.outfit === 'nurse' ? -0.08 : -0.035;
-    f.cone(f.at(r.spine, -0.11 * b, hy, 0.01), f.at(r.spine, 0.11 * b, hy + 0.008, 0.01), 0.058 * sb * s, 0.058 * sb * s, M.shirt)
+    // The living's hem flaps behind them when they run (the dead's rags sway on their own).
+    const run = L.dead ? 0 : Math.min(1, st.speed / 4);
+    const fz = 0.01 - run * (0.02 + 0.025 * Math.abs(Math.sin(t * 13)));
+    const fy = run * 0.012 * Math.sin(t * 13 + 1);
+    f.cone(f.at(r.spine, -0.11 * b, hy + fy, fz), f.at(r.spine, 0.11 * b, hy + 0.008 - fy, fz), 0.058 * sb * s, 0.058 * sb * s, M.shirt)
       .k(0.02 * s)
       .z(-0.03)
       .rag((L.dead ? 0.012 : 0.004) * s, PF.SPIKY)
@@ -473,11 +490,15 @@ export function paintHuman(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: Hum
     for (let side = 1; side >= -1; side -= 2) {
       const leg = side > 0 ? r.legL : r.legR;
       const mid = f.depth(f.at(leg.knee, 0, 0, 0));
-      f.layer(0.04 * s, PART.LIMB, mid > torsoDepth + 0.06 ? -0.09 : 0);
+      // (The living crouch and kneel: a thigh folded away from the camera, seen
+      // from behind, tucks in behind the seat instead of melting over it.)
+      const tuck = L.dead ? 0 : Math.min(0.08, Math.max(0, (mid - f.depth(f.at(leg.hip, 0, 0, 0)) - 0.12) * 0.5));
+      f.layer(0.04 * s, PART.LIMB, mid > torsoDepth + 0.06 ? -0.09 : 0, tuck);
       paintLeg(f, leg.hip, leg.knee, side, L, M, s * (st.legW ?? 1));
     }
   }
   if (st.extra) st.extra(f);
+  if (st.bubble !== undefined && st.bubble >= 0 && !st.headless) paintBubble(f, r, st.bubble, s);
 
   if (st.squash > 0) {
     const q = st.squash;
@@ -693,6 +714,7 @@ function paintHead(f: PixelFigure, r: HumanoidRig, h: THREE.Object3D, L: HumanLo
       .seed(11)
       .z(0.05);
   }
+  if (L.hair !== null && L.ponytail) paintPonytail(f, h, L, M, st, s, hs);
   f.layer(0.03 * s, PART.HEAD);
   const jaw = st.jaw;
   // Cranium: a projected ellipsoid, a touch deeper than wide.
@@ -726,7 +748,8 @@ function paintHead(f: PixelFigure, r: HumanoidRig, h: THREE.Object3D, L: HumanLo
       .k(0.01 * s);
     // Back of the head.
     f.ellipsoid(h, 0, 0.14 * hs, -0.06 * hs, 0.116 * hs, 0.105 * hs, 0.075 * hs, M.hair).z(-0.01).k(0.01 * s);
-    if (L.bun) f.ball(f.at(h, 0, 0.2 * hs, -0.14 * hs), 0.05 * hs * s, M.hair).part(PART.NONE).k(0.02 * s);
+    // (A living civilian's bun lies over the head box — a shot there hits the head.)
+    if (L.bun) f.ball(f.at(h, 0, 0.2 * hs, -0.14 * hs), 0.05 * hs * s, M.hair).part(L.dead ? PART.NONE : PART.HEAD).k(0.02 * s);
     if (L.dead && !crownHat) {
       // Matted tufts sticking up and out (each zombie its own).
       for (let i = 0; i < 4; i++) {
@@ -763,7 +786,7 @@ function paintHead(f: PixelFigure, r: HumanoidRig, h: THREE.Object3D, L: HumanLo
       const mirror = nx < f.project(eye, P1).x;
       if (useStamps) {
         if (L.dead) f.stamp(eye, cellM, STAMP.zeye[size], M.eyeGlow, 0, 0, 0, mirror);
-        else f.stamp(eye, cellM, (st.face === 'scream' ? STAMP.seye : STAMP.leye)[size], 0, M.eyeWhite, M.pupil, L.hair !== null ? M.hair : M.skin, mirror);
+        else f.stamp(eye, cellM, liveEyes(st.face)[size], 0, M.eyeWhite, M.pupil, L.hair !== null ? M.hair : M.skin, mirror);
       } else if (L.dead) {
         f.decal(f.at(h, sd * 0.05 * hs, ey + 0.004, ez), f.at(h, sd * 0.044 * hs, ey - 0.006, ez), 0.022 * hs * s, 0.018 * hs * s, M.skin).flag(D | PF.SHADE_ONLY).tone(-0.55);
         f.decal(eye, eye, 0.009 * hs * s, 0.009 * hs * s, M.eyeGlow).flag(D | PF.GLOW).min(0.5);
@@ -777,13 +800,13 @@ function paintHead(f: PixelFigure, r: HumanoidRig, h: THREE.Object3D, L: HumanLo
       f.decal(f.at(h, -0.03 * hs, ey + 0.008, ez + 0.01), f.at(h, 0.03 * hs, ey + 0.008, ez + 0.01), 0.006 * hs * s, 0.006 * hs * s, M.frame).flag(D);
     }
     // Mouth: hand-pixelled by how far the jaw hangs open (closed / open / gaping).
-    const open = st.face === 'calm' ? 0.05 : Math.max(jaw, L.mouthOpen ? 0.25 : 0.05);
+    const open = st.face === 'calm' || st.face === 'relief' || st.face === 'strain' ? 0.05 : Math.max(jaw, L.mouthOpen ? 0.25 : 0.05);
     const my = 0.074 * hs - open * 0.012 * hs;
     const mouth = f.at(h, 0, my, 0.118 * hs);
     if (useStamps) {
       const mm = nx < f.project(mouth, P1).x - 0.5;
       if (L.dead) f.stamp(mouth, cellM, STAMP.zmouth[open < 0.3 ? 0 : open < 0.62 ? 1 : 2][size], M.mouth, M.teeth, 0, 0, mm);
-      else f.stamp(mouth, cellM, STAMP.lmouth[st.face === 'scream' ? 1 : 0][size], M.mouth, M.teeth, 0, 0, mm);
+      else f.stamp(mouth, cellM, liveMouth(st.face, jaw)[size], M.mouth, M.teeth, 0, 0, mm);
     } else {
       const mw = 0.04 * hs;
       const mr = (0.008 + open * 0.02) * hs * s;
@@ -808,6 +831,81 @@ function paintHead(f: PixelFigure, r: HumanoidRig, h: THREE.Object3D, L: HumanLo
     f.layer(0.01 * s, PART.HEAD);
     paintHat(f, h, L, M, s, hs);
   }
+}
+
+/** Living eye stamps [size] for an expression. */
+function liveEyes(face: HumanPose['face']): readonly number[] {
+  switch (face) {
+    case 'scream':
+      return STAMP.seye;
+    case 'terror':
+      return CIV_STAMP.teye;
+    case 'relief':
+      return CIV_STAMP.heye;
+    case 'strain':
+      return CIV_STAMP.qeye;
+    default:
+      return STAMP.leye;
+  }
+}
+
+/** Living mouth stamps [size] for an expression (terror gasps, and screams once the jaw drops). */
+function liveMouth(face: HumanPose['face'], jaw: number): readonly number[] {
+  switch (face) {
+    case 'scream':
+      return STAMP.lmouth[1];
+    case 'terror':
+      return jaw > 0.55 ? STAMP.lmouth[1] : CIV_STAMP.lmouth[0];
+    case 'relief':
+      return CIV_STAMP.lmouth[1];
+    case 'strain':
+      return CIV_STAMP.lmouth[2];
+    default:
+      return STAMP.lmouth[0];
+  }
+}
+
+/**
+ * A ponytail (own layer): a tie at the back of the crown, then a tapering tail
+ * that hangs from it and swings — a slow sway, bouncing and streaming back with
+ * ground speed, plus whatever jolt the pose adds (`hairSwing`: trembling, a yank).
+ */
+function paintPonytail(f: PixelFigure, h: THREE.Object3D, L: HumanLook, M: Mats, st: HumanPose, s: number, hs: number) {
+  f.layer(0.025 * s, PART.NONE);
+  const run = Math.min(1, st.speed / 4);
+  const t = st.time;
+  const sway = 0.05 * Math.sin(t * 2.3 + L.seed) + 0.09 * run * Math.sin(t * 11) + (st.hairSwing ?? 0) * 0.12;
+  const back = 0.05 + 0.11 * run;
+  const lift = 0.04 * run * Math.abs(Math.sin(t * 11));
+  // (The tie and the top of the tail lie over the head box: a shot there hits the
+  // head; the end of the tail hangs free of it.)
+  const tie = f.at(h, 0, 0.21 * hs, -0.125 * hs);
+  f.ball(tie, 0.032 * hs * s, M.hair).k(0.01 * s).part(PART.HEAD);
+  const mid = f.at(h, sway * 0.5, 0.06 * hs + lift, -(0.17 + back * 0.5) * hs);
+  f.cone(f.at(h, 0, 0.2 * hs, -0.14 * hs), mid, 0.036 * hs * s, 0.03 * hs * s, M.hair).k(0.012 * s).z(0.04).part(PART.HEAD);
+  f.cone(f.vec().copy(mid), f.at(h, sway, -0.05 * hs + lift * 1.6, -(0.16 + back) * hs), 0.03 * hs * s, 0.012 * hs * s, M.hair)
+    .k(0.01 * s)
+    .rag(0.008 * s, PF.SPIKY | PF.RAG_END)
+    .seed(12)
+    .z(0.04);
+}
+
+/** Speech-bubble materials (fill, ink), resolved once. */
+let bubbleMats: [number, number] | null = null;
+
+/**
+ * A pixel speech bubble ("HELP!", "THANKS!") over the head: a solid stamp on a
+ * layer of its own, pulled toward the camera so the body never covers it, two
+ * retro pixels a cell (readable next to the HUD's text) and never a target.
+ */
+function paintBubble(f: PixelFigure, r: HumanoidRig, id: number, s: number) {
+  if (!bubbleMats) bubbleMats = [Mat.flat(0xf8f4e6), Mat.flat(0x16121c)];
+  // Over the head (world up — however the head is bowed), above a hand waving up there.
+  const tip = f.at(r.head, 0, 0.13, 0);
+  tip.y += 0.55 * s;
+  if (f.depth(tip) < 1) return;
+  f.layer(0, PART.NONE, 0, -0.15 * s);
+  f.stamp(tip, 2 / f.pxPerM(tip), id, bubbleMats[0], bubbleMats[1], 0, 0, false, true);
 }
 
 /**
@@ -928,7 +1026,7 @@ function paintArm(f: PixelFigure, sh: THREE.Object3D, elbow: THREE.Object3D | nu
   if (L.dead && L.armWound === side) {
     f.decal(f.at(elbow, 0, -0.08 * a, 0.03), f.at(elbow, 0, -0.14 * a, 0.03), 0.04 * s, 0.035 * s, M.blood).flag(D).rag(0.008 * s);
   }
-  paintHand(f, elbow, side, L, M, s, a, st.time, st.hand ?? (L.dead ? HAND.CLAW : HAND.OPEN), chest);
+  paintHand(f, elbow, side, L, M, s, a, st.time, (side > 0 ? st.handL : st.handR) ?? st.hand ?? (L.dead ? HAND.CLAW : HAND.OPEN), chest);
 }
 
 // Hand frame (module scratch: one hand is painted at a time).
@@ -936,6 +1034,7 @@ const hWrist = new THREE.Vector3();
 const hAlong = new THREE.Vector3();
 const hSpread = new THREE.Vector3();
 const hThick = new THREE.Vector3();
+const _up = new THREE.Vector3(0, 1, 0);
 let hA = 1;
 let hS = 1;
 /** Hand-frame point: `y` along the arm (elbow units), `x` across the fan, `z` through the palm. */
@@ -978,9 +1077,13 @@ function paintHand(f: PixelFigure, el: THREE.Object3D, side: number, L: HumanLoo
   hS = s;
   // Palm, knuckles.
   f.coneE(hp(f, 0.255, 0, 0), hp(f, 0.322, 0, 0), hThick, hSpread, 0.022 * s, 0.036 * s, 0.02 * s, 0.043 * s, M.skin).k(0.012 * s);
-  if (pose === HAND.FIST) {
+  if (pose === HAND.FIST || pose === HAND.THUMB) {
     f.coneE(hp(f, 0.3, 0, 0.01), hp(f, 0.34, 0, -0.01), hThick, hSpread, 0.03 * s, 0.045 * s, 0.028 * s, 0.042 * s, M.skin).k(0.01 * s);
-    f.cone(hp(f, 0.28, 0.04, 0), hp(f, 0.31, 0.03, -0.02), 0.015 * s, 0.013 * s, M.skin).k(0.004 * s);
+    if (pose === HAND.THUMB) {
+      // Thumbs-up: the thumb stands straight up off the fist.
+      const base = hp(f, 0.3, 0.04, 0);
+      f.cone(base, f.add(base, _up, 0.07 * s), 0.016 * s, 0.013 * s, M.skin).k(0.004 * s);
+    } else f.cone(hp(f, 0.28, 0.04, 0), hp(f, 0.31, 0.03, -0.02), 0.015 * s, 0.013 * s, M.skin).k(0.004 * s);
     return;
   }
   // Fingers: zombies claw (curled, splayed, twitching), the living keep them straighter.

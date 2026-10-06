@@ -139,7 +139,8 @@ export class StageRunner {
         run: () => {
           const pos = c.world ? new THREE.Vector3(...c.pos) : w.rig.relToWorld(c.pos);
           pos.y = w.groundAt(pos.x, pos.z);
-          this.civilians.push(w.add(new Civilian(w, pos, 'world', c.variant)));
+          const to = c.to ? (c.world ? new THREE.Vector3(...c.to) : w.rig.relToWorld(c.to)) : null;
+          this.civilians.push(w.add(new Civilian(w, pos, 'world', c.variant, { act: c.act, to, attacker: c.attacker, help: c.help })));
         },
       });
     }

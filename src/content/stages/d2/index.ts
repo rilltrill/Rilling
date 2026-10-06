@@ -178,7 +178,7 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'gift shop',
     look: { at: W(0, 1.6, -71), world: true, blend: 1.2 },
-    civilians: [{ pos: W(5.0, 0, -76.4), world: true, variant: 'scientist', t: 0.3 }],
+    civilians: [{ pos: W(5.0, 0, -76.4), world: true, variant: 'scientist', t: 0.3, act: 'hide' }],
     pickups: [{ kind: 'bomb', pos: W(-3.7, 1.35, -66.5), world: true, t: 1 }],
     onStart: (w) => w.later(1.0, () => popup(w, "DON'T SHOOT THE SCIENTIST!", 0.6, 0.26)),
     waves: [
@@ -278,7 +278,7 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'hatchery',
     look: { at: W(0, 1.6, -144), world: true, blend: 1.2 },
-    civilians: [{ pos: W(1.7, 0, -142.6), world: true, variant: 'scientist', t: 0.3 }],
+    civilians: [{ pos: W(1.7, 0, -142.6), world: true, variant: 'scientist', t: 0.3, act: 'cower' }],
     pickups: [{ kind: 'magnum', pos: W(-2.2, 1.35, -137.5), world: true, t: 1 }],
     waves: [
       {

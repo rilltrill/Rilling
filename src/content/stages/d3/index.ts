@@ -178,7 +178,7 @@ const beats: Beat[] = [
     label: 'visitor centre',
     look: { at: rel(D.HOLD_VISITOR, 180, -11, 2.2), blend: 0.9 },
     // Out on the road at the right edge of the frame; the pack comes across the plaza on the left.
-    civilians: [{ pos: SCIENTIST, variant: 'scientist' }],
+    civilians: [{ pos: SCIENTIST, variant: 'scientist', act: 'flee', help: 0.8 }],
     pickups: [{ kind: 'health', pos: rel(D.HOLD_VISITOR, 174, -2.6, 2.4), t: 2 }],
     onStart: (w) => w.later(0.5, () => park()?.strike(w)),
     waves: [
@@ -293,7 +293,7 @@ const beats: Beat[] = [
       });
     },
     // On the cleared right verge, at the edge of the frame; everything comes in from the left and ahead.
-    civilians: [{ pos: RANGER, variant: 'ranger' }],
+    civilians: [{ pos: RANGER, variant: 'ranger', act: 'backaway' }],
     pickups: [{ kind: 'bomb', pos: rel(D.HOLD_ROADBLOCK, 246, -2.2, 2.3), t: 2 }],
     waves: [
       {

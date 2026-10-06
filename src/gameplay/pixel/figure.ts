@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { atlasCode, stampInfo } from './stamps';
+import { atlasCode, stampInfo, stampReach } from './stamps';
 
 /**
  * PixelCast figures: a character's sprite frame described as a short list of
@@ -860,7 +860,7 @@ export class PixelFigure {
         z1 = Math.max(z1, d[o + ZA], d[o + ZB]);
         continue;
       }
-      const r = d[o + FLAGS] & PF.STAMP ? d[o + RA] * 8 : Math.max(d[o + RA], d[o + RB]) + d[o + RAG] + 1;
+      const r = d[o + FLAGS] & PF.STAMP ? d[o + RA] * stampReach(d[o + SEED]) : Math.max(d[o + RA], d[o + RB]) + d[o + RAG] + 1;
       x0 = Math.min(x0, d[o + AX] - r, d[o + BX] - r);
       x1 = Math.max(x1, d[o + AX] + r, d[o + BX] + r);
       y0 = Math.min(y0, d[o + AY] - r, d[o + BY] - r);

@@ -2,6 +2,7 @@ import type * as THREE from 'three';
 import type { CampaignId, EntryKind, Frame, PickupKind, RigMode, V3, WeaponId } from '../core/types';
 import type { World } from './World';
 import type { MusicId } from '../audio/names';
+import type { CivAct } from './Civilian';
 
 /**
  * ─── Stage scripting contract ────────────────────────────────────────────────
@@ -131,6 +132,18 @@ export interface CivilianDef {
   /** Appearance variant passed to the civilian model (e.g. 'scientist', 'cop'). */
   variant?: string;
   t?: number;
+  /**
+   * What they do (gameplay/Civilian.ts `CivAct`): 'cower' | 'hide' | 'flee' |
+   * 'backaway' | 'grabbed' | 'plead'; default 'auto' (a short HELP!, then
+   * cower; back off and run when a threat comes close).
+   */
+  act?: CivAct;
+  /** flee: where to run (rig-relative unless `world`). Default: off the nearer side of the screen. */
+  to?: V3;
+  /** grabbed: the outfit of the zombie holding on (default 'civilian'). */
+  attacker?: string;
+  /** Seconds of HELP! waving before the act (default: per act). */
+  help?: number;
 }
 
 interface BeatBase {

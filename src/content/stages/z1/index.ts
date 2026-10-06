@@ -219,7 +219,7 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'rescue',
     look: { at: [0.5, 1.2, 12], blend: 1.2 },
-    civilians: [{ pos: [3.8, 0, 8.2], variant: 'cop' }],
+    civilians: [{ pos: [3.8, 0, 8.2], variant: 'cop', act: 'backaway' }],
     pickups: [{ kind: 'health', pos: [-2.5, 1.3, 7] }],
     onStart: (w) => w.later(0.8, () => popupCenter(w, "DON'T SHOOT THE COP!", 0.62, 0.28)),
     waves: [
@@ -256,7 +256,7 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'gas station',
     look: { at: [-11, 1.4, 10], blend: 1.3 },
-    civilians: [{ pos: [-1.5, 0, 6], variant: 'worker', t: 0.5 }],
+    civilians: [{ pos: [-1.5, 0, 6], variant: 'worker', t: 0.5, act: 'cower' }],
     pickups: [{ kind: 'smg', pos: [-5, 1.3, 6], t: 1 }],
     onStart: (w) => w.later(1.6, () => popupCenter(w, 'SHOOT THE BARRELS!', 0.36, 0.3)),
     waves: [
