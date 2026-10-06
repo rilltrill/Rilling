@@ -29,6 +29,9 @@ import type { Town } from './town';
 import { Kit } from '../../kit/ModelKit';
 import { M, type FacadeRecord } from './props';
 import type { ZoneId } from './town';
+import { pwMaterial, pwTick } from '../../pixelworld/material';
+import { z1FlameTile, Z1_FLAME_FRAMES, Z1_FLAME_H, Z1_FLAME_W } from '../../pixelworld/z1fire';
+import { pwPuffTexture } from './vfx';
 
 /**
  * MAIN STREET in ART: PIXEL WORLD — the reference conversion for the stage
@@ -102,7 +105,9 @@ export class Z1PixelWorld {
   private extras: Z1FacadeExtras;
   private diner: Z1Diner;
   /** PixelWorld meshes for dynamic objects (built in `finish`): batch, parent, world → parent matrix. */
-  private dynBatches: { b: PwBatch; parent: THREE.Object3D; local?: boolean; swap?: boolean }[] = [];
+  private dynBatches: { b: PwBatch; parent: THREE.Object3D; local?: boolean; swap?: boolean; anim?: boolean }[] = [];
+  /** The fires' animated flame material (ticked by `tick`). */
+  private fireMat: THREE.Material | null = null;
   private bus: Z1Bus;
   private square: Z1Square;
   private street: Z1Street;
@@ -211,6 +216,27 @@ export class Z1PixelWorld {
       this.street.pillar(b, g.width, g.height, g.depth);
       this.dynBatches.push({ b, parent: m, swap: true });
     }
+    // Fires: painted flames (crossed cut-out cards, an animated strip) where the glow cones were.
+    const flames = [z1FlameTile(this.atlas, 0), z1FlameTile(this.atlas, 1)];
+    const sub = { x: 0, y: 0, w: Z1_FLAME_W, h: Z1_FLAME_H };
+    const puff = pwPuffTexture();
+    town.anim.fires.forEach((f, fi) => {
+      const b = new PwBatch(this.atlas);
+      f.plume.flameDefs().forEach((d, i) => {
+        // A card the flame's height (the cones flicker up to ~1.35 ×), the strip's own aspect.
+        const h = d.h * 1.3;
+        const w = (h * Z1_FLAME_W) / Z1_FLAME_H;
+        const yaw0 = hash2(fi, i, 31) * Math.PI;
+        const tile = flames[(fi + i) % 2];
+        for (let k = 0; k < 3; k++) {
+          const a = yaw0 + (k * Math.PI) / 3;
+          const ux = new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
+          b.rect(new THREE.Vector3(d.x, -0.04, d.z).addScaledVector(ux, -w / 2), ux, Y, w, h, tile, { sub, flipU: (i + k) % 2 === 1 });
+        }
+      });
+      f.plume.pixelArt(puff);
+      this.dynBatches.push({ b, parent: f.plume.group, local: true, anim: true });
+    });
     for (const d of Object.values(town.dynZones)) {
       for (const o of [...d.children]) {
         if (!o.userData.pwDinerR || !sign) continue;
@@ -244,6 +270,11 @@ export class Z1PixelWorld {
     this.dynBatches.push({ b, parent: g, local: true });
   }
 
+  /** Per frame: the fires' flame strips play on. */
+  tick(dt: number) {
+    if (this.fireMat) pwTick(this.fireMat, dt);
+  }
+
   /** Build the atlases and the zone meshes (adds each zone's PixelWorld mesh to its group). */
   finish(zones: Record<ZoneId, THREE.Group>) {
     this.atlas.build();
@@ -252,8 +283,9 @@ export class Z1PixelWorld {
       if (mesh) zones[id].add(mesh);
     }
     // Dynamic pieces: world-space geometry under a moving / toggled parent (undo the parent's transform).
-    for (const { b, parent, local, swap } of this.dynBatches) {
-      const mesh = b.build(undefined, { gain: 1 });
+    for (const { b, parent, local, swap, anim } of this.dynBatches) {
+      if (anim && !this.fireMat) this.fireMat = pwMaterial(this.atlas, { anim: { frames: Z1_FLAME_FRAMES, fps: 12 }, side: THREE.DoubleSide });
+      const mesh = anim ? b.build(this.fireMat!) : b.build(undefined, { gain: 1 });
       if (!mesh) continue;
       if (swap) {
         // Re-skin an animated mesh in place (same object, same transform): the painted geometry and material.

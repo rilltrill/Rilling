@@ -197,6 +197,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     // Sky follows the camera on XZ so it always reads as infinitely far.
     if (pw?.backdrop) pw.backdrop.update(_cam);
     else sky.position.set(_cam.x, 0, _cam.z);
+    pw?.tick(dt);
 
     // Flashlight: from just right of / below the eye, aimed where the camera looks.
     cam.getWorldDirection(_dir);

@@ -43,6 +43,44 @@ export function radialTexture(): THREE.DataTexture {
   return radialTex;
 }
 
+let puffTex: THREE.DataTexture | null = null;
+
+/**
+ * ART: PIXEL WORLD's particle puff (embers, smoke): 16 texels, nearest, its
+ * alpha in four flat steps with an ordered dither between them — a pixel
+ * blob, not a soft gradient.
+ */
+export function pwPuffTexture(): THREE.DataTexture {
+  if (puffTex && puffTex.userData.alive) return puffTex;
+  const n = 16;
+  const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  const data = new Uint8Array(n * n * 4);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const dx = (x + 0.5) / n - 0.5;
+      const dy = (y + 0.5) / n - 0.5;
+      const r = Math.min(1, Math.sqrt(dx * dx + dy * dy) * 2);
+      const a = Math.pow(1 - r, 1.2) * 4 + ((bayer[(y & 3) * 4 + (x & 3)] + 0.5) / 16 - 0.5) * 0.9;
+      const i = (y * n + x) * 4;
+      data[i] = data[i + 1] = data[i + 2] = 255;
+      data[i + 3] = Math.round((Math.max(0, Math.min(4, Math.floor(a))) / 4) * 255);
+    }
+  }
+  const t = new THREE.DataTexture(data, n, n, THREE.RGBAFormat);
+  t.needsUpdate = true;
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.userData.alive = true;
+  const dispose = t.dispose.bind(t);
+  t.dispose = () => {
+    t.userData.alive = false;
+    puffTex = null;
+    dispose();
+  };
+  puffTex = Kit.track(t);
+  return puffTex;
+}
+
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3();
@@ -353,6 +391,24 @@ export class FirePlume {
     for (let i = 0; i < this.o.smoke; i++) this.smoke.life[i] = this.rng.next() * 4;
     this.group.add(this.embers.points, this.smoke.points);
     if (this.o.light) this.group.add(this.o.light);
+  }
+
+  /** The flame cones (local x / z of their base, radius, height): ART: PIXEL WORLD paints flames in their place. */
+  flameDefs(): { x: number; z: number; r: number; h: number; inner: boolean }[] {
+    return this.flames.map((m, i) => ({ x: m.position.x, z: m.position.z, r: (m.geometry as THREE.ConeGeometry).parameters.radius, h: m.userData.h as number, inner: i % 2 === 1 }));
+  }
+
+  /**
+   * ART: PIXEL WORLD: the glow cones hide (painted flame cards under `group`
+   * take their place) and the embers / smoke draw with a stepped pixel puff.
+   */
+  pixelArt(puff: THREE.Texture) {
+    for (const f of this.flames) f.visible = false;
+    for (const c of [this.embers, this.smoke]) {
+      const m = c.points.material as THREE.PointsMaterial;
+      m.map = puff;
+      m.needsUpdate = true;
+    }
   }
 
   update(dt: number) {
