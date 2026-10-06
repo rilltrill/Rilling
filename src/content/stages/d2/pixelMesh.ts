@@ -63,6 +63,23 @@ const _base = new THREE.Color();
 const _box = new THREE.Box3();
 const _m = new THREE.Matrix4();
 
+const _lin = new Map<number, readonly number[]>();
+const _lc2 = new THREE.Color();
+/** Linear RGB of an sRGB hex tint (memoised: a stage uses a few dozen). */
+function linearOf(hex: number): readonly number[] {
+  let v = _lin.get(hex);
+  if (!v) {
+    _lc2.setHex(hex);
+    v = [_lc2.r, _lc2.g, _lc2.b];
+    _lin.set(hex, v);
+  }
+  return v;
+}
+
+const FACE_I: Record<Face, number> = { px: 0, nx: 1, py: 2, ny: 3, pz: 4, nz: 5 };
+const UNSET = Symbol('unset');
+const _memo: (Paint | null | typeof UNSET)[] = new Array(36).fill(UNSET);
+
 function faceOf(n: THREE.Vector3): Face {
   const ax = Math.abs(n.x);
   const ay = Math.abs(n.y);
@@ -131,8 +148,11 @@ export function emitMesh(batch: PwBatch, mesh: THREE.Mesh, rule: MeshRule, frame
   const matColor = (mesh.material as THREE.MeshLambertMaterial).color;
   const prev = batch.matrix.clone();
   batch.setMatrix(null);
+  const tb = batch as unknown as { tintRGB: readonly number[] | null };
   let n = 0;
   const uv = [0, 0, 0, 0, 0, 0];
+  // Without vertex colours a rule's answer depends only on the (face, world face) pair: ask once per pair.
+  _memo.fill(UNSET);
   for (let t = 0; t + 2 < triCount; t += 3) {
     const ia = index ? index.getX(t) : t;
     const ib = index ? index.getX(t + 1) : t + 1;
@@ -159,7 +179,14 @@ export function emitMesh(batch: PwBatch, mesh: THREE.Mesh, rule: MeshRule, frame
     _wn.crossVectors(_e1, _e2);
     if (mirrored) _wn.negate();
     const wface = faceOf(_wn);
-    const paint = rule(mesh, face, colAttr ? _vcol : undefined, wface);
+    let paint: Paint | null | undefined;
+    if (colAttr) paint = rule(mesh, face, _vcol, wface);
+    else {
+      const mi = FACE_I[face] * 6 + FACE_I[wface];
+      const hit = _memo[mi];
+      if (hit === UNSET) _memo[mi] = paint = rule(mesh, face, undefined, wface) ?? null;
+      else paint = hit as Paint | null;
+    }
     if (!paint) continue;
     const tile = paint.tile;
     const map = paint.map ?? 'local';
@@ -255,10 +282,13 @@ export function emitMesh(batch: PwBatch, mesh: THREE.Mesh, rule: MeshRule, frame
       else _col.copy(matColor ?? _col.setRGB(1, 1, 1));
       tint = neutralTint(tile, _col);
     }
+    // (The batch's linear tint slot — the one `rect({ tintRGB })` uses — so no sRGB decode per vertex.)
+    tb.tintRGB = linearOf(tint);
     if (mirrored) batch.tri(_A, _C, _B, tile, [uv[0], uv[1], uv[4], uv[5], uv[2], uv[3]], tint);
     else batch.tri(_A, _B, _C, tile, uv, tint);
     n++;
   }
+  tb.tintRGB = null;
   batch.setMatrix(prev);
   return n;
 }

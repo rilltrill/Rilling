@@ -92,21 +92,23 @@ export function flagstoneTile(atlas: PwAtlas): PwTile {
       const s = k.ramp(0x958c7a, { light: 0.45, sat: 0.8 });
       const s2 = k.ramp(0x8a7e6a, { light: 0.45, sat: 0.8 });
       const moss = k.ramp(0x3a6a2a, { light: 0.5 });
-      for (let y = 0; y < 128; y++) {
-        for (let x = 0; x < 128; x++) {
-          const v = cells(x, y, 128, 128, 5, 5, 31, 0.9);
+      // The slab layout on a half-resolution grid (every feature lands 2 texels wide, a quarter of the work).
+      for (let hy = 0; hy < 64; hy++) {
+        for (let hx = 0; hx < 64; hx++) {
+          const v = cells(hx, hy, 64, 64, 5, 5, 31, 0.9);
           const id = v.id;
           const ramp = hash2(id, 1, 3) > 0.55 ? s2 : s;
-          // Mortar joints 2+ texels wide (a hairline joint crawls in motion), moss in 2×2 clumps.
-          if (v.edge < 2.1) {
-            // (The joint is the stone a step and a half down: dark enough to draw the slabs, never a black hairline.)
-            c.set(x, y, hash2(x >> 1, y >> 1, 5) > 0.62 ? moss : ramp, hash2(x >> 2, y >> 2, 9) > 0.5 ? 1.75 : 1.5);
-            continue;
+          let t: number;
+          let r = ramp;
+          // Mortar joints (the stone a step and a half down, moss in clumps), a lit / shaded bevel band.
+          if (v.edge < 1.05) {
+            if (hash2(hx, hy, 5) > 0.62) r = moss;
+            t = hash2(hx >> 1, hy >> 1, 9) > 0.5 ? 1.75 : 1.5;
+          } else {
+            t = 3 + (hash2(id, 2, 3) - 0.5) * 0.6;
+            if (v.edge < 2.05) t += v.dx + v.dy < 0 ? 0.75 : -0.5;
           }
-          let t = 3 + (hash2(id, 2, 3) - 0.5) * 0.6;
-          // Bevel: a 2-texel lit edge where the joint is above / left, a shade below / right.
-          if (v.edge < 4.1) t += v.dx + v.dy < 0 ? 0.75 : -0.5;
-          c.set(x, y, ramp, t);
+          c.rect(hx * 2, hy * 2, 2, 2, r, t);
         }
       }
       // Wear: a few larger chips and pits (clusters of 4–5 texels), not per-texel flecks.

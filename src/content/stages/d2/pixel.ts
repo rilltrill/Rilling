@@ -6,7 +6,7 @@ import { pwMaterial } from '../../pixelworld/material';
 import { NEUTRAL_HEX } from '../../pixelworld/retexture';
 import { chequerTile, corrugatedTile, grateTile, hazardTile, tilesTile } from '../../pixelworld/surfaces';
 import { rubbleTile } from '../../pixelworld/d2green';
-import { d2CalmLevels } from '../../pixelworld/d2levels';
+import { D2_LEVEL_STATS, d2CalmLevels } from '../../pixelworld/d2levels';
 import { d2BoneTile, d2ClothTile, d2ConcreteTile, d2MetalTile, d2PlainTile, d2PlasterTile, d2SteelTile, d2WoodTile } from '../../pixelworld/d2surfaces';
 import { emitMesh, paintGroup, type Face, type MeshRule, type Paint } from './pixelMesh';
 
@@ -30,6 +30,8 @@ import { emitMesh, paintGroup, type Face, type MeshRule, type Paint } from './pi
  * Gameplay never sees any of it: occluders, ground, spawn data and the
  * room-building RNG are the classic ones.
  */
+
+type GenKey = 'metal' | 'steel' | 'concrete' | 'plaster' | 'wood' | 'woodH' | 'cloth' | 'plain' | 'bone' | 'hazard' | 'corrugated' | 'tiles' | 'rock';
 
 export interface RoomParts {
   root: THREE.Group;
@@ -69,7 +71,7 @@ export class D2PixelWorld {
   /** Built materials by role (filled at finish). */
   readonly mats = new Map<string, THREE.Material>();
   /** Lazily created tiles shared by every room's generic rule. */
-  private generic: Record<string, PwTile> | null = null;
+  private generic: Record<GenKey, PwTile> | null = null;
   /** Lighting gain of lit texels (matches the classic scenery brightness). */
   gain = 1;
 
@@ -201,31 +203,38 @@ export class D2PixelWorld {
     return { tile, map };
   }
 
-  /** The shared generic tiles (registered once). */
-  gen(): Record<string, PwTile> {
-    if (this.generic) return this.generic;
+  /** The shared generic tiles (each registered on first use: no unused tile is ever painted). */
+  gen(): Record<GenKey, PwTile> {
+    if (this.generic) return this.generic as Record<GenKey, PwTile>;
     const a = this.atlas;
-    const corrugated = corrugatedTile(a, { hex: NEUTRAL_HEX, rust: 0.6 });
-    corrugated.neutral = NEUTRAL_HEX;
-    const tiles = tilesTile(a, { hex: NEUTRAL_HEX });
-    tiles.neutral = NEUTRAL_HEX;
-    const rock = rubbleTile(a);
-    this.generic = {
-      metal: d2MetalTile(a),
-      steel: d2SteelTile(a),
-      concrete: d2ConcreteTile(a),
-      plaster: d2PlasterTile(a),
-      wood: d2WoodTile(a),
-      woodH: d2WoodTile(a, true),
-      cloth: d2ClothTile(a),
-      plain: d2PlainTile(a),
-      bone: d2BoneTile(a),
-      hazard: hazardTile(a, {}),
-      corrugated,
-      tiles,
-      rock,
+    const make: Record<GenKey, () => PwTile> = {
+      metal: () => d2MetalTile(a),
+      steel: () => d2SteelTile(a),
+      concrete: () => d2ConcreteTile(a),
+      plaster: () => d2PlasterTile(a),
+      wood: () => d2WoodTile(a),
+      woodH: () => d2WoodTile(a, true),
+      cloth: () => d2ClothTile(a),
+      plain: () => d2PlainTile(a),
+      bone: () => d2BoneTile(a),
+      hazard: () => hazardTile(a, {}),
+      corrugated: () => {
+        const t = corrugatedTile(a, { hex: NEUTRAL_HEX, rust: 0.6 });
+        t.neutral = NEUTRAL_HEX;
+        return t;
+      },
+      tiles: () => {
+        const t = tilesTile(a, { hex: NEUTRAL_HEX });
+        t.neutral = NEUTRAL_HEX;
+        return t;
+      },
+      rock: () => rubbleTile(a),
     };
-    return this.generic;
+    const cache: Partial<Record<GenKey, PwTile>> = {};
+    const g = {} as Record<GenKey, PwTile>;
+    for (const k of Object.keys(make) as GenKey[]) Object.defineProperty(g, k, { get: () => (cache[k] ??= make[k]()), enumerable: true });
+    this.generic = g;
+    return g;
   }
 
   /** Every tile registered in the stage atlas. */
@@ -240,6 +249,11 @@ export class D2PixelWorld {
     const data = this.atlas.build();
     // Calm far levels on every tileable surface (no crawling grates / grout / chequer in motion).
     d2CalmLevels(data, this.atlasTiles());
+    // (Captures / bench read the PixelWorld stats from the page: report the calm pass beside the atlases.)
+    if (typeof window !== 'undefined') {
+      const ws = window as unknown as { __pixelWorld?: Record<string, unknown> };
+      ws.__pixelWorld = { ...(ws.__pixelWorld ?? {}), 'd2-calm': { w: 0, h: 0, tiles: 0, bytes: 0, ms: D2_LEVEL_STATS.ms, texels: 0, cached: D2_LEVEL_STATS.ms === 0 } };
+    }
     const main = pwMaterial(this.atlas, { gain: this.gain });
     // Tileable surfaces (floors, walls, ceilings) switch to their calm levels a step sooner:
     // level texels 1–2 pixels (the cast's own chunkiness), nothing crawls in motion.

@@ -182,22 +182,33 @@ export function emblemMosaic(atlas: PwAtlas): PwTile {
       const [kx, ky] = P(Math.cos(aa) * (len + 9), 12 + Math.sin(aa) * (len + 9));
       c.poly([tx + nx * 3, ty + ny * 3, kx, ky, tx - nx * 3, ty - ny * 3], gold, 2.25);
     }
-    // Outline (2 texels, dark) round the print, a lit upper-left inner edge (2 texels).
-    const isGold = (x: number, y: number) => c.at(x, y) === gold;
-    const edits: [number, number, number, number][] = [];
-    for (let y = 2; y < 126; y++) {
-      for (let x = 2; x < 126; x++) {
-        if (isGold(x, y)) {
-          if (!isGold(x - 1, y) || !isGold(x, y - 1) || !isGold(x - 2, y) || !isGold(x, y - 2)) edits.push([x, y, gold, 4.25]);
-          else if (!isGold(x + 1, y) || !isGold(x, y + 1)) edits.push([x, y, gold, 2]);
-          continue;
+    // Outline (2 texels, dark) round the print, a lit upper-left inner edge (2 texels): two passes of
+    // 4-neighbour dilation give the Manhattan-2 ring without a 5×5 search per texel.
+    const N = 128 * 128;
+    const gm = new Uint8Array(N);
+    for (let i = 0; i < N; i++) gm[i] = c.ramp[i] === gold ? 1 : 0;
+    const d1 = new Uint8Array(N);
+    const dil = (src: Uint8Array, dst: Uint8Array) => {
+      for (let y = 0; y < 128; y++) {
+        for (let x = 0; x < 128; x++) {
+          const i = y * 128 + x;
+          dst[i] = src[i] || (x > 0 && src[i - 1]) || (x < 127 && src[i + 1]) || (y > 0 && src[i - 128]) || (y < 127 && src[i + 128]) ? 1 : 0;
         }
-        let near = false;
-        for (let q = -2; q <= 2 && !near; q++) for (let r = -2; r <= 2 && !near; r++) if (Math.abs(q) + Math.abs(r) <= 2 && isGold(x + q, y + r)) near = true;
-        if (near) edits.push([x, y, ink, 1.5]);
+      }
+    };
+    dil(gm, d1);
+    const d2 = new Uint8Array(N);
+    dil(d1, d2);
+    const gAt = (x: number, y: number) => x >= 0 && y >= 0 && x < 128 && y < 128 && gm[y * 128 + x] === 1;
+    for (let y = 0; y < 128; y++) {
+      for (let x = 0; x < 128; x++) {
+        const i = y * 128 + x;
+        if (gm[i]) {
+          if (!gAt(x - 1, y) || !gAt(x, y - 1) || !gAt(x - 2, y) || !gAt(x, y - 2)) c.set(x, y, gold, 4.25);
+          else if (!gAt(x + 1, y) || !gAt(x, y + 1)) c.set(x, y, gold, 2);
+        } else if (d2[i] && c.ramp[i]) c.set(x, y, ink, 1.5);
       }
     }
-    for (const [x, y, r, t] of edits) c.set(x, y, r, t);
     // Wear: whole tesserae missing (4×4, darker), a crack across the field.
     for (let i = 0; i < 22; i++) {
       const a = rng.next() * Math.PI * 2;

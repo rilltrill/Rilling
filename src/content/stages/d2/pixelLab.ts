@@ -9,7 +9,7 @@ import { acousticTile } from '../../pixelworld/d2shop';
 import {
   applianceTile, bulkheadTile, cableDropTile, gratingTile, kitchenChequerTile, kitchenNoticesTile, rackEndTile, rackFrontTile, raisedFloorTile, serverWallTile,
 } from '../../pixelworld/d2lab';
-import { cabinetFrontTile, hoodFrontTile, hoodUndersideTile, islandEndTile, kitchenWallTile, panCardTile, sootDecalTile } from '../../pixelworld/d2kitchen';
+import { cabinetFrontTile, counterClutterTile, hoodFrontTile, hoodUndersideTile, islandEndTile, kitchenWallTile, panCardTile, sootDecalTile } from '../../pixelworld/d2kitchen';
 import { bloodDecal, gougeDecal, splatDecal } from '../../pixelworld/d2decals';
 import { tintFor } from '../../pixelworld/batch';
 
@@ -91,6 +91,17 @@ function convertKitchen(pw: D2PixelWorld, parts: RoomParts) {
         const wx = s * 8.74;
         b.rect(_o.set(wx, 0.98, z + (s < 0 ? 0.75 : -0.75)), ux, Y, 1.5, 1.4, sootDecalTile(a, Math.round(z) & 1));
       }
+    }
+  }
+  // Clutter stood on the island tops (breaking their flat top line), turned to the aisle.
+  for (const sgn of [-1, 1]) {
+    for (const [z0, z1] of [[-167, -176], [-178.6, -187.6]] as const) {
+      const cxI = sgn * 4.6;
+      [z0 - 1.6, z1 + 2.2].forEach((z, i) => {
+        const yaw = sgn * 0.5;
+        const u = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+        cards.rect(_o.set(cxI - sgn * 0.25 - u.x * 0.375, 0.95, z - u.z * 0.375), u, Y, 0.75, 0.5, counterClutterTile(a, i + (sgn > 0 ? 1 : 0)));
+      });
     }
   }
   // Pans and pots on S-hooks under the racks (cards turned a little toward the aisle).

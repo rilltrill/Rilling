@@ -228,7 +228,6 @@ export function oilPoolTile(atlas: PwAtlas, v: number): PwTile {
     const oil = k.ramp(0x14121a, { light: 0.55, sat: 1.0 });
     const vio = k.ramp(0x5a3a8a, { light: 0.5, sat: 1.0 });
     const grn = k.ramp(0x2a6a5a, { light: 0.5, sat: 1.0 });
-    const gold = k.ramp(0x8a7a3a, { light: 0.5 });
     const seed = v * 13 + 5;
     const lobes: [number, number, number, number][] = [
       [26, 22, 15, 10],
@@ -245,9 +244,11 @@ export function oilPoolTile(atlas: PwAtlas, v: number): PwTile {
         const d = inside(x, y);
         if (d <= 0) continue;
         if (d < 0.18) {
-          // Sheen rim: iridescent clumps (2×2), else the oil's lit edge.
-          const h = hash2((x + seed) >> 1, (y + seed) >> 1, 4);
-          c.set(x, y, h < 0.2 ? vio : h < 0.35 ? grn : h < 0.45 ? gold : oil, h < 0.45 ? 2.25 : 2);
+          // The rim: the oil's dark brown edge; iridescence only where the light catches it
+          // (upper-left), in clumps 4 texels long, violet / green alternating — never a speckled ring.
+          const lit = x + y < 46 + (v % 2) * 6;
+          const band = (x >> 2) % 3;
+          c.set(x, y, lit && band !== 2 ? (band ? grn : vio) : oil, lit && band !== 2 ? 2.25 : 1.75);
         } else c.set(x, y, oil, d > 0.6 ? 0.5 : 1);
       }
     }

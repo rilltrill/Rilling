@@ -199,39 +199,45 @@ export function hoodUndersideTile(atlas: PwAtlas): PwTile {
 
 /**
  * A stainless cabinet run (world, v0 at the body's foot; NEUTRAL): door fronts
- * a metre wide with 2-texel shadow gaps, lit top / left edges, bar handles with
- * a cast shadow, a recessed kick plinth, a couple of dents (a lit and a dark
- * crescent) and greasy finger marks round the handles. 64 × 32.
+ * a metre wide with 2-texel shadow gaps, each with a recessed centre panel
+ * (shaded top / left inside, lit bottom / right lip), a polished diagonal sheen
+ * (2 texels) across it, a bar handle with a cast shadow, a recessed kick
+ * plinth, a couple of dents and greasy finger marks. 64 × 32.
  */
 export function cabinetFrontTile(atlas: PwAtlas): PwTile {
   const t = atlas.tile(
-    'd2cabinet|r3',
+    'd2cabinet|r4',
     64,
     32,
     (c, k) => {
-      const m = k.ramp(N, { light: 0.55, sat: 0.4 });
-      c.rect(0, 0, 64, 32, m, 3);
-      // Broad brushed bands (2 texels), not per-texel streaks.
-      for (let y = 4; y < 24; y += 5) c.rect(0, y, 64, 2, m, 3.25);
+      const m = k.ramp(N, { light: 0.6, sat: 0.4 });
+      c.rect(0, 0, 64, 32, m, 3.25);
       for (let d = 0; d < 2; d++) {
         const x = d * 32;
         // Shadow gap round each door (2 texels), lit top / left edge inside it.
-        c.rect(x, 0, 2, 26, m, 1);
-        c.rect(x, 0, 32, 2, m, 1.25);
-        c.vline(x + 2, 2, 24, m, 4);
-        c.hline(x + 2, 2, 30, m, 4);
+        c.rect(x, 0, 2, 26, m, 0.75);
+        c.rect(x, 0, 32, 2, m, 1);
+        c.vline(x + 2, 2, 24, m, 4.25);
+        c.hline(x + 2, 2, 30, m, 4.25);
+        // Recessed centre panel: shaded top / left, lit lip bottom / right.
+        c.rect(x + 6, 6, 22, 15, m, 2.5);
+        c.hline(x + 6, 6, 22, m, 1.5);
+        c.vline(x + 6, 6, 15, m, 1.75);
+        c.hline(x + 6, 20, 22, m, 3.75);
+        c.vline(x + 27, 6, 15, m, 3.5);
+        // A polished sheen across the panel (2-texel diagonal), broken.
+        for (let i = 0; i < 12; i++) if (i % 5 < 4) c.rect(x + 10 + i, 18 - i, 2, 1, m, 4);
         // Bar handle with its shadow, finger marks.
-        const hx = x + (d ? 6 : 24);
-        c.rect(hx, 9, 2, 9, m, 4.5);
-        c.vline(hx + 2, 10, 9, m, 1.75);
-        for (const [fx, fy] of [[hx - 3, 10], [hx - 2, 14], [hx + 3, 12]]) c.rect(fx, fy, 2, 2, m, 2.5);
+        const hx = x + (d ? 3 : 29);
+        c.rect(hx, 8, 2, 11, m, 4.75);
+        c.vline(hx + (d ? 2 : -1), 9, 11, m, 1.25);
+        for (const [fx, fy] of [[hx + (d ? 3 : -3), 10], [hx + (d ? 3 : -3), 14]]) c.rect(fx, fy, 2, 2, m, 2.5);
       }
       // Kick plinth (recessed, dark), the lit edge of the door bottoms over it.
-      c.rect(0, 26, 64, 6, m, 1.25);
+      c.rect(0, 26, 64, 6, m, 0.75);
       c.hline(0, 25, 64, m, 2);
       // Dents.
-      c.ellipseShade(46, 15, 4, 3, (dd) => (dd > 0.55 ? 0.75 : -0.75));
-      c.ellipseShade(12, 20, 3, 2, (dd) => (dd > 0.55 ? 0.75 : -0.75));
+      c.ellipseShade(46, 13, 3, 2, (dd) => (dd > 0.55 ? 0.75 : -0.75));
       bloodSplat(c, k.rng, k, 52, 22, 1.5, { drips: 2, wrap: true });
     },
     { wrap: true },
@@ -310,5 +316,44 @@ export function panCardTile(atlas: PwAtlas, v: number): PwTile {
     void drawText;
     void FONT_3x5;
     void textWidth;
+  });
+}
+
+/**
+ * Counter-top clutter standing on the islands (cut out, two-sided card, 0.75 ×
+ * 0.5 m): 0 = a stock pot with a ladle and a stack of steel trays, 1 = a
+ * leaning cutting board, a knife block and a jar of utensils. Breaks the
+ * island's flat top line. 24 × 16.
+ */
+export function counterClutterTile(atlas: PwAtlas, v: number): PwTile {
+  return atlas.tile(`d2clutter|${v % 2}`, 24, 16, (c, k) => {
+    const steel = k.ramp(0xb8bec4, { light: 0.55, sat: 0.4 });
+    const dark = k.ramp(0x2a2a2e, { light: 0.4 });
+    const wood = k.ramp(0x9a6a3a, { light: 0.45 });
+    const red = k.ramp(0xc03a2a, { light: 0.45 });
+    if (v % 2 === 0) {
+      // Trays (stacked, lit lips), the pot with a ladle.
+      for (let i = 0; i < 4; i++) {
+        c.hline(1, 15 - i * 2, 9, steel, 4);
+        c.hline(1, 14 - i * 2, 9, steel, 2);
+      }
+      c.rect(12, 7, 10, 9, steel, (x: number) => (x < 14 ? 4 : x > 19 ? 2 : 3));
+      c.hline(11, 6, 12, steel, 4.5);
+      c.hline(12, 15, 10, steel, 1.5);
+      c.line(18, 6, 21, 0, dark, 2);
+      c.rect(20, 0, 3, 2, steel, 3.5);
+    } else {
+      // Leaning cutting board, a knife block, a jar of utensils.
+      c.poly([1, 15, 4, 2, 10, 2, 9, 15], wood, 3);
+      c.line(4, 2, 10, 2, wood, 4);
+      c.ellipse(6.5, 4.5, 1, 1, dark, 1);
+      c.rect(12, 7, 5, 9, dark, 2);
+      for (let i = 0; i < 3; i++) c.rect(12 + i * 2, 3 + i, 1, 4, steel, 4);
+      c.rect(18, 9, 5, 7, red, 3);
+      c.hline(18, 9, 5, red, 4);
+      c.line(19, 9, 18, 2, steel, 4);
+      c.line(21, 9, 22, 3, wood, 3);
+    }
+    c.outline(0);
   });
 }

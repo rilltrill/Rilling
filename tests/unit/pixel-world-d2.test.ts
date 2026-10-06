@@ -73,8 +73,10 @@ describe.skipIf(!process.env.PW_D2_BENCH)('d2 PixelWorld paint bench', () => {
     const { ALL_STAGES } = await import('../../src/content');
     const { clearPwCache, PW_STATS } = await import('../../src/content/pixelworld/atlas');
     const { nullHud } = await import('./sim');
+    const { D2_LEVEL_STATS } = await import('../../src/content/pixelworld/d2levels');
     const runs: number[] = [];
     const paints: number[] = [];
+    const calms: number[] = [];
     for (let i = 0; i < 6; i++) {
       clearPwCache();
       PW_STATS.clear();
@@ -84,10 +86,12 @@ describe.skipIf(!process.env.PW_D2_BENCH)('d2 PixelWorld paint bench', () => {
       new StageRunner(w, ALL_STAGES.find((s) => s.id === 'd2')!).start();
       runs.push(performance.now() - t0);
       paints.push([...PW_STATS.values()].reduce((s, a) => s + a.ms, 0));
+      calms.push(D2_LEVEL_STATS.ms);
       w.dispose();
     }
     for (const [n, s] of PW_STATS) console.log(`${n}: ${s.w}×${s.h} ${(s.bytes / 1048576).toFixed(2)} MB, ${(s.texels / 1000).toFixed(0)}k texels, ${s.tiles} tiles`);
     console.log(`paint ms per pass: ${paints.map((r) => r.toFixed(0)).join(', ')} (min warm ${Math.min(...paints.slice(1)).toFixed(0)})`);
+    console.log(`calm levels ms per pass: ${calms.map((r) => r.toFixed(1)).join(', ')}; paint + calm min warm ${Math.min(...paints.slice(1).map((p, i) => p + calms[i + 1])).toFixed(0)}`);
     console.log(`env build ms per pass: ${runs.map((r) => r.toFixed(0)).join(', ')}`);
     const tms = PW_DEBUG_TILE_MS();
     console.log(`tile painters total ${tms.reduce((s, l) => s + parseFloat(l), 0).toFixed(1)} ms over ${tms.length} tiles`);

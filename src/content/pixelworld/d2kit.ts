@@ -335,43 +335,89 @@ export function recordFit(key: string, text: string, W: number, H: number, tw: n
  */
 export function litText(c: PwCanvas, text: string, x: number, y: number, f: PixelFont, ramp: number, o: TextOpts & { core?: number; halo?: number; haloRamp?: number; rings?: number } = {}): number {
   const m = rasterText(text, f, { ...o, tube: 0 });
-  const on = (a: number, b: number) => a >= 0 && b >= 0 && a < m.w && b < m.h && m.data[b * m.w + a] === 1;
   const core = o.core ?? 5;
   const halo = o.halo ?? 1.75;
   const hr = o.haloRamp ?? ramp;
   const s = o.scale ?? 1;
   const R = o.rings ?? 1;
   const gap = 2 * s + 1;
-  for (let my = -R; my < m.h + R; my++) {
-    for (let mx = -R; mx < m.w + R; mx++) {
-      if (on(mx, my)) continue;
-      // Distance (rings) to the nearest letter texel: 4-neighbour first ring, Chebyshev beyond.
-      let d = 0;
-      if (on(mx + 1, my) || on(mx - 1, my) || on(mx, my + 1) || on(mx, my - 1)) d = 1;
-      else
-        for (let r = 1; r <= R && !d; r++) {
-          for (let k = -r; k <= r && !d; k++) if (on(mx + k, my - r) || on(mx + k, my + r) || on(mx - r, my + k) || on(mx + r, my + k)) d = r + (r === 1 ? 1 : 0);
+  // A frame of R texels round the mask: one pass of distance bookkeeping, no searches per texel.
+  const W = m.w + 2 * R;
+  const H = m.h + 2 * R;
+  const on = new Uint8Array(W * H);
+  for (let my = 0; my < m.h; my++) for (let mx = 0; mx < m.w; mx++) if (m.data[my * m.w + mx]) on[(my + R) * W + mx + R] = 1;
+  // Run lengths to the nearest letter texel left / right / up / down (capped).
+  const CAP = 255;
+  const left = new Uint8Array(W * H);
+  const right = new Uint8Array(W * H);
+  const up = new Uint8Array(W * H);
+  const down = new Uint8Array(W * H);
+  for (let yy = 0; yy < H; yy++) {
+    let d = CAP;
+    for (let xx = 0; xx < W; xx++) {
+      const i = yy * W + xx;
+      left[i] = d;
+      d = on[i] ? 1 : Math.min(CAP, d + 1);
+    }
+    d = CAP;
+    for (let xx = W - 1; xx >= 0; xx--) {
+      const i = yy * W + xx;
+      right[i] = d;
+      d = on[i] ? 1 : Math.min(CAP, d + 1);
+    }
+  }
+  for (let xx = 0; xx < W; xx++) {
+    let d = CAP;
+    for (let yy = 0; yy < H; yy++) {
+      const i = yy * W + xx;
+      up[i] = d;
+      d = on[i] ? 1 : Math.min(CAP, d + 1);
+    }
+    d = CAP;
+    for (let yy = H - 1; yy >= 0; yy--) {
+      const i = yy * W + xx;
+      down[i] = d;
+      d = on[i] ? 1 : Math.min(CAP, d + 1);
+    }
+  }
+  // Rings: 4-neighbour first ring; Chebyshev beyond (dilation R − 1 times more).
+  const ring = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) if (!on[i] && (left[i] === 1 || right[i] === 1 || up[i] === 1 || down[i] === 1)) ring[i] = 1;
+  for (let r = 2; r <= R; r++) {
+    for (let yy = 0; yy < H; yy++) {
+      for (let xx = 0; xx < W; xx++) {
+        const i = yy * W + xx;
+        if (on[i] || ring[i]) continue;
+        for (let dy = -1; dy <= 1 && !ring[i]; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = xx + dx;
+            const ny = yy + dy;
+            if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+            const j = ny * W + nx;
+            if (on[j] || (ring[j] && ring[j] < r)) {
+              ring[i] = r;
+              break;
+            }
+          }
         }
-      if (!d || d > R) continue;
-      // Between two strokes (left and right, or above and below, within a gap)? Keep it dark.
-      let l = false;
-      let rr = false;
-      let u = false;
-      let dn = false;
-      for (let k = 1; k <= gap; k++) {
-        l ||= on(mx - k, my);
-        rr ||= on(mx + k, my);
-        u ||= on(mx, my - k);
-        dn ||= on(mx, my + k);
       }
-      if ((l && rr) || (u && dn)) continue;
-      c.set(x + mx, y + my, hr, Math.max(0.5, halo - (d - 1) * 0.75), PWF.GLOW);
+    }
+  }
+  for (let yy = 0; yy < H; yy++) {
+    for (let xx = 0; xx < W; xx++) {
+      const i = yy * W + xx;
+      const d = ring[i];
+      if (!d) continue;
+      // Between two strokes (left and right, or above and below, within a gap)? Keep it dark.
+      if ((left[i] <= gap && right[i] <= gap) || (up[i] <= gap && down[i] <= gap)) continue;
+      c.set(x + xx - R, y + yy - R, hr, Math.max(0.5, halo - (d - 1) * 0.75), PWF.GLOW);
     }
   }
   for (let my = 0; my < m.h; my++) {
     for (let mx = 0; mx < m.w; mx++) {
-      if (!on(mx, my)) continue;
-      c.set(x + mx, y + my, ramp, on(mx, my + 1) ? core : core - 1, PWF.GLOW);
+      if (!m.data[my * m.w + mx]) continue;
+      const below = my + 1 < m.h && m.data[(my + 1) * m.w + mx];
+      c.set(x + mx, y + my, ramp, below ? core : core - 1, PWF.GLOW);
     }
   }
   return textWidth(text, f, o);
