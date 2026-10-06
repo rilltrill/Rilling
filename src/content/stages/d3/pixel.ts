@@ -10,7 +10,7 @@ import {
 import { d3BoltModule, d3RangeTile, d3SkyTile } from '../../pixelworld/d3Sky';
 import {
   d3BarrierBoardModule, d3CableTile, d3ConcreteTile, d3DangerBoardModule, d3DrumLidModule, d3DrumTile, d3FlareDecal, d3FrondModule, d3InsulatorModule, d3LampHeadModule, d3PalmBarkTile,
-  d3PoleTile, d3PylonFaceModule, d3SignBoardModule, d3UtilityPoleTile, d3WireSpanModule,
+  d3PoleTile, d3PylonFaceModule, d3SignBoardModule, d3UtilityPoleTile, d3WireSpanModule, d3FireModule, d3WindsockModule, d3VineModule,
 } from '../../pixelworld/d3Park';
 import {
   d1CarBackModule, d1CarCabinModule, d1CarFrontModule, d1CarPaintTile, d1CarSideModule, d1CarUnderModule, d1TreadTile, d1WheelModule, type CarPaint,
@@ -158,6 +158,10 @@ export class D3PixelWorld {
   private parts: { batch: PwBatch; parent: THREE.Object3D; cull: boolean }[] = [];
   /** Painted meshes that copy a classic object's world matrix every frame (the flying roadblock car). */
   private followers: { batch: PwBatch; target: THREE.Object3D; mesh: THREE.Mesh | null }[] = [];
+  /** Windsocks swinging with the wind. */
+  private socks: THREE.Object3D[] = [];
+  /** Pivots attached at `finish` (a bake drops empty groups). */
+  private late: [THREE.Object3D, THREE.Object3D][] = [];
   /** Swinging banners: pivots rocked by the wind each frame. */
   private banners: { pivot: THREE.Object3D; phase: number }[] = [];
   private time = 0;
@@ -171,6 +175,8 @@ export class D3PixelWorld {
   /** The forks' material (made at `finish`: the world atlas must be painted first). */
   boltMat!: THREE.MeshBasicMaterial;
   private floorT: PwTile;
+  private fireT: PwTile;
+  private flameGeos = new Map<string, THREE.BufferGeometry>();
   private mudT: PwTile;
   private rockT: PwTile;
   private bedT: PwTile;
@@ -186,6 +192,8 @@ export class D3PixelWorld {
     this.bedT = d3GravelTile(a, { hex: 0x5a5e58, silt: D3C.bed });
     // Bolts: painted forks (cut-out, glowing), in the world atlas (its levels keep the glow far away).
     for (let i = 0; i < 3; i++) d3BoltModule(a, i);
+    // Fires (spawned during play): the animated flame, registered up front.
+    this.fireT = d3FireModule(a, D3_ANIM_FRAMES);
   }
 
   /** The static batch of the chunk at rail distance d. */
@@ -301,6 +309,9 @@ export class D3PixelWorld {
       if (intact) {
         b.box(0, h + 0.15, 0, 1.1, 0.3, 1.1, conc);
         for (let i = 0; i < 6; i++) b.box(0, 1.3 + i * ((h - 2) / 5), 0, 0.25, 0.12, 1.3, { px: ins, nx: ins, pz: steel, nz: steel, py: steel, ny: steel });
+        // Vines hanging from the cap over the road-facing face (some pylons), breaking the column's edge.
+        if (variant % 3 === 1) pwPanel(b, V(0.12, h - 1.5, 0.47), X, Y, 1.0, 3.0, d3VineModule(a, { hex: 0x3f6d3a }, variant % 2));
+        if (variant % 4 === 2) pwPanel(b, V(-0.47, h - 2.2, 0.1), Z, Y, 1.0, 3.0, d3VineModule(a, { hex: 0x355f36 }, 1));
       }
     });
   }
@@ -529,6 +540,12 @@ export class D3PixelWorld {
     pwPanel(this.part(flick), V(9.5 + 2 * 2.9, 2.37, -0.97), X, Y, 2.5, 2.625, win('flicker'));
     // A dark window behind it (shown when the strip light is off).
     pwPanel(b, V(9.5 + 2 * 2.9, 2.37, -0.98), X, Y, 2.5, 2.625, win('dark'));
+    // Vines hanging from the cornice down the wings and the atrium's corners.
+    const vine = d3VineModule(a, { hex: 0x3f6d3a }, 0);
+    const vine2 = d3VineModule(a, { hex: 0x355f36 }, 1);
+    for (const [x, y, z, w, hh, t] of [[-19.4, 6.4, -0.95, 1.2, 3.4, vine], [-8.2, 6.6, -0.95, 1.0, 3, vine2], [19.2, 6.3, -0.95, 1.2, 3.4, vine2], [-7, 10.6, -0.94, 1.0, 3, vine], [7.0, 10.8, -0.94, 1.0, 2.8, vine2]] as [number, number, number, number, number, PwTile][]) {
+      pwPanel(b, V(x, y, z), X, Y, w, hh, t);
+    }
     // Atrium: stucco round the big glass, its sides.
     b.rect(V(-7.5, 0, -0.99), X, Y, 1.5, 12.5, st, { u0: 3 });
     b.rect(V(6, 0, -0.99), X, Y, 1.5, 12.5, st, { u0: 11 });
@@ -826,7 +843,19 @@ export class D3PixelWorld {
       });
       stripMeshes(mast, () => false);
     }
-    // The pad's own classic slab / paint go; edge lights (separate groups) and the windsock stay.
+    // The windsock: a painted pole, the sock a striped card swinging with the wind.
+    const ws = root.children.find((c) => !(c as THREE.Mesh).isMesh && c.position.x > half && c.position.z < 0);
+    if (ws) {
+      _m.compose(ws.position, ws.quaternion, ws.scale);
+      b.withMatrix(_m, () => pwCylinder(b, V(0, 0, 0), V(0, 6, 0), 0.1, 0.08, 6, d3PoleTile(a, { hex: 0x9a9a96 })));
+      stripMeshes(ws, () => false);
+      const pivot = new THREE.Group();
+      pivot.position.set(ws.position.x, 5.8, ws.position.z);
+      this.late.push([root, pivot]);
+      pwPanel(this.part(pivot), V(1.3, -0.15, 0), X, Y, 2.6, 0.8, d3WindsockModule(a), { back: true });
+      this.socks.push(pivot);
+    }
+    // The pad's own classic slab / paint go; edge lights (separate groups) stay.
     for (const c of [...root.children]) if ((c as THREE.Mesh).isMesh) root.remove(c);
   }
 
@@ -1037,6 +1066,29 @@ export class D3PixelWorld {
     return b.build(this.boltMat)!.geometry;
   }
 
+  /** A painted flame card `w` × `h` m centred on its origin (two-sided, animated, unlit) — `Fire` uses them for its tongues. */
+  flameCard(w: number, h: number): THREE.Mesh {
+    const key = `${w.toFixed(3)}|${h.toFixed(3)}`;
+    let geo = this.flameGeos.get(key);
+    if (!geo) {
+      const b = new PwBatch(this.atlas);
+      const t = this.fireT;
+      pwPanel(b, V(0, 0, 0), X, Y, w, h, t, { back: true });
+      const m = b.build(this.animMat!)!;
+      // (pwPanel maps the whole strip: the material plays one frame of it; rescale v to a frame.)
+      geo = m.geometry;
+      const uv = geo.getAttribute('pwUv') as THREE.BufferAttribute;
+      for (let i = 0; i < uv.count; i++) uv.setY(i, uv.getY(i) / D3_ANIM_FRAMES);
+      this.flameGeos.set(key, geo);
+    }
+    const mesh = new THREE.Mesh(geo, this.animMat!);
+    mesh.raycast = () => {};
+    mesh.userData.pixelWorld = true;
+    mesh.userData.noMerge = true;
+    mesh.name = 'pw:d3-flame';
+    return mesh;
+  }
+
   // ─── Build + per frame ─────────────────────────────────────────────────────
 
   /** Paint the atlases and build every mesh: terrain / chunks / water → `root` (chunks fog-culled via `culled`). */
@@ -1063,6 +1115,7 @@ export class D3PixelWorld {
     this.animMat = pwMaterial(this.atlas, { anim: { frames: D3_ANIM_FRAMES, fps: 8 } });
     const an = this.anim.build(this.animMat);
     if (an) root.add(an);
+    for (const [p, c] of this.late) p.add(c);
     for (const p of this.parts) {
       const m = p.batch.build();
       if (!m) continue;
@@ -1090,6 +1143,11 @@ export class D3PixelWorld {
   update(dt: number, cam: THREE.Vector3, flash: number, gust = 0) {
     this.time += dt;
     if (this.animMat) pwTick(this.animMat, dt);
+    for (const sk of this.socks) {
+      const t = this.time;
+      sk.rotation.y = -0.45 + Math.sin(t * 0.7) * 0.22 - gust * 0.2;
+      sk.rotation.z = -0.35 + Math.max(0, gust) * 0.3 + Math.sin(t * 5.3) * 0.04;
+    }
     for (const bn of this.banners) {
       const t = this.time * 1.7 + bn.phase;
       bn.pivot.rotation.x = -0.1 - Math.max(0, gust) * 0.18 + Math.sin(t) * 0.07 + Math.sin(t * 2.3) * 0.03;

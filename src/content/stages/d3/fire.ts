@@ -16,10 +16,15 @@ export class Fire {
   private smokeT = 0;
   private seed: number;
 
+  /**
+   * `card` (ART: PIXEL WORLD): a painted, animated flame card `w` × `h` m (centred) instead of
+   * each glowing cone — same placement and flicker.
+   */
   constructor(
     pos: THREE.Vector3,
     private size = 1,
     seed = 1,
+    card?: (w: number, h: number) => THREE.Mesh,
   ) {
     this.seed = seed;
     this.group.position.copy(pos);
@@ -30,7 +35,12 @@ export class Fire {
       const a = (i / n) * Math.PI * 2 + seed;
       const r = (i === 0 ? 0 : 0.45) * size;
       const big = i % 2 === 0;
-      const m = Kit.add(this.group, Kit.cone(0.35 * size * (big ? 1 : 0.7), 1.6 * size, 5), big ? outer : inner, Math.cos(a) * r, 0.8 * size, Math.sin(a) * r);
+      const m = card ? card(1.1 * size * (big ? 1 : 0.7), 1.9 * size) : Kit.add(this.group, Kit.cone(0.35 * size * (big ? 1 : 0.7), 1.6 * size, 5), big ? outer : inner);
+      if (card) {
+        m.rotation.y = a;
+        this.group.add(m);
+      }
+      m.position.set(Math.cos(a) * r, 0.8 * size, Math.sin(a) * r);
       m.renderOrder = 3;
       this.flames.push({ m, ph: i * 1.7 + seed * 3.1, s: big ? 1 : 0.75, x: m.position.x, z: m.position.z });
     }

@@ -91,14 +91,14 @@ export interface D3RoadOpts {
 export const D3_ROAD_W = 256;
 
 /**
- * The park road (wrap 256 × 384 = 8 × 12 m, v along the road): wet asphalt in
+ * The park road (wrap 256 × 320 = 8 × 10 m, v along the road): wet asphalt in
  * worn and patched areas (hard-edged, never a blur), darker polished wheel
  * paths, sparse aggregate, tar snakes, a patch, a pothole full of water, worn
  * yellow centre dashes every 6 m (one more faded), broken white edge lines, a
  * crumbled shoulder with gravel and grass, leaves blown onto the edges.
  */
 export function d3RoadTile(atlas: PwAtlas, o: D3RoadOpts): PwTile {
-  return atlas.tile(`d3road|${h6(o.hex)}|${h6(o.line)}|2`, D3_ROAD_W, 384, (c, k) => paintRoad(c, k, o), { wrap: true });
+  return atlas.tile(`d3road|${h6(o.hex)}|${h6(o.line)}|3`, D3_ROAD_W, 320, (c, k) => paintRoad(c, k, o), { wrap: true });
 }
 
 function paintRoad(c: PwCanvas, k: PwKit, o: D3RoadOpts) {
@@ -227,9 +227,9 @@ function paintRoad(c: PwCanvas, k: PwKit, o: D3RoadOpts) {
     if (hash2(0, y >> 2, 96) > 0.25) c.shift(x, y, -1.4);
   }
   for (let i = 0; i < 5; i++) crack(c, rng, rng.int(20, W - 20), rng.int(0, H - 1), rng.int(14, 34), rng.chance(0.5) ? 0 : Math.PI, { dt: -1.6, lip: 0.7, wrapX: false, branch: 0.06 });
-  // Centre dashes (2.6 m every 6 m): yellow paint worn through to the aggregate, chipped ends.
+  // Centre dashes (2.6 m every 5 m): yellow paint worn through to the aggregate, chipped ends.
   for (let dsh = 0; dsh < 2; dsh++) {
-    const y0 = 20 + dsh * 192;
+    const y0 = 20 + dsh * 160;
     const worn = dsh === 1 ? 0.45 : 0.18;
     for (let y = 0; y < 83; y++) {
       for (let x = 126; x < 131; x++) {

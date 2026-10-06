@@ -1203,7 +1203,8 @@ export class ParkEnv {
 
   private addFire(p: THREE.Vector3, size: number, world: World | null) {
     if (this.fires.length >= 6) return;
-    const f = new Fire(p.clone().setY(this.groundAt(p.x, p.z)), size, this.fires.length + 1);
+    const pw = this.pw;
+    const f = new Fire(p.clone().setY(this.groundAt(p.x, p.z)), size, this.fires.length + 1, pw ? (w, h) => pw.flameCard(w, h) : undefined);
     this.root.add(f.group);
     this.fires.push({ fire: f, pos: f.group.position.clone() });
     if (world) world.fx.explosion(_v.copy(f.group.position).setY(f.group.position.y + 0.5), 0.6);

@@ -524,3 +524,101 @@ export function d3UtilityPoleTile(atlas: PwAtlas): PwTile {
     c.scatter(k.rng, 0, 0, 16, 64, 8, 0, -0.8, { shapes: 3 });
   }, { wrap: true });
 }
+
+/**
+ * A fuel fire (animated module 32 × 48 a frame, D3_ANIM_FRAMES frames, cut out):
+ * three licking tongues (white-hot cores, orange bodies, red tips) swaying and
+ * flaring frame by frame, embers breaking off, a ragged dark smoke lip on top.
+ */
+export function d3FireModule(atlas: PwAtlas, frames: number): PwTile {
+  const W = 32;
+  const FH = 48;
+  return atlas.tile(`d3fire|${frames}`, W, FH * frames, (c, k) => {
+    const fire = k.ramp(0xff7a1a, { light: 0.6, sat: 1.1 });
+    const core = k.ramp(0xffd860, { light: 0.6, sat: 1.0 });
+    const red = k.ramp(0xc82a14, { light: 0.5, sat: 1.1 });
+    const smoke = k.ramp(0x2a2624, { light: 0.4 });
+    for (let f = 0; f < frames; f++) {
+      const y0 = c.h - (f + 1) * FH;
+      const tongues = [
+        [16, 0.95, 0.3],
+        [9, 0.66, 1.7],
+        [24, 0.72, 3.1],
+      ];
+      for (let vt = 0; vt < FH; vt++) {
+        const h = vt / FH;
+        for (let x = 0; x < W; x++) {
+          let best = 9;
+          let tip = 0;
+          for (const [cx, hh, ph] of tongues) {
+            const top = hh * (0.86 + Math.sin(f * 1.9 + ph) * 0.12);
+            if (h > top) continue;
+            const sway = Math.sin(h * 6 + f * 1.4 + ph) * 2.2 * h;
+            const half = (1 - h / top) * 7 * (0.9 + Math.sin(f * 2.3 + ph + h * 3) * 0.1) + 1;
+            const d = Math.abs(x + 0.5 - cx - sway) / half;
+            if (d < best) {
+              best = d;
+              tip = h / top;
+            }
+          }
+          if (best > 1) continue;
+          const r = best < 0.35 && tip < 0.55 ? core : tip > 0.78 ? red : fire;
+          c.set(x, y0 + FH - 1 - vt, r, r === core ? 5 : best > 0.75 ? 3 : 4, PWF.GLOW);
+        }
+      }
+      // Embers and a smoke lip.
+      for (let i = 0; i < 5; i++) {
+        const x = Math.floor(hash2(i, f, 7) * W);
+        const y = Math.floor(hash2(i, f, 8) * FH * 0.35);
+        c.set(x, y0 + y, core, 5, PWF.GLOW);
+      }
+      for (let x = 6; x < 26; x++) if (hash2(x, f, 9) > 0.55) c.set(x, y0 + 1 + (x & 1), smoke, 1.6);
+    }
+  });
+}
+
+/** A windsock (module 84 × 26 = 2.6 × 0.8 m, cut out, the mast end on the LEFT): orange / white bands tapering, wet, a frayed tail. */
+export function d3WindsockModule(atlas: PwAtlas): PwTile {
+  const W = 84;
+  const H = 26;
+  return atlas.tile(`d3windsock`, W, H, (c, k) => {
+    const or = k.ramp(0xe05a1a, { light: 0.5, sat: 1.05 });
+    const wh = k.ramp(0xe8e0d0, { light: 0.3, sat: 0.5 });
+    const st = k.ramp(0x9a9a96, { light: 0.5, sat: 0.6 });
+    for (let x = 0; x < W; x++) {
+      const t = x / W;
+      const half = 12 - t * 6 + Math.sin(t * 9) * 0.8;
+      const cy = 12 + t * 3 + Math.sin(t * 7) * 1.2;
+      const band = Math.floor(t * 5) % 2 === 0 ? or : wh;
+      for (let y = Math.round(cy - half); y <= Math.round(cy + half); y++) {
+        const v = (y - (cy - half)) / (half * 2);
+        c.set(x, y, band, v < 0.18 ? 4 : v > 0.8 ? 1.8 : (x % 9) === 0 ? 2.4 : 3);
+      }
+    }
+    c.rect(0, 0, 3, H, st, 3.4);
+    for (let y = 4; y < 22; y++) if (hash2(y, 1, 3) > 0.5) c.set(W - 1, y, 0, 0);
+  });
+}
+
+/** Hanging vines (module 32 × 96 = 1 × 3 m, cut out): five strands from the top, heart-shaped leaves along them, lit on the left. */
+export function d3VineModule(atlas: PwAtlas, o: { hex: number }, variant = 0): PwTile {
+  const W = 32;
+  const H = 96;
+  return atlas.tile(`d3vine|${h6(o.hex)}|${variant}`, W, H, (c, k) => {
+    const g = k.ramp(o.hex, { light: 0.45, sat: 1.05 });
+    const stem = k.ramp(0x4a4a2a, { light: 0.4 });
+    for (let s = 0; s < 5; s++) {
+      const x0 = 3 + s * 6 + Math.round(hash2(s, variant, 3) * 3);
+      const len = Math.round(H * (0.45 + hash2(s, variant, 4) * 0.55));
+      let x = x0;
+      for (let y = 0; y < len; y++) {
+        if (y % 7 === 3) x += hash2(s, y, variant) > 0.5 ? 1 : -1;
+        c.set(x, y, stem, 2.4);
+        if (y % 5 === 2 && y > 2) {
+          const side = (y >> 2) & 1 ? 1 : -1;
+          for (const [dx, dy, t] of [[side, 0, 3.4], [side * 2, 0, 3], [side, 1, 2.6], [side * 2, 1, 2.2], [side * 2, -1, 4], [side * 3, 0, 2.6]] as [number, number, number][]) c.set(x + dx, y + dy, g, side < 0 && t > 3 ? 4.2 : t);
+        }
+      }
+    }
+  });
+}
