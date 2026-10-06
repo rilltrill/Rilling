@@ -467,7 +467,8 @@ export function rackFrontTile(atlas: PwAtlas): PwTile {
       for (const rx of [x0, x0 + Math.round(colW) - 3]) {
         c.rect(rx, 0, 3, 74, frame, 3);
         c.vline(rx, 0, 74, frame, 4);
-        for (let y = 2; y < 74; y += 3) c.set(rx + 1, y, voidR, 1);
+        // (Holes every 6 rows, 2 tall: no 1-texel rhythm to crawl when the row is seen edge-on.)
+        for (let y = 2; y < 72; y += 6) c.rect(rx + 1, y, 1, 2, voidR, 1);
       }
       for (let u = 0; u < 6; u++) {
         // Unit centre (texels above the floor) = (0.3 + u·0.33) m.
@@ -485,7 +486,8 @@ export function rackFrontTile(atlas: PwAtlas): PwTile {
         c.hline(ux, top, uw, bezel, 4);
         c.hline(ux, top + 7, uw, bezel, 1.5);
         // Vent slots, drive bays, the LED window (left), a label, pull handles.
-        for (let x = ux + 14; x < ux + uw - 4; x += 2) c.vline(x, top + 2, 4, bezel, 1.5);
+        // Vent slots 2 texels wide every 4 (a 1-on-1-off comb shimmers at grazing views).
+        for (let x = ux + 14; x < ux + uw - 5; x += 4) c.rect(x, top + 2, 2, 4, bezel, 1.5);
         c.rect(ux + 5, top + 1, 7, 3, voidR, 1);
         c.rect(ux + 1, top + 2, 2, 4, bezel, 4.5);
         c.rect(ux + uw - 3, top + 2, 2, 4, bezel, 4.5);

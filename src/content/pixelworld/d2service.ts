@@ -43,15 +43,20 @@ export function tunnelDeckTile(atlas: PwAtlas): PwTile {
           if (e < 5) c.set(x, y, voidR, e === 4 ? 2 : 1.5);
           else if (e < 15) c.set(x, y, Math.floor((y + (x < W / 2 ? x : -x)) / 5) % 2 ? blk : yel, e === 5 ? 4 : e === 14 ? 2 : 3);
           else {
-            // Chequer plate walkway (low-frequency: no shimmer at grazing angles): raised lozenges, plate seams.
+            // Chequer plate walkway (low-frequency: no shimmer at grazing angles): raised lozenges in
+            // 2-texel strokes (whole at level 1, the floor's level right under the camera), plate seams.
             const ly = y % 32;
-            const lx = e - 15;
+            const hx = (e - 15) >> 1;
+            const hy = y >> 1;
             if (ly === 0 || ly === 1) c.set(x, y, m, ly === 0 ? 1.5 : 3.75);
             else {
-              const dx = lx % 8;
-              const dy = y % 8;
-              const loz = (dx + dy) % 8 === 3 && ((Math.floor(lx / 8) + Math.floor(y / 8)) % 2 === 0) ? 4 : (dx + 8 - dy) % 8 === 3 && ((Math.floor(lx / 8) + Math.floor(y / 8)) % 2 === 1) ? 4 : 0;
-              c.set(x, y, m, loz || 2.75);
+              // One tread bar (three 2×2 blocks on a diagonal) per 16-texel cell, alternating direction:
+              // sparse enough to read as a tread pattern, not speckle, at the near floor's level 1.
+              const dx = hx % 8;
+              const dy = hy % 8;
+              const odd = ((hx >> 3) + (hy >> 3)) % 2 === 1;
+              const bar = dy >= 2 && dy <= 4 && (odd ? dx === 7 - dy : dx === dy + 1);
+              c.set(x, y, m, bar ? 3.75 : 2.75);
             }
           }
         }
