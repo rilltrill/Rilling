@@ -90,9 +90,9 @@ function paintLaundry(c: PwCanvas, k: PwKit) {
   const F = PWF.GLOW;
   const frame = k.ramp(0x8a8c90, { light: 0.45, sat: 0.5 });
   const riser = k.ramp(0x2a3a4a, { light: 0.42, sat: 0.9 });
-  const wall = k.ramp(0xb8d8d0, { light: 0.45, sat: 0.6 });
+  const wall = k.ramp(0x7a9a94, { light: 0.45, sat: 0.6 });
   const tube = k.ramp(0xe8fff8, { light: 0.3 });
-  const enamel = k.ramp(0xd8dcd8, { light: 0.45, sat: 0.4 });
+  const enamel = k.ramp(0xb8bcb8, { light: 0.45, sat: 0.4 });
   const glass = k.ramp(0x2a3440, { light: 0.4 });
   const warm = k.ramp(0xffb860, { light: 0.4 });
   const table = k.ramp(0x7a6a5a, { light: 0.4 });
