@@ -1,6 +1,9 @@
 import { bayer, PWF, PwRng, type PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
-import { drawText, FONT_3x5, FONT_5x7, FONT_BOLD } from './font';
+import { drawText, FONT_3x5, FONT_5x7, FONT_BOLD, tallFont } from './font';
+
+/** Bold caps doubled in height (tall gilded sign letters). */
+const TALL_BOLD = tallFont(FONT_BOLD, 2);
 import { darken, hash2, shiftHue, smooth } from './surfaces';
 
 /**
@@ -473,7 +476,7 @@ export function d1GateSignModule(atlas: PwAtlas, o: { board: number; frame: numb
     // Lettering: raised gilded caps with a cast shadow, lit tops — the biggest face that fits each side.
     const room = W / 2 - er - 12;
     const word = (text: string, cx: number) => {
-      const opts: [typeof FONT_BOLD, number][] = [[FONT_BOLD, 2], [FONT_5x7, 2], [FONT_BOLD, 1]];
+      const opts: [typeof FONT_BOLD, number][] = [[FONT_BOLD, 2], [FONT_5x7, 2], [TALL_BOLD, 1], [FONT_BOLD, 1]];
       let pick = opts[opts.length - 1];
       for (const o2 of opts) if (measure(text, o2[0], o2[1]) <= room) { pick = o2; break; }
       const [f, scale] = pick;

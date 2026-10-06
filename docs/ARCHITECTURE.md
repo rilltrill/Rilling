@@ -681,10 +681,10 @@ answers "what do I draw"):
 
 | budget | limit | z1 MAIN STREET | d1 JUNGLE RUN |
 |---|---|---|---|
-| atlas memory (all levels) | ≤ 24 MB | 11.4 MB (world 2048×768 8.0 MB + sky 2048×432 3.4 MB) | 6.6 MB (world 512×512 1.3 MB + sky 2048×672 5.3 MB) |
-| paint at stage load | ≤ 300 ms on a phone | 170–210 ms (node on a shared 4-core dev box; sky 36–41 ms) | 180–195 ms (sky 125–130 ms) |
-| draw calls (same frame) | ≤ 250 | 45–51 (PIXEL CAST 53–60) | 44–50 (PIXEL CAST 50–57) |
-| triangles (same frame) | — | 49 k (PIXEL CAST 73 k) | 31 k (PIXEL CAST 31 k) |
+| atlas memory (all levels) | ≤ 24 MB | 11.4 MB (world 2048×768 8.0 MB + sky 2048×432 3.4 MB) | 9.0 MB (world 1024×816 4.2 MB + sky 2048×592 4.6 MB + jeep 256×160 0.2 MB; FLORA stone / herd sprites 2 × 512×256 R8) |
+| paint at stage load | ≤ 300 ms on a phone | 170–210 ms (node on a shared 4-core dev box; sky 36–41 ms) | ≈ 100 ms warm (min of 5: world ≈ 60, sky ≈ 35, jeep ≈ 3) + FLORA stones 14 / herd 7 ms |
+| draw calls (same frame) | ≤ 250 | 45–51 (PIXEL CAST 53–60) | 23–52 (PIXEL CAST 34–71) |
+| triangles (same frame) | — | 49 k (PIXEL CAST 73 k) | 18–20 k (PIXEL CAST 23–31 k) |
 | per-frame work | no allocations | backdrop follow (a position set per layer) | same |
 
 Keep tiles few: a NEUTRAL tile tinted per material beats a tile per colour; wrap shop
@@ -731,12 +731,30 @@ load skips painting), paint the one-level sky atlas after the first frame.
   fire effects, the river / alley interiors past beat 10, the boss arena dressing
   (butcher shop interior), the title-screen backdrop. Facade variety: 5 wall kinds; add
   storefront goods per shop name and a second window set.
-- **d1 JUNGLE RUN** (converted): dirt road ribbon with ruts and ragged grass edges, painted
-  meadow, rocks / boulders / cliffs as fractured rock faces, day panorama (fog-matched
-  haze, cumulus, jungle ranges, smoking volcano). Still classic: the park gate and
-  palisade (wooden planks are a natural `planksTile` job), river / waterfall (animated
-  `waterTile` strip), fallen tree, the car, the herd, dirt patches (still rectangles —
-  paint ragged-edge patch decals), the visitor-centre buildings in the fog.
+- **d1 JUNGLE RUN** (converted end to end; `stages/d1/pixel.ts`, `jeepPixel.ts`,
+  `herdPixel.ts`, `pwShapes.ts`; painters `pixelworld/d1*.ts`): the road (`d1RoadTile`: ruts
+  with worn tread prints, damp hollows, pebbles, crown tufts, a raptor track, ragged verges),
+  the meadow (`d1MeadowTile`), moss / litter / earth patch decals with ragged edges, puddles
+  mirroring the sky, the stampede's churned band; the gate (bark logs wrapped round by
+  `pwCylinder`, iron bands, hewn points, the palisade as one cut-out wall tile, braced plank
+  doors with strap hinges and claw gouges, the carved PRIMAL ISLAND sign with the park emblem,
+  flickering pixel torch flames), the ticket kiosk, flags; the electric fence (galvanised
+  posts, hazard collars, insulators, sagging cut-out wire spans — vines, the cut wire at the
+  old breach — DANGER plates; the breakable section in its pivot's frame); the fallen tree
+  (bark, moss drapes, splintered break, limbs; both halves still fly apart), ranger supplies;
+  the tour car (body / cabin / front / back / underside / tread / wheel modules) following
+  its flip; banks, animated river / white water / waterfall / splash (`d1Water.ts`, one
+  animated material); boulders and cliff pillars as FLORA stone billboards (`d1Species.ts`);
+  the herd as run / walk-cycle sprites (`d1Herd.ts`, posed by the herd's own gait);
+  stippled sun shafts (`d1Shafts.ts`); the jeep view model on its own atlas at 48 texels a
+  metre; the ROAD CLOSED barricade; boss-stretch dressing (river-tours landing, raft, NO
+  SWIMMING, driftwood, an upturned tour car); the panorama painted straight into the canvas
+  (`d1Sky.ts`: range feet melt into the fog). The gate pillars and the car stay the classic
+  (hidden) occluders. Still classic: the fuel drums (destructibles: every mesh is a hit
+  box), the jeep's windscreen glass / lamps / hot barrel, FX. Checks:
+  `tests/unit/pixel-world-d1.test.ts` (occluders, raycasts, budget, full-stage simulator),
+  `D1_SIG=1 … d1-sig.test.ts` (CLASSIC / PIXEL CAST scene signature), `d1-lab.test.ts`
+  (tile / stone / herd dumps, paint benches).
 - **z2 HOSPITAL** (interior, z2/bake.ts colour baker, zones in zonesUpper/Lower.ts):
   `paintedWallTile` / `labPanelTile` walls with wainscot and scuffs, `ceilingTile` with
   light panels as glow modules, `terrazzoTile` / sheet-vinyl floors, `bloodTrailDecal`,

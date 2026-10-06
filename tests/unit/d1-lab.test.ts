@@ -200,3 +200,31 @@ describe.skipIf(!process.env.D1_TILEBENCH)('d1 tile bench', () => {
     w.dispose();
   });
 });
+
+describe.skipIf(!process.env.D1_MEASURE)('d1 measure', () => {
+  it('measures sign words', async () => {
+    const F = await import('../../src/content/pixelworld/font');
+    for (const [n, f] of [['bold', F.FONT_BOLD], ['5x7', F.FONT_5x7], ['tallbold', F.tallFont(F.FONT_BOLD, 2)]] as const) {
+      for (const s of [1, 2]) console.log(n, s, 'PRIMAL', F.textWidth('PRIMAL', f, { scale: s }), 'ISLAND', F.textWidth('ISLAND', f, { scale: s }));
+    }
+  });
+});
+
+describe.skipIf(!process.env.D1_FLORAMIN)('d1 flora atlas min', () => {
+  it('stones + herd atlases, min of 8 (warm)', { timeout: 600_000 }, async () => {
+    const { paintFloraAtlas } = await import('../../src/content/pixel/floraField');
+    const S = await import('../../src/content/pixelworld/d1Species');
+    const Hd = await import('../../src/content/pixelworld/d1Herd');
+    let st = Infinity;
+    let hd = Infinity;
+    for (let i = 0; i < 8; i++) {
+      let t0 = performance.now();
+      paintFloraAtlas(S.D1_STONES, S.D1_STONE_BIOME, `min-st-${i}`);
+      st = Math.min(st, performance.now() - t0);
+      t0 = performance.now();
+      paintFloraAtlas(Hd.D1_HERD, Hd.D1_HERD_BIOME, `min-hd-${i}`);
+      hd = Math.min(hd, performance.now() - t0);
+    }
+    console.log(`FLORA stones ${st.toFixed(1)} ms, herd ${hd.toFixed(1)} ms`);
+  });
+});

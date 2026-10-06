@@ -586,13 +586,13 @@ export class D1PixelWorld {
   /** The painted panorama: day sky, two jungle ranges whose feet melt into the fog, the smoking volcano. */
   buildBackdrop(anchor: THREE.Vector3): THREE.Group {
     const s = this.skyAtlas;
-    const sky = d1SkyTile(s, { horizon: FOG, top: 0x3a86cc, el0: -4, el1: 42, sunAz: 124, clouds: 0.55, haze: 15 });
-    const far = d1RangeTile(s, { hex: 0x7c9a92, haze: FOG, el0: -2, el1: 20, height: 0.85, rough: 0.5, lightAz: 124, seed: 4, fogFoot: 0.22 });
+    const sky = d1SkyTile(s, { horizon: FOG, top: 0x3a86cc, el0: -4, el1: 38, sunAz: 124, clouds: 0.55, haze: 15 });
+    const far = d1RangeTile(s, { hex: 0x7c9a92, haze: FOG, el0: -2, el1: 18, height: 0.85, rough: 0.5, lightAz: 124, seed: 4, fogFoot: 0.22 });
     const near = d1RangeTile(s, { hex: 0x4f7258, haze: FOG, el0: -3, el1: 11, height: 0.7, rough: 0.8, lightAz: 124, seed: 7, fogFoot: 0.3 });
     const vo = { hex: 0x707a76, haze: FOG, el0: -3, el1: 24, az: 340, halfWidth: 24, lightAz: 124 };
     const volcano = volcanoTile(s, vo);
-    this.backdrop = new PwBackdrop(s, { tile: sky, el0: -4, el1: 42, radius: 330 }, [
-      { tile: far, radius: 310, el0: -2, el1: 20, follow: 1 },
+    this.backdrop = new PwBackdrop(s, { tile: sky, el0: -4, el1: 38, radius: 330 }, [
+      { tile: far, radius: 310, el0: -2, el1: 18, follow: 1 },
       { tile: volcano, radius: 280, el0: -3, el1: 24, yaw: vo.az, span: volcanoSpan(vo), follow: 0.85 },
       { tile: near, radius: 250, el0: -3, el1: 11, yaw: 77, follow: 0.92 },
     ]);
