@@ -178,7 +178,7 @@ export class D1PixelWorld {
     const a = this.atlas;
     const right = new THREE.Vector3(normal.z, 0, -normal.x);
     const c = new THREE.Vector3(top.x, 10.6, top.z).addScaledVector(normal, 0.6);
-    pwPanel(this.anim, c, right, Y, 8, 22, d1FallTile(a, { hex: 0xb8e0ec }));
+    pwPanel(this.anim, c, right, Y, 8, 22, d1FallTile(a, { hex: 0x84c8dc, deep: 0x2e7e96 }));
     const sp = d1SplashModule(a, { hex: 0xe8f4f4 });
     const base = new THREE.Vector3(top.x, 1.4, top.z).addScaledVector(normal, 1.4);
     pwPanel(this.anim, base, right, Y, 9, 3.6, sp);
@@ -435,7 +435,7 @@ export class D1PixelWorld {
     const a = this.atlas;
     // The trunk meshes (merged into each half) are hidden; crown / root billboards are FLORA's.
     for (const half of [t.left, t.right]) for (const c of half.children) if ((c as THREE.Mesh).isMesh) c.visible = false;
-    const bark = d1BarkTile(a, { hex: COL.trunk, lichen: 0x8a9a6a });
+    const bark = d1BarkTile(a, { hex: COL.trunk, lichen: 0x8a9a6a, checks: 3 });
     const barkDark = d1BarkTile(a, { hex: 0x4a382a });
     const drape = d1MossDrapeModule(a, { hex: 0x4e7a2a, light: 0x8aaa3c });
     const end = d1LogEndModule(a, { wood: 0xc0965e, bark: 0x4a382a, broken: true });
@@ -521,7 +521,7 @@ export class D1PixelWorld {
     const b = this.world;
     const plank = planksTile(a, { hex: 0x7a5a38, horizontal: true });
     const post = d1BarkTile(a, { hex: 0x5a4632 });
-    const bark = d1BarkTile(a, { hex: COL.trunk, lichen: 0x8a9a6a });
+    const bark = d1BarkTile(a, { hex: COL.trunk, lichen: 0x8a9a6a, checks: 3 });
     const end = d1LogEndModule(a, { wood: 0xc0965e, bark: 0x4a382a, broken: true });
     // The jetty: a deck from the far bank out over the water, on four posts.
     b.withMatrix(at(556, 25.6), () => {

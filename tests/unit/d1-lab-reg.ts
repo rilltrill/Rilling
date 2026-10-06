@@ -46,7 +46,7 @@ export async function register2(a: PwAtlas, t: PwTile[]) {
   t.push(P.d1RoadTile(a, { hex: 0xa8885a, rut: 0x8a6a44, grass: 0x6b8c34, stone: 0x8a8478, leaf: 0x7a6a2a }));
   t.push(Wt.d1WaterTile(a, { hex: 0x2a98b4, deep: 0x1a6a8a }));
   t.push(Wt.d1FoamEdgeTile(a, { hex: 0xe8f4f4 }));
-  t.push(Wt.d1FallTile(a, { hex: 0xb8e0ec }));
+  t.push(Wt.d1FallTile(a, { hex: 0x84c8dc, deep: 0x2e7e96 }));
   t.push(Wt.d1SplashModule(a, { hex: 0xe8f4f4 }));
   t.push(Wt.d1BankTile(a, { earth: 0x6a5434, sand: 0x9a8a6a, mud: 0x4a3a28, grass: 0x6b8c34, stone: 0x8a8478 }));
 }

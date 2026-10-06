@@ -98,25 +98,56 @@ export function d1FoamEdgeTile(atlas: PwAtlas, o: { hex: number; mirror?: boolea
   }, { wrap: true });
 }
 
-/** Waterfall sheet (wrap 64 × 32 a frame): pale ropes of water falling 8 texels a frame, dark gaps, foam beads. */
-export function d1FallTile(atlas: PwAtlas, o: { hex: number }): PwTile {
+/**
+ * Waterfall sheet (wrap 128 × 32 a frame at 16 tpm: the whole 8 m width, so
+ * its sides can be ragged): ropes of water falling 8 texels a frame — deep
+ * teal gaps, lit ropes, white streaks — and both edges frayed into loose
+ * strands and spray that fall with the water (cut out).
+ */
+export function d1FallTile(atlas: PwAtlas, o: { hex: number; deep: number }): PwTile {
   const F = D1_WATER_FRAMES;
-  return atlas.tile(`d1fall|${h6(o.hex)}|${F}`, 64, 32 * F, (c, k) => {
-    const w = k.ramp(o.hex, { light: 0.45, sat: 0.9 });
+  const W = 128;
+  return atlas.tile(`d1fall|${h6(o.hex)}|${h6(o.deep)}|${F}|${W}`, W, 32 * F, (c, k) => {
+    const w = k.ramp(o.hex, { light: 0.45, sat: 0.95 });
+    const deep = k.ramp(o.deep, { light: 0.4, sat: 0.9 });
     // Ropes: columns with their own tone and wobble.
-    const rope = new Float32Array(64);
-    for (let x = 0; x < 64; x++) rope[x] = smooth(x, 0, 64, 4, 8, 3);
+    const rope = new Float32Array(W);
+    for (let x = 0; x < W; x++) rope[x] = smooth(x, 0, W, 4, 16, 3) * 0.55 + smooth(x, 0, W, 4, 32, 4) * 0.45;
     frames(c, F, (x, vt, f, y) => {
       const v = wrap(vt + f * 8, 32);
+      // Frayed edges: how far in each side starts on this row (moves down with the water).
+      const eL = 3 + Math.floor(hash2(0, v >> 1, 21) * 7);
+      const eR = 3 + Math.floor(hash2(1, v >> 1, 22) * 7);
+      const fromEdge = Math.min(x - eL, W - 1 - eR - x);
+      if (fromEdge < 0) {
+        // Loose strands / spray off the edge.
+        if (fromEdge > -6 && hash2(x, v >> 2, 23) > 0.86) c.set(x, y, w, 4.4);
+        return;
+      }
       const r = rope[x];
-      let t = r > 0.62 ? 4 : r > 0.4 ? 3.2 : 2.2;
-      // Streaks falling: bright dashes 3-8 long in each rope.
-      const s = hash2(x, v >> 2, 9);
-      if (s > 0.8 && (v & 3) < 3) t = 4.8;
-      else if (s < 0.12) t = 2;
-      c.set(x, y, w, t);
+      // Split ropes near the edges: gaps where a rope is thin.
+      if (fromEdge < 10 && r < 0.36 && (v & 7) < 5) return;
+      // Ropes lit by their thickness, the gaps between them deep teal.
+      let ramp = r < 0.34 ? deep : w;
+      let t = r < 0.34 ? (r < 0.2 ? 2.4 : 3) : r > 0.66 ? 4 : r > 0.46 ? 3.4 : 2.8;
+      // Streaks falling: bright 1-2 texel dashes down the ropes, dark ones down the gaps.
+      const sh = hash2(x >> 1, v >> 3, 9);
+      const dash = (v & 7) < 5;
+      if (dash && sh > 0.78 && r >= 0.3) {
+        ramp = w;
+        t = 4.8;
+      } else if (dash && sh < 0.14 && r < 0.5) {
+        ramp = deep;
+        t = 2.2;
+      }
+      // The outermost texels: lit foam.
+      if (fromEdge < 2) {
+        ramp = w;
+        t = 4.6;
+      }
+      c.set(x, y, ramp, t);
     });
-  }, { wrap: true });
+  }, { wrap: true, density: 16 });
 }
 
 /** Splash / spray where the fall hits the pool (module 64 × 32 a frame, cut out): churning foam heaps, flying droplets. */

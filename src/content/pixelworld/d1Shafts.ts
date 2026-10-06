@@ -4,12 +4,12 @@ import { Kit } from '../kit/ModelKit';
 
 /**
  * Sun shafts for JUNGLE RUN's ART: PIXEL WORLD: instead of one pale additive
- * slab per shaft, each plane draws a few RAYS of light stippled with an
- * ordered dither in screen pixels (the retro target's own pixels — the way
- * 16-bit games did light beams): the ray mask comes from the plane's u (a
- * hashed set of rays of different widths, tapering at the plane's edges), the
- * stipple density from v (strongest where it leaves the canopy, gone before
- * the ground). Additive, no depth writes, fogged like the classic shafts.
+ * slab per shaft, each plane draws a few hard-edged RAYS of light in three
+ * stepped strengths (the way 16-bit games did light beams): the ray mask comes
+ * from the plane's u (a hashed set of rays of different widths, tapering at
+ * the plane's edges), the strength from v (strongest where it leaves the
+ * canopy, gone before the ground). Additive, no depth writes, fogged like the
+ * classic shafts.
  */
 
 const VERT = /* glsl */ `
@@ -18,17 +18,11 @@ const VERT = /* glsl */ `
 const FRAG = /* glsl */ `
   varying vec2 vShUv;
   uniform float uShK;
-  float shBayer(vec2 p) {
-    ivec2 q = ivec2(mod(p, 4.0));
-    int i = q.y * 4 + q.x;
-    float b[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
-    return (b[i] + 0.5) / 16.0;
-  }
   float shHash(float x) { return fract(sin(x * 127.1) * 43758.5453); }
 `;
 
 /** The dithered shaft material (one per stage; `strength` = how much light a full ray adds). */
-export function d1ShaftMaterial(color = 0xfff1c0, strength = 0.12): THREE.MeshBasicMaterial {
+export function d1ShaftMaterial(color = 0xfff1c0, strength = 0.1): THREE.MeshBasicMaterial {
   const m = new THREE.MeshBasicMaterial({
     color,
     transparent: true,
@@ -55,14 +49,15 @@ export function d1ShaftMaterial(color = 0xfff1c0, strength = 0.12): THREE.MeshBa
         float edge = smoothstep(0.0, 0.15, vShUv.x) * smoothstep(1.0, 0.85, vShUv.x);
         // Strong up in the canopy, fading toward the ground (in three stepped bands).
         float fall = floor(clamp(vShUv.y * 1.15, 0.0, 1.0) * 3.0 + 0.5) / 3.0;
-        float a = ray * edge * fall;
-        if (a <= 0.0 || shBayer(gl_FragCoord.xy) > a * 0.3) discard;
-        gl_FragColor = vec4(outgoingLight * uShK, 1.0);
+        // Hard-edged, in three steps of light (no per-pixel stipple: through the CRT mask that turns to colour noise).
+        float a = floor(ray * edge * fall * 3.0 + 0.5) / 3.0;
+        if (a <= 0.0) discard;
+        diffuseColor.a = uShK * a;
       }
       #include <opaque_fragment>`,
     );
   };
-  m.customProgramCacheKey = () => 'd1Shaft1';
+  m.customProgramCacheKey = () => 'd1Shaft3';
   m.name = 'pw:d1-shafts';
   return Kit.track(m);
 }

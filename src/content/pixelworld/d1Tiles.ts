@@ -35,11 +35,13 @@ export const D1_EMBLEM = { red: 0xe0401a, gold: 0xf4c43a, ink: 0x1a1210 } as con
  * side), cross-checks, a knot or two and grey-green lichen. 64 × 64 wrap.
  * `moss` adds clumps creeping up from one edge (the log's foot / top side).
  */
-export function d1BarkTile(atlas: PwAtlas, o: { hex: number; lichen?: number; moss?: number }): PwTile {
-  return atlas.tile(`d1bark|${h6(o.hex)}|${o.lichen !== undefined ? h6(o.lichen) : ''}|${o.moss !== undefined ? h6(o.moss) : ''}`, 64, 64, (c, k) => paintBark(c, k, o), { wrap: true });
+export function d1BarkTile(atlas: PwAtlas, o: { hex: number; lichen?: number; moss?: number; checks?: number }): PwTile {
+  const ck = o.checks !== undefined ? `|c${o.checks}` : '';
+  return atlas.tile(`d1bark|${h6(o.hex)}|${o.lichen !== undefined ? h6(o.lichen) : ''}|${o.moss !== undefined ? h6(o.moss) : ''}${ck}`, 64, 64, (c, k) => paintBark(c, k, o), { wrap: true });
 }
 
-export function paintBark(c: PwCanvas, k: PwKit, o: { hex: number; lichen?: number; moss?: number }) {
+/** `checks`: how many cross-checks break the ridges (16; fewer reads as long grain — a log lying down). */
+export function paintBark(c: PwCanvas, k: PwKit, o: { hex: number; lichen?: number; moss?: number; checks?: number }) {
   const rng = k.rng;
   const W = c.w;
   const H = c.h;
@@ -88,12 +90,17 @@ export function paintBark(c: PwCanvas, k: PwKit, o: { hex: number; lichen?: numb
       if (left < 1) t = 0.6; // the fissure
       else if (left < 2) t = 4; // lit lip
       else if (left > width - 2) t = 2; // shaded far side
-      if (t === 3 && hash2(x >> 1, y >> 2, 11) > 0.9) t = 2;
+      if (t === 3 && hash2(x >> 1, y >> 2, 11) > (o.checks !== undefined && o.checks < 8 ? 0.94 : 0.9)) t = 2;
       c.set(x, y, ridgeRamp[i], t);
     }
   }
   // Cross-checks: short dark breaks across a ridge with a lit texel under them.
+  const checks = o.checks ?? 16;
   for (let i = 0; i < 16; i++) {
+    if (i >= checks) {
+      rng.int(0, W - 1), rng.int(0, H - 1), rng.int(2, 4);
+      continue;
+    }
     const x = rng.int(0, W - 1);
     const y = rng.int(0, H - 1);
     const len = rng.int(2, 4);
@@ -869,13 +876,22 @@ export function d1MossDrapeModule(atlas: PwAtlas, o: { hex: number; light: numbe
     const rng = k.rng;
     const m = k.ramp(o.hex, { light: 0.45, sat: 1.05 });
     const ml = k.ramp(o.light, { light: 0.45, sat: 1.05 });
+    // Tongues hanging down the flanks: along the log the moss is widest over the top
+    // (x ≈ 64) and breaks into lobes of its own length down each side.
+    const tongue = new Float32Array(128);
+    for (let x = 0; x < 128; x++) {
+      const side = Math.abs(x + 0.5 - 64) / 64;
+      tongue[x] = 0.92 - side * side * 0.75 + (smooth(x, 0, 128, 4, 10, 6) - 0.5) * 0.5;
+    }
     for (let y = 0; y < 64; y++) {
       for (let x = 0; x < 128; x++) {
-        // Ragged rim: lobed distance from the centre in both axes (x round the log, y along it).
-        const ex = Math.abs(x + 0.5 - 64) / 64 + Math.sin(y * 0.4 + 1) * 0.05 + hash2(x >> 1, y >> 2, 3) * 0.07;
-        const ey = Math.abs(y + 0.5 - 32) / 32 + Math.sin(x * 0.35) * 0.08 + hash2(x >> 2, y >> 1, 4) * 0.1;
-        if (ex > 0.93 || ey > 0.9) continue;
-        c.set(x, y, m, smooth(x, y, 128, 64, 8, 5) > 0.55 ? 3.4 : 2.6);
+        const ex = Math.abs(x + 0.5 - 64) / 64 + Math.sin(y * 0.4 + 1) * 0.04 + hash2(x >> 1, y >> 2, 3) * 0.05;
+        const ey = Math.abs(y + 0.5 - 32) / 32 + hash2(x >> 1, y >> 1, 4) * 0.08;
+        if (ex > 0.95 || ey > tongue[x]) continue;
+        // Bark showing through thin moss near the rims.
+        const thin = smooth(x, y, 128, 64, 12, 7);
+        if (ey > tongue[x] - 0.18 && thin < 0.38) continue;
+        c.set(x, y, m, thin > 0.6 ? 3.1 : thin > 0.42 ? 2.6 : 2.2);
       }
     }
     for (let i = 0; i < 110; i++) {
@@ -883,19 +899,24 @@ export function d1MossDrapeModule(atlas: PwAtlas, o: { hex: number; light: numbe
       const y = rng.int(4, 59);
       if (!c.at(x, y)) continue;
       const r = rng.int(1, 3);
-      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy <= r * r && c.at(x + dx, y + dy)) c.set(x + dx, y + dy, m, dx + dy < 0 ? 4 : 2.6);
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy <= r * r && c.at(x + dx, y + dy)) c.set(x + dx, y + dy, m, dx + dy < 0 ? 3.6 : 2.2);
     }
-    for (let i = 0; i < 55; i++) {
-      const x = rng.int(2, 125);
-      const y = rng.int(2, 61);
-      if (c.at(x, y)) c.cluster(x, y, i, ml, 4.3);
+    for (let i = 0; i < 26; i++) {
+      const x = rng.int(30, 97);
+      const y = rng.int(6, 57);
+      if (c.at(x, y)) c.cluster(x, y, i, ml, 3.9);
     }
-    // Strands hanging off both long edges (the log's flanks: x near 0 and 63).
-    for (let i = 0; i < 14; i++) {
-      const y = rng.int(8, 56);
+    // Strands hanging off both flanks (x near 0 and 127), longer where a tongue reaches.
+    for (let i = 0; i < 26; i++) {
       const left = i % 2 === 0;
-      const len = rng.int(3, 7);
-      for (let j = 0; j < len; j++) c.set(left ? 4 - Math.min(4, j) : 123 + Math.min(4, j), y, m, j === len - 1 ? 2 : 3);
+      const y = rng.int(10, 54);
+      const x0 = left ? 18 : 109;
+      const len = rng.int(6, 16);
+      for (let j = 0; j < len; j++) {
+        const x = left ? x0 - j : x0 + j;
+        if (x < 0 || x > 127) break;
+        c.set(x, y + (j > len / 2 && i % 3 === 0 ? 1 : 0), m, j === len - 1 ? 1.8 : 2.6);
+      }
     }
     c.outline(1);
   });

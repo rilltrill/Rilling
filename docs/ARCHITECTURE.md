@@ -681,10 +681,10 @@ answers "what do I draw"):
 
 | budget | limit | z1 MAIN STREET | d1 JUNGLE RUN |
 |---|---|---|---|
-| atlas memory (all levels) | ≤ 24 MB | 11.4 MB (world 2048×768 8.0 MB + sky 2048×432 3.4 MB) | 9.0 MB (world 1024×816 4.2 MB + sky 2048×592 4.6 MB + jeep 256×160 0.2 MB; FLORA stone / herd sprites 2 × 512×256 R8) |
-| paint at stage load | ≤ 300 ms on a phone | 170–210 ms (node on a shared 4-core dev box; sky 36–41 ms) | ≈ 100 ms warm (min of 5: world ≈ 60, sky ≈ 35, jeep ≈ 3) + FLORA stones 14 / herd 7 ms |
+| atlas memory (all levels) | ≤ 24 MB | 11.4 MB (world 2048×768 8.0 MB + sky 2048×432 3.4 MB) | 9.3 MB (world 1024×848 4.4 MB + sky 2048×592 4.6 MB + jeep 256×160 0.2 MB; FLORA stone / herd sprites 2 × 512×256 R8) |
+| paint at stage load | ≤ 300 ms on a phone | 170–210 ms (node on a shared 4-core dev box; sky 36–41 ms) | ≈ 100 ms warm on a quiet box (min of 5: world ≈ 60, sky ≈ 35, jeep ≈ 3); 149 ms min of 10 at load avg 18 (world 99, sky 47, jeep 3) + FLORA stones 14 / herd 7 ms |
 | draw calls (same frame) | ≤ 250 | 45–51 (PIXEL CAST 53–60) | 23–52 (PIXEL CAST 34–71) |
-| triangles (same frame) | — | 49 k (PIXEL CAST 73 k) | 18–20 k (PIXEL CAST 23–31 k) |
+| triangles (same frame) | — | 49 k (PIXEL CAST 73 k) | 18–20 k (PIXEL CAST 23–32 k) |
 | per-frame work | no allocations | backdrop follow (a position set per layer) | same |
 
 Keep tiles few: a NEUTRAL tile tinted per material beats a tile per colour; wrap shop
@@ -743,10 +743,11 @@ load skips painting), paint the one-level sky atlas after the first frame.
   old breach — DANGER plates; the breakable section in its pivot's frame); the fallen tree
   (bark, moss drapes, splintered break, limbs; both halves still fly apart), ranger supplies;
   the tour car (body / cabin / front / back / underside / tread / wheel modules) following
-  its flip; banks, animated river / white water / waterfall / splash (`d1Water.ts`, one
+  its flip; banks, animated river / white water / waterfall (frayed cut-out edges) / splash (`d1Water.ts`, one
   animated material); boulders and cliff pillars as FLORA stone billboards (`d1Species.ts`);
   the herd as run / walk-cycle sprites (`d1Herd.ts`, posed by the herd's own gait);
-  stippled sun shafts (`d1Shafts.ts`); the jeep view model on its own atlas at 48 texels a
+  hard-edged sun-shaft rays in stepped strengths (`d1Shafts.ts`); fog starting at 38 m instead
+  of 24 m so the painted middle distance keeps its colour; the jeep view model on its own atlas at 48 texels a
   metre; the ROAD CLOSED barricade; boss-stretch dressing (river-tours landing, raft, NO
   SWIMMING, driftwood, an upturned tour car); the panorama painted straight into the canvas
   (`d1Sky.ts`: range feet melt into the fog). The gate pillars and the car stay the classic

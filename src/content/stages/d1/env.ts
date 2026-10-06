@@ -295,6 +295,8 @@ export class JungleEnv {
     this.vegPx.name = 'd1-vegPx';
     root.add(this.veg3D, this.vegPx);
     this.pw = pixelWorld(w) ? new D1PixelWorld() : null;
+    // PIXEL WORLD: the fog starts further out, so the painted middle distance keeps its colour (same far wall).
+    if (this.pw) (w.scene.fog as THREE.Fog).near = 38;
     this.buildBackdrop();
     if (this.pw) this.pw.ground(GROUND_Y);
     else {
@@ -664,7 +666,7 @@ export class JungleEnv {
         shafts.add(sg);
       }
       if (shafts.children.length) {
-        // PIXEL WORLD: the same planes drawn as stippled rays (dithered in screen pixels) instead of pale slabs.
+        // PIXEL WORLD: the same planes drawn as hard-edged rays in stepped strengths instead of pale slabs.
         const meshes = this.pw ? [mergeShafts(shafts, this.pwShaftMat ??= d1ShaftMaterial())].filter((m): m is THREE.Mesh => !!m) : EnvKit.mergeStatic(shafts);
         for (const m of meshes) {
           m.renderOrder = 3;
