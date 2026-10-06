@@ -207,7 +207,7 @@ export class Z1Street {
       const p = (part.mesh.geometry as THREE.BoxGeometry).parameters;
       b.setMatrix(_m.copy(part.rel));
       if (part.tag === 'canopy') {
-        boxFaces(b, p.width, p.height, p.depth, { px: g.fascia, nx: g.fascia, pz: g.fascia, nz: g.fascia, ny: g.soffit, py: this.metal });
+        boxFaces(b, p.width, p.height, p.depth, { px: g.fascia, nx: g.fascia, pz: g.fascia, nz: g.fascia, ny: g.soffit, py: g.roofTop });
         // The logo on the street face (+x), centred along it.
         b.rect(_o.set(p.width / 2 + 0.03, -p.height / 2 + 0.05, 3), NZ, Y, 6, 0.75, g.logo);
       } else if (part.tag === 'canopyBand') boxFaces(b, p.width, p.height, p.depth, { px: g.band, nx: g.band, pz: g.band, nz: g.band }, {});

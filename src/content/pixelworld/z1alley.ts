@@ -240,6 +240,8 @@ export interface Z1GasTiles {
   /** An explosive drum (wrap round its 0.33 m radius: 64 texels; 0.9 m tall in the bottom 29 rows) and its lid. */
   drum: PwTile;
   drumLid: PwTile;
+  /** The canopy's top (seen when it buckles): pale roofing membrane in sheets, ponding stains, grit. */
+  roofTop: PwTile;
 }
 
 export function z1GasTiles(a: PwAtlas): Z1GasTiles {
@@ -261,6 +263,7 @@ export function z1GasTiles(a: PwAtlas): Z1GasTiles {
     cageSide: a.tile('z1gas|cageS', 29, 54, (c, k) => paintCage(c, k, 1)),
     drum: a.tile('z1gas|drum', 64, 32, paintDrum, { wrap: true }),
     drumLid: a.tile('z1gas|drumLid', 22, 22, paintDrumLid),
+    roofTop: a.tile('z1gas|roofTop', 64, 64, paintRoofTop, { wrap: true }),
   };
 }
 
@@ -545,6 +548,21 @@ function paintDrumLid(c: PwCanvas, k: PwKit) {
   }
   c.ellipse(r0 - 5, r0 - 2, 2, 2, steel, 3);
   c.ellipse(r0 + 5, r0 + 3, 1.5, 1.5, steel, 2);
+}
+
+/** Canopy top (wrap 64 × 64): pale membrane sheets with lapped seams, dark ponding stains, grit and a lost bottle cap. */
+function paintRoofTop(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const H = c.h;
+  const m = k.ramp(0xb8b8b0, { light: 0.4, sat: 0.4 });
+  const stain = k.ramp(0x6a6e70, { light: 0.4, sat: 0.4 });
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) c.set(x, y, m, y % 32 === 0 ? 4 : y % 32 === 1 ? 2 : 3);
+  for (let i = 0; i < 3; i++) {
+    const cx = Math.floor(hash2(i, 1, 13) * W);
+    const cy = Math.floor(hash2(i, 2, 13) * H);
+    for (let y = -6; y <= 6; y++) for (let x = -10; x <= 10; x++) if ((x * x) / 100 + (y * y) / 36 < 0.8 + (hash2(cx + x, cy + y, 3) - 0.5) * 0.4) c.set((cx + x + W) % W, (cy + y + H) % H, stain, 2);
+  }
+  c.scatter(k.rng, 0, 0, W, H, 18, stain, 1, { shapes: 2 });
 }
 
 /** Canopy fascia: white enamel panels with seams, rain streaks, a lit lip. */
