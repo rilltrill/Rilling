@@ -186,7 +186,13 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   const poolDef = badLamp ? town.pools.colorOf(badLamp.pool) : null;
   const beamDef = badLamp ? town.beams.colorOf(badLamp.beam) : null;
 
+  // ART: PIXEL WORLD paints the stage's extra explosive drums (spawned at setup) on the first frame.
+  let pwDrums = !pw;
   const update = (dt: number, w: World) => {
+    if (!pwDrums) {
+      pwDrums = true;
+      pw!.skinDrums(w, town.extraBarrels);
+    }
     z.t += dt;
     flora2d.time.value = z.t;
     const t = z.t;

@@ -229,6 +229,17 @@ export interface Z1GasTiles {
   tape: PwTile;
   /** The GAS & GO store window bay (wrap along u, 128 × 112 = one 4 m shop bay). */
   store: PwTile;
+  /** A pump (destructible; painted over its hit boxes): front with the lit price display, the hose side, the plain side, the cap. */
+  pumpFront: PwTile;
+  pumpHose: PwTile;
+  pumpSide: PwTile;
+  pumpCap: PwTile;
+  /** The propane exchange cage: front (tanks through the diamond mesh, the PROPANE sign), side, lid. */
+  cageFront: PwTile;
+  cageSide: PwTile;
+  /** An explosive drum (wrap round its 0.33 m radius: 64 texels; 0.9 m tall in the bottom 29 rows) and its lid. */
+  drum: PwTile;
+  drumLid: PwTile;
 }
 
 export function z1GasTiles(a: PwAtlas): Z1GasTiles {
@@ -242,6 +253,14 @@ export function z1GasTiles(a: PwAtlas): Z1GasTiles {
     ad: a.tile('z1gas|ad', 35, 54, paintAd),
     tape: a.tile('z1gas|tape', 96, 16, paintTape, { wrap: true }),
     store: a.tile('z1gas|store', 128, 112, paintStore, { wrap: true }),
+    pumpFront: a.tile('z1gas|pumpF', 27, 56, paintPumpFront),
+    pumpHose: a.tile('z1gas|pumpH', 18, 56, (c, k) => paintPumpSide(c, k, true)),
+    pumpSide: a.tile('z1gas|pumpS', 18, 56, (c, k) => paintPumpSide(c, k, false)),
+    pumpCap: a.tile('z1gas|pumpC', 29, 19, paintPumpCap),
+    cageFront: a.tile('z1gas|cageF', 51, 54, (c, k) => paintCage(c, k, 3)),
+    cageSide: a.tile('z1gas|cageS', 29, 54, (c, k) => paintCage(c, k, 1)),
+    drum: a.tile('z1gas|drum', 64, 32, paintDrum, { wrap: true }),
+    drumLid: a.tile('z1gas|drumLid', 22, 22, paintDrumLid),
   };
 }
 
@@ -337,6 +356,195 @@ function paintStore(c: PwCanvas, k: PwKit) {
   c.rect(0, gy0, 3, gy1 - gy0 + 1, steel, 3);
   c.vline(0, gy0, gy1 - gy0 + 1, steel, 4);
   c.vline(2, gy0, gy1 - gy0 + 1, steel, 2);
+}
+
+const PUMP_RED = 0xb82c22;
+
+/** Red enamel with a lit left edge, a shadowed right one, scuffs, bullet dings and rust creeping up from the foot. */
+function pumpEnamel(c: PwCanvas, k: PwKit, red: number) {
+  const W = c.w;
+  const H = c.h;
+  const rust = k.ramp(0x6a3418, { light: 0.4 });
+  for (let x = 0; x < W; x++) c.rect(x, 0, 1, H, red, x === 0 ? 4 : x === W - 1 ? 2 : 3);
+  c.hline(0, 0, W, red, 5);
+  for (let i = 0; i < 6; i++) c.cluster(Math.floor(hash2(i, W, 3) * (W - 2)), Math.floor(hash2(i, H, 4) * (H - 2)), i % 5, red, 2);
+  for (let y = H - 9; y < H; y++) for (let x = 0; x < W; x++) if (hash2(x, y, 6) < (y - (H - 9)) / 11) c.set(x, y, rust, hash2(x, y, 7) < 0.5 ? 2 : 3);
+}
+
+/** Pump front (27 × 56 = 0.85 × 1.75 m): brand band, the lit price display, REG 87, louvred lower panel, kick plate. */
+function paintPumpFront(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const H = c.h;
+  const red = k.ramp(PUMP_RED, { light: 0.5, sat: 1.05 });
+  const white = k.ramp(0xf0ece0, { light: 0.3 });
+  const ink = k.ramp(0x141418, { light: 0.4 });
+  const cyan = k.ramp(0x9fe8ff, { light: 0.45 });
+  const steel = k.ramp(0x9a9ca2, { light: 0.5, sat: 0.4 });
+  pumpEnamel(c, k, red);
+  // Brand band.
+  c.rect(1, 1, W - 2, 5, white, 3);
+  drawText(c, 'GAS', Math.round((W - textWidth('GAS', FONT_3x5)) / 2), 1, FONT_3x5, red, 3);
+  // Price display (GLOW): dark bezel, cyan digits.
+  c.rect(2, 7, W - 4, 15, ink, 1);
+  c.frame(2, 7, W - 4, 15, steel, 3);
+  c.rect(4, 9, W - 8, 11, cyan, 1, PWF.GLOW);
+  drawText(c, '1.29', Math.round((W - textWidth('1.29', FONT_3x5)) / 2), 9, FONT_3x5, cyan, 5, { flag: PWF.GLOW });
+  drawText(c, 'GAL', Math.round((W - textWidth('GAL', FONT_3x5)) / 2), 15, FONT_3x5, cyan, 3, { flag: PWF.GLOW });
+  // Grade label, push button.
+  c.rect(2, 24, W - 4, 7, white, 3);
+  drawText(c, 'REG 87', 3, 25, FONT_3x5, ink, 1);
+  c.rect(W - 6, 32, 3, 2, k.ramp(0xe8c040, { light: 0.4 }), 4);
+  // Louvred lower panel.
+  c.frame(2, 35, W - 4, 13, red, 1);
+  for (let y = 37; y < 46; y += 2) c.hline(4, y, W - 8, red, 1);
+  // Kick plate.
+  c.rect(0, H - 6, W, 6, steel, 2);
+  c.hline(0, H - 6, W, steel, 4);
+}
+
+/** Pump side (18 × 56 = 0.55 × 1.75 m): `hose` — the chrome nozzle in its holster and the black hose looping down. */
+function paintPumpSide(c: PwCanvas, k: PwKit, hose: boolean) {
+  const W = c.w;
+  const H = c.h;
+  const red = k.ramp(PUMP_RED, { light: 0.5, sat: 1.05 });
+  const steel = k.ramp(0xb8bac0, { light: 0.55, sat: 0.4 });
+  const black = k.ramp(0x18181c, { light: 0.4 });
+  const white = k.ramp(0xf0ece0, { light: 0.3 });
+  pumpEnamel(c, k, red);
+  c.vline(Math.floor(W / 2), 2, H - 10, red, 2);
+  c.rect(0, H - 6, W, 6, steel, 2);
+  if (!hose) {
+    // NO SMOKING decal.
+    c.rect(3, 12, 12, 12, white, 3);
+    c.ellipse(9, 18, 4, 4, red, 3);
+    c.ellipse(9, 18, 2.5, 2.5, white, 3);
+    c.line(6, 21, 12, 15, red, 3);
+    return;
+  }
+  // Holster (chrome boot) and the nozzle handle, the hose swinging down to the ground and back up.
+  c.rect(5, 16, 8, 14, steel, 3);
+  c.vline(5, 16, 14, steel, 5);
+  c.rect(7, 12, 4, 6, black, 1);
+  c.rect(6, 10, 6, 3, steel, 4);
+  for (let y = 30; y < H - 2; y++) {
+    const t = (y - 30) / (H - 32);
+    const x = Math.round(9 + Math.sin(t * Math.PI) * 5);
+    c.set(x, y, black, 1);
+    c.set(x + 1, y, black, 2);
+  }
+}
+
+/** Pump cap (29 × 19: the 0.18 m band on the bottom 6 rows, the lid above): white enamel, red pinstripe. */
+function paintPumpCap(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const H = c.h;
+  const w = k.ramp(0xdedad0, { light: 0.4, sat: 0.5 });
+  const red = k.ramp(PUMP_RED, { light: 0.5 });
+  c.rect(0, 0, W, H, w, 3);
+  c.frame(0, 0, W, H - 6, w, 2);
+  c.hline(0, H - 6, W, w, 5);
+  c.hline(0, H - 3, W, red, 3);
+  c.hline(0, H - 1, W, w, 1);
+}
+
+/** Propane exchange cage (1.6 / 0.9 × 1.7 m): white tanks behind a diamond wire mesh in a steel frame; the front carries the PROPANE sign. */
+function paintCage(c: PwCanvas, k: PwKit, tanks: number) {
+  const W = c.w;
+  const H = c.h;
+  const steel = k.ramp(0x44474e, { light: 0.5, sat: 0.6 });
+  const dark = k.ramp(0x14161a, { light: 0.4 });
+  const tank = k.ramp(0xd8d8d0, { light: 0.45, sat: 0.4 });
+  const red = k.ramp(0xff5030, { light: 0.45 });
+  const white = k.ramp(0xf0ece0, { light: 0.3 });
+  c.rect(0, 0, W, H, dark, 1);
+  // Tanks: rounded shoulders, a collar with handle holes, a foot ring, the top valve.
+  const tw = 13;
+  for (let i = 0; i < tanks; i++) {
+    const x0 = Math.round((W - tanks * (tw + 3)) / 2) + i * (tw + 3) + 1;
+    for (let y = 16; y < H - 4; y++) {
+      for (let x = 0; x < tw; x++) {
+        const u = (x + 0.5) / tw - 0.5;
+        const sh = y < 21 ? Math.sqrt(Math.max(0, 0.25 - ((21 - y) / 12) ** 2)) : 0.5;
+        if (Math.abs(u) > sh) continue;
+        c.set(x0 + x, y, tank, u < -0.25 ? 4 : u > 0.3 ? 2 : 3);
+      }
+    }
+    c.rect(x0 + 4, 11, 5, 5, tank, 2);
+    c.rect(x0 + 5, 12, 3, 2, dark, 1);
+    c.rect(x0 + 5, 9, 3, 2, steel, 4);
+    c.hline(x0 + 1, H - 9, tw - 2, tank, 2);
+  }
+  // Diamond mesh over everything, the frame.
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if ((x + y) % 6 === 0 || (x - y + 600) % 6 === 0) c.set(x, y, steel, (x + y) % 12 === 0 ? 3 : 2);
+  c.frame(0, 0, W, H, steel, 3);
+  c.hline(0, 0, W, steel, 5);
+  if (tanks > 1) {
+    c.rect(8, 2, W - 16, 9, red, 3, PWF.GLOW);
+    drawText(c, 'PROPANE', Math.round((W - textWidth('PROPANE', FONT_3x5)) / 2), 4, FONT_3x5, white, 4, { flag: PWF.GLOW });
+  }
+}
+
+/**
+ * Explosive drum (wrap 64 × 32; rows 3…31 = the 0.9 m drum, bottom up): red
+ * steel shaded round, two rolling hoops, the yellow FLAMMABLE diamond (GLOW,
+ * as the classic label glows) centred on u = 0, rust and runs.
+ */
+function paintDrum(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const H = c.h;
+  const red = k.ramp(0xa82018, { light: 0.45, sat: 1.1 });
+  const dark = k.ramp(0x5a120e, { light: 0.45 });
+  const yel = k.ramp(0xffd23a, { light: 0.45 });
+  const ink = k.ramp(0x1a1a1e, { light: 0.4 });
+  const rust = k.ramp(0x6a3418, { light: 0.4 });
+  for (let x = 0; x < W; x++) {
+    // Lit from the street side: one bright stripe, falling off round the back.
+    const a = (x / W) * Math.PI * 2;
+    const l = Math.cos(a - 0.6);
+    c.rect(x, 0, 1, H, red, l > 0.93 ? 4 : l > -0.3 ? 3 : 2);
+  }
+  // Hoops (≈ 0.25 m and 0.75 m up: rows from the bottom), top and bottom chimes.
+  for (const r of [H - 1 - 8, H - 1 - 24]) {
+    c.hline(0, r, W, dark, 2);
+    c.hline(0, r - 1, W, red, 4);
+  }
+  c.hline(0, H - 29, W, dark, 1);
+  c.hline(0, H - 1, W, dark, 1);
+  // The FLAMMABLE diamond, front and back (u = 0, wrapping over the tile edge, and u = 32).
+  const cy = H - 1 - 14;
+  for (const u0 of [0, W / 2]) {
+    for (let dy = -6; dy <= 6; dy++) {
+      for (let dx = -6; dx <= 6; dx++) {
+        if (Math.abs(dx) + Math.abs(dy) > 6) continue;
+        const x = (u0 + dx + W) % W;
+        const edge = Math.abs(dx) + Math.abs(dy) === 6;
+        c.set(x, cy + dy, edge ? ink : yel, edge ? 1 : 3, edge ? 0 : PWF.GLOW);
+      }
+    }
+    // A flame glyph in the diamond.
+    for (const [dx, dy] of [[0, -3], [0, -2], [-1, -1], [0, -1], [1, -1], [-1, 0], [0, 0], [1, 0], [-2, 1], [-1, 1], [0, 1], [1, 1], [2, 1], [-1, 2], [0, 2], [1, 2]]) c.set((u0 + dx + W) % W, cy + dy, ink, 1);
+  }
+  // Rust blooms and runs, a dent.
+  for (let i = 0; i < 10; i++) c.cluster(Math.floor(hash2(i, 1, 5) * (W - 3)), H - 1 - Math.floor(hash2(i, 2, 5) * 27), i % 6, rust, 2);
+  for (let i = 0; i < 6; i++) {
+    const x = Math.floor(hash2(i, 3, 5) * W);
+    for (let y = H - 26; y < H - 26 + 4 + (i % 3) * 3; y++) c.set(x, y, rust, 2);
+  }
+}
+
+/** Drum lid (planar across the disc): red steel, the rim ring, two bungs. */
+function paintDrumLid(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const red = k.ramp(0xb3261e, { light: 0.5, sat: 1.05 });
+  const dark = k.ramp(0x5a120e, { light: 0.45 });
+  const steel = k.ramp(0x9a9ca2, { light: 0.5, sat: 0.4 });
+  const r0 = W / 2;
+  for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+    const d = Math.hypot(x + 0.5 - r0, y + 0.5 - r0);
+    c.set(x, y, d > r0 - 2 ? dark : red, d > r0 - 2 ? 2 : d > r0 - 4 ? 4 : 3);
+  }
+  c.ellipse(r0 - 5, r0 - 2, 2, 2, steel, 3);
+  c.ellipse(r0 + 5, r0 + 3, 1.5, 1.5, steel, 2);
 }
 
 /** Canopy fascia: white enamel panels with seams, rain streaks, a lit lip. */

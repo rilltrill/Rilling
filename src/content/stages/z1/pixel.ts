@@ -19,7 +19,7 @@ import { z1AsphaltTile, z1PavingTile } from '../../pixelworld/z1ground';
 import { Z1Ground } from './pwGround';
 import { Z1Cars } from './pwCars';
 import { Z1FacadeExtras } from './pwFacade';
-import { Z1Diner } from './pwDiner';
+import { boxFaces, cylinder, Z1Diner } from './pwDiner';
 import { Z1Bus } from './pwBus';
 import { Z1Square } from './pwSquare';
 import { Z1Street } from './pwStreet';
@@ -32,6 +32,8 @@ import type { ZoneId } from './town';
 import { pwMaterial, pwTick } from '../../pixelworld/material';
 import { z1FlameTile, Z1_FLAME_FRAMES, Z1_FLAME_H, Z1_FLAME_W } from '../../pixelworld/z1fire';
 import { pwPuffTexture } from './vfx';
+import { Destructible } from '../../../gameplay/Props';
+import type { World } from '../../../gameplay/World';
 
 /**
  * MAIN STREET in ART: PIXEL WORLD — the reference conversion for the stage
@@ -216,6 +218,9 @@ export class Z1PixelWorld {
       this.street.pillar(b, g.width, g.height, g.depth);
       this.dynBatches.push({ b, parent: m, swap: true });
     }
+    // The pumps and the propane cage (spawned at stage setup): painted over their hit boxes.
+    const cageLid = metalTile(this.atlas, { hex: 0x44474e, rust: 0.3 });
+    town.gas.pwSkin = (g, kind) => this.skinGasProp(g, kind, cageLid);
     // Fires: painted flames (crossed cut-out cards, an animated strip) where the glow cones were.
     const flames = [z1FlameTile(this.atlas, 0), z1FlameTile(this.atlas, 1)];
     const sub = { x: 0, y: 0, w: Z1_FLAME_W, h: Z1_FLAME_H };
@@ -268,6 +273,52 @@ export class Z1PixelWorld {
       if (m.isMesh && (!keepGlow || !(m.material as THREE.MeshBasicMaterial).isMeshBasicMaterial)) g.remove(m);
     }
     this.dynBatches.push({ b, parent: g, local: true });
+  }
+
+  /**
+   * A gas station destructible in PIXEL WORLD: its painted mesh joins the model
+   * (after the hit boxes were registered, so it never takes a hit; it never
+   * raycasts either), and the classic meshes stop drawing but stay the hit boxes.
+   */
+  skinGasProp(g: THREE.Object3D, kind: 'pump' | 'cage' | 'drum', lid: PwTile = this.street.gas.drumLid) {
+    const t = this.street.gas;
+    const b = new PwBatch(this.atlas);
+    if (kind === 'pump') {
+      b.setMatrix(_m.makeTranslation(0, 0.875, 0));
+      boxFaces(b, 0.85, 1.75, 0.55, { pz: t.pumpFront, nz: t.pumpFront, px: t.pumpHose, nx: t.pumpSide });
+      b.setMatrix(_m.makeTranslation(0, 1.84, 0));
+      const band = { sub: { x: 0, y: 0, w: t.pumpCap.w, h: 6 } };
+      boxFaces(b, 0.9, 0.18, 0.6, { pz: t.pumpCap, nz: t.pumpCap, px: t.pumpCap, nx: t.pumpCap, py: t.pumpCap }, { pz: band, nz: band, px: band, nx: band, py: { sub: { x: 0, y: 6, w: t.pumpCap.w, h: t.pumpCap.h - 6 } } });
+    } else if (kind === 'cage') {
+      b.setMatrix(_m.makeTranslation(0, 0.85, 0));
+      boxFaces(b, 1.6, 1.7, 0.9, { pz: t.cageFront, nz: t.cageFront, px: t.cageSide, nx: t.cageSide, py: lid });
+    } else {
+      // The drum (the classic barrel: r 0.32, 0.9 m, its rims 0.33): rows 3…31 of the wrap tile, the lid on top.
+      b.setMatrix(_m.makeTranslation(0, 0.45, 0));
+      cylinder(b, 0.33, 0.9, 10, t.drum, t.drumLid, 3, 32);
+    }
+    b.setMatrix(null);
+    const mesh = b.build(undefined, { gain: 1 });
+    if (!mesh) return;
+    g.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      const hide = (mat: THREE.Material) => {
+        const c = Kit.track(mat.clone());
+        c.visible = false;
+        return c;
+      };
+      m.material = Array.isArray(m.material) ? m.material.map(hide) : hide(m.material);
+    });
+    g.add(mesh);
+  }
+
+  /** The explosive drums the stage spawns at setup (at `positions`): painted like the gas station's. */
+  skinDrums(world: World, positions: readonly THREE.Vector3[]) {
+    for (const e of world.entities) {
+      if (!(e instanceof Destructible) || e.removed) continue;
+      if (positions.some((p) => e.root.position.distanceToSquared(p) < 1e-4)) this.skinGasProp(e.root, 'drum');
+    }
   }
 
   /** Per frame: the fires' flame strips play on. */

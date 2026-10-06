@@ -100,6 +100,13 @@ export class GasStation {
     readonly height: number,
   ) {}
 
+  /**
+   * ART: PIXEL WORLD paints the pumps and the propane cage: set by z1/pixel.ts,
+   * called with each model AFTER its hit boxes are registered (the painted mesh
+   * never takes a hit; the classic meshes stay the hit boxes, unseen).
+   */
+  pwSkin: ((model: THREE.Object3D, kind: 'pump' | 'cage' | 'drum') => void) | null = null;
+
   /** Create the shootable pumps, barrels and propane cage (call from stage setup). */
   spawn(world: World, pumps: THREE.Vector3[], barrels: THREE.Vector3[], propane: THREE.Vector3) {
     for (const p of pumps) {
@@ -120,12 +127,14 @@ export class GasStation {
         onDestroy: (w) => this.ignite(w, p),
       });
       world.add(d);
+      this.pwSkin?.(g, 'pump');
       this.items.push(d);
     }
     for (const b of barrels) {
       const d = explosiveBarrel(world, b);
       bakeMerge(d.root);
       world.add(d);
+      this.pwSkin?.(d.root, 'drum');
       this.items.push(d);
     }
     {
@@ -147,6 +156,7 @@ export class GasStation {
         onDestroy: (w) => this.ignite(w, propane),
       });
       world.add(d);
+      this.pwSkin?.(g, 'cage');
       this.items.push(d);
     }
   }
