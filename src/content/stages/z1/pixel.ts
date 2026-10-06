@@ -109,7 +109,8 @@ export class Z1PixelWorld {
   private diner: Z1Diner;
   /** PixelWorld meshes for dynamic objects (built in `finish`): batch, parent, world → parent matrix. */
   private dynBatches: { b: PwBatch; parent: THREE.Object3D; local?: boolean; swap?: boolean; anim?: boolean }[] = [];
-  /** The fires' animated flame material (ticked by `tick`). */
+  /** The fires' flame strips (a small atlas of their own) and their animated material (ticked by `tick`). */
+  readonly fireAtlas = new PwAtlas('z1-fire');
   private fireMat: THREE.Material | null = null;
   private bus: Z1Bus;
   private square: Z1Square;
@@ -223,11 +224,12 @@ export class Z1PixelWorld {
     const cageLid = metalTile(this.atlas, { hex: 0x44474e, rust: 0.3 });
     town.gas.pwSkin = (g, kind) => this.skinGasProp(g, kind, cageLid);
     // Fires: painted flames (crossed cut-out cards, an animated strip) where the glow cones were.
-    const flames = [z1FlameTile(this.atlas, 0), z1FlameTile(this.atlas, 1)];
+    // (Their own small atlas: the tall animated strips would leave a 448-texel shelf half empty in the world atlas.)
+    const flames = [z1FlameTile(this.fireAtlas, 0), z1FlameTile(this.fireAtlas, 1)];
     const sub = { x: 0, y: 0, w: Z1_FLAME_W, h: Z1_FLAME_H };
     const puff = pwPuffTexture();
     town.anim.fires.forEach((f, fi) => {
-      const b = new PwBatch(this.atlas);
+      const b = new PwBatch(this.fireAtlas);
       f.plume.flameDefs().forEach((d, i) => {
         // A card the flame's height (the cones flicker up to ~1.35 ×), the strip's own aspect.
         const h = d.h * 1.3;
@@ -336,7 +338,7 @@ export class Z1PixelWorld {
     }
     // Dynamic pieces: world-space geometry under a moving / toggled parent (undo the parent's transform).
     for (const { b, parent, local, swap, anim } of this.dynBatches) {
-      if (anim && !this.fireMat) this.fireMat = pwMaterial(this.atlas, { anim: { frames: Z1_FLAME_FRAMES, fps: 12 }, side: THREE.DoubleSide });
+      if (anim && !this.fireMat) this.fireMat = pwMaterial(this.fireAtlas, { anim: { frames: Z1_FLAME_FRAMES, fps: 12 }, side: THREE.DoubleSide });
       const mesh = anim ? b.build(this.fireMat!) : b.build(undefined, { gain: 1 });
       if (!mesh) continue;
       if (swap) {
