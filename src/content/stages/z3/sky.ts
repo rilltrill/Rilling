@@ -4,6 +4,7 @@ import { EnvKit } from '../../kit/EnvKit';
 import { Rng } from '../../../core/Rng';
 import { M, bake } from './bake';
 import { Plumes } from './vfx';
+import type { Z3FxAtlas } from '../../pixelworld/z3fx';
 
 /**
  * Dusk backdrop that follows the camera (so it sits "at infinity" however far
@@ -249,6 +250,11 @@ export class DuskSky {
     // Smoke columns over the city.
     this.plumes = new Plumes(plumeBases(rng));
     g.add(this.plumes.mesh);
+  }
+
+  /** ART: PIXEL WORLD: the smoke columns as painted pixel puffs. */
+  pixelArt(fx: Z3FxAtlas) {
+    this.plumes.pixelArt(fx);
   }
 
   update(t: number, cam: THREE.Vector3) {

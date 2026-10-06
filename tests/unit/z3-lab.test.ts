@@ -37,8 +37,49 @@ describe.skipIf(!OUT)('z3 PIXEL WORLD look-dev', () => {
       for (const [n, a] of PW_STATS) best.set(n, Math.min(best.get(n) ?? Infinity, a.ms));
       if (r === runs - 1) {
         console.log([...PW_STATS].map(([n, a]) => `${n} ${a.w}×${a.h} ${(a.bytes / 1048576).toFixed(2)} MB ${a.tiles} tiles ${a.texels} texels`).join('\n'));
-        console.log('slowest tiles:\n' + PW_DEBUG_TILE_MS().slice(0, 25).join('\n'));
-        console.log('largest tiles:\n' + PW_DEBUG_TILES().slice(0, 25).join('\n'));
+        void PW_DEBUG_TILE_MS;
+        void PW_DEBUG_TILES;
+        // Per-tile cost of the world and sky atlases (repainted one by one: min of 3).
+        const { z3Scene } = await import('../../src/content/stages/z3/env');
+        const { paintTile } = await import('../../src/content/pixelworld/atlas');
+        const { PwPalette } = await import('../../src/content/pixelworld/canvas');
+        const pw = z3Scene(w)!.pw!;
+        for (const atlas of [pw.atlas, pw.skyAtlas]) {
+          const defs = (atlas as unknown as { tiles: Map<string, { tile: { key: string; w: number; h: number }; paint: Parameters<typeof paintTile>[3] }> }).tiles;
+          const rows: [number, string][] = [];
+          let tot = 0;
+          let tex = 0;
+          for (const { tile, paint } of defs.values()) {
+            let best = Infinity;
+            for (let i = 0; i < 3; i++) {
+              const pal = new PwPalette();
+              const t0 = performance.now();
+              const c = paintTile(tile.key, tile.w, tile.h, paint, pal);
+              c.resolve(pal);
+              best = Math.min(best, performance.now() - t0);
+            }
+            tot += best;
+            tex += tile.w * tile.h;
+            rows.push([process.env.Z3_BY_AREA ? tile.w * tile.h : best, `${best.toFixed(2)} ms ${tile.w}×${tile.h} ${tile.key}`]);
+          }
+          rows.sort((a, b) => b[0] - a[0]);
+          console.log(`${atlas.name}: ${defs.size} tiles, ${tex} texels, paint+resolve ${tot.toFixed(1)} ms (min of 3 each)\n` + rows.slice(0, Number(process.env.Z3_TOP ?? 30)).map((r) => r[1]).join('\n'));
+        }
+        // Whole-atlas rebuilds (paint + pack + levels), min of 3.
+        const { PwAtlas } = await import('../../src/content/pixelworld/atlas');
+        for (const atlas of [pw.atlas, pw.skyAtlas]) {
+          const defs = (atlas as unknown as { tiles: Map<string, { tile: { key: string; w: number; h: number; wrap: boolean; density: number }; paint: Parameters<typeof paintTile>[3] }> }).tiles;
+          let best = Infinity;
+          for (let i = 0; i < 3; i++) {
+            clearPwCache();
+            const a2 = new PwAtlas(atlas.name + '-rebuild', { levels: atlas.levels });
+            for (const { tile, paint } of defs.values()) a2.tile(tile.key, tile.w, tile.h, paint, { wrap: tile.wrap, density: tile.density });
+            const t0 = performance.now();
+            a2.build();
+            best = Math.min(best, performance.now() - t0);
+          }
+          console.log(`${atlas.name} rebuild (min of 3): ${best.toFixed(1)} ms`);
+        }
         // The atlases (scene textures named pw:<atlas>).
         const seen = new Set<THREE.Texture>();
         w.scene.traverse((o) => {

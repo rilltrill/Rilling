@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
+import { FLAME, pwSpriteMaterial, spriteGeometry, spriteTick, type Z3FxAtlas } from '../../pixelworld/z3fx';
 
 /**
  * Burning wrecks: every fire on the interstate shares two instanced meshes —
@@ -47,6 +48,8 @@ export class FireField {
   private flames: THREE.InstancedMesh;
   private smoke: THREE.InstancedMesh;
   private near: FireEmitter[] = [];
+  /** ART: PIXEL WORLD: flames / smoke as painted sprites (set by `pixelArt`). */
+  private sprites = false;
 
   constructor(
     private maxEmitters = 14,
@@ -83,6 +86,32 @@ export class FireField {
     this.group.add(this.smoke, this.flames);
   }
 
+  /**
+   * ART: PIXEL WORLD: the flames become hand-drawn animated flame sprites and the smoke pixel
+   * puffs (camera-facing, cut-out: the same two draws, no sorting). Call after building, before
+   * the first update.
+   */
+  pixelArt(fx: Z3FxAtlas) {
+    const n = this.flames.count;
+    void n;
+    const flames = new THREE.InstancedMesh(spriteGeometry(true), pwSpriteMaterial(fx.atlas, fx.flame[0], { frames: FLAME.frames, fps: 12, glow: true }), this.maxEmitters * 3);
+    const smoke = new THREE.InstancedMesh(spriteGeometry(false), pwSpriteMaterial(fx.atlas, fx.puff, { cells: 3, gain: 1.7 }), this.maxEmitters * PUFFS_PER);
+    for (const im of [flames, smoke]) {
+      im.frustumCulled = false;
+      im.count = 0;
+      im.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      im.setColorAt(0, _c.set(0xffffff));
+      im.instanceColor!.setUsage(THREE.DynamicDrawUsage);
+    }
+    smoke.renderOrder = 1;
+    flames.renderOrder = 2;
+    this.group.remove(this.flames, this.smoke);
+    this.flames = flames;
+    this.smoke = smoke;
+    this.group.add(smoke, flames);
+    this.sprites = true;
+  }
+
   add(pos: THREE.Vector3, size = 1, smoke = 1, on = true): FireEmitter {
     const e: FireEmitter = { pos: pos.clone(), size, smoke, on, seed: (this.emitters.length * 0.618) % 1, dist: 0 };
     this.emitters.push(e);
@@ -110,9 +139,27 @@ export class FireField {
 
     let fi = 0;
     let si = 0;
+    if (this.sprites) {
+      spriteTick(this.flames.material as THREE.Material, t);
+      _q.identity();
+    }
     for (const e of near) {
       const s = e.size;
-      for (let i = 0; i < FLAMES_PER; i++) {
+      if (this.sprites) {
+        // Three flame sprites per fire: a tall centre and two lower side tongues (out of step).
+        for (let i = 0; i < 3; i++) {
+          const side = i === 0 ? 0 : i === 1 ? -1 : 1;
+          const w = (i === 0 ? 1.25 : 0.85) * s;
+          const h = (w * FLAME.h) / FLAME.w * (1 + 0.06 * Math.sin(t * 7 + i + e.seed * 9));
+          _p.set(e.pos.x + side * 0.45 * s, e.pos.y - 0.25 * s, e.pos.z + side * 0.2 * s);
+          _s.set(w, h, 1);
+          _m.compose(_p, _q, _s);
+          this.flames.setMatrixAt(fi, _m);
+          this.flames.setColorAt(fi, _c.setRGB(1, 1, 1));
+          fi++;
+        }
+      }
+      for (let i = 0; i < (this.sprites ? 0 : FLAMES_PER); i++) {
         const ph = fract(t * (1.5 + (i % 3) * 0.23) + i / FLAMES_PER + e.seed);
         const a = i * 2.39996 + e.seed * 6.28;
         const rad = (0.15 + 0.42 * ((i * 37) % 7) / 7) * s;
@@ -139,7 +186,7 @@ export class FireField {
         _p.set(e.pos.x + drift * 0.8 + Math.sin(j * 3.1 + t * 0.4) * 0.4 * s, e.pos.y + h, e.pos.z + drift * 0.35);
         const grow = ss * (0.5 + ph * 1.7) * e.smoke;
         const fade = ph < 0.1 ? ph / 0.1 : ph > 0.8 ? (1 - ph) / 0.2 : 1;
-        _s.setScalar(Math.max(0.001, grow * fade));
+        _s.setScalar(Math.max(0.001, grow * fade * (this.sprites ? 2.3 : 1)));
         _e.set(j * 0.7 + t * 0.1, j * 1.3, 0);
         _q.setFromEuler(_e);
         _m.compose(_p, _q, _s);
@@ -163,7 +210,8 @@ export class FireField {
  * camera-following sky group, so it never gets closer however far you drive.
  */
 export class Plumes {
-  readonly mesh: THREE.InstancedMesh;
+  mesh: THREE.InstancedMesh;
+  private sprites = false;
   private bases: THREE.Vector3[] = [];
   private sizes: number[] = [];
   private readonly per = 22;
@@ -182,6 +230,21 @@ export class Plumes {
     }
   }
 
+  /** ART: PIXEL WORLD: the columns as painted pixel puffs (same instances, cut-out sprites). Returns the new mesh. */
+  pixelArt(fx: Z3FxAtlas): THREE.InstancedMesh {
+    const m = new THREE.InstancedMesh(spriteGeometry(false), pwSpriteMaterial(fx.atlas, fx.puff, { cells: 3, gain: 0.95, fog: false }), this.mesh.count || this.bases.length * this.per);
+    m.frustumCulled = false;
+    m.renderOrder = -1;
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    m.setColorAt(0, _c.set(0xffffff));
+    m.instanceColor!.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.parent?.add(m);
+    this.mesh.parent?.remove(this.mesh);
+    this.mesh = m;
+    this.sprites = true;
+    return m;
+  }
+
   update(t: number) {
     let n = 0;
     for (let b = 0; b < this.bases.length; b++) {
@@ -192,7 +255,7 @@ export class Plumes {
         const h = ph * 110 * s;
         _p.set(base.x + ph * ph * 70 * s, base.y + h, base.z + ph * ph * 20 * s);
         const fade = ph < 0.08 ? ph / 0.08 : ph > 0.8 ? (1 - ph) / 0.2 : 1;
-        _s.setScalar(Math.max(0.01, (7 + ph * 30) * s * fade));
+        _s.setScalar(Math.max(0.01, (7 + ph * 30) * s * fade * (this.sprites ? 2.3 : 1)));
         _s.y *= 0.8;
         _e.set(j, b + j * 0.5, 0);
         _q.setFromEuler(_e);

@@ -1,4 +1,4 @@
-import type { PwCanvas } from './canvas';
+import { PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { hash2 } from './surfaces';
 import { dith, fill, h6, wander, wcluster, wrapI, wscatter, wset, wshift } from './z3kit';
@@ -45,13 +45,19 @@ export const Z3_ROAD: Z3RoadPalette = {
   yellow: 0xd8a428,
 };
 
-/** Lane tile size (texels): 4 m across (a 3.7–3.8 m lane uses the left part), 16 m along. */
+/** Lane tile: two lane variants side by side (u 0…128 our lanes, 128…256 the oncoming ones; 4 m each, a 3.7–3.8 m lane uses the left part), 8 m along. */
 export const LANE_W = 128;
-export const LANE_H = 512;
+export const LANE_H = 256;
 
-/** One lane of interstate asphalt (`variant` 0 our lanes, 1 the oncoming ones). */
-export function z3LaneTile(atlas: PwAtlas, variant: number, p: Z3RoadPalette = Z3_ROAD): PwTile {
-  return atlas.tile(`z3lane|${variant}|${h6(p.asphalt)}`, LANE_W, LANE_H, (c, k) => paintLane(c, k, variant, p), { wrap: true });
+/** The interstate's lanes (one wrap tile: both variants side by side; a ribbon picks one with `u0`). */
+export function z3LaneTile(atlas: PwAtlas, p: Z3RoadPalette = Z3_ROAD): PwTile {
+  return atlas.tile(`z3lanes|${h6(p.asphalt)}`, LANE_W * 2, LANE_H, (c, k) => {
+    for (const v of [0, 1]) {
+      const sub = new PwCanvas(LANE_W, LANE_H);
+      paintLane(sub, k, v, p);
+      c.blit(sub, v * LANE_W, 0);
+    }
+  }, { wrap: true });
 }
 
 function paintLane(c: PwCanvas, k: PwKit, variant: number, p: Z3RoadPalette) {
@@ -67,15 +73,12 @@ function paintLane(c: PwCanvas, k: PwKit, variant: number, p: Z3RoadPalette) {
   const R = c.ramp;
   const TN = c.tone;
   // Large irregular areas of older, rougher asphalt (blocky blobs 8×8 with ragged rims).
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const v = hash2(x >> 4, y >> 5, 11 + variant) * 0.6 + hash2((x + 8) >> 4, (y + 16) >> 5, 12 + variant) * 0.4;
-      const rim = hash2(x >> 1, y >> 1, 13) * 0.12;
-      if (v + rim > 0.78) {
-        const i = y * W + x;
-        R[i] = O;
-        TN[i] = 3;
-      }
+  for (let y = 0; y < H; y += 2) {
+    for (let x = 0; x < W; x += 2) {
+      const v = hash2(x >> 4, y >> 5, 11 + variant) * 0.6 + hash2((x + 8) >> 4, (y + 16) >> 5, 12 + variant) * 0.4 + hash2(x >> 1, y >> 1, 13) * 0.12;
+      if (v <= 0.78) continue;
+      const i = y * W + x;
+      R[i] = R[i + 1] = R[i + W] = R[i + W + 1] = O;
     }
   }
   // Wheel paths: two polished bands (ragged edges), the lane's middle stripe of oil drips.
@@ -96,7 +99,7 @@ function paintLane(c: PwCanvas, k: PwKit, variant: number, p: Z3RoadPalette) {
   }
   // Oil drips down the lane centre: elongated blotches in two dark steps.
   const mid = Math.round(lane / 2);
-  for (let i = 0; i < 26; i++) {
+  for (let i = 0; i < 14; i++) {
     const y0 = rng.int(0, H - 1);
     const len = rng.int(6, 22);
     const wdt = rng.int(2, 5);
@@ -110,14 +113,14 @@ function paintLane(c: PwCanvas, k: PwKit, variant: number, p: Z3RoadPalette) {
     }
   }
   // Aggregate: sparse light chips (polished paths fewer) and dark pits.
-  wscatter(c, rng, 0, 0, W, H, 520, 0, 1, { shapes: 3, only: A });
-  wscatter(c, rng, 0, 0, W, H, 260, 0, 1, { shapes: 3, only: O });
-  wscatter(c, rng, 0, 0, W, H, 140, 0, 1, { shapes: 2, only: P });
-  wscatter(c, rng, 0, 0, W, H, 420, 0, -1, { shapes: 3 });
+  wscatter(c, rng, 0, 0, W, H, 260, 0, 1, { shapes: 3, only: A });
+  wscatter(c, rng, 0, 0, W, H, 130, 0, 1, { shapes: 3, only: O });
+  wscatter(c, rng, 0, 0, W, H, 70, 0, 1, { shapes: 2, only: P });
+  wscatter(c, rng, 0, 0, W, H, 210, 0, -1, { shapes: 3 });
   // A saw-cut patch (straight edges, tar seal round it), darker newer asphalt.
   {
     const pw = rng.int(34, 70);
-    const ph = rng.int(60, 140);
+    const ph = rng.int(50, 110);
     const x0 = rng.int(4, lane - pw - 4);
     const y0 = rng.int(0, H - 1);
     for (let y = 0; y < ph; y++) {
@@ -131,7 +134,7 @@ function paintLane(c: PwCanvas, k: PwKit, variant: number, p: Z3RoadPalette) {
     for (let x = 1; x < pw - 1; x++) wshift(c, x0 + x, y0 - 1, 0.8);
   }
   // Tar snakes: glossy crack seals meandering across the lane (they catch the dusk sky).
-  const nSnake = variant === 0 ? 7 : 5;
+  const nSnake = variant === 0 ? 5 : 4;
   for (let i = 0; i < nSnake; i++) {
     const y = rng.int(0, H - 1);
     const fromLeft = rng.chance(0.5);
@@ -150,7 +153,7 @@ function paintLane(c: PwCanvas, k: PwKit, variant: number, p: Z3RoadPalette) {
     const x = rng.chance(0.5) ? rng.int(2, 6) : rng.int(lane - 6, lane - 2);
     const y = rng.int(0, H - 1);
     let xx = x;
-    const len = rng.int(120, 300);
+    const len = rng.int(80, 200);
     for (let j = 0; j < len; j++) {
       wshift(c, xx, y + j, -1.4);
       wshift(c, xx + 1, y + j, 0.5);
@@ -525,4 +528,27 @@ export function z3ScrubTile(atlas: PwAtlas, o: { hex: number; grass: number }): 
     wscatter(c, rng, 0, 0, W, H, 500, 0, 1, { shapes: 3, only: E });
     wscatter(c, rng, 0, 0, W, H, 400, 0, -1, { shapes: 3 });
   }, { wrap: true });
+}
+
+/** The tanker's fuel spill (module 160 × 96 = 5 × 3 m): an oily sheet with a rainbow rim, the dusk in it, runnels. */
+export function z3SpillDecal(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3spill', 160, 96, (c, k) => {
+    const oil = k.ramp(0x2c2734, { light: 0.6, sat: 1.3 });
+    const rim = k.ramp(0x5a3a7a, { light: 0.6, sat: 1.4 });
+    const gold = k.ramp(0x8a7a3a, { light: 0.6, sat: 1.3 });
+    const sky = k.ramp(0xb06a6a, { light: 0.5 });
+    for (let y = 0; y < 96; y += 1) {
+      for (let x = 0; x < 160; x++) {
+        const u = (x - 80) / 76;
+        const v = (y - 48) / 44;
+        const n = hash2(x >> 3, y >> 3, 91) * 0.35 + hash2(x >> 4, y >> 4, 92) * 0.3;
+        const d = u * u + v * v + n - 0.32;
+        if (d > 1) continue;
+        if (d > 0.86) c.set(x, y, rim, 3);
+        else if (d > 0.76) c.set(x, y, gold, (x + y) & 1 ? 3 : 2.4);
+        else if ((x * 3 + y * 7) % 41 < 3 && d < 0.6) c.set(x, y, sky, 2.4);
+        else c.set(x, y, oil, d < 0.4 ? 1.4 : 2);
+      }
+    }
+  });
 }

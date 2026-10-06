@@ -4,7 +4,7 @@ import type { PwBatch } from '../../pixelworld/batch';
 import { PW_TPM, PwRng } from '../../pixelworld/canvas';
 import { hash2 } from '../../pixelworld/surfaces';
 import {
-  LANE_H, z3BloodDecal, z3DebrisDecal, z3LaneTile, z3LineTile, z3MedianTile, z3OilDecal, z3PotholeDecal, z3ScorchDecal, z3ShoulderTile, z3SkidDecal,
+  LANE_H, LANE_W, z3BloodDecal, z3SpillDecal, z3DebrisDecal, z3LaneTile, z3LineTile, z3MedianTile, z3OilDecal, z3PotholeDecal, z3ScorchDecal, z3ShoulderTile, z3SkidDecal,
   type LineKind,
 } from '../../pixelworld/z3road';
 import type { Ctx } from './scenery';
@@ -22,11 +22,12 @@ import { D } from './layout';
 const Y = new THREE.Vector3(0, 1, 0);
 
 /** Lateral bands (rig-relative x): [centre, width, kind]. */
-type Band = { x: number; w: number; tile: () => PwTile; lane?: number };
+type Band = { x: number; w: number; tile: () => PwTile; lane?: number; u0?: number };
 
 export class Z3Road {
   readonly t: {
-    lane: PwTile[];
+    lane: PwTile;
+    spill: PwTile;
     shoulderL: PwTile;
     shoulderR: PwTile;
     median: PwTile;
@@ -46,7 +47,8 @@ export class Z3Road {
   ) {
     const a = atlas;
     this.t = {
-      lane: [z3LaneTile(a, 0), z3LaneTile(a, 1)],
+      lane: z3LaneTile(a),
+      spill: z3SpillDecal(a),
       shoulderL: z3ShoulderTile(a, 'left'),
       shoulderR: z3ShoulderTile(a, 'right'),
       median: z3MedianTile(a),
@@ -61,13 +63,13 @@ export class Z3Road {
     const t = this.t;
     this.bands = [
       { x: -20.6, w: 1.2, tile: () => t.shoulderR },
-      { x: -18.1, w: 3.8, tile: () => t.lane[1], lane: 0 },
-      { x: -14.3, w: 3.8, tile: () => t.lane[1], lane: 1 },
-      { x: -10.5, w: 3.8, tile: () => t.lane[1], lane: 2 },
+      { x: -18.1, w: 3.8, tile: () => t.lane, lane: 0, u0: LANE_W },
+      { x: -14.3, w: 3.8, tile: () => t.lane, lane: 1, u0: LANE_W },
+      { x: -10.5, w: 3.8, tile: () => t.lane, lane: 2, u0: LANE_W },
       { x: -7.1, w: 3.0, tile: () => t.median },
-      { x: -3.733, w: 3.733, tile: () => t.lane[0], lane: 3 },
-      { x: 0, w: 3.733, tile: () => t.lane[0], lane: 4 },
-      { x: 3.733, w: 3.733, tile: () => t.lane[0], lane: 5 },
+      { x: -3.733, w: 3.733, tile: () => t.lane, lane: 3 },
+      { x: 0, w: 3.733, tile: () => t.lane, lane: 4 },
+      { x: 3.733, w: 3.733, tile: () => t.lane, lane: 5 },
       { x: 7.0, w: 2.8, tile: () => t.shoulderL },
     ];
   }
@@ -87,7 +89,7 @@ export class Z3Road {
       const tile = band.tile();
       // Each lane slides its own way through the 16 m tile (and the oncoming lanes run mirrored).
       const off = band.lane !== undefined ? Math.floor(hash2(band.lane, 3, 17) * LANE_H) : Math.floor(hash2(Math.round(band.x), 4, 17) * tile.h);
-      b.ribbon(pts, band.w, tile, { offset: band.x, y: 0, v0: v0 + off, u0: 0 });
+      b.ribbon(pts, band.w, tile, { offset: band.x, y: 0, v0: v0 + off, u0: band.u0 ?? 0 });
     }
     const L = this.t.line;
     for (const [x, kind] of [

@@ -4,6 +4,13 @@ import type { World } from '../../../gameplay/World';
 import { angleDelta, clamp } from '../../../core/math';
 import { M, bake } from './bake';
 import { addText } from './font';
+import { pixelWorld } from '../../../core/art';
+import { PwAtlas } from '../../pixelworld/atlas';
+import { PwBatch } from '../../pixelworld/batch';
+import {
+  z3TruckBed, z3TruckGlass, z3TruckHazard, z3TruckHood, z3TruckPaint, z3TruckRoof, z3TruckSteel, z3TruckTailgate,
+} from '../../pixelworld/z3truck';
+import { box, cylinder } from './pwShapes';
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -141,6 +148,8 @@ export class TruckViewModel {
     Kit.add(b, Kit.box(0.4, 0.5, 0.25), M.lam(0x3e622c, 'metal', 1.6, 0.7), -0.65, -1.6, 1.1);
     Kit.add(b, Kit.box(0.55, 0.3, 0.32), M.lam(0x56663a, 'metal', 1.6, 0.5), 0.55, -1.7, 1.35);
     Kit.add(b, Kit.cyl(0.32, 0.32, 0.2, 10), dark, 0.5, -1.76, 0.4, 0, 0, 0);
+    // ART: PIXEL WORLD: the pickup painted (its own atlas, 48 texels a metre); the lamps stay classic.
+    if (pixelWorld(this.world)) paintTruck(b);
     bake(b);
     this.body.add(b);
   }
@@ -308,4 +317,73 @@ export class TruckViewModel {
     for (const t of this.tracers) t.mesh.parent?.remove(t.mesh);
     this.root.parent?.remove(this.root);
   }
+}
+
+/**
+ * ART: PIXEL WORLD: re-emit the pickup's parts with painted modules (battered paint, the NOT TODAY
+ * hood, the roof, the windscreen, bed floor, hazard tape, welded steel) and drop the classic meshes
+ * (glows stay: the light bar, the mirror glass).
+ */
+function paintTruck(b: THREE.Group) {
+  const atlas = new PwAtlas('z3-truck', { levels: 3 });
+  const t = {
+    paint: z3TruckPaint(atlas),
+    red: z3TruckPaint(atlas, 0xb82a1a),
+    green: z3TruckPaint(atlas, 0x3e622c),
+    olive: z3TruckPaint(atlas, 0x56663a),
+    hood: z3TruckHood(atlas),
+    roof: z3TruckRoof(atlas),
+    glass: z3TruckGlass(atlas),
+    bed: z3TruckBed(atlas),
+    hazard: z3TruckHazard(atlas),
+    steel: z3TruckSteel(atlas),
+    dark: z3TruckSteel(atlas, 0x26272c),
+    rust: z3TruckSteel(atlas, 0x7a4024),
+    tail: z3TruckTailgate(atlas),
+  };
+  const batch = new PwBatch(atlas);
+  const drop: THREE.Mesh[] = [];
+  const near = (a: number, x: number) => Math.abs(a - x) < 0.02;
+  b.updateMatrixWorld(true);
+  for (const c of b.children) {
+    const m = c as THREE.Mesh;
+    if (!m.isMesh) continue;
+    const mat = m.material as THREE.MeshLambertMaterial;
+    if ((mat as unknown as THREE.MeshBasicMaterial).isMeshBasicMaterial) continue;
+    drop.push(m);
+    if (m.userData.pwText) continue;
+    const hex = mat.color.getHex();
+    batch.setMatrix(m.matrix);
+    const g = m.geometry as THREE.BoxGeometry & THREE.CylinderGeometry;
+    if (g.type === 'CylinderGeometry') {
+      const d = (g as THREE.CylinderGeometry).parameters;
+      cylinder(batch, new THREE.Vector3(0, -d.height / 2, 0), new THREE.Vector3(0, d.height / 2, 0), d.radiusBottom, d.radiusTop, Math.max(6, d.radialSegments), hex === 0x26272c ? t.dark : t.steel, { capB: hex === 0x26272c ? t.dark : t.steel });
+      continue;
+    }
+    if (g.type === 'ConeGeometry') {
+      batch.geometry(g, new THREE.Matrix4(), t.rust);
+      continue;
+    }
+    const d = (g as THREE.BoxGeometry).parameters;
+    const all = (tile: typeof t.paint) => ({ px: tile, nx: tile, pz: tile, nz: tile, py: tile, ny: tile });
+    if (hex === 0x962a20) {
+      if (near(d.width, 1.84) && near(d.height, 0.3)) box(batch, 0, 0, 0, d.width, d.height, d.depth, { ...all(t.paint), py: t.hood });
+      else if (near(d.width, 1.8) && near(d.height, 0.1)) box(batch, 0, 0, 0, d.width, d.height, d.depth, { ...all(t.paint), py: t.roof });
+      else if (near(d.width, 1.9) && near(d.height, 0.45)) box(batch, 0, 0, 0, d.width, d.height, d.depth, { ...all(t.paint), pz: t.tail, nz: t.tail }, { nz: { flipU: true } });
+      else box(batch, 0, 0, 0, d.width, d.height, d.depth, all(t.paint));
+    } else if (hex === 0x74726a || hex === 0x5a0c08) {
+      // (Primer patches and blood: painted into the hood / roof.)
+    } else if (hex === 0x1a2230) box(batch, 0, 0, 0, d.width, d.height, d.depth, { ...all(t.dark), py: t.glass });
+    else if (hex === 0x56585c) box(batch, 0, 0, 0, d.width, d.height, d.depth, { ...all(t.steel), py: t.bed });
+    else if (hex === 0xe8b420) box(batch, 0, 0, 0, d.width, d.height, d.depth, all(t.hazard));
+    else if (hex === 0xb82a1a) box(batch, 0, 0, 0, d.width, d.height, d.depth, all(t.red));
+    else if (hex === 0x3e622c) box(batch, 0, 0, 0, d.width, d.height, d.depth, all(t.green));
+    else if (hex === 0x56663a) box(batch, 0, 0, 0, d.width, d.height, d.depth, all(t.olive));
+    else if (hex === 0x26272c) box(batch, 0, 0, 0, d.width, d.height, d.depth, all(t.dark));
+    else box(batch, 0, 0, 0, d.width, d.height, d.depth, all(t.steel));
+  }
+  for (const m of drop) b.remove(m);
+  batch.setMatrix(null);
+  const mesh = batch.build(undefined, { gain: 1 });
+  if (mesh) b.add(mesh);
 }

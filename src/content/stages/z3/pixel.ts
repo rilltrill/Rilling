@@ -11,6 +11,12 @@ import { Z3Roadside } from './pwRoadside';
 import { Z3Vehicles } from './pwVehicles';
 import { Z3Trucks } from './pwTrucks';
 import { Z3Structures } from './pwStructures';
+import { Z3Buildings } from './pwBuildings';
+import { BAY_FRAMES, z3BayWater, z3BridgeHouse, z3ContainerTile, z3ExitSign, z3HullTile, z3SosPhone } from '../../pixelworld/z3bay';
+import { z3FootingTile, z3SteelPoleTile } from '../../pixelworld/z3roadside';
+import { tintFor } from '../../pixelworld/batch';
+import { pwMaterial, pwTick } from '../../pixelworld/material';
+import { Z3FxAtlas } from '../../pixelworld/z3fx';
 import type { PwCarRecord } from './props';
 import type { Ctx } from './scenery';
 import { partsOf } from './pwTrucks';
@@ -71,11 +77,19 @@ export class Z3PixelWorld {
   readonly veh: Z3Vehicles;
   readonly trucks: Z3Trucks;
   readonly st: Z3Structures;
+  readonly bld: Z3Buildings;
   backdrop: PwBackdrop | null = null;
   private batches = new Map<THREE.Object3D, PwBatch>();
   /** Batches laid in a moving group's own frame (built in `finish`). */
   private parts: { batch: PwBatch; parent: THREE.Object3D }[] = [];
 
+  /** Animated surfaces (the bay's water): one batch, one animated material. */
+  private anim: PwBatch;
+  private animMat: THREE.Material | null = null;
+  private animParent: THREE.Object3D | null = null;
+  /** Flame strips and smoke puffs (their own small atlas). */
+  readonly fx = new Z3FxAtlas();
+  private bay;
   private gateLink: PwTile;
   private strata: PwTile;
   private gatePlate: PwTile;
@@ -83,6 +97,19 @@ export class Z3PixelWorld {
   constructor(readonly ctx: Ctx) {
     this.rule = kitTileRule(this.atlas);
     this.strata = z3StrataTile(this.atlas);
+    this.anim = new PwBatch(this.atlas);
+    const a = this.atlas;
+    this.bay = {
+      water: z3BayWater(a),
+      hull: z3HullTile(a),
+      house: z3BridgeHouse(a),
+      container: z3ContainerTile(a),
+      exit: z3ExitSign(a),
+      sos: z3SosPhone(a),
+      footing: z3FootingTile(a),
+      steel: z3SteelPoleTile(a),
+      scrub: z3ScrubTile(a, { hex: 0x56493a, grass: 0x7a6a40 }),
+    };
     this.gateLink = chainFenceTile(this.atlas, { hex: 0x9a9ea4, rust: 0.4 });
     this.gatePlate = paintedSign(this.atlas, 'KEEP OUT', { ground: 0xe0b820, ink: 0x1a1a1a, font: 'bold', cap: 0.14 }).tile;
     this.road = new Z3Road(this.atlas, ctx);
@@ -90,6 +117,7 @@ export class Z3PixelWorld {
     this.veh = new Z3Vehicles(this.atlas);
     this.trucks = new Z3Trucks(this.atlas);
     this.st = new Z3Structures(this.atlas);
+    this.bld = new Z3Buildings(this.atlas);
   }
 
   /** The (world-frame) batch whose mesh joins `g` (a chunk, a landmark, the root). */
@@ -138,6 +166,15 @@ export class Z3PixelWorld {
       case 'paint':
         drop.push(o);
         return true;
+      case 'spill': {
+        // The oil slick's thin slabs → one painted fuel spill.
+        o.updateMatrixWorld(true);
+        const p = o.getWorldPosition(new THREE.Vector3());
+        const f = new THREE.Vector3(0, 0, -1).applyQuaternion(o.getWorldQuaternion(new THREE.Quaternion()));
+        this.road.decalAt(b, p, 7.5, 4.6, Math.atan2(-f.x, -f.z), this.road.t.spill, 0.02);
+        dropUntagged(o, drop);
+        return true;
+      }
       case 'jersey':
         this.side.jersey(b, o, tag as unknown as { len: number; color: number });
         dropUntagged(o, drop);
@@ -240,6 +277,88 @@ export class Z3PixelWorld {
         this.st.flood(b, o, tag as unknown as { h: number; w: number });
         dropUntagged(o, drop, true);
         return true;
+      case 'house':
+        this.bld.house(b, o, tag as unknown as Parameters<Z3Buildings['house']>[2]);
+        dropUntagged(o, drop, true);
+        return true;
+      case 'gas':
+        drop.push(...this.bld.gas(b, o));
+        return true;
+      case 'gasSign':
+        this.bld.gasSign(b, o);
+        dropUntagged(o, drop, true);
+        return true;
+      case 'warehouse':
+        drop.push(...this.bld.warehouse(b, o, tag as unknown as Parameters<Z3Buildings['warehouse']>[2]));
+        return true;
+      case 'motel':
+        drop.push(...this.bld.motel(b, o, tag as unknown as { wins: number[] }));
+        return false;
+      case 'motelSign':
+        this.bld.motelSign(b, o);
+        dropUntagged(o, drop, true);
+        return true;
+      case 'billboard':
+        drop.push(...this.bld.billboard(b, o, tag as unknown as { art: string; lit: boolean }));
+        return true;
+      case 'block':
+        this.bld.block(b, o as THREE.Mesh, tag as unknown as Parameters<Z3Buildings['block']>[2]);
+        drop.push(o);
+        return true;
+      case 'blockRoof':
+        this.bld.blockRoof(b, o as THREE.Mesh);
+        drop.push(o);
+        return true;
+      case 'blockWin':
+        drop.push(o);
+        return true;
+      case 'exit': {
+        o.updateMatrixWorld(true);
+        b.setMatrix(o.matrixWorld);
+        b.rect(new THREE.Vector3(-0.06, -0.28, -0.62), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0), 1.25, 0.56, this.bay.exit);
+        b.setMatrix(null);
+        dropUntagged(o, drop, true);
+        return true;
+      }
+      case 'phone': {
+        const d = ((o as THREE.Mesh).geometry as THREE.BoxGeometry).parameters;
+        b.setMatrix(o.matrixWorld);
+        box(b, 0, 0, 0, d.width, d.height, d.depth, { nx: this.bay.sos, px: this.bay.sos, pz: this.bay.sos, nz: this.bay.sos, py: this.bay.sos });
+        b.setMatrix(null);
+        drop.push(o);
+        return true;
+      }
+      case 'shore':
+        for (const p of partsOf(o, true)) {
+          const hex = (p.mesh.material as THREE.MeshLambertMaterial).color.getHex();
+          b.geometry(p.mesh.geometry, p.rel, hex === 0x7a746c ? this.bay.footing : this.strata, { world: true });
+          drop.push(p.mesh);
+        }
+        return true;
+      case 'ship':
+        for (const p of partsOf(o, true)) {
+          const m = p.mesh;
+          const d = (m.geometry as THREE.BoxGeometry).parameters;
+          const hex = (m.material as THREE.MeshLambertMaterial).color.getHex();
+          b.setMatrix(p.rel);
+          const t = d.depth > 60 ? this.bay.hull : d.height > 8 ? this.bay.house : this.bay.container;
+          const o2 = t === this.bay.container ? { tintRGB: tintFor(t, hex) } : {};
+          box(b, 0, 0, 0, d.width, d.height, d.depth, { px: t, nx: t, pz: t, nz: t, py: t }, {}, o2);
+          drop.push(m);
+        }
+        b.setMatrix(null);
+        return true;
+      case 'checkpoint':
+        for (const c of o.children) {
+          const m = c as THREE.Mesh;
+          if (!m.isMesh || c.userData.pw) continue;
+          const d = (m.geometry as THREE.BoxGeometry).parameters;
+          b.setMatrix(m.matrixWorld);
+          box(b, 0, 0, 0, d.width, d.height, d.depth, { px: this.bay.steel, nx: this.bay.steel, pz: this.bay.steel, nz: this.bay.steel, py: this.bay.steel, ny: this.bay.steel });
+          drop.push(m);
+        }
+        b.setMatrix(null);
+        return false;
       case 'ridge':
         b.geometry((o as THREE.Mesh).geometry, o.matrixWorld, this.strata, { world: true });
         drop.push(o);
@@ -328,6 +447,28 @@ export class Z3PixelWorld {
     });
   }
 
+  /** Root-level bay pieces: the water (animated) and the far shore's ground. */
+  bayRoot(root: THREE.Object3D) {
+    const list: THREE.Mesh[] = [];
+    for (const c of root.children) if (c.userData.pw && (c.userData.pw.k === 'water' || c.userData.pw.k === 'farShore')) list.push(c as THREE.Mesh);
+    const b = this.batchFor(root);
+    for (const m of list) {
+      m.updateMatrixWorld(true);
+      if (m.userData.pw.k === 'water') {
+        const g = (m.geometry as THREE.PlaneGeometry).parameters;
+        const p = m.position;
+        this.anim.rect(new THREE.Vector3(p.x - g.width / 2, p.y, p.z + g.height / 2), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), g.width, g.height, this.bay.water, { u0: 0, v0: 0 });
+        this.animParent = root;
+      } else b.geometry(m.geometry, m.matrixWorld, this.bay.scrub, { world: true });
+      root.remove(m);
+    }
+  }
+
+  /** Per frame: the water's strip plays on. */
+  tick(dt: number) {
+    if (this.animMat) pwTick(this.animMat, dt);
+  }
+
   /** The scrub either side of the road (classic ground meshes → one painted, world-projected surface). */
   ground(root: THREE.Object3D, meshes: THREE.Mesh[]) {
     const b = this.batchFor(root);
@@ -363,6 +504,11 @@ export class Z3PixelWorld {
     for (const { batch, parent } of this.parts) {
       const m = batch.build(undefined, { gain: 1 });
       if (m) parent.add(m);
+    }
+    if (this.animParent) {
+      this.animMat = pwMaterial(this.atlas, { anim: { frames: BAY_FRAMES, fps: 3 } });
+      const m = this.anim.build(this.animMat);
+      if (m) this.animParent.add(m);
     }
   }
 }

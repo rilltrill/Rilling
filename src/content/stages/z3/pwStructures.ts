@@ -5,7 +5,7 @@ import { hash2, hazardTile } from '../../pixelworld/surfaces';
 import { railingTile } from '../../pixelworld/props';
 import {
   z3BridgeSteel, z3CableTile, z3CastLetters, z3FanEnd, z3FanTile, z3FasciaTile, z3FloodHead, z3GraffitiWords, z3HighwaySign, z3PierTile, z3PortalTile, z3RiprapTile,
-  z3SandbagTile, z3SignBack, z3SoffitTile, z3SoundWallTile, z3TrussTile, z3TunnelCeil, z3TunnelWall,
+  z3SandbagTile, z3SignBack, z3SoffitTile, z3SosMarker, z3SoundWallTile, z3TrussTile, z3TunnelCeil, z3TunnelWall,
 } from '../../pixelworld/z3structures';
 import { z3CobraHead, z3FootingTile, z3SteelPoleTile } from '../../pixelworld/z3roadside';
 import { z3ChromeTile } from '../../pixelworld/z3trucks';
@@ -46,7 +46,8 @@ export class Z3Structures {
       railing: railingTile(a, { hex: 0x8a8e94 }),
       railingRed: railingTile(a, { hex: 0xb8442a }),
       sound: [z3SoundWallTile(a, 0), z3SoundWallTile(a, 1)],
-      tunWall: [z3TunnelWall(a, 0), z3TunnelWall(a, 1)],
+      tunWall: z3TunnelWall(a, 0),
+      sos: z3SosMarker(a),
       tunCeil: z3TunnelCeil(a),
       portal: z3PortalTile(a),
       fan: z3FanTile(a),
@@ -201,10 +202,15 @@ export class Z3Structures {
       b.setMatrix(p.rel);
       const x = p.mesh.position.x;
       if (near(d.height, 7.4) && near(d.width, 0.5)) {
-        const tile = t.tunWall[rec.i % 5 === 2 ? 1 : 0];
+        const tile = t.tunWall;
         // The face toward the road (the left wall's +x side, the right wall's −x side).
         if (x < 0) box(b, 0, 0, 0, d.width, d.height, d.depth, { px: tile, py: t.tunCeil });
         else box(b, 0, 0, 0, d.width, d.height, d.depth, { nx: tile, py: t.tunCeil }, { nx: { flipU: true } });
+        // An SOS marker every fifth segment.
+        if (rec.i % 5 === 2) {
+          const s = x < 0 ? 1 : -1;
+          b.rect(V(s * 0.27, -0.2, s * 0.4), V(0, 0, -s), Y, 0.8, 0.4, t.sos);
+        }
       } else if (near(d.height, 0.18) && d.width > 0.52) {
         // The hazard stripe along the kick band.
         if (x < 0) box(b, 0, 0, 0, d.width, d.height, d.depth, { px: t.hazard, py: t.hazard });

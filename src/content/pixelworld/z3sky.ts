@@ -155,38 +155,16 @@ function paintSky(c: PwCanvas, k: PwKit, o: Z3SkyOpts) {
     const fv = famV[((x % TW) + TW) % TW];
     return fv > 1.4 ? { body: cloudWarm, rim: rimWarm, hot: fv > 3 } : fv < -1 ? { body: cloudCool, rim: rimFire, hot: false } : { body: cloudCool, rim: rimCool, hot: false };
   };
-  for (let n = 0; n < 16; n++) {
-    const el = 3 + Math.pow(rng.next(), 1.2) * 19;
+  for (let n = 0; n < 14; n++) {
+    const el = 2.5 + Math.pow(rng.next(), 1.1) * 17;
     const base = rowOfEl(el);
     const cx = rng.int(0, TW - 1);
-    const L = Math.round((40 + rng.next() * 190) * (1.15 - el / 40));
-    const hMax = Math.max(2, Math.round((3 + rng.next() * 7) * (1.1 - el / 40)));
+    const L = Math.round((70 + rng.next() * 220) * (1.15 - el / 40));
+    const hMax = Math.max(3, Math.round((5 + rng.next() * 9) * (1.1 - el / 40)));
     bank(c, rng, cx, base, L, hMax, rampsAt);
   }
-  // Mackerel cloudlets high up: rows of small lit flecks.
-  for (let n = 0; n < 5; n++) {
-    const cx = rng.int(0, TW - 1);
-    const cy = rowOfEl(14 + rng.next() * 10);
-    for (let r = 0; r < 4; r++) {
-      for (let q = 0; q < 9; q++) {
-        if (rng.next() < 0.3) continue;
-        const x = cx + q * 9 + r * 4 + rng.int(-1, 1);
-        const y = cy + r * 3;
-        const rs = rampsAt(x);
-        for (let j = 0; j < 5; j++) {
-          const i = y * TW + (((x + j) % TW) + TW) % TW;
-          R[i] = rs.body;
-          T[i] = 3;
-          if (j > 0 && j < 4) {
-            R[i + TW] = rs.rim;
-            T[i + TW] = rs.hot ? 4 : 3;
-          }
-        }
-      }
-    }
-  }
-  for (let n = 0; n < 26; n++) {
-    const el = 1.6 + Math.pow(rng.next(), 2) * 14;
+  for (let n = 0; n < 16; n++) {
+    const el = 1.6 + Math.pow(rng.next(), 2) * 10;
     const cy = rowOfEl(el);
     const cx = rng.int(0, TW - 1);
     const L = Math.round(30 + rng.next() * 140);
@@ -444,8 +422,8 @@ export function z3HillsTile(atlas: PwAtlas, o: Z3HillsOpts): PwTile {
       // Lower in front of the city skyline (it carries its own foreground).
       const dc = Math.min(Math.abs(x - cityX), TW - Math.abs(x - cityX)) / TW;
       const dip = dc < 0.12 ? 0.35 + dc * 5 : 1;
-      farTop[x] = ridge(x, 7, (H * 0.55) * dip, horizon + 1);
-      nearTop[x] = ridge(x + 900, 8, (H * 0.32) * dip, horizon + 4);
+      farTop[x] = ridge(x, 7, (H * 0.72) * dip, horizon + 1);
+      nearTop[x] = ridge(x + 900, 8, (H * 0.4) * dip, horizon + 4);
     }
     for (let x = 0; x < TW; x++) {
       const towardSun = ((sunX - x + TW) % TW) < TW / 2 ? 1 : -1;

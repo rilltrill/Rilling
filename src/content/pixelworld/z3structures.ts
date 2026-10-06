@@ -354,14 +354,14 @@ export function z3TunnelWall(atlas: PwAtlas, v: number): PwTile {
     // Panels 32 × 16 (staggered by half a panel per row): a lit top edge, a dark seam under / right.
     for (let y = 0; y < H; y++) {
       const row = y >> 4;
-      const off = (row & 1) * 16;
+      const off = 0;
       const yy = y & 15;
       for (let x = 0; x < W; x++) {
         const xx = (x + off) & 31;
         const i = y * W + x;
         if (yy === 15 || xx === 31) T[i] = 2;
         else if (yy === 0) T[i] = 3.6;
-        else if (hash2((x + off) >> 5, row, 3 + v) > 0.88) T[i] = 2.7;
+        else if (hash2((x + off) >> 5, row, 3 + v) > 0.94) T[i] = 2.8;
       }
     }
     // Soot thickening toward the ceiling (dithered) and exhaust streaks running down.
@@ -391,11 +391,19 @@ export function z3TunnelWall(atlas: PwAtlas, v: number): PwTile {
     c.rect(0, 18, W, 5, steel, 2.6);
     c.hline(0, 18, W, steel, 4);
     for (let x = 10; x < W; x += 32) c.rect(x, 23, 2, 4, steel, 2);
-    if (v === 1) {
-      c.rect(84, 120, 24, 12, k.ramp(0xe8e8e8, { light: 0.4 }), 4);
-      drawText(c, 'SOS', 88, 122, FONT_3x5, k.ramp(0x1a1a1a, { light: 0.4 }), 1);
-      for (let j = 0; j < 8; j++) c.hline(110 + j, 122 + (j < 4 ? j : 7 - j), 1, green, 4, G);
-    }
+    void green;
+  });
+}
+
+/** The tunnel's SOS marker plate (module 26 × 13): white plate, SOS, a green arrow. */
+export function z3SosMarker(atlas: PwAtlas): PwTile {
+  return atlas.tile('z3sosmark', 26, 13, (c, k) => {
+    const w = k.ramp(0xe8e8e8, { light: 0.4 });
+    const green = k.ramp(0x2ad070, { light: 0.4 });
+    c.rect(0, 0, 26, 13, w, 4);
+    c.frame(0, 0, 26, 13, w, 2.6);
+    drawText(c, 'SOS', 3, 3, FONT_3x5, k.ramp(0x1a1a1a, { light: 0.4 }), 1);
+    for (let j = 0; j < 8; j++) c.hline(16 + j, 3 + (j < 4 ? j : 7 - j), 1, green, 4, G);
   });
 }
 
@@ -534,26 +542,38 @@ export function z3FanEnd(atlas: PwAtlas): PwTile {
 
 // ─── Bridge ──────────────────────────────────────────────────────────────────
 
-/** Painted bridge steel (wrap 64 × 64): International-orange plates, rivet seams, chipped paint, rust bleed. */
+/**
+ * Bridge tower steel (wrap 64 × 128 = 2 × 4 m): International-orange cells — tall recessed panels
+ * between vertical stiffeners (lit left lip, shadowed recess), rivet lines down the stiffeners, a
+ * horizontal batten every 4 m, rust weeping from the rivets, chipped paint.
+ */
 export function z3BridgeSteel(atlas: PwAtlas, hex = 0xb8442a): PwTile {
-  return atlas.tile(`z3bsteel|${h6(hex)}`, 64, 64, (c, k) => {
+  return atlas.tile(`z3bsteel|${h6(hex)}`, 64, 128, (c, k) => {
     const rng = k.rng;
     const s = k.ramp(hex, { light: 0.45, sat: 1 });
     const rust = k.ramp(0x5a2412, { light: 0.4 });
     fill(c, s, 3);
-    for (const y of [0, 32]) {
-      c.hline(0, y, 64, s, 1.8);
-      c.hline(0, y + 1, 64, s, 3.8);
-      for (let x = 2; x < 64; x += 4) rivet(c, x, y + 3, s, 3);
+    const T = c.tone;
+    // Cells 32 wide: stiffener (6 texels, raised), recess (26 texels, shaded toward its right).
+    for (let y = 0; y < 128; y++) {
+      for (let x = 0; x < 64; x++) {
+        const u = x & 31;
+        const i = y * 64 + x;
+        if (u === 0) T[i] = 4.2;
+        else if (u < 5) T[i] = 3.4;
+        else if (u === 5) T[i] = 1.8;
+        else T[i] = u < 9 ? 2.4 : u > 28 ? 3.2 : 2.8;
+      }
     }
-    for (const x of [0, 32]) {
-      c.vline(x, 0, 64, s, 1.8);
-      c.vline(x + 1, 0, 64, s, 3.6);
-      for (let y = 6; y < 64; y += 4) rivet(c, x + 3, y, s, 3);
-    }
-    for (let i = 0; i < 8; i++) rustRun(c, rng, rng.int(0, 63), rng.int(0, 63), rng.int(6, 16), rust);
-    wscatter(c, rng, 0, 0, 64, 64, 40, 0, -0.8, { shapes: 3 });
-    wscatter(c, rng, 0, 0, 64, 64, 18, 0, 0.8, { shapes: 2 });
+    for (let y = 3; y < 128; y += 5) for (const x of [2, 34]) rivet(c, x, y, s, 3);
+    // Horizontal batten (a plate across the cells) once per tile.
+    c.rect(0, 60, 64, 6, s, 3.4);
+    c.hline(0, 60, 64, s, 4.4);
+    c.hline(0, 65, 64, s, 1.8);
+    for (let x = 3; x < 64; x += 5) rivet(c, x, 62, s, 3.4);
+    for (let i = 0; i < 10; i++) rustRun(c, rng, rng.int(0, 63), rng.int(0, 120), rng.int(6, 20), rust);
+    wscatter(c, rng, 0, 0, 64, 128, 50, 0, -0.8, { shapes: 3 });
+    wscatter(c, rng, 0, 0, 64, 128, 16, 0, 0.8, { shapes: 2 });
   }, { wrap: true });
 }
 

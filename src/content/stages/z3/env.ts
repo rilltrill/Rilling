@@ -108,6 +108,8 @@ export class Z3Scene {
   gateBroken = false;
   private flickerT = 0;
   private stallSeq = 0;
+  /** ART: PIXEL WORLD's painter (null in CLASSIC / PIXEL CAST) — tests and look-dev read its atlases. */
+  pw: Z3PixelWorld | null = null;
 
   constructor(
     readonly world: World,
@@ -458,6 +460,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
   SCENES.set(world, z);
   // ART: PIXEL WORLD: painted scenery (z3/pixel.ts); the classic builders below only record for it.
   const pw = pixelWorld(world) ? new Z3PixelWorld(ctx) : null;
+  z.pw = pw;
   const sky = new DuskSky(!!pw);
   root.add(sky.group);
   if (pw) {
@@ -643,6 +646,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
   if (pw) {
     // Paint every chunk and landmark before its bake (the bake only sees what stays classic).
     for (const g of [...chunksOf(ctx).values(), ...ctx.landmarks]) pw.convert(g);
+    pw.bayRoot(root);
     pw.finish();
   }
   for (const g of all) {
@@ -660,6 +664,12 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
   void CHUNK;
   scene.add(root);
 
+  if (pw) {
+    // The burning wrecks' flames and smoke, the sky's smoke columns: painted sprites.
+    fires.pixelArt(pw.fx);
+    sky.pixelArt(pw.fx);
+  }
+
   const zFrom = ctx.at(D.BRIDGE_FROM, 0).z;
   const zTo = ctx.at(D.BRIDGE_TO, 0).z;
 
@@ -674,6 +684,7 @@ export function buildHighway(world: World, curve: THREE.CatmullRomCurve3): Envir
     update(dt: number, w: World) {
       sky.update(z.t + dt, w.camera.position);
       pw?.backdrop?.update(w.camera.position);
+      pw?.tick(dt);
       z.update(dt);
     },
     dispose() {
