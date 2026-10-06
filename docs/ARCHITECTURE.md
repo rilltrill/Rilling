@@ -847,12 +847,41 @@ load skips painting), paint the one-level sky atlas after the first frame.
   greenhouse (glass roof grid, planters), hatchery, containment wing (hazard stripes,
   `grateTile` floors, warning signs), tunnels (`pipesTile`, concrete, steam vents
   classic). Convert per room before `bake()`.
-- **d3 TYRANT CHASE** (storm exterior, d3/bake.ts Baker with packed vertices and sway):
-  `stormSkyTile` panorama with rain curtains; terrain (grass / mud) and road strips as
-  PLANAR batches (24 B a vertex — d3 is ≈ 1 M vertices, keep it packed), paddock fences
-  (`chainFenceTile`, cut-out), roadblock (`hazardTile`, drums as prop species), visitor
-  centre (`plasterTile`, `windowModule`), bridge planks / cables, helipad paint. Swaying
-  vegetation is already FLORA in PIXEL CAST — leave it.
+- **d3 TYRANT CHASE** (converted end to end; `stages/d3/pixel.ts` = `D3PixelWorld`, the
+  jeep `stages/d3/jeepPixel.ts`; painters `pixelworld/d3Ground.ts`, `d3Sky.ts`, `d3Park.ts`,
+  `d3Visitor.ts`, `d3Vehicles.ts`, `d3Bridge.ts`, `d3Jeep.ts`). env.ts hooks (`this.pw?.…`)
+  paint each piece before its `Baker.bake` and strip the classic meshes they replace; the
+  Baker keeps its packed 20 B vertices (`baker.pixel` only tells the jeep to paint). Ground:
+  terrain as ONE planar batch (floor sward / mud / gorge rock / river bed, tinted per vertex
+  from the classic colours), the road per 60 m chunk (`d3RoadTile` 8 × 10 m: worn patches on
+  a 4-texel grid, tar snakes, pothole, chipped dashes; `d3VergeTile` mud verges with ruts,
+  gravel and grass clumps; `d3MudRoadTile` for the mud stretch), animated puddles / pools /
+  river (`d3WaterTile`, `d3PuddleDecal`, `d3FoamModule`: 4 frames, one anim material),
+  footprints, skids; boulders as FLORA-style billboards (`stones`). Sky: `PwBackdrop` storm
+  panorama (moon behind silver-rimmed billows, scud, rain shafts) + two ranges (ridges
+  crowded with palms; no volcano glow: through the canopy it read as a stray blob), gain
+  following the lightning; the bolts are painted glow forks from the
+  world atlas (`Storm.usePixelSky`). Pylons (rust-streaked faces, insulators, hazard feet,
+  vines), wire spans as cut-outs, DANGER boards, utility poles, signs with painted arrows,
+  lamp posts, the visitor centre (stucco, painted wing windows lit / dark / broken /
+  flickering, atrium with the rex skeleton, thatch and fringe, marquee bulbs, banners
+  swinging, gouged doors, plaza pavers and mosaic, kiosk), the roadblock (tour car,
+  sawhorses, palm log, drums), the mud truck, the trestle bridge (deck, creosoted timbers,
+  pieces that fall), helipad (pad, ring, H, PARK RESCUE, hut, floodlight mast, windsock),
+  the helicopter livery, the fuel tank, flame cards for the fires (`Fire` takes a `card`
+  factory), and the boss road dressing (print trails, flares, an overturned tour car, a
+  fallen lamp, a leaning pole, EVACUATE boards). Occluders (visitor-centre shell, roadblock
+  car) stay the classic meshes, hidden and out of the fog-cull list; drums and the tank keep
+  their classic hit meshes with an invisible material (raycast, never drawn) under the
+  painted ones. Budgets: world atlas 1024×976 (5.1 MB with mips) + sky 2048×400 (3.1 MB) +
+  jeep 256×192 (0.25 MB), 8.5 MB in all; paint ≈ 85–98 ms world + ≈ 20–26 ms sky (node CPU
+  time, best of 5, on a shared box at load 20+) + a few ms jeep; draw calls 18–64 a beat
+  (PIXEL CAST 16–70). Checks:
+  `tests/unit/pixel-world-d3.test.ts` (occluders, hit proxies, entities, ground, RNG,
+  painted props not hit boxes, budget, full-stage simulator), `D1_SIG=1 D1_SIG_STAGE=d3 …
+  d1-sig.test.ts` (CLASSIC / PIXEL CAST scene signature), `d3-lab.test.ts` (atlas dumps,
+  paint benches). Still classic: swaying vegetation (the FLORA billboards of PIXEL CAST),
+  the helipad edge lights, the jeep's glass / lamps, FX.
 
 ## Audio
 
