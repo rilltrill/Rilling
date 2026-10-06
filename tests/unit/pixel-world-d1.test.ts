@@ -8,6 +8,8 @@ import { AudioSystem } from '../../src/audio/Audio';
 import { Kit } from '../../src/content/kit/ModelKit';
 import { clearPwCache, PW_STATS } from '../../src/content/pixelworld/atlas';
 import { nullHud, simulateStage } from './sim';
+import { Destructible } from '../../src/gameplay/Props';
+import { jungle } from '../../src/content/stages/d1/env';
 
 /**
  * JUNGLE RUN (d1) in ART: PIXEL WORLD — the stage-specific identity checks on
@@ -18,7 +20,7 @@ import { nullHud, simulateStage } from './sim';
 
 const stage = (id: string) => ALL_STAGES.find((s) => s.id === id)!;
 
-function build(art: 'sprites' | 'pixel') {
+function build(art: '3d' | 'sprites' | 'pixel') {
   const w = new World(new THREE.PerspectiveCamera(60, 844 / 390, 0.05, 400), new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS }, 7);
   w.art = art;
   const runner = new StageRunner(w, stage('d1'));
@@ -64,6 +66,56 @@ describe('d1 JUNGLE RUN in PIXEL WORLD', () => {
     });
     w.dispose();
     Kit.disposeAll();
+  });
+
+  it('destructibles and hit proxies are identical in CLASSIC, PIXEL CAST and PIXEL WORLD (drums, fence section, tree halves)', { timeout: 180_000 }, () => {
+    // Per ART: every fuel drum (the fallen-tree three + the boss road four) is spawned, then a fan of
+    // rays is cast at each drum and across the breakable fence section and both tree halves against
+    // what bullets can hit (the shootables + the occluders). PIXEL WORLD paints the drums over their
+    // classic hit meshes (undrawn, same geometry and side), so every hit must land at the same
+    // distance on the same kind of thing.
+    const run = (art: '3d' | 'sprites' | 'pixel') => {
+      clearPwCache();
+      const { w } = build(art);
+      const env = jungle()!;
+      env.spawnDrums(w);
+      env.spawnBossDrums(w);
+      w.scene.updateMatrixWorld(true);
+      const drums = w.entities.filter((e): e is Destructible => e instanceof Destructible);
+      const targets = [...w.shootables.active(), ...(w.env!.occluders ?? [])];
+      const ray = new THREE.Raycaster();
+      const out: string[] = [`drums ${drums.length}`, `shootables ${w.shootables.active().length}`, `hitboxes ${drums.map((d) => w.shootables.objects.filter((o) => (o.userData.shot as { owner: unknown }).owner === d).length).join(',')}`];
+      const cast = (o: THREE.Vector3, d: THREE.Vector3) => {
+        ray.set(o, d.normalize());
+        const h = ray.intersectObjects(targets, false)[0];
+        if (!h) return '-';
+        const tag = h.object.userData.shot as { owner: unknown } | undefined;
+        return `${Math.round(h.distance * 1000)}:${tag ? drums.indexOf(tag.owner as Destructible) : 'occ'}`;
+      };
+      const p = new THREE.Vector3();
+      for (const d of drums) {
+        d.root.getWorldPosition(p);
+        for (let k = 0; k < 8; k++) {
+          const a = (k / 8) * Math.PI * 2;
+          for (const y of [0.15, 0.5, 0.85]) out.push(cast(new THREE.Vector3(p.x + Math.sin(a) * 4, p.y + y + 0.3, p.z + Math.cos(a) * 4), new THREE.Vector3(-Math.sin(a) * 4, -0.3, -Math.cos(a) * 4)));
+        }
+      }
+      // Across the fence section and the tree halves (rays toward them from the road).
+      for (const name of ['fence', 'tree'] as const) {
+        const at = name === 'fence' ? env.P(166, -10) : env.P(247, 0);
+        for (let k = -3; k <= 3; k++) out.push(cast(new THREE.Vector3(at.x + 8, 1.2, at.z + k), new THREE.Vector3(-1, 0, 0)));
+      }
+      w.dispose();
+      Kit.disposeAll();
+      return out;
+    };
+    const a = run('3d');
+    const b = run('sprites');
+    const c = run('pixel');
+    expect(a.length).toBeGreaterThan(80);
+    expect(a.filter((h) => h !== '-').length).toBeGreaterThan(40);
+    expect(b).toEqual(a);
+    expect(c).toEqual(a);
   });
 
   it('the atlases stay within budget (≤ 24 MB all levels)', { timeout: 120_000 }, () => {

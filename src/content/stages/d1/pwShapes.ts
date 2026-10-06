@@ -107,20 +107,23 @@ function disc(batch: PwBatch, c: THREE.Vector3, r: number, dir: number, sides: n
  * up along `up` (unit vectors), facing right × up. `back` adds the reverse face
  * (the module mirrored so it reads the same way round from behind, or `backTile`).
  */
-export function pwPanel(batch: PwBatch, c: THREE.Vector3, right: THREE.Vector3, up: THREE.Vector3, w: number, h: number, tile: PwTile, o: { back?: boolean; backTile?: PwTile; flipU?: boolean; tint?: number } = {}) {
+export function pwPanel(batch: PwBatch, c: THREE.Vector3, right: THREE.Vector3, up: THREE.Vector3, w: number, h: number, tile: PwTile, o: { back?: boolean; backTile?: PwTile; flipU?: boolean; tint?: number; frames?: number } = {}) {
   const corner = c.clone().addScaledVector(right, -w / 2).addScaledVector(up, -h / 2);
-  batch.rect(corner, right, up, w, h, tile, { flipU: o.flipU, tint: o.tint });
+  // An animated strip module (frames stacked, frame 0 at the bottom): map ONE frame onto the quad —
+  // the animated material steps the frame (stretching the whole strip would also pick a far mip level).
+  const sub = o.frames ? { x: 0, y: 0, w: tile.w, h: tile.h / o.frames } : undefined;
+  batch.rect(corner, right, up, w, h, tile, { flipU: o.flipU, tint: o.tint, sub });
   if (o.back || o.backTile) {
     const neg = right.clone().negate();
     const c2 = c.clone().addScaledVector(right, w / 2).addScaledVector(up, -h / 2);
-    batch.rect(c2, neg, up, w, h, o.backTile ?? tile, { flipU: o.backTile ? false : !o.flipU, tint: o.tint });
+    batch.rect(c2, neg, up, w, h, o.backTile ?? tile, { flipU: o.backTile ? false : !o.flipU, tint: o.tint, sub: o.backTile ? undefined : sub });
   }
 }
 
 /** A flat decal on the ground (facing up) centred at (x, y, z), `sx` × `sz` metres, turned by `yaw`. */
-export function pwDecal(batch: PwBatch, x: number, y: number, z: number, sx: number, sz: number, yaw: number, tile: PwTile, tint?: number) {
+export function pwDecal(batch: PwBatch, x: number, y: number, z: number, sx: number, sz: number, yaw: number, tile: PwTile, tint?: number, frames?: number) {
   const ax = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
   const az = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
   const o = new THREE.Vector3(x, y, z).addScaledVector(ax, -sx / 2).addScaledVector(az, sz / 2);
-  batch.rect(o, ax, az.clone().negate(), sx, sz, tile, { tint });
+  batch.rect(o, ax, az.clone().negate(), sx, sz, tile, { tint, sub: frames ? { x: 0, y: 0, w: tile.w, h: tile.h / frames } : undefined });
 }

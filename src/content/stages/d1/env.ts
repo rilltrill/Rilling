@@ -8,7 +8,7 @@ import { Rng } from '../../../core/Rng';
 import { clamp, easeInOutSine } from '../../../core/math';
 import { Flora, COL } from './flora';
 import { pixelWorld } from '../../../core/art';
-import { D1PixelWorld } from './pixel';
+import { D1PixelWorld, D1_PX_FOG } from './pixel';
 import { d1ShaftMaterial, mergeShafts } from '../../pixelworld/d1Shafts';
 import { Herd } from './herd';
 import { D1HerdSprites } from './herdPixel';
@@ -296,7 +296,12 @@ export class JungleEnv {
     root.add(this.veg3D, this.vegPx);
     this.pw = pixelWorld(w) ? new D1PixelWorld() : null;
     // PIXEL WORLD: the fog starts further out, so the painted middle distance keeps its colour (same far wall).
-    if (this.pw) (w.scene.fog as THREE.Fog).near = 38;
+    // Its colour is the painted sky's horizon haze (a light blue-green), not the classic near-white.
+    if (this.pw) {
+      (w.scene.fog as THREE.Fog).near = 38;
+      (w.scene.fog as THREE.Fog).color.setHex(D1_PX_FOG);
+      (w.scene.background as THREE.Color).setHex(D1_PX_FOG);
+    }
     this.buildBackdrop();
     if (this.pw) this.pw.ground(GROUND_Y);
     else {
@@ -1032,7 +1037,10 @@ export class JungleEnv {
     for (const [lat, y] of spots) {
       const p = f.pos.clone().addScaledVector(f.right, lat);
       p.y = y;
-      this.drums.push(w.add(fuelDrum(w, p, onBlast)));
+      const dr = w.add(fuelDrum(w, p, onBlast));
+      this.drums.push(dr);
+      // PIXEL WORLD: the painted drum over its (undrawn, still shot) classic hit meshes.
+      this.pw?.drum(dr.root);
     }
   }
 
@@ -1094,7 +1102,8 @@ export class JungleEnv {
       [634, -4.6],
       [672, 4.4],
     ] as [number, number][]) {
-      w.add(fuelDrum(w, this.P(d, lat)));
+      const dr = w.add(fuelDrum(w, this.P(d, lat)));
+      this.pw?.drum(dr.root);
     }
   }
 

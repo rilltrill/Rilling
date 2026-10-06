@@ -16,7 +16,26 @@ export function register(a: PwAtlas, t: PwTile[], T: any) {
   t.push(T.d1PatchDecal(a, 'moss', { hex: 0x5b7a30, dark: 0x3a5622, accent: 0x8aaa3c }, 0));
   t.push(T.d1PatchDecal(a, 'litter', { hex: 0x5a4a2c, dark: 0x2a2018, accent: 0x8a6a34 }, 1));
   t.push(T.d1PatchDecal(a, 'earth', { hex: 0x6a5a3a, dark: 0x8a8478, accent: 0x6b8c34 }, 2));
-  t.push(T.d1PuddleDecal(a, { mud: 0x5a4632, sky: 0xa8c8d8, tree: 0x4a6a4a }, 0));
+  t.push(T.d1PuddleDecal(a, { mud: 0x6a5232, sky: 0x7e8c8c, tree: 0x5e665a }, 0));
+  t.push(T.d1LogBarkTile(a, { hex: 0x5a4632, wood: 0xc8a878, lichen: 0x8a9a6a }));
+  t.push(T.d1TrampleTile(a, { mud: 0x5a4632, grass: 0x6b8c34 }));
+  t.push(T.d1EmblemPlaqueModule(a, { iron: 0x3a3633 }));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function register3(a: PwAtlas, t: PwTile[]) {
+  const P = await import('../../src/content/pixelworld/d1Props');
+  const J = await import('../../src/content/pixelworld/d1Jeep');
+  t.push(P.d1DrumTile(a, { hex: 0xa8301c }));
+  t.push(P.d1DrumLidModule(a, { hex: 0xa8301c }));
+  t.push(P.d1CanvasTile(a, { hex: 0x5a6a3a }));
+  t.push(P.d1KitFrontModule(a, { hex: 0x5a6a3a }));
+  t.push(P.d1ThatchFringeTile(a, { hex: 0x8a6a34 }));
+  t.push(P.d1LanternModule(a));
+  t.push(P.d1KioskWindowDeepModule(a, { wood: 0x8a6a44, shutter: 0x6a7a6a }));
+  t.push(P.d1TicketsBoardModule(a));
+  t.push(J.d1TubeTile(a, { hex: 0x5a6a48, primer: 0xb8a070 }));
+  t.push(J.d1HoodStripeDecal(a, { hex: 0x46603a, primer: 0xb8a070, mud: 0x8a6e48 }));
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -44,9 +63,12 @@ export async function register2(a: PwAtlas, t: PwTile[]) {
   t.push(P.d1KioskWindowModule(a, { wood: 0x8a6a44, shutter: 0x6a7a6a }));
   t.push(P.d1MapBoardModule(a));
   t.push(P.d1RoadTile(a, { hex: 0xa8885a, rut: 0x8a6a44, grass: 0x6b8c34, stone: 0x8a8478, leaf: 0x7a6a2a }));
-  t.push(Wt.d1WaterTile(a, { hex: 0x2a98b4, deep: 0x1a6a8a }));
+  t.push(Wt.d1RiverTile(a, { body: 0x2c6e6c, deep: 0x21545a, shallow: 0x5c7650, refl: 0x1f4436, sky: 0x86b2b4, span: 198 }));
+  t.push(Wt.d1EddyDecal(a, { hex: 0xe8f4f4 }));
+  t.push(Wt.d1FallLipModule(a, { hex: 0x9ad2e2, deep: 0x245e6e }));
+  t.push(Wt.d1FlameModule(a));
   t.push(Wt.d1FoamEdgeTile(a, { hex: 0xe8f4f4 }));
-  t.push(Wt.d1FallTile(a, { hex: 0x84c8dc, deep: 0x2e7e96 }));
+  t.push(Wt.d1FallTile(a, { hex: 0x84c8dc, deep: 0x2e7e96, rock: 0x4a4a44 }));
   t.push(Wt.d1SplashModule(a, { hex: 0xe8f4f4 }));
   t.push(Wt.d1BankTile(a, { earth: 0x6a5434, sand: 0x9a8a6a, mud: 0x4a3a28, grass: 0x6b8c34, stone: 0x8a8478 }));
 }

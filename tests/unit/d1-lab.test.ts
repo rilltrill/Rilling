@@ -13,8 +13,9 @@ describe.skipIf(!process.env.D1_LAB)('d1 lab', () => {
     const atlas = new PwAtlas('d1-lab');
     const tiles: PwTile[] = [];
     const reg = (await import('./d1-lab-reg')).register;
-    if (process.env.D1_SET !== "2") reg(atlas, tiles, T);
-    else await (await import("./d1-lab-reg")).register2(atlas, tiles);
+    if (process.env.D1_SET === '3') await (await import('./d1-lab-reg')).register3(atlas, tiles);
+    else if (process.env.D1_SET !== '2') reg(atlas, tiles, T);
+    else await (await import('./d1-lab-reg')).register2(atlas, tiles);
     const pal = new PwPalette();
     const defs = (atlas as unknown as { tiles: Map<string, { paint: Parameters<typeof paintTile>[3] }> }).tiles;
     const only = process.env.D1_ONLY;
@@ -48,7 +49,7 @@ describe.skipIf(!process.env.D1_STONES)('d1 stones', () => {
     const { paintFloraAtlas } = await import('../../src/content/pixel/floraField');
     const S = await import('../../src/content/pixelworld/d1Species');
     const t0 = performance.now();
-    const a = paintFloraAtlas(S.D1_STONES, S.D1_STONE_BIOME, 'd1-stones-lab');
+    const a = paintFloraAtlas(S.D1_STONES_ALL, S.D1_STONE_BIOME, 'd1-stones-lab');
     console.log(`stones atlas ${a.w}x${a.h} ${(performance.now() - t0).toFixed(1)} ms`);
     for (const l of [0, 1]) {
       const lv = a.levels[l];
@@ -76,13 +77,13 @@ describe.skipIf(!process.env.D1_STONETIME)('d1 stone timing', () => {
       const t1 = performance.now();
       paintFloraAtlas(Hd.D1_HERD, Hd.D1_HERD_BIOME, `lab-herd-${pass}`);
       if (pass >= 2) console.log(`herd ${(performance.now() - t1).toFixed(1)} ms`);
-      for (const sp of S.D1_STONES) {
+      for (const sp of S.D1_STONES_ALL) {
         const t0 = performance.now();
         paintFloraAtlas([sp], S.D1_STONE_BIOME, `lab-${pass}-${sp.key}`);
         if (pass === 2) console.log(`${sp.key} ${(performance.now() - t0).toFixed(1)} ms`);
       }
       const t0 = performance.now();
-      paintFloraAtlas(S.D1_STONES, S.D1_STONE_BIOME, `lab-all-${pass}`);
+      paintFloraAtlas(S.D1_STONES_ALL, S.D1_STONE_BIOME, `lab-all-${pass}`);
       if (pass === 2) console.log(`all ${(performance.now() - t0).toFixed(1)} ms`);
     }
   });
@@ -219,7 +220,7 @@ describe.skipIf(!process.env.D1_FLORAMIN)('d1 flora atlas min', () => {
     let hd = Infinity;
     for (let i = 0; i < 8; i++) {
       let t0 = performance.now();
-      paintFloraAtlas(S.D1_STONES, S.D1_STONE_BIOME, `min-st-${i}`);
+      paintFloraAtlas(S.D1_STONES_ALL, S.D1_STONE_BIOME, `min-st-${i}`);
       st = Math.min(st, performance.now() - t0);
       t0 = performance.now();
       paintFloraAtlas(Hd.D1_HERD, Hd.D1_HERD_BIOME, `min-hd-${i}`);

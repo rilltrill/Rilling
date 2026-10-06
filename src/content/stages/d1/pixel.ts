@@ -6,16 +6,17 @@ import { PwBatch } from '../../pixelworld/batch';
 import { PwBackdrop } from '../../pixelworld/backdrop';
 import { pwMaterial, pwTick } from '../../pixelworld/material';
 import { kitTile, neutral, NEUTRAL_HEX, retexture, type TileRule } from '../../pixelworld/retexture';
-import { volcanoSpan, volcanoTile } from '../../pixelworld/sky';
-import { d1RangeTile, d1SkyTile } from '../../pixelworld/d1Sky';
-import { fabricTile, grateTile, hazardTile, planksTile, rockTile } from '../../pixelworld/surfaces';
-import { d1BarkTile, d1FlagModule, d1MeadowTile, d1MossDrapeModule, d1SmallTile, d1TrampleTile, d1GateDoorModule, d1GateSignModule, d1HewnTile, d1IronTile, d1LogEndModule, d1PalisadeTile, d1PatchDecal, d1PuddleDecal } from '../../pixelworld/d1Tiles';
+import { d1EscarpTile, d1RangeTile, d1SkyTile, d1TreelineTile } from '../../pixelworld/d1Sky';
+import { d1VolcanoSpan, d1VolcanoTile } from '../../pixelworld/d1Volcano';
+import { grateTile, hazardTile, planksTile, rockTile } from '../../pixelworld/surfaces';
+import { d1BarkTile, d1EmblemPlaqueModule, d1FlagModule, d1LogBarkTile, d1MeadowTile, d1MossDrapeModule, d1SmallTile, d1TrampleTile, d1GateDoorModule, d1GateSignModule, d1HewnTile, d1IronTile, d1LogEndModule, d1PalisadeTile, d1PatchDecal, d1PuddleDecal } from '../../pixelworld/d1Tiles';
 import {
   d1ArrowSignModule, d1BarricadeModule, d1CarBackModule, d1CarCabinModule, d1CarFrontModule, d1CarPaintTile, d1CarSideModule, d1CarUnderModule, d1CrateModule,
-  d1DangerSignModule, d1GalvTile, d1NoSwimModule, d1RaftModule, d1TinTile, d1KioskWindowModule, d1MapBoardModule, d1MossTile, d1RoadTile, d1ThatchTile, d1TreadTile, d1WheelModule, d1WireSpanModule, type CarPaint,
+  d1CanvasTile, d1DangerSignModule, d1DrumLidModule, d1DrumTile, d1GalvTile, d1KioskWindowDeepModule, d1KitFrontModule, d1LanternModule, d1NoSwimModule, d1RaftModule, d1ThatchFringeTile, d1TicketsBoardModule, d1TinTile,
+  d1KioskWindowModule, d1MapBoardModule, d1MossTile, d1RoadTile, d1ThatchTile, d1TreadTile, d1WheelModule, d1WireSpanModule, type CarPaint,
 } from '../../pixelworld/d1Props';
-import { D1_WATER_FRAMES, d1BankTile, d1FallTile, d1FlameModule, d1FoamEdgeTile, d1SplashModule, d1WaterTile } from '../../pixelworld/d1Water';
-import { D1_STONE_BIOME, D1_STONES } from '../../pixelworld/d1Species';
+import { D1_WATER_FRAMES, d1BankTile, d1EddyDecal, d1FallLipModule, d1FallTile, d1FlameModule, d1FoamEdgeTile, d1RiverTile, d1SplashModule } from '../../pixelworld/d1Water';
+import { D1_BOULDERS, D1_STONE_BIOME, D1_STONES_ALL } from '../../pixelworld/d1Species';
 import { FloraField, floraAtlas, floraReach } from '../../pixel/floraField';
 import { pwCylinder, pwDecal, pwPanel } from './pwShapes';
 import { paintedSign } from '../../pixelworld/signs';
@@ -48,8 +49,15 @@ import type { FallenTree, GateParts } from './props';
  * `pixelWorld(world)`, never draws from an RNG differently.
  */
 
-const FOG = 0xb3cfc2;
+/**
+ * PIXEL WORLD fog / horizon colour: a light blue-green haze that is the sky's
+ * own horizon band (the classic 0xb3cfc2 read as a white stripe under the
+ * saturated painted sky). env.ts sets the scene fog to it in PIXEL WORLD only.
+ */
+export const D1_PX_FOG = 0x9ec4c8;
+const FOG = D1_PX_FOG;
 const FOG_FAR = 140;
+const SUN_AZ = 124;
 
 const CAR: CarPaint = { white: 0xe8e2d4, red: 0xd0321c, glass: 0x3e5a70, tyre: 0x2a2b2c, steel: 0xa4a4a0, mud: 0x8a6e48 };
 
@@ -97,13 +105,18 @@ export class D1PixelWorld {
   /** Batches laid in a moving group's own frame (doors, the breakable fence, the tree halves). */
   private parts: { batch: PwBatch; parent: THREE.Object3D }[] = [];
   private car: { batch: PwBatch; body: THREE.Object3D; mesh: THREE.Mesh | null } | null = null;
+  /** The painted fuel drum (one geometry shared by every drum) and the invisible stand-ins for the hit meshes. */
+  private drumMesh: { geo: THREE.BufferGeometry; mat: THREE.Material } | null = null;
+  private hiddenMats = new Map<THREE.Side, THREE.MeshBasicMaterial>();
+  /** The river's centre line (for rocks standing in the water). */
+  private riverPts: THREE.Vector3[] = [];
   private animMat: THREE.Material | null = null;
 
   constructor() {
     this.world = new PwBatch(this.atlas);
     this.veg = new PwBatch(this.atlas);
     this.anim = new PwBatch(this.atlas);
-    this.stones = new FloraField(floraAtlas(D1_STONES, D1_STONE_BIOME, 'd1-stones'), { far: FOG_FAR + 10 });
+    this.stones = new FloraField(floraAtlas(D1_STONES_ALL, D1_STONE_BIOME, 'd1-stones'), { far: FOG_FAR + 10 });
     const a = this.atlas;
     // Tiles are registered only when a surface needs them (every registered tile is painted at load):
     // rocks the billboards don't take → one painted rock face tinted per material; earth / grass → one patch tile.
@@ -139,7 +152,7 @@ export class D1PixelWorld {
 
   /** The road along the rail: one painted ribbon (ruts, tread prints, verges) 8 m across. */
   road(curve: THREE.Curve<THREE.Vector3>, to: number) {
-    const t: PwTile = d1RoadTile(this.atlas, { hex: COL.road, rut: 0x94744c, grass: COL.verge, stone: 0x8a8478, leaf: 0x7a6a2a });
+    const t: PwTile = d1RoadTile(this.atlas, { hex: COL.road, rut: 0x94744c, grass: COL.verge, stone: 0x8a8478, leaf: 0x8a5a2a });
     const pts: THREE.Vector3[] = [];
     for (let d = 0; d <= to + 0.001; d += 2) pts.push(EnvKit.frameAt(curve, Math.min(d, to)).pos.clone());
     this.world.ribbon(pts, 8, t, { y: 0.02 });
@@ -147,7 +160,7 @@ export class D1PixelWorld {
 
   /** A rain puddle on the road (the classic one's disc: radii `rx`, `rz`, turned by `yaw`). */
   puddle(p: THREE.Vector3, yaw: number, rx: number, rz: number, variant: number) {
-    const t = d1PuddleDecal(this.atlas, { mud: 0x5a4632, sky: 0xa8c8d8, tree: 0x4a6a4a }, variant % 2);
+    const t = d1PuddleDecal(this.atlas, { mud: 0x8a6a44, sky: 0x7c8488, tree: 0x646660 }, variant % 2);
     pwDecal(this.world, p.x, 0.056, p.z, rx * 2.2, rz * 2.2, yaw, t);
   }
 
@@ -164,11 +177,13 @@ export class D1PixelWorld {
     const len = rc.getLength();
     const pts: THREE.Vector3[] = [];
     for (let s = 0; s <= len + 0.001; s += 2) pts.push(rc.getPointAt(Math.min(1, s / len)));
+    this.riverPts = pts;
     const bank = { earth: 0x6a5434, sand: 0x9a8a6a, mud: 0x4a3a28, grass: COL.verge, stone: 0x8a8478 };
     const W = RIVER_WIDTH;
     this.world.ribbon(pts, 2.6, d1BankTile(a, bank), { offset: -(W / 2 + 1.0), y: 0.045 });
     this.world.ribbon(pts, 2.6, d1BankTile(a, { ...bank, mirror: true }), { offset: W / 2 + 1.0, y: 0.045 });
-    this.anim.ribbon(pts, W + 0.4, d1WaterTile(a, { hex: 0x2a8098, deep: 0x1c5e74 }), { y: 0.075 });
+    // One tile spans the whole channel (16 texels a metre): shallows, reflections, channel painted across it.
+    this.anim.ribbon(pts, W + 0.4, d1RiverTile(a, { body: 0x2c6e6c, deep: 0x21545a, shallow: 0x5c7650, refl: 0x1f4436, sky: 0x86b2b4, span: Math.round((W + 0.4) * 16) }), { y: 0.075 });
     this.anim.ribbon(pts, 0.5, d1FoamEdgeTile(a, { hex: 0xe8f4f4 }), { offset: -(W / 2 - 0.05), y: 0.085 });
     this.anim.ribbon(pts, 0.5, d1FoamEdgeTile(a, { hex: 0xe8f4f4, mirror: true }), { offset: W / 2 - 0.05, y: 0.085 });
   }
@@ -178,12 +193,23 @@ export class D1PixelWorld {
     const a = this.atlas;
     const right = new THREE.Vector3(normal.z, 0, -normal.x);
     const c = new THREE.Vector3(top.x, 10.6, top.z).addScaledVector(normal, 0.6);
-    pwPanel(this.anim, c, right, Y, 8, 22, d1FallTile(a, { hex: 0x84c8dc, deep: 0x2e7e96 }));
+    pwPanel(this.anim, c, right, Y, 8, 22, d1FallTile(a, { hex: 0x84c8dc, deep: 0x2e7e96, rock: 0x4a4a44 }));
+    // The lip: the dark overflow band and its bright curl along the rim.
+    pwPanel(this.anim, c.clone().setY(21.1).addScaledVector(normal, 0.08), right, Y, 8, 1.0, d1FallLipModule(a, { hex: 0x9ad2e2, deep: 0x245e6e }), { frames: D1_WATER_FRAMES });
     const sp = d1SplashModule(a, { hex: 0xe8f4f4 });
     const base = new THREE.Vector3(top.x, 1.4, top.z).addScaledVector(normal, 1.4);
-    pwPanel(this.anim, base, right, Y, 9, 3.6, sp);
+    pwPanel(this.anim, base, right, Y, 9, 3.6, sp, { frames: D1_WATER_FRAMES });
+    // Crags flanking the fall (billboards standing just in front of the sheet's edges): the water pours
+    // out of a notch in broken rock with canopy over its rim, never off the edge of a pale rectangle.
+    for (const side of [-1, 1]) {
+      const p = new THREE.Vector3(top.x, 0, top.z).addScaledVector(normal, 1.3).addScaledVector(right, side * 6.6);
+      this.stones.add('cliffSpire', p.x, 0, p.z, 23.5 + side * 1.2, { variant: side < 0 ? 0 : 1, flip: side > 0 });
+    }
+    // And the cliff behind it, taller than the sheet: the water pours from under its canopy, not off a ruled edge.
+    const back = new THREE.Vector3(top.x, 0, top.z).addScaledVector(normal, -2.5);
+    this.stones.add('cliffSpireWide', back.x, 0, back.z, 33, { variant: 0 });
     const p2 = pool.clone().setY(1.0).addScaledVector(normal, -0.5);
-    pwPanel(this.anim, p2, right, Y, 6, 2.4, sp, { flipU: true });
+    pwPanel(this.anim, p2, right, Y, 6, 2.4, sp, { flipU: true, frames: D1_WATER_FRAMES });
   }
 
   // ─── Rocks, patches, signposts (the SPRITES scenery chunks) ────────────────
@@ -208,7 +234,14 @@ export class D1PixelWorld {
     return n + retexture(g, this.veg, this.rule, { world: () => false });
   }
 
-  /** A rock / cliff stone as a stone billboard of its size (rotation-independent reach). */
+  /**
+   * A rock / cliff stone as a stone billboard of its size (rotation-independent
+   * reach): cliff stones → crags; boulders → the family member whose aspect is
+   * nearest the rock's own (so the footprint matches the classic rock), the
+   * river family (wet band, foam ring) when it stands in the water, plus a
+   * swirl of white water on the river round it. A rock flatter than the widest
+   * sprite gets a smaller companion beside it.
+   */
   private stone(o: THREE.Object3D) {
     _box.setFromObject(o);
     const cx = (_box.min.x + _box.max.x) / 2;
@@ -217,7 +250,59 @@ export class D1PixelWorld {
     if (h <= 0.05) return;
     _v.set(cx, 0, cz);
     const reach = floraReach(o, _v);
-    this.stones.fit(h > 5 ? 'cliffSpire' : 'boulder', cx, 0, cz, reach, h, { aspectTol: 1.6 });
+    if (h > 5) {
+      this.stones.fit('cliffSpire', cx, 0, cz, reach, h, { aspectTol: 1.6 });
+      return;
+    }
+    const wet = this.inRiver(cx, cz, 0.25);
+    const want = Math.max(0.05, reach * 0.75) / h;
+    let best = wet ? D1_BOULDERS.river[0] : D1_BOULDERS.land[0];
+    for (const f of wet ? D1_BOULDERS.river : D1_BOULDERS.land) if (Math.abs(Math.log(f[1] / want)) < Math.abs(Math.log(best[1] / want))) best = f;
+    const variants = [...Array(best[2]).keys()];
+    const widest = best[1] * 1.15;
+    if (want > widest * 1.2) {
+      // Very flat rock: two stones side by side along its long axis.
+      const ax = _box.max.x - _box.min.x >= _box.max.z - _box.min.z;
+      const off = reach * 0.22;
+      this.stones.fit(best[0], ax ? cx - off : cx, 0, ax ? cz : cz - off, reach * 0.62, h, { variants });
+      this.stones.fit(best[0], ax ? cx + off : cx, 0, ax ? cz : cz + off, reach * 0.48, h * 0.75, { variants });
+    } else this.stones.fit(best[0], cx, 0, cz, reach, h, { variants });
+    if (wet) this.eddy(cx, cz, reach);
+  }
+
+  /** Is (x, z) within the river (its half-width + `margin`)? */
+  private inRiver(x: number, z: number, margin: number): boolean {
+    const p = this.riverPts;
+    const lim = (RIVER_WIDTH / 2 + margin) ** 2;
+    for (let i = 1; i < p.length; i++) {
+      const ax = p[i - 1].x;
+      const az = p[i - 1].z;
+      const dx = p[i].x - ax;
+      const dz = p[i].z - az;
+      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+      const ex = ax + dx * t - x;
+      const ez = az + dz * t - z;
+      if (ex * ex + ez * ez < lim) return true;
+    }
+    return false;
+  }
+
+  /** White water swirling round a rock in the river (animated decal, the flow along the river). */
+  private eddy(x: number, z: number, reach: number) {
+    const p = this.riverPts;
+    let bi = 1;
+    let bd = Infinity;
+    for (let i = 1; i < p.length; i++) {
+      const d = (p[i].x - x) ** 2 + (p[i].z - z) ** 2;
+      if (d < bd) {
+        bd = d;
+        bi = i;
+      }
+    }
+    // The decal's v runs downstream (the river curve's direction).
+    const yaw = Math.atan2(p[bi - 1].x - p[bi].x, p[bi - 1].z - p[bi].z);
+    const w = Math.max(1.6, reach * 1.25);
+    pwDecal(this.anim, x, 0.082, z, w, w * 1.5, yaw, d1EddyDecal(this.atlas, { hex: 0xe8f4f4 }), undefined, D1_WATER_FRAMES);
   }
 
   /** A ground patch (moss / leaf litter disc) as a ragged decal of the same footprint. */
@@ -296,6 +381,8 @@ export class D1PixelWorld {
         }
         for (const y of [1.2, 4.5, 8.4]) pwCylinder(b, V(x, y - 0.14, 0), V(x, y + 0.14, 0), 1.0, 1.0, 12, iron, { capB: iron });
         b.box(x - side * 0.2, 5.6, 1.0, 0.12, 0.12, 0.9, iron);
+        // The park emblem on an iron plaque bolted to the pillar's front.
+        pwPanel(b, V(x, 3.0, 1.02), X, Y, 1.5, 1.5, d1EmblemPlaqueModule(a, { iron: 0x3a3633 }));
         pwCylinder(b, V(x - side * 0.2, 5.62, 1.45), V(x - side * 0.2, 6.07, 1.45), 0.18, 0.32, 8, iron);
       }
       // Cross beams (logs along x), the roof board, the sign and its trims / hangers.
@@ -331,45 +418,66 @@ export class D1PixelWorld {
     this.anim.withMatrix(root.matrixWorld, () => {
       for (const side of [-1, 1]) {
         const c = V(side * (W + 0.75) - side * 0.2, 6.55, 1.45);
-        pwPanel(this.anim, c, X, Y, 0.62, 0.93, flame, { back: true });
-        pwPanel(this.anim, c, Z, Y, 0.62, 0.93, flame, { back: true });
+        pwPanel(this.anim, c, X, Y, 0.62, 0.93, flame, { back: true, frames: D1_WATER_FRAMES });
+        pwPanel(this.anim, c, Z, Y, 0.62, 0.93, flame, { back: true, frames: D1_WATER_FRAMES });
       }
     });
     this.kiosk(kiosk);
   }
 
-  /** Ticket kiosk, flagpoles and flags (the classic group, placed in the gate's frame). */
+  /**
+   * Ticket kiosk, flagpoles and flags (the classic group, placed in the gate's
+   * frame): a plank booth on log corner posts under a palm-thatch roof whose
+   * fringe overhangs every side, the deep ticket window and its TICKETS board
+   * facing the approaching jeep (+z), the park map on the road side, a supply
+   * crate at the corner, a lantern hanging from the eave; torn flags.
+   */
   private kiosk(g: THREE.Object3D) {
     const a = this.atlas;
     g.updateMatrixWorld(true);
     hideMeshes(g);
     const b = this.world;
     const wall = planksTile(a, { hex: 0x8a6a44, horizontal: true });
-    const roof = d1TinTile(a, { hex: 0x3e5a2c });
+    const thatch = d1ThatchTile(a, { hex: 0x8a6a34 });
+    const fringe = d1ThatchFringeTile(a, { hex: 0x8a6a34 });
+    const post = d1BarkTile(a, { hex: 0x5a4632 });
     const galv = d1GalvTile(a, { hex: 0x9a9a92 });
     const gm = g.matrixWorld.clone();
     b.withMatrix(gm, () => {
-      // Booth: plank walls; the ticket window on the gate side (−z), the park map on the road side (+x).
-      b.box(-9, 1.3, 14, 3.2, 2.6, 2.6, { px: wall, nx: wall, pz: wall, nz: null, py: null, ny: null });
-      pwPanel(b, V(-9, 1.3, 12.7), NX, Y, 3.2, 2.6, wall);
-      pwPanel(b, V(-9, 1.45, 12.69), NX, Y, 2.0, 1.5, d1KioskWindowModule(a, { wood: 0x8a6a44, shutter: 0x6a7a6a }));
+      // Booth (3.2 × 2.6 × 2.6 at (−9, 1.3, 14)): plank walls, the window on the +z face, the map on +x.
+      b.box(-9, 1.3, 14, 3.2, 2.6, 2.6, { px: wall, nx: wall, pz: null, nz: wall, py: null, ny: null });
+      pwPanel(b, V(-9, 1.3, 15.3), X, Y, 3.2, 2.6, wall);
+      pwPanel(b, V(-9, 1.25, 15.31), X, Y, 2.0, 1.5, d1KioskWindowDeepModule(a, { wood: 0x8a6a44, shutter: 0x6a7a6a }));
+      b.box(-9, 0.56, 15.42, 2.1, 0.08, 0.24, wall);
+      pwPanel(b, V(-9, 2.22, 15.36), X, Y, 1.5, 0.375, d1TicketsBoardModule(a), { back: true });
       pwPanel(b, V(-7.39, 1.45, 14), NZ, Y, 1.5, 1.0, d1MapBoardModule(a));
-      pwPanel(b, V(-9, 1.5, 15.31), X, Y, 1.0, 0.75, d1CrateModule(a, { wood: 0xc8b890, stencil: 'TOURS' }));
-      // Flagpoles and flags (cloth modules on both faces, the hoist at the pole).
+      // Corner posts (bark logs) up to the eave.
+      for (const [px, pz] of [[-10.62, 12.72], [-7.38, 12.72], [-10.62, 15.28], [-7.38, 15.28]]) pwCylinder(b, V(px, 0, pz), V(px, 2.9, pz), 0.11, 0.1, 6, post);
+      // A supply crate at the corner.
+      b.box(-7.0, 0.3, 15.8, 0.7, 0.6, 0.6, { px: d1CrateModule(a, { wood: 0xc8b890, stencil: 'TOURS' }), nx: wall, pz: d1CrateModule(a, { wood: 0xc8b890, stencil: 'TOURS' }), nz: wall, py: wall, ny: null });
+      // Thatch fringe hanging off all four eaves (both faces), below the roof edge.
+      const ey = 2.62;
+      for (const [cx, cz, rx, rz, w] of [[-9, 15.62, 1, 0, 3.9], [-9, 12.38, -1, 0, 3.9], [-7.07, 14, 0, -1, 3.3], [-10.93, 14, 0, 1, 3.3]] as [number, number, number, number, number][]) {
+        const right = V(rx, 0, rz);
+        pwPanel(b, V(cx, ey - 0.125, cz), right, Y, w, 1.0, fringe, { back: true });
+      }
+      // Flagpoles and flags (cloth modules on both faces, the hoist at the pole), a third bigger than before.
       for (const side of [-1, 1]) {
         for (const z of [4, 9]) {
           pwCylinder(b, V(side * 6.5, 0, z), V(side * 6.5, 7, z), 0.1, 0.08, 6, galv);
           const flag = d1FlagModule(a, side < 0 ? { hex: 0xe0401a, emblem: z === 4 } : { hex: 0xf4c43a, emblem: z === 9 });
-          const hoist = V(side * 6.5, 5.85, z);
+          const hoist = V(side * 6.5, 5.6, z);
           const dir = side < 0 ? NX : X;
-          b.rect(hoist.clone(), dir, Y, 1.5, 1.0, flag);
-          b.rect(hoist.clone().addScaledVector(dir, 1.5), dir.clone().negate(), Y, 1.5, 1.0, flag, { flipU: true });
+          b.rect(hoist.clone(), dir, Y, 1.95, 1.3, flag);
+          b.rect(hoist.clone().addScaledVector(dir, 1.95), dir.clone().negate(), Y, 1.95, 1.3, flag, { flipU: true });
         }
       }
     });
-    // Tin roof, tilted.
+    // Thatch roof, tilted (the classic roof's box).
     _m.makeRotationZ(0.08).setPosition(-9, 2.75, 14);
-    b.withMatrix(gm.clone().multiply(_m), () => b.box(0, 0, 0, 3.8, 0.3, 3.2, roof));
+    b.withMatrix(gm.clone().multiply(_m), () => b.box(0, 0, 0, 3.8, 0.3, 3.2, thatch));
+    // A lantern hanging from the front eave (lit glass: an unlit glow core).
+    b.withMatrix(gm, () => pwPanel(b, V(-7.6, 2.15, 15.66), X, Y, 0.24, 0.4, d1LanternModule(a), { back: true }));
   }
 
   // ─── Electric fence ────────────────────────────────────────────────────────
@@ -435,7 +543,8 @@ export class D1PixelWorld {
     const a = this.atlas;
     // The trunk meshes (merged into each half) are hidden; crown / root billboards are FLORA's.
     for (const half of [t.left, t.right]) for (const c of half.children) if ((c as THREE.Mesh).isMesh) c.visible = false;
-    const bark = d1BarkTile(a, { hex: COL.trunk, lichen: 0x8a9a6a, checks: 3 });
+    // The trunk: bark painted once round the whole log, light baked across it (lit top, dark underside).
+    const bark = d1LogBarkTile(a, { hex: COL.trunk, wood: 0xc8a878, lichen: 0x8a9a6a });
     const barkDark = d1BarkTile(a, { hex: 0x4a382a });
     const drape = d1MossDrapeModule(a, { hex: 0x4e7a2a, light: 0x8aaa3c });
     const end = d1LogEndModule(a, { wood: 0xc0965e, bark: 0x4a382a, broken: true });
@@ -454,7 +563,14 @@ export class D1PixelWorld {
     const b = this.world;
     const sm = supplies.matrixWorld.clone();
     _m.makeRotationY(0.3).setPosition(-3.2, 0.3, 1.6);
-    b.withMatrix(sm.clone().multiply(_m), () => b.box(0, 0, 0, 0.9, 0.6, 0.6, fabricTile(a, { hex: 0x5a6a3a })));
+    const canvas = d1CanvasTile(a, { hex: 0x5a6a3a });
+    const kitFront = d1KitFrontModule(a, { hex: 0x5a6a3a });
+    b.withMatrix(sm.clone().multiply(_m), () => {
+      // An opaque canvas duffel: webbing straps, buckles and a stencilled patch on both long faces.
+      b.box(0, 0, 0, 0.9, 0.6, 0.6, canvas);
+      pwPanel(b, V(0, 0, 0.302), X, Y, 0.9, 0.6, kitFront);
+      pwPanel(b, V(0, 0, -0.302), NX, Y, 0.9, 0.6, kitFront);
+    });
     _m.makeRotationY(-0.2).setPosition(-2.6, 0.25, 2.4);
     b.withMatrix(sm.clone().multiply(_m), () => b.box(0, 0, 0, 0.7, 0.5, 0.5, d1CrateModule(a, { wood: 0x6a5a3a })));
     _m.makeRotationFromEuler(new THREE.Euler(0, 0.6, Math.PI / 2 - 0.05)).setPosition(4.5, 0.2, 2.4);
@@ -583,27 +699,86 @@ export class D1PixelWorld {
 
   // ─── Backdrop ──────────────────────────────────────────────────────────────
 
-  /** The painted panorama: day sky, two jungle ranges whose feet melt into the fog, the smoking volcano. */
+  /**
+   * The painted panorama, far to near: the day sky (stepped haze bands, lumpy
+   * cumulus, stratus), a far range, the jungle escarpment the boss chase looks
+   * back at (az ≈ 180), the smoking volcano, a near range and a continuous far
+   * treeline in the fog band. Every foot melts into the fog colour in steps.
+   */
   buildBackdrop(anchor: THREE.Vector3): THREE.Group {
     const s = this.skyAtlas;
-    const sky = d1SkyTile(s, { horizon: FOG, top: 0x3a86cc, el0: -4, el1: 38, sunAz: 124, clouds: 0.55, haze: 15 });
-    const far = d1RangeTile(s, { hex: 0x7c9a92, haze: FOG, el0: -2, el1: 18, height: 0.85, rough: 0.5, lightAz: 124, seed: 4, fogFoot: 0.22 });
-    const near = d1RangeTile(s, { hex: 0x4f7258, haze: FOG, el0: -3, el1: 11, height: 0.7, rough: 0.8, lightAz: 124, seed: 7, fogFoot: 0.3 });
-    const vo = { hex: 0x707a76, haze: FOG, el0: -3, el1: 24, az: 340, halfWidth: 24, lightAz: 124 };
-    const volcano = volcanoTile(s, vo);
-    this.backdrop = new PwBackdrop(s, { tile: sky, el0: -4, el1: 38, radius: 330 }, [
-      { tile: far, radius: 310, el0: -2, el1: 18, follow: 1 },
-      { tile: volcano, radius: 280, el0: -3, el1: 24, yaw: vo.az, span: volcanoSpan(vo), follow: 0.85 },
-      { tile: near, radius: 250, el0: -3, el1: 11, yaw: 77, follow: 0.92 },
+    const sky = d1SkyTile(s, { horizon: FOG, top: 0x3a86cc, el0: -2, el1: 32, sunAz: SUN_AZ, clouds: 0.8 });
+    const far = d1RangeTile(s, {
+      hex: 0x6c8c8a, haze: FOG, el0: -2, el1: 14, lightAz: SUN_AZ, yaw: 0, crown: 4, seed: 4, fogRows: 14,
+      peaks: [[0, 0.55], [40, 0.75], [80, 0.45], [120, 0.6], [150, 0.35], [200, 0.3], [250, 0.7], [300, 0.5], [330, 0.62]],
+    });
+    const near = d1RangeTile(s, {
+      hex: 0x46684e, haze: FOG, el0: -3, el1: 9, lightAz: SUN_AZ, yaw: 77, crown: 5.5, seed: 7, fogRows: 16,
+      peaks: [[0, 0.5], [30, 0.72], [60, 0.4], [95, 0.6], [140, 0.36], [175, 0.3], [215, 0.42], [260, 0.66], [300, 0.45], [330, 0.7]],
+    });
+    const tree = d1TreelineTile(s, { hex: 0x3e6a44, haze: FOG, el0: -1.5, el1: 3.5, lightAz: SUN_AZ, seed: 2 });
+    const eo = { rock: 0x7e725e, canopy: 0x3e6a44, water: 0xcfeef6, haze: FOG, el0: -2, el1: 17, span: 150, az: 178, lightAz: SUN_AZ };
+    const escarp = d1EscarpTile(s, eo);
+    const vo = { rock: 0x5e5a62, canopy: 0x3e6a44, haze: FOG, el0: -3, el1: 30, az: 340, halfWidth: 24, lightAz: SUN_AZ };
+    const volcano = d1VolcanoTile(s, vo);
+    this.backdrop = new PwBackdrop(s, { tile: sky, el0: -2, el1: 32, radius: 330 }, [
+      { tile: far, radius: 310, el0: -2, el1: 14, follow: 1 },
+      { tile: escarp, radius: 300, el0: eo.el0, el1: eo.el1, yaw: eo.az, span: eo.span, follow: 1 },
+      { tile: volcano, radius: 280, el0: vo.el0, el1: vo.el1, yaw: vo.az, span: d1VolcanoSpan(vo), follow: 0.85 },
+      { tile: near, radius: 250, el0: -3, el1: 9, yaw: 77, follow: 0.92 },
+      { tile: tree, radius: 220, el0: -1.5, el1: 3.5, follow: 1 },
     ]);
     this.backdrop.anchor.copy(anchor);
     return this.backdrop.build();
+  }
+
+  // ─── Fuel drums (destructibles) ────────────────────────────────────────────
+
+  /** Register the drum tiles before the atlas is painted (the drums are spawned later, by beats). */
+  private drumTiles() {
+    d1DrumTile(this.atlas, { hex: 0xa8301c });
+    d1DrumLidModule(this.atlas, { hex: 0xa8301c });
+  }
+
+  /**
+   * Paint a fuel drum (a destructible, AFTER it was added to the world, so the
+   * painted mesh is never one of its hit boxes): its classic meshes keep their
+   * geometry and stay the hit boxes — same geometry, same `side`, so every
+   * shot hits exactly as in PIXEL CAST — but are no longer drawn; the painted
+   * drum (red oxide, ribs, hazard diamond, rust, lid with bungs) rides its root.
+   */
+  drum(root: THREE.Object3D) {
+    root.traverse((c) => {
+      const m = c as THREE.Mesh;
+      if (!m.isMesh || m.userData.pixelWorld) return;
+      const side = (m.material as THREE.Material).side;
+      let h = this.hiddenMats.get(side);
+      if (!h) {
+        h = new THREE.MeshBasicMaterial({ visible: false, side });
+        this.hiddenMats.set(side, h);
+      }
+      m.material = h;
+    });
+    if (!this.drumMesh) {
+      const b = new PwBatch(this.atlas);
+      pwCylinder(b, V(0, 0, 0), V(0, 1.0, 0), 0.365, 0.365, 14, d1DrumTile(this.atlas, { hex: 0xa8301c }), { capB: d1DrumLidModule(this.atlas, { hex: 0xa8301c }) });
+      const m = b.build()!;
+      m.geometry.userData.shared = true;
+      this.drumMesh = { geo: m.geometry, mat: m.material as THREE.Material };
+    }
+    const mesh = new THREE.Mesh(this.drumMesh.geo, this.drumMesh.mat);
+    mesh.name = 'pw:d1-drum';
+    mesh.raycast = () => {};
+    mesh.userData.noMerge = true;
+    mesh.userData.pixelWorld = true;
+    root.add(mesh);
   }
 
   // ─── Build + per frame ─────────────────────────────────────────────────────
 
   /** Paint the atlas and build the meshes: world / water → `root`, scenery leftovers + stones → `vegPx`, parts → their groups. */
   finish(root: THREE.Object3D, vegPx: THREE.Object3D) {
+    this.drumTiles();
     this.atlas.build();
     const w = this.world.build();
     if (w) root.add(w);

@@ -718,10 +718,10 @@ answers "what do I draw"):
 
 | budget | limit | z1 MAIN STREET | d1 JUNGLE RUN |
 |---|---|---|---|
-| atlas memory (all levels) | ≤ 24 MB | 14.3 MB (world 2048×1040 10.8 MB + sky 2048×368 2.9 MB + fire strips 256×448 0.6 MB) | 9.3 MB (world 1024×848 4.4 MB + sky 2048×592 4.6 MB + jeep 256×160 0.2 MB; FLORA stone / herd sprites 2 × 512×256 R8) |
-| paint at stage load | ≤ 300 ms on a phone | ≈ 200 ms warm, min of 8 at load avg 8–16 (world ≈ 165, sky ≈ 25, fire ≈ 6; the z1 tile painters ≈ 70 ms of it, the rest the shared resolve / pack / mip pass over 1.7 M texels) | ≈ 100 ms warm on a quiet box (min of 5: world ≈ 60, sky ≈ 35, jeep ≈ 3); 149 ms min of 10 at load avg 18 (world 99, sky 47, jeep 3) + FLORA stones 14 / herd 7 ms |
-| draw calls (same frame) | ≤ 250 | 15–61 over 26 beats (PIXEL CAST 21–90) | 23–52 (PIXEL CAST 34–71) |
-| triangles (same frame) | — | 15–42 k (PIXEL CAST 19–74 k) | 18–20 k (PIXEL CAST 23–32 k) |
+| atlas memory (all levels) | ≤ 24 MB | 14.3 MB (world 2048×1040 10.8 MB + sky 2048×368 2.9 MB + fire strips 256×448 0.6 MB) | 9.7 MB (world 1024×848 4.6 MB + sky 2048×576 4.7 MB, one level + jeep 256×240 0.3 MB; FLORA stone / herd sprites R8) |
+| paint at stage load | ≤ 300 ms on a phone | ≈ 200 ms warm, min of 8 at load avg 8–16 (world ≈ 165, sky ≈ 25, fire ≈ 6; the z1 tile painters ≈ 70 ms of it, the rest the shared resolve / pack / mip pass over 1.7 M texels) | R2: 102 ms CPU, min of 12 at load avg 25 (world 67, sky 32, jeep 3; 129–146 ms in runs beside a full test suite); per-tile minima: world tiles 35 + resolve 5, sky tiles 24–43 + resolve 8 — + FLORA stones 16 (7 species) / herd 7 ms |
+| draw calls (same frame) | ≤ 250 | 15–61 over 26 beats (PIXEL CAST 21–90) | 26–48 over 18 shots, boss included (PIXEL CAST 35–77) |
+| triangles (same frame) | — | 15–42 k (PIXEL CAST 19–74 k) | 20–22 k (PIXEL CAST 23–33 k) |
 | per-frame work | no allocations | backdrop follow (a position set per layer) | same |
 
 Keep tiles few: a NEUTRAL tile tinted per material beats a tile per colour; wrap shop
@@ -780,29 +780,65 @@ load skips painting), paint the one-level sky atlas after the first frame.
   backdrop.
 - **d1 JUNGLE RUN** (converted end to end; `stages/d1/pixel.ts`, `jeepPixel.ts`,
   `herdPixel.ts`, `pwShapes.ts`; painters `pixelworld/d1*.ts`): the road (`d1RoadTile`: ruts
-  with worn tread prints, damp hollows, pebbles, crown tufts, a raptor track, ragged verges),
-  the meadow (`d1MeadowTile`), moss / litter / earth patch decals with ragged edges, puddles
-  mirroring the sky, the stampede's churned band; the gate (bark logs wrapped round by
-  `pwCylinder`, iron bands, hewn points, the palisade as one cut-out wall tile, braced plank
-  doors with strap hinges and claw gouges, the carved PRIMAL ISLAND sign with the park emblem,
-  flickering pixel torch flames), the ticket kiosk, flags; the electric fence (galvanised
-  posts, hazard collars, insulators, sagging cut-out wire spans — vines, the cut wire at the
-  old breach — DANGER plates; the breakable section in its pivot's frame); the fallen tree
-  (bark, moss drapes, splintered break, limbs; both halves still fly apart), ranger supplies;
-  the tour car (body / cabin / front / back / underside / tread / wheel modules) following
-  its flip; banks, animated river / white water / waterfall (frayed cut-out edges) / splash (`d1Water.ts`, one
-  animated material); boulders and cliff pillars as FLORA stone billboards (`d1Species.ts`);
-  the herd as run / walk-cycle sprites (`d1Herd.ts`, posed by the herd's own gait);
-  hard-edged sun-shaft rays in stepped strengths (`d1Shafts.ts`); fog starting at 38 m instead
-  of 24 m so the painted middle distance keeps its colour; the jeep view model on its own atlas at 48 texels a
-  metre; the ROAD CLOSED barricade; boss-stretch dressing (river-tours landing, raft, NO
-  SWIMMING, driftwood, an upturned tour car); the panorama painted straight into the canvas
-  (`d1Sky.ts`: range feet melt into the fog). The gate pillars and the car stay the classic
-  (hidden) occluders. Still classic: the fuel drums (destructibles: every mesh is a hit
-  box), the jeep's windscreen glass / lamps / hot barrel, FX. Checks:
-  `tests/unit/pixel-world-d1.test.ts` (occluders, raycasts, budget, full-stage simulator),
+  with worn tread prints, damp hollows, pebbles, dry-grass crown tufts, brown leaf litter by
+  the verges, a raptor track, ragged verges), the meadow (`d1MeadowTile`), moss / litter / earth
+  patch decals with ragged edges, low-contrast lobed puddles (blue-grey a step under the road,
+  a soft wet rim, one glint: never read as a pickup), the stampede's churned band
+  (`d1TrampleTile`: furrows along the herd's way, beaten grass combed flat, clods, three-toed
+  hadrosaur prints); the gate (bark logs wrapped round by `pwCylinder`, iron bands, hewn
+  points, the palisade as one cut-out wall tile, braced plank doors with strap hinges and claw
+  gouges, PRIMAL ISLAND in one line of tall gilded caps across the sign — 2-texel strokes, a
+  carved groove — the park emblem on iron plaques on both pillars, torch flames as narrow lit
+  teardrops round a small glow core), the ticket kiosk (log corner posts, thatch roof with a
+  fringe hanging off every eave, a deep ticket window — lamp-lit booth, counter, rolled shutter
+  — with a TICKETS board facing the approach, the park map, a crate, a hanging lantern), flags
+  a third bigger; the electric fence (galvanised posts, hazard collars, insulators, sagging
+  cut-out wire spans — vines, the cut wire at the old breach — DANGER plates; the breakable
+  section in its pivot's frame); the fallen tree (`d1LogBarkTile` painted once round the whole
+  log: a lit top third, a dark underside and contact line, long tapered fissures, peeled pale
+  patches, knots, lichen; moss drapes, splintered break, limbs; both halves still fly apart),
+  ranger supplies (an opaque canvas kit bag with webbing and a patch); the fuel drums (red
+  oxide, rolled ribs, FLAMMABLE diamonds, rust runs, lids with bungs: one shared painted mesh
+  ridden on each destructible, whose classic meshes stay its hit boxes with an undrawn material
+  of the same `side`); the tour car (body / cabin / front / back / underside / tread / wheel
+  modules) following its flip; banks, the river as ONE tile across the whole channel
+  (`d1RiverTile` at 16 texels a metre: olive shallows over still pebbles, the bank trees'
+  broken reflection, a teal body with sky wisps, a darker channel, current streaks on a fast
+  layer, ripples on a slow one, glint crosses in GLOW so the far river still sparkles), white
+  water at the banks and round every rock standing in the river (`d1EddyDecal`: bow wave and
+  wake), the waterfall (strands falling at two speeds with wet rock between, a dark overflow lip
+  with a bright curl, frayed edges) and its splash (`d1Water.ts`, one animated material:
+  animated MODULES map one frame onto their quad — `pwPanel` / `pwDecal` `frames`); boulders and
+  crags as FLORA stone billboards (`d1Species.ts`: boulders in three aspects picked by the classic
+  rock's proportions so the footprint matches, darker faceted mid-tones, cracks, lichen, moss on
+  some; river boulders with a wet band and a foam ring; crags with a jagged stepped silhouette,
+  overhangs, slanted fracture facets, short pinching strata, violet shadow steps, moss tongues,
+  root / vine curtains and an overhanging canopy crown; the wide crag two or three pillars at
+  different depths; d3 paints the shared four, `D1_STONES`, in its own biome, d1 all seven,
+  `D1_STONES_ALL`); the herd as run / walk-cycle sprites (`d1Herd.ts`, posed by the herd's own
+  gait); hard-edged sun-shaft rays in stepped strengths (`d1Shafts.ts`); fog starting at 38 m
+  and coloured `D1_PX_FOG` (a light blue-green haze = the sky's horizon band) in PIXEL WORLD
+  only; the jeep view model on its own atlas at 48 texels a metre (every long tube — roll
+  hoops, roll bar, bull bars — painted round as a tube: a highlight along the top, chips at
+  irregular spacing, rust at the welds; a worn hood stripe); the ROAD CLOSED barricade;
+  boss-stretch dressing (river-tours landing, raft, NO SWIMMING, driftwood, an upturned tour
+  car). The panorama (`d1Sky.ts`, `d1Volcano.ts`, painted straight into the canvas arrays): the
+  sky in hard bands from the fog colour to the zenith whose edges swell gently (no dither rows),
+  stratus wisps, cumulus piled from lobes (overall form light + lobe accents: warm crowns, cool
+  violet flanks, flat bellies); two keyframed ranges crowned and covered with scalloped canopy
+  in staggered rows, gullies splitting light and shade, lobed mist pockets, stepped haze feet
+  following the treetops; a continuous far treeline in the fog band; the jungle escarpment the
+  boss chase looks back at (az ≈ 178: buttressed cliffs, ledges, vine curtains, waterfall
+  threads); the volcano (notched crater, a collapsed scarred side with glowing lava seams, a
+  shoulder vent, erosion ribs, scree fans, the jungle creeping up its foot, a billowing plume
+  lit toward the sun with a violet shadow side and an ash-dark core, thinning in dither at the
+  top). The gate pillars and the car stay the classic (hidden) occluders. Still classic: the
+  jeep's windscreen glass / lamps / hot barrel, FX. Checks: `tests/unit/pixel-world-d1.test.ts`
+  (occluders, raycasts, destructibles and hit proxies identical in all three ARTs — rays at
+  every drum, across the fence section and the tree halves —, budget, full-stage simulator),
   `D1_SIG=1 … d1-sig.test.ts` (CLASSIC / PIXEL CAST scene signature), `d1-lab.test.ts`
-  (tile / stone / herd dumps, paint benches).
+  (tile / stone / herd dumps — `D1_SET=2|3` for the prop / water and round-2 tiles — paint
+  benches).
 - **z2 ST. MERCY HOSPITAL** (converted end to end; `stages/z2/pixel.ts` = `Z2PixelWorld`;
   painters `pixelworld/z2surfaces.ts`, `z2decals.ts`, `z2signs.ts`, `z2modules.ts`,
   `z2props.ts`, `z2billboard.ts`, `z2furniture.ts`, `z2vehicles.ts`, `z2atrium.ts`,

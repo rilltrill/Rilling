@@ -1,6 +1,6 @@
 import { bayer, PWF, PwRng, type PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
-import { drawText, FONT_3x5, FONT_5x7, FONT_BOLD, tallFont } from './font';
+import { drawText, FONT_3x5, FONT_5x7, FONT_BOLD, rasterText, tallFont } from './font';
 
 /** Bold caps doubled in height (tall gilded sign letters). */
 const TALL_BOLD = tallFont(FONT_BOLD, 2);
@@ -142,6 +142,116 @@ export function paintBark(c: PwCanvas, k: PwKit, o: { hex: number; lichen?: numb
       }
     }
   }
+}
+
+/**
+ * Bark of a fallen log, painted round the WHOLE circumference (wrap 192 × 64:
+ * u once round the log, v 2 m along it; `pwCylinder` lays it with u = 0 on top,
+ * u = 96 underneath, u = 144 facing the road). Cylindrical light baked in: a
+ * lit top third, a mid band, a dark underside with a contact line at the very
+ * bottom. Long continuous fissures of varied length with tapered ends (no two
+ * plate ends line up), plates of varied width, knots, peeled patches of pale
+ * wood, lichen clusters — long grain, never a brick rhythm.
+ */
+export function d1LogBarkTile(atlas: PwAtlas, o: { hex: number; wood: number; lichen: number }): PwTile {
+  const W = 192;
+  const H = 64;
+  return atlas.tile(`d1logbark|${h6(o.hex)}|${h6(o.wood)}|${h6(o.lichen)}`, W, H, (c, k) => {
+    const rng = k.rng;
+    const b = k.ramp(o.hex, { light: 0.42, sat: 0.95 });
+    const b2 = k.ramp(shiftHue(darken(o.hex, 0.86), -0.01, 0.95), { light: 0.4, sat: 0.95 });
+    const wood = k.ramp(o.wood, { light: 0.42 });
+    const li = k.ramp(o.lichen, { light: 0.45, sat: 0.7 });
+    // Light round the log by u: top lit, front mid, underside dark (+ contact line).
+    const lightU = new Float32Array(W);
+    for (let u = 0; u < W; u++) {
+      const a = (u / W) * Math.PI * 2; // 0 = top
+      const up = Math.cos(a); // 1 top, −1 bottom
+      lightU[u] = up > 0.55 ? 1 : up > 0 ? 0.4 : up > -0.6 ? -0.4 : up > -0.93 ? -1.1 : -2.2;
+    }
+    // Fissures: each a run along v (start, length) at a wandering u.
+    const R = c.ramp;
+    const T = c.tone;
+    const base = new Float32Array(W * H);
+    // Plates: columns between fissure centres of varied width, each with its own tone and ramp.
+    const plateTone = new Float32Array(W);
+    const plateRamp = new Uint16Array(W);
+    for (let u = 0, i = 0; u < W; i++) {
+      const w = 5 + Math.floor(hash2(i, 1, 41) * 9);
+      const t = hash2(i, 2, 41) > 0.7 ? 0.3 : hash2(i, 2, 41) < 0.25 ? -0.3 : 0;
+      const r = hash2(i, 3, 41) > 0.75 ? b2 : b;
+      for (let j = 0; j < w && u + j < W; j++) {
+        plateTone[u + j] = t + (j === 0 ? 0.5 : j === w - 1 ? -0.5 : 0);
+        plateRamp[u + j] = r;
+      }
+      u += w;
+    }
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        R[i] = plateRamp[x];
+        base[i] = 3 + plateTone[x];
+      }
+    }
+    // Fissures: dark lines along v, wandering ±1, tapered (only the middle is 2 wide), a lit lip on the top side.
+    for (let n = 0; n < 34; n++) {
+      let x = rng.int(0, W - 1);
+      const y0 = rng.int(0, H - 1);
+      const len = rng.int(12, 58);
+      for (let j = 0; j < len; j++) {
+        const y = (y0 + j) % H;
+        if (rng.chance(0.08)) x = (x + (rng.chance(0.5) ? 1 : W - 1)) % W;
+        const mid = j > len * 0.2 && j < len * 0.8;
+        base[y * W + x] = 0.8;
+        if (mid) base[y * W + ((x + 1) % W)] = 1.4;
+        base[y * W + ((x + W - 1) % W)] = Math.max(base[y * W + ((x + W - 1) % W)], 3.8);
+      }
+    }
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        T[i] = Math.max(0.4, Math.min(4.8, base[i] + lightU[x]));
+      }
+    }
+    // Contact line at the very bottom.
+    for (let y = 0; y < H; y++) for (const u of [95, 96, 97]) T[y * W + u] = 0.4;
+    // Peeled patches: pale wood with grain lines (on the upper half, where the bark has fallen away).
+    for (let n = 0; n < 3; n++) {
+      const cx = rng.pick([rng.int(150, 191), rng.int(0, 30), rng.int(120, 150)]);
+      const cy = rng.int(0, H - 1);
+      const rw = rng.int(2, 5);
+      const rh = rng.int(4, 14);
+      for (let dy = -rh; dy <= rh; dy++) {
+        for (let dx = -rw; dx <= rw; dx++) {
+          if ((dx * dx) / (rw * rw) + (dy * dy) / (rh * rh) > 1 - hash2(dx + 9, dy >> 2, 13 + n) * 0.5) continue;
+          const x = (cx + dx + W) % W;
+          const y = (cy + dy + H) % H;
+          const edge = (dx * dx) / (rw * rw) + (dy * dy) / (rh * rh) > 0.7;
+          R[y * W + x] = edge ? b2 : wood;
+          T[y * W + x] = edge ? 1.2 : Math.max(1.4, Math.min(4.6, (dx % 3 === 0 ? 2.8 : 3.4) + lightU[x] * 0.6));
+        }
+      }
+    }
+    // Knots: a dark eye with a lit rim.
+    for (let n = 0; n < 3; n++) {
+      const x = rng.int(120, 191);
+      const y = rng.int(4, H - 5);
+      for (let dy = -3; dy <= 3; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const d = (dx * dx) / 4 + (dy * dy) / 9;
+          if (d > 1) continue;
+          R[(y + dy) * W + ((x + dx) % W)] = b2;
+          T[(y + dy) * W + ((x + dx) % W)] = d < 0.3 ? 0.6 : d < 0.65 ? 1.6 : dx + dy < 0 ? 4 : 2.4;
+        }
+      }
+    }
+    // Lichen clusters on the lit top and front.
+    for (let n = 0; n < 40; n++) {
+      const x = rng.pick([rng.int(170, 191), rng.int(0, 30), rng.int(130, 170)]);
+      const y = rng.int(0, H - 1);
+      c.cluster(x % W, y, n, li, hash2(x, y, 3) > 0.5 ? 4 : 3.2);
+    }
+  }, { wrap: true });
 }
 
 /** Axe-hewn wood (sharpened log points, chopped faces): pale facets in bands, grain lines, a split. 32 × 32 wrap. */
@@ -477,23 +587,36 @@ export function d1GateSignModule(atlas: PwAtlas, o: { board: number; frame: numb
       c.hline(j, H - 1 - j, W - 2 * j, fr, j === 0 ? 1 : 2.2);
       c.vline(W - 1 - j, j, H - 2 * j, fr, j === 0 ? 1 : 2.2);
     }
-    // Emblem in the middle.
-    const er = 23;
-    d1Emblem(c, k, W / 2, H / 2, er);
-    // Lettering: raised gilded caps with a cast shadow, lit tops — the biggest face that fits each side.
-    const room = W / 2 - er - 12;
-    const word = (text: string, cx: number) => {
-      const opts: [typeof FONT_BOLD, number][] = [[FONT_BOLD, 2], [FONT_5x7, 2], [TALL_BOLD, 1], [FONT_BOLD, 1]];
-      let pick = opts[opts.length - 1];
-      for (const o2 of opts) if (measure(text, o2[0], o2[1]) <= room) { pick = o2; break; }
-      const [f, scale] = pick;
-      const w = measure(text, f, scale);
-      const x = Math.round(cx - w / 2);
-      const y = Math.round(H / 2 - (f.base * scale) / 2);
-      drawText(c, text, x, y, f, gold, 3, { scale, shadow: { ramp: bd, tone: 0.5 }, shadowD: scale, shadeFn: (_u, v) => (v < 0.2 ? 1.4 : v > 0.8 ? -0.8 : 0) });
-    };
-    word('PRIMAL', (6 + W / 2 - er - 4) / 2);
-    word('ISLAND', W - (6 + W / 2 - er - 4) / 2);
+    // PRIMAL ISLAND in one line across the whole board: tall bold gilded caps, 2 texels a stroke
+    // (still whole at the first level down), a carved dark outline round them, lit tops.
+    const text = 'PRIMAL ISLAND';
+    const scale = 2;
+    const tw = measure(text, TALL_BOLD, scale);
+    const th = TALL_BOLD.base * scale;
+    const tx = Math.round((W - tw) / 2);
+    const ty = Math.round((H - th) / 2) + 2;
+    // Rasterised once: the carved groove (a dark ring round every stroke), then the gilt letters.
+    const m = rasterText(text, TALL_BOLD, { scale });
+    for (const [ox, oy, t] of [[-1, 0, 0.6], [1, 0, 0.6], [0, -1, 0.6], [0, 2, 0.4]] as [number, number, number][]) {
+      for (let my = 0; my < m.h; my++) for (let mx = 0; mx < m.w; mx++) if (m.data[my * m.w + mx]) c.set(tx + mx + ox, ty + my + oy, bd, t);
+    }
+    for (let my = 0; my < m.h; my++) {
+      for (let mx = 0; mx < m.w; mx++) {
+        const i = my * m.w + mx;
+        if (!m.data[i]) continue;
+        const v = m.v[i];
+        c.set(tx + mx, ty + my, gold, 3 + (v < 0.12 ? 1.6 : v < 0.45 ? 0.6 : v > 0.85 ? -0.8 : 0));
+      }
+    }
+    // Gilt studs along the top and bottom rails.
+    for (let x = 12; x < W - 10; x += 12) {
+      for (const y of [7, H - 8]) {
+        c.set(x, y, gold, 4.6);
+        c.set(x + 1, y, gold, 3.4);
+        c.set(x, y + 1, gold, 2.6);
+        c.set(x + 1, y + 1, gold, 1.6);
+      }
+    }
     // Iron corner brackets with bolts.
     for (const [x, y, fx, fy] of [[4, 4, 1, 1], [W - 5, 4, -1, 1], [4, H - 5, 1, -1], [W - 5, H - 5, -1, -1]] as [number, number, number, number][]) {
       for (let j = 0; j < 12; j++) {
@@ -566,6 +689,30 @@ export function d1Emblem(c: PwCanvas, k: PwKit, cx: number, cy: number, r: numbe
       if (c.at(x, y - 1) !== ink || c.at(x - 1, y) !== ink) c.set(x, y, ink, 3);
     }
   }
+}
+
+/** The park emblem on an iron-rimmed round plaque (module 48 × 48, cut out round the disc): riveted rim, the emblem. */
+export function d1EmblemPlaqueModule(atlas: PwAtlas, o: { iron: number }): PwTile {
+  return atlas.tile(`d1plaque|${h6(o.iron)}`, 48, 48, (c, k) => {
+    const ir = k.ramp(o.iron, { light: 0.5, sat: 0.7 });
+    for (let y = 0; y < 48; y++) {
+      for (let x = 0; x < 48; x++) {
+        const dx = x + 0.5 - 24;
+        const dy = y + 0.5 - 24;
+        const d = Math.hypot(dx, dy);
+        if (d > 23.5) continue;
+        c.set(x, y, ir, d > 22.5 ? 1.2 : (-dx - dy) / d > 0.3 ? 4 : (-dx - dy) / d < -0.4 ? 2 : 3);
+      }
+    }
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const x = Math.round(24 + Math.cos(a) * 20.5);
+      const y = Math.round(24 + Math.sin(a) * 20.5);
+      c.set(x, y, ir, 5);
+      c.set(x + 1, y + 1, ir, 0.8);
+    }
+    d1Emblem(c, k, 24, 24, 18);
+  });
 }
 
 /**
@@ -691,46 +838,54 @@ export function d1PatchDecal(atlas: PwAtlas, kind: 'moss' | 'litter' | 'earth', 
 }
 
 /**
- * A rain puddle in a rut (module, cut out): a muddy rim (dark wet earth, a lit
- * lip), the water mirroring the sky (pale, with a darker reflected treeline
- * band) and a couple of ripple rings. 64 × 40.
+ * A rain puddle in a rut (module 64 × 40, cut out round a lobed edge): a soft
+ * rim of wet mud (no outline — darker earth fading out in steps), the water
+ * a calm blue-grey only a step or two darker than the road, the far bank's
+ * shadow along its far edge, one bright glint on the far rim, a faint ripple.
+ * Low contrast on purpose: it must never read as a pickup or a target.
  */
 export function d1PuddleDecal(atlas: PwAtlas, o: { mud: number; sky: number; tree: number }, variant = 0): PwTile {
   const W = 64;
   const H = 40;
-  return atlas.tile(`d1puddle|${h6(o.mud)}|${variant}`, W, H, (c, k) => {
-    const rng = k.rng;
+  return atlas.tile(`d1puddle2|${h6(o.mud)}|${h6(o.sky)}|${variant}`, W, H, (c, k) => {
     const mud = k.ramp(o.mud, { light: 0.4 });
-    const sky = k.ramp(o.sky, { light: 0.4, sat: 0.9 });
-    const tree = k.ramp(o.tree, { light: 0.4 });
+    const sky = k.ramp(o.sky, { light: 0.35, sat: 0.7 });
+    const shade = k.ramp(o.tree, { light: 0.4, sat: 0.7 });
+    // Lobed outline: three overlapping ellipses (never an almond).
+    const lobes = [[0, 0, 1, 1], [-0.35, 0.15, 0.6, 0.75], [0.4, -0.1, 0.55, 0.8]].map(([x, y, rx, ry], i) => [x + Math.sin(variant * 3 + i) * 0.08, y, rx * 0.62, ry * 0.7]);
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         const u = (x + 0.5 - W / 2) / (W / 2);
         const v = (y + 0.5 - H / 2) / (H / 2);
-        const a = Math.atan2(v, u);
-        const rim = 0.86 + Math.sin(a * 2 + variant * 2) * 0.08 + Math.sin(a * 5 + variant) * 0.05;
-        const d = Math.hypot(u, v);
-        if (d > rim) continue;
-        if (d > rim - 0.16) {
-          if (d > rim - 0.06 && bayer(x, y) < 0.5) continue;
-          c.set(x, y, mud, v < 0 ? 1.6 : 3.6); // far rim in shadow, near lip lit
+        let d = 9;
+        for (const [lx, ly, rx, ry] of lobes) d = Math.min(d, Math.hypot((u - lx) / rx, (v - ly) / ry));
+        d += (hash2(x >> 2, y >> 2, 11 + variant) - 0.5) * 0.12;
+        if (d > 1.35) continue;
+        if (d > 1) {
+          // Wet mud rim, fading out (dithered only at its very edge).
+          if (d > 1.25 && bayer(x, y) < (d - 1.25) / 0.1) continue;
+          c.set(x, y, mud, d > 1.15 ? 3 : 2.6);
           continue;
         }
-        // Reflection: far half = the trees (dark band), near half = sky (pale, brighter toward us).
-        const t = v < -0.35 ? 2 : v < -0.2 ? (bayer(x, y) < 0.5 ? 2 : 3) : v < 0.4 ? 3 : 4;
-        c.set(x, y, v < -0.2 ? tree : sky, t);
+        // Water: blue-grey, the far edge in the bank's shadow, a lighter band nearer us.
+        let r = sky;
+        let t = v < -0.1 ? 2.6 : 3;
+        if (v < -0.45 && d > 0.6) {
+          r = shade;
+          t = 2.6;
+        }
+        c.set(x, y, r, t);
       }
     }
-    // Ripples: two thin pale ellipse arcs.
-    for (let i = 0; i < 2; i++) {
-      const cx = W / 2 + rng.spread(10);
-      const cy = H / 2 + rng.spread(4);
-      const rx = rng.range(5, 9);
-      for (let a = 0; a < Math.PI * 2; a += 0.12) {
-        const x = Math.round(cx + Math.cos(a) * rx);
-        const y = Math.round(cy + Math.sin(a) * rx * 0.45);
-        if (c.at(x, y) === sky || c.at(x, y) === tree) c.set(x, y, sky, Math.sin(a) < 0 ? 5 : 4);
-      }
+    // One glint on the far rim, a short ripple arc.
+    for (let x = 22; x < 30; x++) {
+      const y = Math.round(H * 0.3 - Math.sin(((x - 22) / 8) * Math.PI) * 1.5);
+      if (c.at(x, y) === sky || c.at(x, y) === shade) c.set(x, y, sky, 4.4);
+    }
+    for (let a = 0.3; a < 2.6; a += 0.15) {
+      const x = Math.round(W * 0.55 + Math.cos(a) * 7);
+      const y = Math.round(H * 0.55 + Math.sin(a) * 3);
+      if (c.at(x, y) === sky) c.set(x, y, sky, 3.6);
     }
   });
 }
@@ -821,47 +976,85 @@ export function d1MeadowTile(atlas: PwAtlas, o: { hex: number; cool: number; dir
 
 /**
  * Trampled ground where the herd crosses (wrap 128 × 128 = 4 m, cut out round
- * ragged tufts so the meadow shows through): churned mud in furrows, torn sod
- * clumps flipped over, crushed grass, three-toed prints pressed in.
+ * ragged tufts so the meadow shows through): churned earth in two tones, the
+ * grass beaten flat and combed one way (the herd's way, along x), clods kicked
+ * up with lit tops and a shadow under, and three-toed hadrosaur prints pressed
+ * in, toes pointing along the run. Fields sampled per 4 × 4 cell (fast).
  */
 export function d1TrampleTile(atlas: PwAtlas, o: { mud: number; grass: number }): PwTile {
-  return atlas.tile(`d1trample|${h6(o.mud)}|${h6(o.grass)}`, 128, 128, (c, k) => {
+  return atlas.tile(`d1trample2|${h6(o.mud)}|${h6(o.grass)}`, 128, 128, (c, k) => {
     const rng = k.rng;
     const W = 128;
     const mud = k.ramp(o.mud, { light: 0.4 });
-    const gr = k.ramp(o.grass, { light: 0.42, sat: 1.0 });
+    const gr = k.ramp(o.grass, { light: 0.42, sat: 0.95 });
+    // Field per 8 × 8 cell, bilinear between cells (organic edges, cheap): churned mud / beaten grass / meadow showing through.
+    const G = W >> 3;
+    const nf = new Float32Array(G * G);
+    for (let y = 0; y < G; y++) for (let x = 0; x < G; x++) nf[y * G + x] = smooth(x * 8, y * 8, W, W, 8, 21);
+    const R = c.ramp;
+    const T = c.tone;
+    const rowOff = new Uint8Array(W);
+    for (let y = 0; y < W; y++) rowOff[y] = Math.floor(hash2(y, 1, 23) * 11);
     for (let y = 0; y < W; y++) {
+      const row = y * W;
+      const gy = y >> 3;
+      const fy = (y & 7) / 8;
+      const r0 = gy * G;
+      const r1 = ((gy + 1) & (G - 1)) * G;
+      // Furrows run along x (the herd's way): a lit ridge row every few rows.
+      const fr = (y + 128) % 5;
+      const ro = rowOff[y];
       for (let x = 0; x < W; x++) {
-        const n = smooth(x, y, W, W, 8, 21);
-        if (n > 0.62 && bayer(x, y) < (n - 0.62) * 6) continue; // meadow showing through
-        // Furrows along the herd's line (x): darker troughs, lit ridges.
-        const f = Math.sin(y * 0.55 + Math.sin(x * 0.07) * 2);
-        c.set(x, y, mud, f > 0.6 ? 3.6 : f < -0.5 ? 2 : 2.8);
+        const gx = x >> 3;
+        const gx1 = (gx + 1) & (G - 1);
+        const fx = (x & 7) / 8;
+        const a = nf[r0 + gx] + (nf[r0 + gx1] - nf[r0 + gx]) * fx;
+        const b = nf[r1 + gx] + (nf[r1 + gx1] - nf[r1 + gx]) * fx;
+        const n = a + (b - a) * fy;
+        if (n > 0.64) continue; // the meadow shows through
+        if (n > 0.6) {
+          // A ragged fringe of torn grass at the edge.
+          if (bayer(x, y) > (0.64 - n) * 20) continue;
+          R[row + x] = gr;
+          T[row + x] = 2.6;
+          continue;
+        }
+        if (n > 0.5) {
+          // Beaten grass, combed flat along x: long strokes with dark seams.
+          R[row + x] = gr;
+          T[row + x] = (x + ro) % 11 < 2 ? 2.2 : y % 3 === 0 ? 3.4 : 2.8;
+          continue;
+        }
+        R[row + x] = mud;
+        T[row + x] = fr === 0 ? 3.4 : fr === 4 ? 2 : 2.7;
       }
     }
-    // Torn sod clumps (grass on top, a dark earth lip under).
-    for (let i = 0; i < 40; i++) {
+    // Clods: lumps with a lit top and a shadow under (mud or upturned sod).
+    for (let i = 0; i < 46; i++) {
       const x = rng.int(0, W - 4);
-      const y = rng.int(0, W - 3);
-      for (let j = 0; j < 4; j++) c.set(x + j, y, gr, j === 0 ? 4 : 3);
-      for (let j = 0; j < 4; j++) c.set(x + j, (y + 1) & (W - 1), mud, 1.4);
-    }
-    // Crushed grass blades lying flat.
-    for (let i = 0; i < 70; i++) {
-      const x = rng.int(0, W - 4);
-      const y = rng.int(0, W - 1);
-      const len = rng.int(2, 4);
-      for (let j = 0; j < len; j++) c.set(x + j, y, gr, j === len - 1 ? 3.6 : 2.6);
-    }
-    // Prints: three toes pressed in (dark), the heel, a lit rim behind.
-    for (let i = 0; i < 9; i++) {
-      const x = rng.int(6, W - 7);
-      const y = rng.int(6, W - 7);
-      for (const [tx, ty] of [[5, 0], [4, -3], [4, 3]]) {
-        for (let s2 = 0; s2 <= 4; s2++) c.set(x + Math.round((tx * s2) / 4), y + Math.round((ty * s2) / 4), mud, 0.8);
+      const y = rng.int(1, W - 3);
+      const sod = rng.chance(0.4);
+      const w = rng.int(2, 4);
+      for (let j = 0; j < w; j++) {
+        c.set(x + j, y, sod ? gr : mud, sod ? 3.6 : 3.8);
+        c.set(x + j, y + 1, mud, 3);
       }
-      c.set(x - 1, y, mud, 0.8);
-      c.set(x - 2, y, mud, 4);
+      for (let j = 0; j < w; j++) c.set(x + j + 1, y + 2, mud, 1.4);
+    }
+    // Hadrosaur prints: three broad toes pointing +x, a round heel pad; pressed in (dark inside, lit back rim).
+    for (let i = 0; i < 12; i++) {
+      const x = rng.int(8, W - 12);
+      const y = rng.int(8, W - 10);
+      for (const [tx, ty] of [[6, 0], [4, -4], [4, 4]]) {
+        for (let s2 = 0; s2 <= 4; s2++) {
+          const px = x + Math.round((tx * s2) / 4);
+          const py = y + Math.round((ty * s2) / 4);
+          c.set(px, py, mud, 0.8);
+          c.set(px, py + 1, mud, 1.2);
+        }
+      }
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 1; dx++) if (dx * dx + dy * dy <= 4) c.set(x + dx, y + dy, mud, 1);
+      for (let dy = -2; dy <= 2; dy++) c.set(x - 3, y + dy, mud, 3.8);
     }
   }, { wrap: true });
 }

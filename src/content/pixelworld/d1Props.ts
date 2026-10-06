@@ -795,8 +795,9 @@ function paintRoad(c: PwCanvas, k: PwKit, o: { hex: number; rut: number; grass: 
   }
   // Mud cracks on the shoulders.
   for (let i = 0; i < 8; i++) crack(c, rng, rng.chance(0.5) ? rng.int(22, 40) : rng.int(W - 40, W - 22), rng.int(0, H - 1), rng.int(6, 14), rng.next() * 6, { dt: -1, lip: 1, wrapX: false });
-  // Crown: tufts of grass and weeds between the ruts.
-  for (let i = 0; i < 70; i++) tuft(c, Math.round(W / 2 + rng.spread(13)), rng.int(0, H - 1), grass, rng);
+  // Crown: tufts of dry grass and weeds between the ruts (dull olive-straw: never compy-green).
+  const dry = k.ramp(0x8a8a46, { light: 0.4, sat: 0.85 });
+  for (let i = 0; i < 70; i++) tuft(c, Math.round(W / 2 + rng.spread(13)), rng.int(0, H - 1), i % 3 ? dry : grass, rng);
   // Stones: half-buried pebbles to cobbles, lit top-left, a dark lower-right and a shadow on the earth.
   const xMin = eLmin(edgeL) + 2;
   const xMax = eRmax(edgeR) - 3;
@@ -814,10 +815,10 @@ function paintRoad(c: PwCanvas, k: PwKit, o: { hex: number; rut: number; grass: 
     c.shift(x + sz + 1, wrap(y + sz, H), -1);
     c.shift(x + 1, wrap(y + sz, H), -1);
   }
-  // Fallen leaves and twigs (few; more toward the edges).
+  // Fallen leaves and twigs (few; brown, by the verges — never compy-green dashes mid-road).
   for (let i = 0; i < 45; i++) {
     const side = rng.chance(0.5);
-    const x = side ? rng.int(18, 60) : rng.int(W - 60, W - 18);
+    const x = side ? rng.int(18, 44) : rng.int(W - 44, W - 18);
     const y = rng.int(0, H - 1);
     if (!c.at(x, y)) continue;
     c.set(x, y, leaf, 4);
@@ -855,3 +856,274 @@ const eLmin = (a: Int16Array) => a.reduce((m, v) => Math.max(m, v), 0);
 const eRmax = (a: Int16Array) => a.reduce((m, v) => Math.min(m, v), 1e9);
 
 export { FONT_BOLD };
+
+// ─── Round 2: drums, kit bag, kiosk dressing ─────────────────────────────────
+
+/**
+ * A fuel drum's wrap (80 × 32 = round the 0.36 m drum × 1 m tall, u = 0 at the
+ * drum's right limb seen from the road, u = 60 facing the road): red-oxide
+ * body shaded as a cylinder (a lit band left of the front, the right limb
+ * dark), two rolled ribs (lit top, shadow under), a FLAMMABLE hazard diamond
+ * front and back, rust runs from the ribs and the rim, dents, scuffs to bare
+ * metal, a mud splash at the foot.
+ */
+export function d1DrumTile(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`d1drum|${h6(o.hex)}`, 80, 32, (c, k) => {
+    const rng = k.rng;
+    const p = k.ramp(o.hex, { light: 0.48, sat: 1.0 });
+    const rust = k.ramp(0x6e3418, { light: 0.4 });
+    const yel = k.ramp(0xf0c02a, { light: 0.45, sat: 1.05 });
+    const ink = k.ramp(0x1c1814, { light: 0.4 });
+    const st = k.ramp(0x9a9a92, { light: 0.5, sat: 0.6 });
+    const mud = k.ramp(0x6a5434, { light: 0.4 });
+    // Cylinder shading by u (the front half u 40…80 faces the road).
+    const shadeU = (u: number) => {
+      const f = (u - 40) / 40; // 0 = left limb, 0.5 = front, 1 = right limb (back half: < 0)
+      if (f < 0) return 2.2;
+      if (f < 0.08) return 2.6;
+      if (f < 0.32) return 4;
+      if (f < 0.42) return 3.6;
+      if (f < 0.78) return 3;
+      if (f < 0.92) return 2.4;
+      return 1.8;
+    };
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 80; x++) c.set(x, y, p, shadeU(x));
+    // Rolled ribs (rows 8 and 23 from the top): lit top row, the rib, a shadow row under.
+    for (const ry of [8, 23]) {
+      for (let x = 0; x < 80; x++) {
+        const t = shadeU(x);
+        c.set(x, ry - 1, p, Math.min(5, t + 1.2));
+        c.set(x, ry, p, Math.min(5, t + 0.4));
+        c.set(x, ry + 1, p, Math.max(0.6, t - 1.4));
+      }
+    }
+    // Top / bottom chime: dark seams.
+    c.hline(0, 0, 80, p, 1.2);
+    c.hline(0, 31, 80, p, 1);
+    // Hazard diamonds (front u = 60, back u = 20): yellow square on its point, black flame, border.
+    for (const cx of [60, 20]) {
+      const cy = 15;
+      for (let dy = -6; dy <= 6; dy++) {
+        for (let dx = -6; dx <= 6; dx++) {
+          const d = Math.abs(dx) + Math.abs(dy);
+          if (d > 6) continue;
+          c.set(cx + dx, cy + dy, d > 5 ? ink : yel, d > 5 ? 1.4 : dx + dy < -2 ? 4.4 : 3.6);
+        }
+      }
+      // The flame pictogram.
+      for (const [fx, fy] of [[0, -3], [0, -2], [-1, -1], [0, -1], [1, -2], [-1, 0], [0, 0], [1, 0], [1, -1], [-2, 1], [-1, 1], [0, 1], [1, 1], [2, 1], [-2, 2], [-1, 2], [0, 2], [1, 2], [2, 2]]) c.set(cx + fx, cy + fy, ink, 1.2);
+      // Peeling corner.
+      c.set(cx + 4, cy - 1, p, 2.4);
+      c.set(cx + 3, cy - 2, p, 2.4);
+    }
+    // Rust runs down from the ribs and the top chime; scuffs to bare steel; dents (dark / lit pair).
+    for (let i = 0; i < 9; i++) {
+      const x = rng.int(0, 79);
+      const y0 = rng.pick([1, 9, 24]);
+      const len = rng.int(3, 8);
+      for (let j = 0; j < len; j++) if (bayer(x, y0 + j) < 1 - j / len) c.tint(x, Math.min(31, y0 + j), rust, 0);
+    }
+    for (let i = 0; i < 6; i++) {
+      const x = rng.int(0, 77);
+      const y = rng.int(2, 29);
+      c.set(x, y, st, 4.2);
+      c.set(x + 1, y, st, 3.4);
+    }
+    for (let i = 0; i < 3; i++) {
+      const x = rng.int(44, 74);
+      const y = rng.int(3, 28);
+      c.shift(x, y, -1.2);
+      c.shift(x + 1, y, -0.8);
+      c.shift(x, y + 1, 1);
+    }
+    // Mud splashed up the foot.
+    for (let x = 0; x < 80; x++) {
+      const h = Math.floor(hash2(x >> 1, 3, 9) * 4);
+      for (let j = 0; j < h; j++) if ((x + j) % 3 !== 0) c.set(x, 30 - j, mud, j === h - 1 ? 3.4 : 2.6);
+    }
+  }, { wrap: true });
+}
+
+/** A drum lid (module disc 32 × 32): the rolled rim, the recessed lid, two bung caps, rust in the dish. */
+export function d1DrumLidModule(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`d1drumlid|${h6(o.hex)}`, 32, 32, (c, k) => {
+    const p = k.ramp(o.hex, { light: 0.48, sat: 1.0 });
+    const st = k.ramp(0x8a8a84, { light: 0.5, sat: 0.6 });
+    const rust = k.ramp(0x6e3418, { light: 0.4 });
+    for (let y = 0; y < 32; y++) {
+      for (let x = 0; x < 32; x++) {
+        const dx = x + 0.5 - 16;
+        const dy = y + 0.5 - 16;
+        const d = Math.hypot(dx, dy);
+        const lit = (-dx - dy) / 16;
+        if (d > 13.5) c.set(x, y, p, lit > 0 ? 4.2 : 2.4);
+        else if (d > 12.5) c.set(x, y, p, 1.6);
+        else c.set(x, y, p, lit > 0.4 ? 3.4 : lit < -0.4 ? 2.6 : 3);
+      }
+    }
+    for (const [bx, by, r] of [[10, 11, 2.5], [21, 20, 1.6]] as [number, number, number][]) {
+      c.ellipse(bx, by, r, r, st, 3.4);
+      c.set(Math.round(bx - 1), Math.round(by - 1), st, 4.6);
+      c.set(Math.round(bx + 1), Math.round(by + 1), st, 1.6);
+    }
+    c.scatter(k.rng, 6, 6, 20, 20, 10, rust, 2.6, { shapes: 5 });
+  });
+}
+
+/** Olive canvas (wrap 32 × 32): a coarse weave, seams with stitch rows, creases, mud. Opaque (the kit bag). */
+export function d1CanvasTile(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`d1canvas|${h6(o.hex)}`, 32, 32, (c, k) => {
+    const r = k.ramp(o.hex, { light: 0.42, sat: 0.9 });
+    const mud = k.ramp(0x6a5434, { light: 0.4 });
+    c.rect(0, 0, 32, 32, r, (x, y) => ((x + y) % 4 === 0 ? 2.6 : (x * 3 + y) % 7 === 0 ? 3.4 : 3));
+    // Seams with stitches.
+    for (let x = 0; x < 32; x++) {
+      c.set(x, 15, r, 1.6);
+      if (x % 3 === 0) c.set(x, 16, r, 4);
+    }
+    // Creases: lit fold with a shadow beside.
+    for (let i = 0; i < 4; i++) {
+      const x = k.rng.int(2, 29);
+      const y = k.rng.int(2, 26);
+      for (let j = 0; j < 5; j++) {
+        c.set(x + j, y + (j >> 1), r, 3.8);
+        c.set(x + j, y + (j >> 1) + 1, r, 2);
+      }
+    }
+    c.scatter(k.rng, 0, 0, 32, 32, 6, mud, 2.6, { shapes: 6 });
+  }, { wrap: true });
+}
+
+/** The kit bag's front (module 32 × 20 = 0.9 × 0.6 m-ish face): two webbing straps with buckles, a stencilled RANGER patch, a zip line. */
+export function d1KitFrontModule(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`d1kitfront|${h6(o.hex)}`, 32, 20, (c, k) => {
+    const r = k.ramp(o.hex, { light: 0.42, sat: 0.9 });
+    const web = k.ramp(0x3a3a2a, { light: 0.4 });
+    const st = k.ramp(0x9a9a92, { light: 0.5, sat: 0.6 });
+    const patch = k.ramp(0xc8b890, { light: 0.4 });
+    const ink = k.ramp(0x1c1a14, { light: 0.4 });
+    c.rect(0, 0, 32, 20, r, (x, y) => (y < 2 ? 3.8 : y > 17 ? 2 : (x + y) % 4 === 0 ? 2.6 : 3));
+    c.hline(1, 3, 30, r, 1.6);
+    for (let x = 2; x < 30; x += 2) c.set(x, 2, st, 4);
+    for (const sx of [6, 24]) {
+      for (let y = 0; y < 20; y++) {
+        c.set(sx, y, web, 3.4);
+        c.set(sx + 1, y, web, 3);
+        c.set(sx + 2, y, web, 2);
+      }
+      c.frame(sx - 1, 11, 5, 4, st, 4);
+    }
+    c.rect(11, 7, 10, 7, patch, 3.4);
+    c.frame(11, 7, 10, 7, patch, 2.4);
+    drawText(c, 'RG', 13, 8, FONT_3x5, ink, 1.4);
+    c.scatter(k.rng, 0, 0, 32, 20, 6, 0, -0.8, { shapes: 3 });
+  });
+}
+
+/**
+ * Thatch fringe (wrap 64 × 32, the strands in the top 24 rows, cut out below a ragged edge): the eave of a
+ * palm-thatch roof seen edge-on — bundled fronds hanging over, lit tips,
+ * dark gaps, strands of varied length.
+ */
+export function d1ThatchFringeTile(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`d1fringe|${h6(o.hex)}`, 64, 32, (c, k) => {
+    const r = k.ramp(o.hex, { light: 0.45, sat: 0.95 });
+    for (let x = 0; x < 64; x++) {
+      const len = 9 + Math.floor(hash2(x >> 1, 1, 7) * 9) + Math.round(Math.sin(x * 0.7) * 2);
+      for (let y = 0; y < Math.min(24, len); y++) {
+        let t = y < 3 ? 3.6 : y > len - 2 ? 4.2 : (x + (y >> 2)) % 3 === 0 ? 2 : 3;
+        if (x % 4 === 3) t -= 0.8;
+        c.set(x, y, r, t);
+      }
+    }
+    c.hline(0, 0, 64, r, 1.6);
+  }, { wrap: true });
+}
+
+/** A hanging oil lantern (module 12 × 20, cut out): a wire bail, the tin cap, the lit glass (unlit glow core), the base. */
+export function d1LanternModule(atlas: PwAtlas): PwTile {
+  return atlas.tile(`d1lantern`, 12, 20, (c, k) => {
+    const tin = k.ramp(0x4a4a44, { light: 0.5, sat: 0.6 });
+    const glass = k.ramp(0xffd26a, { light: 0.6, sat: 1 });
+    c.vline(6, 0, 3, tin, 3);
+    c.rect(3, 3, 7, 3, tin, 3.4);
+    c.hline(3, 3, 7, tin, 4.4);
+    c.rect(3, 6, 7, 9, glass, 4, 1);
+    c.rect(5, 8, 3, 5, glass, 5, 1);
+    c.vline(3, 6, 9, tin, 2);
+    c.vline(9, 6, 9, tin, 1.6);
+    c.rect(2, 15, 9, 3, tin, 2.8);
+    c.hline(2, 15, 9, tin, 4);
+  });
+}
+
+/**
+ * The ticket window, deep (module 64 × 48 = 2 × 1.5 m): a heavy plank frame
+ * (lit top / left, shaded reveal inside), the booth in shadow with a clerk's
+ * stool, a lamp glow on the back wall, a ticket roll and a cash tin on the
+ * counter, the shutter rolled up under the head with a rusty lip.
+ */
+export function d1KioskWindowDeepModule(atlas: PwAtlas, o: { wood: number; shutter: number }): PwTile {
+  const W = 64;
+  const H = 48;
+  return atlas.tile(`d1kioskwin2|${h6(o.wood)}|${h6(o.shutter)}`, W, H, (c, k) => {
+    const wd = k.ramp(o.wood, { light: 0.42 });
+    const sh = k.ramp(o.shutter, { light: 0.5, sat: 0.8 });
+    const dark = k.ramp(0x2a2018, { light: 0.4 });
+    const lamp = k.ramp(0xe0a040, { light: 0.5, sat: 1 });
+    const cream = k.ramp(0xe8d8a0, { light: 0.35 });
+    const red = k.ramp(D1_EMBLEM.red, { light: 0.45 });
+    const rust = k.ramp(0x7a3a1c, { light: 0.42 });
+    // Interior (back wall in shadow, darker toward the top under the head).
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) c.set(x, y, dark, y < 14 ? 0.8 : y < 22 ? 1.4 : 2);
+    // Lamp glow on the back wall (a pool) and the lamp.
+    for (let y = 14; y < 34; y++) for (let x = 36; x < 60; x++) {
+      const d = Math.hypot((x - 48) / 12, (y - 22) / 10);
+      if (d < 1) c.set(x, y, d < 0.45 ? lamp : dark, d < 0.45 ? 2.6 : bayer(x, y) < 1 - d ? 2.8 : 2);
+    }
+    c.rect(46, 15, 4, 3, lamp, 5, 1);
+    // Clerk's stool and a shelf with ticket books.
+    c.rect(12, 30, 9, 2, wd, 2.4);
+    c.vline(13, 32, 8, wd, 1.8);
+    c.vline(19, 32, 8, wd, 1.6);
+    c.hline(6, 20, 22, wd, 2.6);
+    for (let i = 0; i < 5; i++) c.rect(7 + i * 4, 16, 3, 4, i % 2 ? red : cream, 2.6);
+    // Shutter rolled up under the head: corrugations, a rusty lip.
+    for (let y = 6; y < 12; y++) for (let x = 6; x < 58; x++) c.set(x, y, sh, y % 2 ? 2.6 : 3.6);
+    c.hline(6, 12, 52, sh, 1.4);
+    for (let i = 0; i < 5; i++) c.cluster(k.rng.int(7, 55), k.rng.int(6, 11), i, rust, 2.4);
+    // Counter: a thick plank sill with a lit nosing; the ticket roll and the cash tin on it.
+    c.rect(2, 38, 60, 5, wd, 3.4);
+    c.hline(2, 38, 60, wd, 4.6);
+    c.hline(2, 42, 60, wd, 1.4);
+    c.rect(14, 34, 5, 4, cream, 3.8);
+    c.hline(14, 34, 5, cream, 4.8);
+    c.rect(40, 35, 8, 3, k.ramp(0x4a5a6a, { light: 0.45 }), 3);
+    // Heavy frame: lit top / left, the inside reveal (shaded top / left, lit bottom / right).
+    c.rect(0, 0, W, 6, wd, 3.2);
+    c.hline(0, 0, W, wd, 4.4);
+    c.rect(0, 0, 6, H, wd, 3.4);
+    c.vline(0, 0, H, wd, 4.4);
+    c.rect(W - 6, 0, 6, H, wd, 2.8);
+    c.vline(W - 1, 0, H, wd, 1.6);
+    c.rect(0, H - 5, W, 5, wd, 3);
+    c.hline(6, 6, W - 12, dark, 0.6);
+    c.vline(6, 6, 32, dark, 0.8);
+    c.vline(W - 7, 6, 32, wd, 3.8);
+    for (const [x, y] of [[2, 2], [W - 4, 2], [2, H - 4], [W - 4, H - 4]]) c.set(x, y, wd, 1.2);
+    c.scatter(k.rng, 0, 0, W, H, 18, 0, -0.8, { shapes: 3, only: wd });
+  });
+}
+
+/** TICKETS board (module 48 × 12 = 1.5 × 0.375 m): green board, cream letters with a shadow, a cream border, nail heads, weathering. */
+export function d1TicketsBoardModule(atlas: PwAtlas): PwTile {
+  return atlas.tile(`d1tickets`, 48, 12, (c, k) => {
+    const g = k.ramp(0x2f5a2a, { light: 0.42 });
+    const cream = k.ramp(0xe8d8a0, { light: 0.35 });
+    c.rect(0, 0, 48, 12, g, (x, y) => (y === 0 ? 4 : y === 11 ? 1.6 : Math.abs(Math.sin(x * 0.2 + y)) < 0.05 ? 2.4 : 3));
+    c.frame(1, 1, 46, 10, cream, 3.4);
+    drawText(c, 'TICKETS', 4, 3, FONT_3x5, cream, 4, { scale: 1, shadow: { ramp: g, tone: 1 } });
+    drawText(c, '$5', 34, 3, FONT_3x5, cream, 4, { shadow: { ramp: g, tone: 1 } });
+    c.scatter(k.rng, 1, 1, 46, 10, 8, 0, -0.8, { shapes: 3 });
+  });
+}

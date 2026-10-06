@@ -159,3 +159,62 @@ export function d1HoodStencil(atlas: PwAtlas, o: { ink: number }): PwTile {
     for (let y = 0; y < 16; y++) for (let x = 0; x < 96; x++) if (c.at(x, y) && hash2(x, y, 7) > 0.84) c.set(x, y, 0, 0);
   });
 }
+
+/**
+ * A painted steel tube (wrap 16 × 128 at JEEP_TPM, u once round the tube —
+ * `pwCylinder` lays u = 0 on top for a tube lying along x): shaded as a
+ * tube (a highlight line along the top, the body, a dark underside), chips to
+ * primer and scuffs to bare steel at irregular spacing along it, rust at the
+ * welds (both ends of the tile's run).
+ */
+export function d1TubeTile(atlas: PwAtlas, o: { hex: number; primer: number }): PwTile {
+  return atlas.tile(`d1tube|${h6(o.hex)}|${h6(o.primer)}`, 16, 128, (c, k) => {
+    const rng = k.rng;
+    const p = k.ramp(o.hex, { light: 0.45, sat: 0.95 });
+    const pr = k.ramp(o.primer, { light: 0.4 });
+    const st = k.ramp(0x9a9a92, { light: 0.55, sat: 0.6 });
+    const rust = k.ramp(0x7a3a1c, { light: 0.42 });
+    // Round the tube: u 0 top, 4 one side, 8 underneath, 12 the other side.
+    const tone = [4.6, 3.8, 3.4, 3, 3, 2.6, 2.2, 1.6, 1.2, 1.6, 2.2, 2.6, 3, 3, 3.4, 3.8];
+    for (let y = 0; y < 128; y++) for (let x = 0; x < 16; x++) c.set(x, y, p, tone[x]);
+    // Chips and scuffs at irregular spacing (never a rhythm).
+    let y = rng.int(3, 9);
+    while (y < 120) {
+      const x = rng.pick([1, 2, 3, 13, 14, 15, 4, 12]);
+      const big = rng.chance(0.3);
+      c.set(x, y, big ? st : pr, big ? 4.4 : 3.4);
+      c.set((x + 1) % 16, y, pr, 3);
+      if (big) c.set(x, y + 1, pr, 2.6);
+      y += rng.int(5, 23);
+    }
+    // Rust at the welds (the ends) bleeding along the underside.
+    for (const y0 of [0, 124]) {
+      for (let j = 0; j < 4; j++) for (let x = 5; x < 12; x++) if (hash2(x, y0 + j, 5) > 0.35) c.tint(x, y0 + j, rust, 0);
+    }
+    for (let i = 0; i < 4; i++) c.cluster(rng.int(6, 10), rng.int(10, 118), i, rust, 2);
+  }, { wrap: true, density: JEEP_TPM });
+}
+
+/** The hood's centre stripe (module 12 × 48 at JEEP_TPM, laid on the stripe): darker olive, lit edges, chips, scratches, mud flung back from the front. */
+export function d1HoodStripeDecal(atlas: PwAtlas, o: { hex: number; primer: number; mud: number }): PwTile {
+  return atlas.tile(`d1hoodstripe|${h6(o.hex)}`, 12, 48, (c, k) => {
+    const rng = k.rng;
+    const p = k.ramp(o.hex, { light: 0.42, sat: 0.95 });
+    const pr = k.ramp(o.primer, { light: 0.4 });
+    const mud = k.ramp(o.mud, { light: 0.4 });
+    c.rect(0, 0, 12, 48, p, (x, y) => (x === 0 ? 3.8 : x === 11 ? 1.8 : (x + (y >> 2)) % 5 === 0 ? 2.6 : 3));
+    // Scratches: short diagonal lit lines.
+    for (let i = 0; i < 6; i++) {
+      const x = rng.int(1, 9);
+      const y = rng.int(2, 44);
+      for (let j = 0; j < rng.int(2, 4); j++) c.set(x + j, y + j, pr, 3.8);
+    }
+    // Chips to primer.
+    for (let i = 0; i < 7; i++) c.cluster(rng.int(0, 10), rng.int(0, 46), i, pr, 3.2);
+    // Mud flung back from the front (the top of the module = the front of the hood): dense, thinning.
+    for (let i = 0; i < 26; i++) {
+      const y = Math.floor(Math.pow(rng.next(), 2) * 30);
+      c.cluster(rng.int(0, 10), y, i, mud, rng.chance(0.5) ? 3 : 2.4);
+    }
+  });
+}
