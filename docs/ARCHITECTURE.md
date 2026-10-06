@@ -835,12 +835,50 @@ load skips painting), paint the one-level sky atlas after the first frame.
   with the box at load 13); ≤ 95 draw calls at the heaviest beat (the bay; PIXEL CAST 160). Checks:
   `tests/unit/pixel-world-z2.test.ts` (budget, occluders, ground, set pieces,
   destructibles, RNG, full-stage simulator in both styles).
-- **z3 HIGHWAY** (dusk exterior, z3/bake.ts per-50 m chunk baker): `duskSkyTile` panorama
-  + burning-city skyline layer (`skylineTile` with fire glow) + hills; `asphaltTile` road
-  with lane paint, `guardRailTile`, jersey barriers as concrete, billboards
-  (`paintedSign`), overpass concrete + soot, tanker / burnt cars re-painted (metal, rust,
-  soot), houses (`sidingTile`, `roofTile`), utility poles + wires. Convert per chunk
-  before `bake(b)`; road strips are long — use planar batches.
+- **z3 HIGHWAY TO HELL** (converted end to end; `stages/z3/pixel.ts` = `Z3PixelWorld`, the
+  painted parts `stages/z3/pwRoad.ts`, `pwRoadside.ts`, `pwVehicles.ts`, `pwTrucks.ts`,
+  `pwStructures.ts`, `pwBuildings.ts`, `pwShapes.ts`; painters `pixelworld/z3road.ts`,
+  `z3roadside.ts`, `z3cars.ts`, `z3trucks.ts`, `z3structures.ts`, `z3buildings.ts`,
+  `z3bay.ts`, `z3sky.ts`, `z3fx.ts`, `z3truck.ts`, `z3kit.ts`). The builders only RECORD
+  (`userData.pw` = kind + data; `addText` glyphs `pwText`), so CLASSIC and PIXEL CAST are
+  byte-identical (scene signature); every chunk / landmark is converted before its `bake(g)`
+  and the dynamic set pieces (blocker, overpass car, burnt cars, tanker, tanker halves, gate)
+  are painted by env.ts hooks (`pw?.dyn…`). Road: per-strip ribbons along the rail (one
+  256 × 256 lane tile, two variants side by side, the oncoming lanes on the other half;
+  shoulders with rumble grooves and blown sand, the median), cut-out line ribbons, decals by
+  rule per stretch (skids, oil, potholes, debris) and at the wrecks (scorch, blood, glass,
+  the wet fuel slick). Jersey barriers as their real profile, W-beam rails, cobra-head light
+  poles, utility poles with crossarms and transformers, cars (a neutral paint layer tinted
+  per car + a detail layer: greenhouse, screens, grille, lamps, wheels, open doors, police
+  livery, burnt shells), the semi / reefer / bus / tanker (FLAMMABLE band, placards) / army
+  truck / tank, the overpass (fascia, soffit, piers, riprap, railing), highway signs, the
+  gantry and bridge trusses as open cut-out lattices, sound walls with graffiti, houses
+  (siding, gables, shingles, chimneys, burning windows), the gas station, warehouses,
+  the motel (walkway, railing, neon MOTEL / VACANCY), billboard posters (REPENT, BURGER
+  BARN, motel), the tunnel (enamel panels, SOS markers, fans, the ROUTE 9 portal), the
+  red suspension bridge (fluted, riveted tower cells; cables; lamps), the bay (animated
+  water, a freighter, cliffs), the barricade (sandbags, chain-link gate with KEEP OUT,
+  hazard posts, floodlights). Fires are animated pixel flame strips and pixel smoke puffs
+  (`Z3FxAtlas`, instanced camera-facing sprites); the sky plumes the same puffs, lumpy and
+  varied per billow. Sky: `PwBackdrop` dusk panorama painted into the canvas (dithered
+  bands warming toward the sun and reddening over the burning city, cloud banks with lit
+  bellies, towering cumulus with a glowing flank, smoke columns spreading into a pall, the
+  sun setting into a saddle of the hills, moon, crows) + dry hills with masts / water towers +
+  the burning skyline panel at the city's azimuth. The ridge the tunnel bores through and the
+  bay cliffs are cliff-scale strata (12 texels a metre) on their own batch whose fog fades to a
+  dusk mauve (`Z3_HAZE`), not the pink fog colour, so from the bridge the ridge reads as a hill
+  against the burning skyline. The pickup view model on its own atlas at 48 texels a metre. The tanker
+  keeps its classic hit meshes (material hidden, object visible: still shootable) under the
+  painted tank, whose meshes are detached while the destructible registers. Budgets: world
+  atlas 2048×896 (9.3 MB with mips) + sky 2048×464 (3.6 MB, one level) + fx 0.6 MB + pickup
+  0.3 MB = ≈ 13.8 MB; paint ≈ 97 ms world + ≈ 21 ms sky (warm atlas rebuild, node CPU
+  time, best of 3, on a shared 4-core box; paint + resolve alone 53 + 21 ms); draw calls
+  36–57 a beat (PIXEL CAST 64–92). Checks: `tests/unit/pixel-world-z3.test.ts`
+  (budget, PW meshes never occluders / raycast, occluders, ground, set pieces, tanker hit
+  boxes and shootables, RNG, full-stage simulator in both styles), `D1_SIG=1
+  D1_SIG_STAGE=z3 … d1-sig.test.ts`, `z3-lab.test.ts` (atlas dumps, paint benches). Still
+  classic: the shapes of the ridge / shore rocks (painted strata on the jittered-ico lumps),
+  wires, the tunnel light strips, flares, police light-bar glows, searchlight beams, FX.
 - **d2 RESEARCH LABS** (interior, d2/bake.ts recipes): lobby (terrazzo, reception desk,
   park logo signage as `paintedSign`), shop (shelves of goods modules), kitchen
   (`tilesTile` walls, steel counters), server room (rack modules with glow LEDs),
