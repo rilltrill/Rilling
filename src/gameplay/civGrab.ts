@@ -16,7 +16,7 @@ const _pole = new THREE.Vector3();
  * A zombie that has caught a civilian (the civilian's GRABBED act spawns it, at
  * the spot the civilian picks — see `Civilian`): a tug of war at arm's length,
  * both hands on the civilian's arm (the wrist, the forearm by the elbow),
- * hunched in snapping at it, then throwing its weight back on each yank.
+ * leaning back off it and snapping at it, then throwing its weight back on each yank.
  * House of the Dead rules: shoot it and they're free.
  *
  * Fairness: while it holds on it never attacks the player (no warning ring, no
@@ -108,11 +108,12 @@ export class Grabber extends Walker {
     restPose(r, this.hipsY);
     const t = this.age;
     const g = this.gripSide;
-    // The zombie does the pulling: hunched in over the held arm between yanks,
-    // the head darting at it (trying to bite), then on each yank it throws its
-    // weight back, a step back with the rear foot, hauling with BOTH hands — one
-    // clamped on the wrist, the other on the forearm by the elbow. (Leaning away
-    // from the civilian on the yank keeps its head and chest well clear of them.)
+    // The zombie does the pulling: braced and leaning back off the held arm,
+    // stooped over it, the head darting at it (trying to bite), then on each
+    // yank it throws its weight back, a step back with the rear foot, hauling
+    // with BOTH hands — one clamped on the wrist, the other on the forearm by the
+    // elbow. (Leaning away from the civilian — and further on the yank — keeps
+    // its head and chest well clear of them: ≥ 38 px of clear aim at the z2 ER.)
     const y = v.yank;
     const bite = y < 0.15 ? key(t * 0.75) : 0;
     this.bite = bite;
@@ -124,9 +125,9 @@ export class Grabber extends Walker {
     rear.knee.rotation.x = 0.3 + 0.25 * y;
     r.hips.position.y = this.hipsY - 0.07 - 0.05 * y;
     // (z > 0 leans toward −X: away from a civilian at its left when g = +1.)
-    r.spine.rotation.x = 0.38 * (1 - y) - 0.06 * y + 0.05 * bite;
-    r.spine.rotation.z = g * (0.02 * (1 - y) + 0.45 * y);
-    r.spine.rotation.y = g * 0.3;
+    r.spine.rotation.x = 0.22 * (1 - y) - 0.06 * y + 0.05 * bite;
+    r.spine.rotation.z = g * (0.2 * (1 - y) + 0.45 * y);
+    r.spine.rotation.y = g * 0.15;
     r.chest.rotation.x = 0.12 * (1 - y);
     r.neck.rotation.x = -0.2 + 0.3 * bite;
     r.head.rotation.x = -0.12 + 0.15 * bite;

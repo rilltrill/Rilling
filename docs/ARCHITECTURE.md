@@ -184,7 +184,7 @@ hand ever goes over a head, no arm is ever held out sideways.
 | `hide` | only where the stage puts cover right in front: crouched with the back to the camera, hands on the cover, peeking up and out, glancing back over the shoulder for help — never in the open (no stage uses it at the moment: the d1 ranger in the ferns now flees) |
 | `flee` | cowers until the danger is real (a threat within 7 m — 12 m for dinos — an attack winding up, or 8 s; one who has just run in ducks 1.5 s first unless it's right on them), then runs out across the view at 2.8 m/s on the heading (from straight across to a little toward or away from the camera) that keeps them on screen ~3 s, Operation Wolf style — or to the stage's `to` (the z1 cop, kept off the shopfronts; the d2 hatchery tech, back out past the camera) — looking back over the shoulder; may trip once (0.9 s: pitch forward, ~0.3 s on all fours, scramble on), 0.35–0.6 s in and only well inside the view; off screen they have escaped |
 | `backaway` | HELP! over the shoulder, then 1.5–2.5 s edging back from the nearest threat on bent knees (kept within 0.7 rad of facing the camera: in profile with arms out it would read as a zombie), recoiling — leaning back, chin tucked, the face turned away — one hand up in front of the face at nose height, palm out at it, elbow down, the other hand reaching back; steps sized to the ground covered (no skating); then turns and runs. Startled while edging back (a shot or a kill close by, with the threat still over 6 m off and nothing winding up), half of them trip over their own heels onto the seat, scoot back, roll over and scramble off (`fall`) — never over nothing, and one fall per civilian (no stumble on the run after it) |
-| `grabbed` | spawns with a zombie (`attacker`: its outfit) holding their arm — a tug of war, keyed: every 1.1–1.6 s it yanks, throwing its weight back with a step back of the rear foot, and they're dragged two stumbling steps toward it (the near foot, then the other; 0.22 m), the head snapping; they step back twice as they haul themselves away again, weight dropped low, leaning hard away, both hands on the held wrist. Between yanks the zombie hunches over the arm, its head darting at it (a bite). Shoot the zombie (or its holding arm off) and they're free on the spot (THANKS!, a rescue); left ~7–8.5 s they wrench free and run (paid at the clear), the zombie walks on at you |
+| `grabbed` | spawns with a zombie (`attacker`: its outfit) holding their arm — a tug of war, keyed: every 1.1–1.6 s it yanks, throwing its weight back with a step back of the rear foot, and they're dragged two stumbling steps toward it (the near foot, then the other; 0.22 m), the head snapping; they step back twice as they haul themselves away again, weight dropped low, leaning hard away, both hands on the held wrist. Between yanks the zombie leans back off the arm, stooped over it, its head darting at it (a bite). Shoot the zombie (or its holding arm off) and they're free on the spot (THANKS!, a rescue); left ~7–8.5 s they wrench free and run (paid at the clear), the zombie walks on at you |
 | `plead` | calls HELP! — turned 0.42 rad toward the screen edge so the knee bend and the lean show, a short stance, the hand nearer the camera cupped at the mouth (elbow down by the ribs), the far one waving beside the head from an elbow held below the shoulder (two held positions, 2.5 a second) — then cowers (after a startled jolt), and calls again when it's calm. Far off (> 15 m) or perched up on something (the d3 truck bed): a deeper crouch bouncing on the knees and a bigger swing of the forearm — never the arm overhead |
 | `auto` | a short HELP!, then cowers; a zombie within 2.6 m (a dino within 4.2 m) and they back off and run |
 
@@ -205,17 +205,18 @@ where the attacks come in — or run only *outward* (a running civilian's screen
 x only grows, also on deeper headings: those stay under the angle that would
 turn them back in). Which side is "outward" is tracked while they stand their
 ground, so a camera still turning to the scene doesn't send them across it. A
-grabbing zombie stands level with its victim, `GRAB_SEP` (1.4 m: arm's length)
-toward the middle of the view, turned to the camera: with her leaning away and
-it hunched over the arm or thrown back on a yank, its head and chest keep ≥ 25
-px of clear aim from her on screen at the z2 ER (≥ 28 px measured), on a yank
-too; while it holds on it never attacks (no ring, no attack slot); a hit makes
-it flinch but not let go. Never put a civilian behind visible scenery that
+grabbing zombie stands level with its victim, `GRAB_SEP` (1.45 m: arm's
+length, the hands still meeting) toward the middle of the view, turned to the
+camera: with both leaning away from each other, it further on a yank, its head
+and chest keep ≥ 25 px of clear aim from her on screen at the z2 ER (≥ 38 px
+measured: stooped in closer, 28 px, a human-like-bot miss at its chest hit her
+arm), on a yank too; while it holds on it never attacks (no ring, no attack
+slot); a hit makes it flinch but not let go. Never put a civilian behind visible scenery that
 doesn't stop bullets (a shot at the counter would carry on into someone you
 can't see): in the open, or behind a registered occluder.
 
-`civilian-fairness.test.ts` checks it two ways. (1) It plays every stage with a
-slow AutoPlayer and checks, every other frame, that a ray through the centre of
+`civilian-fairness.test.ts` checks it three ways. (1) It plays every stage
+with a slow AutoPlayer and checks, every other frame, that a ray through the centre of
 any hostile's head / torso / weak point — and rings 8, 12 and 16 px round it —
 never hits a civilian first (hostiles out past 120 m are left out), and that no
 civilian's head or chest sits behind solid non-occluder scenery (a leg behind a
@@ -226,14 +227,23 @@ to the environment — aside). (2) HOLD FIRE: each civilian beat on its own (as
 pace and wind up: no hostile's head / torso / weak-point box comes within 16 px
 of a civilian's hitboxes on screen while it attacks, nor for more than 0.3 s at
 a stretch (a dino prowling across them is a moment's wait; one pacing in front
-of them is not), and a grabbing zombie keeps 25 px of clear aim. That pass
-changed the d1 fallen-tree ranger (left hiding in the ferns, a dilo's prowl took
-it right across her: now she cowers there until the dilos step out of the
-bushes, then bolts out of the view to the left) and moved the d2 lab staff
-(the vents' compys pounced across the gift-shop tech at the back of the shop:
-now in the right-hand aisle between the display tables; the hatchery tech runs
-in past the camera down the right-hand aisle, ducks by the far benches and
-bolts back out the way she came once the raptors are out).
+of them is not), and a grabbing zombie keeps 25 px of clear aim. Holding fire,
+a beat's later waves (most start once the first is down to a hostile or two)
+never come, so (3) the same beat is played again CLEARING THE ROOM slowly: from
+3 s on, every 1.2 s the hostile furthest from the civilians on screen drops
+dead and the waves come on, over 20 s, with the same rules for the ones still
+standing. Those passes changed the d1 fallen-tree ranger (left hiding in the
+ferns, a dilo's prowl took it right across her: now she cowers there until the
+dilos step out of the bushes, then bolts out of the view to the left) and the
+d1 river-ford scientist (the red raptor's ambush from the right ran in at the
+camera straight across her: now out of the view to the right as the compys
+leap in), and moved the d2 lab staff: the vents' compys pounced across the
+gift-shop tech at the back of the shop, so she comes in along the right-hand
+aisle to duck between the display tables and goes back out as they drop (the
+last wave's raptor leaps in right there); the hatchery tech runs in from
+beside the camera to the near benches on the right and bolts back out once the
+raptors are out (further down that aisle she was on the line the right-hand
+door's raptor runs at the camera along — a human-like-bot miss at it hit her).
 `civilian.test.ts` covers each act (the run-in and its wait, outward runs,
 the grab and its yank, the one startled fall, rescues paying once and when,
 the hit penalty once, perched civilians, the RNG draw). Measure changes with

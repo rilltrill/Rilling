@@ -127,12 +127,13 @@ type Phase = CivPhase;
 /**
  * Root-to-root distance (m) a grabbing zombie keeps, toward the middle of the
  * view: arm's length — its two hands on the held arm, hers hauling on her own
- * wrist — with the civilian leaning hard away and the zombie hunched over the
- * arm or thrown back on a yank, so its head and chest stay clear shots well
- * away from her on screen (≥ 25 px of clear aim round each at the z2 ER,
- * civilian 7.0 m and zombie 6.3 m from the camera; on a yank too).
+ * wrist (the hands still meet) — with both leaning away from each other, the
+ * zombie further on a yank, so its head and chest stay clear shots well away
+ * from her on screen (≥ 38 px of clear aim round each at the z2 ER, civilian
+ * 7.0 m and zombie 6.3 m from the camera, on a yank too: a human-like-bot miss
+ * at its chest by 40 px hit her arm when it stooped in closer).
  */
-export const GRAB_SEP = 1.4;
+export const GRAB_SEP = 1.45;
 /** Seconds of HELP! before each act (when the stage doesn't say). Cowering and backing off call out from inside the act. */
 const HELP_FIRST: Record<CivAct, number> = { auto: 1.5, cower: 0, hide: 0, flee: 0, backaway: 0, grabbed: 0, plead: 2.2 };
 /** A threat this close (m, ground) panics an `auto` civilian into backing off / running. */

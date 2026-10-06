@@ -293,8 +293,9 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'river ford',
     look: { at: [0, 1.3, 12], blend: 0.8 },
-    // (Right at the edge: the red raptor's ambush leap comes in from the right, nearer the middle.)
-    civilians: [{ pos: [6.5, 0, 6.2], variant: 'scientist', act: 'cower' }],
+    // (Right at the edge, cowering until the compys leap in, then out of the view to the right: left
+    // there, the red raptor's ambush from the right ran in at the camera straight across her.)
+    civilians: [{ pos: [6.5, 0, 6.2], variant: 'scientist', act: 'flee' }],
     pickups: [{ kind: 'health', pos: [-3.5, 2.6, 11], t: 1 }],
     waves: [
       {

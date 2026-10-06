@@ -249,8 +249,20 @@ describe('civilians never block a fair shot at an enemy, and are never hidden be
  *
  * and a zombie holding a civilian keeps GRAB_PX of clear aim round its head
  * and chest centres throughout.
+ *
+ * Holding fire, the beat's later waves (most start once the first is down to a
+ * hostile or two) never come, so a second run CLEARS THE ROOM slowly instead:
+ * from CLEAR_FROM s on, one hostile every CLEAR_EVERY s drops dead (the one
+ * furthest from the civilians on screen — a player picking off the easy
+ * shots first) and the waves come on, over CLEAR_SECS s; the same rules hold
+ * for the hostiles still standing (the d2 hatchery's second raptor bursts out
+ * of the right-hand door and runs straight at the camera: a civilian on its
+ * line is caught there whatever the first wave did).
  */
 const HOLD_FIRE = 12;
+const CLEAR_FROM = 3;
+const CLEAR_EVERY = 1.2;
+const CLEAR_SECS = 20;
 const BOX_PX = 16;
 const LINGER = 0.3;
 const GRAB_PX = 25;
@@ -298,7 +310,8 @@ function rectGap(a: number[], b: number[]): number {
   return Math.hypot(dx, dy);
 }
 
-function holdFire(id: string, beat: number, seed: number, secs = HOLD_FIRE): HoldRec | null {
+function holdFire(id: string, beat: number, seed: number, clear = false): HoldRec | null {
+  const secs = clear ? CLEAR_SECS : HOLD_FIRE;
   const stage = ALL_STAGES.find((s) => s.id === id)!;
   const dt = 1 / 30;
   const camera = new THREE.PerspectiveCamera(58, 844 / 390, 0.05, 400);
@@ -318,6 +331,7 @@ function holdFire(id: string, beat: number, seed: number, secs = HOLD_FIRE): Hol
   const eye = new THREE.Vector3();
   const near = new Map<Enemy, number>();
   let t = 0;
+  let nextKill = CLEAR_FROM;
   while (t < secs && runner.index === beat) {
     const sdt = world.update(dt);
     runner.update(sdt);
@@ -330,6 +344,28 @@ function holdFire(id: string, beat: number, seed: number, secs = HOLD_FIRE): Hol
       const tg = o.userData.shot as ShotTag;
       if (!(tg.owner instanceof Civilian) || tg.owner instanceof PerchedCivilian) continue;
       if (rectOf(o, camera, r)) civRects.push(r.slice());
+    }
+    if (clear && t >= nextKill) {
+      // Clearing the room: the hostile furthest from the civilians on screen drops.
+      nextKill += CLEAR_EVERY;
+      let far: Enemy | null = null;
+      let farGap = -1;
+      for (const e of world.entities) {
+        if (!(e instanceof Enemy) || !e.hostile || e.removed || e.state === 'dying' || (e instanceof Grabber && e.holding)) continue;
+        let g = 1e6;
+        for (const o of active) {
+          if ((o.userData.shot as ShotTag).owner !== e || !rectOf(o, camera, r)) continue;
+          for (const c of civRects) g = Math.min(g, rectGap(r, c));
+        }
+        if (g > farGap) {
+          farGap = g;
+          far = e;
+        }
+      }
+      if (far) {
+        far.die(null);
+        world.shootables.active(active);
+      }
     }
     if (!civRects.length) {
       near.clear();
@@ -409,21 +445,26 @@ function civBeats(id: string): number[] {
 
 describe('hold fire: a slow player who doesn\'t shoot yet never finds a civilian in the way of a hostile', () => {
   const seeds = (process.env.CIV_HOLD_SEEDS ?? '1,2,3,4,5,6').split(',').map(Number);
+  const modes = (process.env.CIV_HOLD_MODES ?? 'hold,clear').split(',');
   for (const s of ALL_STAGES) {
-    it(`${s.id}: every civilian beat, ${HOLD_FIRE} s without a shot, seeds ${seeds.join(' ')}`, { timeout: 900_000 }, () => {
-      const fails: string[] = [];
-      for (const b of civBeats(s.id)) {
-        for (const seed of seeds) {
-          const r = holdFire(s.id, b, seed);
-          if (!r) continue;
-          if (process.env.CIV_HOLD_LOG)
-            process.stderr.write(`HOLD ${s.id} ${r.beat} seed ${seed}: attacking ${r.attack.toFixed(1)} px (${r.attackAt}) linger ${r.linger.toFixed(2)} s (${r.lingerAt}) min ${r.minBox.toFixed(1)} px grab ${r.minGrab} px (${r.grabAt})\n`);
-          if (r.attack < BOX_PX) fails.push(`${r.beat} seed ${seed}: attacking ${r.attackAt}`);
-          if (r.linger > LINGER) fails.push(`${r.beat} seed ${seed}: lingers ${r.linger.toFixed(2)} s — ${r.lingerAt}`);
-          if (r.minGrab < GRAB_PX) fails.push(`${r.beat} seed ${seed}: grabber ${r.minGrab} px — ${r.grabAt}`);
+    for (const mode of modes) {
+      const clear = mode === 'clear';
+      const what = clear ? `the room cleared slowly over ${CLEAR_SECS} s` : `${HOLD_FIRE} s without a shot`;
+      it(`${s.id}: every civilian beat, ${what}, seeds ${seeds.join(' ')}`, { timeout: 900_000 }, () => {
+        const fails: string[] = [];
+        for (const b of civBeats(s.id)) {
+          for (const seed of seeds) {
+            const r = holdFire(s.id, b, seed, clear);
+            if (!r) continue;
+            if (process.env.CIV_HOLD_LOG)
+              process.stderr.write(`${clear ? 'CLEAR' : 'HOLD'} ${s.id} ${r.beat} seed ${seed}: attacking ${r.attack.toFixed(1)} px (${r.attackAt}) linger ${r.linger.toFixed(2)} s (${r.lingerAt}) min ${r.minBox.toFixed(1)} px grab ${r.minGrab} px (${r.grabAt})\n`);
+            if (r.attack < BOX_PX) fails.push(`${r.beat} seed ${seed}: attacking ${r.attackAt}`);
+            if (r.linger > LINGER) fails.push(`${r.beat} seed ${seed}: lingers ${r.linger.toFixed(2)} s — ${r.lingerAt}`);
+            if (r.minGrab < GRAB_PX) fails.push(`${r.beat} seed ${seed}: grabber ${r.minGrab} px — ${r.grabAt}`);
+          }
         }
-      }
-      expect(fails).toEqual([]);
-    });
+        expect(fails).toEqual([]);
+      });
+    }
   }
 });

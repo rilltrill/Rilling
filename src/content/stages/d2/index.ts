@@ -178,10 +178,11 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'gift shop',
     look: { at: W(0, 1.6, -71), world: true, blend: 1.2 },
-    // (In from the shop's front along the right-hand aisle, to cower in the gap between the display
-    // tables: out at the side of the view, where the vents' compys never pounce across her — at the
-    // back of the shop, by the plush T-rex, they did.)
-    civilians: [{ pos: W(6.65, 0, -70.55), from: W(6.4, 0, -62.5), world: true, variant: 'tech', t: 0.3, act: 'cower' }],
+    // (In from the shop's front along the right-hand aisle, to duck in the gap between the display
+    // tables, out at the side of the view — at the back of the shop, by the plush T-rex, the vents'
+    // compys pounced across her — and back out the way she came as soon as they drop: the last wave's
+    // raptor leaps in right there.)
+    civilians: [{ pos: W(6.65, 0, -70.55), from: W(6.4, 0, -62.5), to: W(6.4, 0, -62.5), world: true, variant: 'tech', t: 0.3, act: 'flee' }],
     pickups: [{ kind: 'bomb', pos: W(-3.7, 1.35, -66.5), world: true, t: 1 }],
     onStart: (w) => w.later(1.0, () => popup(w, "DON'T SHOOT THE SCIENTIST!", 0.6, 0.26)),
     waves: [
@@ -281,10 +282,10 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'hatchery',
     look: { at: W(0, 1.6, -144), world: true, blend: 1.2 },
-    // (Runs in past the camera down the right-hand aisle and ducks by the far benches, out at the side
-    // of the view; once the raptors are out she bolts back the way she came — not left cowering in
-    // the middle of the aisle, in the room they're about to roam.)
-    civilians: [{ pos: W(7.6, 0, -143.0), from: W(8.6, 0, -127.5), to: W(8.6, 0, -127.5), world: true, variant: 'tech', t: 0.3, act: 'flee' }],
+    // (Runs in from beside the camera to duck by the near benches on the right, out at the side of
+    // the view, and bolts back the way she came once the raptors are out: further down the aisle she
+    // was on the line the right-hand door's raptor runs at the camera along.)
+    civilians: [{ pos: W(8.0, 0, -140.0), from: W(9.2, 0, -133.0), to: W(9.2, 0, -133.0), world: true, variant: 'tech', t: 0.3, act: 'flee' }],
     pickups: [{ kind: 'magnum', pos: W(-2.2, 1.35, -137.5), world: true, t: 1 }],
     waves: [
       {
