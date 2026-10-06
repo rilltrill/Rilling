@@ -493,7 +493,10 @@ export function z3HillsTile(atlas: PwAtlas, o: Z3HillsOpts): PwTile {
     for (let x = 0; x < TW; x++) {
       // Lower in front of the city skyline (it carries its own foreground).
       const dc = Math.min(Math.abs(x - cityX), TW - Math.abs(x - cityX)) / TW;
-      const dip = dc < 0.12 ? 0.35 + dc * 5 : 1;
+      // And a saddle where the sun goes down, so the disc sits in the gap (not behind a ridge).
+      const ds = Math.min(Math.abs(x - sunX), TW - Math.abs(x - sunX)) / TW;
+      const sd = ds < 0.045 ? 0.1 + (ds / 0.045) ** 1.5 * 0.9 : 1;
+      const dip = Math.min(sd, dc < 0.12 ? 0.35 + dc * 5 : 1);
       farTop[x] = ridge(x, 7, (H * 0.72) * dip, horizon + 1);
       nearTop[x] = ridge(x + 900, 8, (H * 0.4) * dip, horizon + 4);
     }

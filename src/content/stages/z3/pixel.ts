@@ -47,6 +47,12 @@ import type { PwTile } from '../../pixelworld/atlas';
  */
 
 export const Z3_FOG = 0xa65a54;
+/**
+ * What the big rock (the ridge the tunnel bores through, the bay cliffs) fades to with distance
+ * instead of the pink fog: a dusk mauve between the fog and the painted hills, so from the bridge
+ * the ridge reads as a darker hill against the burning skyline, not a flat pink blob.
+ */
+export const Z3_HAZE = 0x6e3e4c;
 
 const _inv = new THREE.Matrix4();
 
@@ -80,6 +86,10 @@ export class Z3PixelWorld {
   readonly bld: Z3Buildings;
   backdrop: PwBackdrop | null = null;
   private batches = new Map<THREE.Object3D, PwBatch>();
+  /** Rock batches per group (hazed toward `Z3_HAZE`, not the fog colour). */
+  private rockBatches = new Map<THREE.Object3D, PwBatch>();
+  /** The group being converted (rock goes to its rock batch). */
+  private cur: THREE.Object3D | null = null;
   /** Batches laid in a moving group's own frame (built in `finish`). */
   private parts: { batch: PwBatch; parent: THREE.Object3D }[] = [];
 
@@ -127,6 +137,14 @@ export class Z3PixelWorld {
     return b;
   }
 
+  /** The rock batch of the group being converted. */
+  private rock(): PwBatch {
+    const g = this.cur!;
+    let b = this.rockBatches.get(g);
+    if (!b) this.rockBatches.set(g, (b = new PwBatch(this.atlas)));
+    return b;
+  }
+
   /** A batch laid in `parent`'s own frame (a moving set piece). */
   part(parent: THREE.Object3D): PwBatch {
     const b = new PwBatch(this.atlas);
@@ -142,6 +160,7 @@ export class Z3PixelWorld {
   convert(g: THREE.Object3D) {
     g.updateMatrixWorld(true);
     const b = this.batchFor(g);
+    this.cur = g;
     const drop: THREE.Object3D[] = [];
     const visit = (o: THREE.Object3D) => {
       const tag = o.userData.pw as { k: string } | undefined;
@@ -331,7 +350,7 @@ export class Z3PixelWorld {
       case 'shore':
         for (const p of partsOf(o, true)) {
           const hex = (p.mesh.material as THREE.MeshLambertMaterial).color.getHex();
-          b.geometry(p.mesh.geometry, p.rel, hex === 0x7a746c ? this.bay.footing : this.strata, { world: true });
+          (hex === 0x7a746c ? b : this.rock()).geometry(p.mesh.geometry, p.rel, hex === 0x7a746c ? this.bay.footing : this.strata, { world: true });
           drop.push(p.mesh);
         }
         return true;
@@ -360,7 +379,7 @@ export class Z3PixelWorld {
         b.setMatrix(null);
         return false;
       case 'ridge':
-        b.geometry((o as THREE.Mesh).geometry, o.matrixWorld, this.strata, { world: true });
+        this.rock().geometry((o as THREE.Mesh).geometry, o.matrixWorld, this.strata, { world: true });
         drop.push(o);
         return true;
       case 'hazardBand':
@@ -501,6 +520,13 @@ export class Z3PixelWorld {
       const m = b.build(undefined, { gain: 1 });
       if (m) g.add(m);
     }
+    if (this.rockBatches.size) {
+      const mat = rockMaterial(this.atlas);
+      for (const [g, b] of this.rockBatches) {
+        const m = b.build(mat);
+        if (m) g.add(m);
+      }
+    }
     for (const { batch, parent } of this.parts) {
       const m = batch.build(undefined, { gain: 1 });
       if (m) parent.add(m);
@@ -511,4 +537,31 @@ export class Z3PixelWorld {
       if (m) this.animParent.add(m);
     }
   }
+}
+
+/** The PixelWorld material, fogged toward `Z3_HAZE` (the rock's aerial perspective) instead of the fog colour. */
+function rockMaterial(atlas: PwAtlas): THREE.MeshLambertMaterial {
+  const m = pwMaterial(atlas, { tag: 'z3rock' });
+  if (m.userData.z3rock) return m;
+  m.userData.z3rock = true;
+  const base = m.onBeforeCompile;
+  const haze = { value: new THREE.Color(Z3_HAZE) };
+  m.onBeforeCompile = (shader, r) => {
+    base.call(m, shader, r);
+    shader.uniforms.uZ3Haze = haze;
+    shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\nuniform vec3 uZ3Haze;').replace(
+      '#include <fog_fragment>',
+      `#ifdef USE_FOG
+  #ifdef FOG_EXP2
+    float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+  #else
+    float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+  #endif
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, uZ3Haze, fogFactor );
+#endif`,
+    );
+  };
+  const key = m.customProgramCacheKey.bind(m);
+  m.customProgramCacheKey = () => `${key()}|z3rock`;
+  return m;
 }

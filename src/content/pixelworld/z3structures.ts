@@ -418,58 +418,76 @@ export function z3SosMarker(atlas: PwAtlas): PwTile {
 
 /** Desert sandstone (wrap 128 × 128, world-projected): strata bands, joints, lit ledges with scrub, varnish streaks. */
 export function z3StrataTile(atlas: PwAtlas): PwTile {
+  // 128 × 128 at 12 texels a metre (≈ 10.7 m a repeat): cliff-sized beds that still read from the
+  // bridge — three rock hues, thick beds with lit ledges and shadowed undercuts, joints, desert
+  // varnish, scrub on the ledges, a dark gully.
   return atlas.tile('z3strata', 128, 128, (c, k) => {
     const rng = k.rng;
-    const a = k.ramp(0x7a5a52, { light: 0.45, sat: 0.9 });
-    const b = k.ramp(0x6a4e50, { light: 0.45, sat: 0.9 });
+    const hues = [k.ramp(0x8a6450, { light: 0.45, sat: 0.9 }), k.ramp(0x6a4e50, { light: 0.45, sat: 0.9 }), k.ramp(0x9a7a5a, { light: 0.45, sat: 0.85 })];
     const varnish = k.ramp(0x3a2a2e, { light: 0.4 });
-    const scrub = k.ramp(0x6a6a3a, { light: 0.45 });
-    // Bands of 6–14 rows, alternating rock, each with a lit ledge on top and an undercut shadow.
+    const scrub = k.ramp(0x5a5a30, { light: 0.45 });
+    // Beds of 7–22 rows, each with a two-row lit ledge on top and a dark undercut under its lip.
     let y = 0;
     let n = 0;
     const bands: number[] = [];
     while (y < 128) {
-      const h = Math.min(128 - y, 6 + Math.floor(hash2(n, 0, 3) * 9));
+      const h = Math.min(128 - y, 7 + Math.floor(hash2(n, 0, 3) * 16));
       bands.push(y);
+      const r = hues[Math.floor(hash2(n, 1, 3) * 3)];
       for (let yy = 0; yy < h; yy++) {
-        const r = n & 1 ? b : a;
         for (let x = 0; x < 128; x++) {
-          const ledge = yy === 0 ? 4 : yy === 1 ? 3.5 : yy === h - 1 ? 1.8 : 3 - (yy / h) * 0.6;
-          c.set(x, y + yy, r, ledge);
+          // The lip wanders a texel up and down; rough grain in the face.
+          const lip = hash2(x >> 3, n, 7) > 0.7 ? 1 : 0;
+          const t = yy < lip ? 1.6 : yy === lip ? 4.2 : yy === lip + 1 ? 3.6 : yy >= h - 2 ? (yy === h - 1 ? 1.4 : 2.0) : 3 - (yy / h) * 0.7 + (hash2(x >> 1, (y + yy) >> 1, 8) - 0.5) * 0.5;
+          c.set(x, y + yy, r, t);
         }
       }
       y += h;
       n++;
     }
-    // Vertical joints (offset per band), varnish streaks down from ledges, scrub tufts on ledges.
     for (let i = 0; i < bands.length; i++) {
       const y0 = bands[i];
       const y1 = i + 1 < bands.length ? bands[i + 1] : 128;
-      for (let j = 0; j < 3; j++) {
+      // Vertical joints (offset per bed), two texels: shadow + lit edge.
+      for (let j = 0; j < 4; j++) {
         const x = Math.floor(hash2(i, j, 5) * 128);
-        for (let yy = y0 + 1; yy < y1; yy++) {
-          c.shift(x, yy, -1.6);
-          c.shift((x + 1) & 127, yy, 0.5);
+        for (let yy = y0 + 2; yy < y1 - 1; yy++) {
+          c.shift(x, yy, -1.4);
+          c.shift((x + 1) & 127, yy, 0.6);
         }
       }
     }
-    for (let i = 0; i < 26; i++) {
+    // A dark gully cut down through the beds (wandering, 3–5 texels wide).
+    {
+      let gx = rng.int(0, 127);
+      for (let yy = 0; yy < 128; yy++) {
+        gx += hash2(yy >> 2, 0, 11) > 0.6 ? 1 : hash2(yy >> 2, 0, 12) > 0.7 ? -1 : 0;
+        const w = 3 + Math.round(hash2(yy >> 3, 0, 13) * 2);
+        for (let d = 0; d < w; d++) c.shift((gx + d) & 127, yy, d === 0 ? 0.6 : -1.3);
+      }
+    }
+    for (let i = 0; i < 30; i++) {
       const x = rng.int(0, 127);
       const y0 = bands[rng.int(0, bands.length - 1)] + 2;
-      const len = rng.int(6, 24);
-      for (let j = 0; j < len; j++) if (dith(x, y0 + j, 1 - j / len)) wset(c, x, y0 + j, varnish, 2);
+      const len = rng.int(8, 30);
+      for (let j = 0; j < len; j++) if (dith(x, y0 + j, 1 - j / len)) {
+        wset(c, x, y0 + j, varnish, 2);
+        if (j < len / 2) wset(c, x + 1, y0 + j, varnish, 2.4);
+      }
     }
-    for (let i = 0; i < 24; i++) {
+    // Scrub clumps on the ledges (dark olive, a lit top).
+    for (let i = 0; i < 26; i++) {
       const x = rng.int(0, 127);
       const yb = bands[rng.int(0, bands.length - 1)];
-      for (let t = 0; t < 3; t++) {
-        wset(c, x - 1 + t, yb - 1, scrub, 3);
-        wset(c, x + t - 1, yb - 2, scrub, t === 1 ? 4 : 3);
+      const w = rng.int(3, 6);
+      for (let t = 0; t < w; t++) {
+        wset(c, x + t, yb - 1, scrub, 2);
+        if (t > 0 && t < w - 1) wset(c, x + t, yb - 2, scrub, t === 1 ? 4 : 3);
       }
-      wset(c, x, yb - 3, scrub, 4);
+      wset(c, x + (w >> 1), yb - 3, scrub, 4);
     }
-    wscatter(c, rng, 0, 0, 128, 128, 120, 0, -0.8, { shapes: 3 });
-  }, { wrap: true });
+    wscatter(c, rng, 0, 0, 128, 128, 90, 0, -0.8, { shapes: 3 });
+  }, { wrap: true, density: 12 });
 }
 
 /** Tunnel ceiling (wrap 64 × 64): sooty concrete, joint lines, drips. */
