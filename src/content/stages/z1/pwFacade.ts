@@ -8,6 +8,7 @@ import {
   z1Aerial, z1Billboard, z1ChimneyPots, z1Coping, z1FeFloor, z1FeLadder, z1FeRail, z1FeStair, z1GhostSign, z1Pediment, z1StringCourse, z1Vent, type PedimentKind,
 } from '../../pixelworld/z1facade';
 import { FLOOR_H, GROUND_H, type FacadeRecord } from './props';
+import { z1BrickHoles, z1Streaks, Z1_WEAR } from '../../pixelworld/z1walls';
 
 /**
  * MAIN STREET facade extras in ART: PIXEL WORLD (z1/pixel.ts `facade()` calls
@@ -42,6 +43,8 @@ export interface WallSet {
   base: PwTile;
   foot: PwTile;
   head: PwTile;
+  /** v offset laying the (short) head band's drip rows at the top. */
+  headV0: number;
   tintRGB: readonly number[] | undefined;
 }
 
@@ -49,6 +52,7 @@ export class Z1FacadeExtras {
   private aerial: PwTile;
   private vent: PwTile;
   private pots: PwTile;
+  private ghostN = 0;
   constructor(private atlas: PwAtlas) {
     this.aerial = z1Aerial(atlas);
     this.vent = z1Vent(atlas);
@@ -128,8 +132,6 @@ export class Z1FacadeExtras {
     const footH = 1.25;
     const headH = 1.0;
     const bodyH = Math.max(0, h - footH - headH);
-    const vTop = h * PW_TPM;
-    const shift = Math.round((Math.ceil(vTop / wall.head.h) * wall.head.h - vTop) / 8) * 8;
     const o = { tintRGB: wall.tintRGB };
     for (const side of [1, -1]) {
       // Right side (+x) runs from the front (z 0) back; left side (−x) from the back to the front.
@@ -138,14 +140,15 @@ export class Z1FacadeExtras {
       const oz = side > 0 ? 0 : -d;
       b.rect(_o.set(ox, 0, oz), ux, Y, d, footH, wall.foot, { ...o, u0: 0, v0: 0 });
       b.rect(_o.set(ox, footH, oz), ux, Y, d, bodyH, wall.base, { ...o, u0: 0, v0: footH * PW_TPM });
-      b.rect(_o.set(ox, footH + bodyH, oz), ux, Y, d, headH, wall.head, { ...o, u0: 0, v0: (h - headH) * PW_TPM + shift });
-      // Ghost sign high on a tall, deep wall.
-      const ghost = rec.spec.floors >= 3 && d >= 12 && hash2(index, side, 41) > 0.4;
+      b.rect(_o.set(ox, footH + bodyH, oz), ux, Y, d, headH, wall.head, { ...o, u0: 0, v0: wall.headV0 });
+      // Ghost sign high on a tall, deep wall — on one side only (of two walls facing each other across a
+      // cross street, or both seen down Main Street at once, never both carry one), each a different ad.
+      const ghost = side > 0 && rec.spec.floors >= 3 && d >= 12 && hash2(index, side, 41) > 0.3;
       const gw = 6;
       const gh = 3;
       const gy = h - 1.2 - gh;
       if (ghost) {
-        const t = z1GhostSign(a, Math.floor(hash2(index, side, 42) * 3));
+        const t = z1GhostSign(a, this.ghostN++ % 3);
         const along = 1.5 + hash2(index, side, 43) * (d - gw - 3);
         const z0 = side > 0 ? -along : -along - gw;
         b.rect(_o.set(ox + side * 0.012, gy, side > 0 ? z0 : z0), ux, Y, gw, gh, t);
@@ -165,7 +168,27 @@ export class Z1FacadeExtras {
           const zc = -along;
           const zs = side > 0 ? zc + WINDOW_M.w / 2 : zc - WINDOW_M.w / 2;
           b.rect(_o.set(ox + side * 0.015, y0, zs), ux, Y, WINDOW_M.w, WINDOW_M.h, t);
+          // Rain streaks under some of the sills.
+          if (kind !== 'boarded' && hash2(index * 5 + side, f * 7 + i, 47) > 0.55) {
+            const st = z1Streaks(a);
+            b.rect(_o.set(ox + side * 0.012, y0 - 1.48, side > 0 ? zc + 0.5 : zc - 0.5), ux, Y, 1.0, 1.5, st, { sub: { x: ((i + f) % 2) * 32, y: 0, w: 32, h: 48 }, tintRGB: wall.tintRGB });
+          }
         }
+      }
+    }
+    // Rendered side walls: a patch of bare brick low by the front corner on one side, high toward the back on the other.
+    if (wall.base.key === 'z1plaster') {
+      const t = z1BrickHoles(a);
+      for (const side of [1, -1]) {
+        const r = Z1_WEAR[(['holeA', 'holeB', 'holeC'] as const)[Math.floor(hash2(index, side, 48) * 3)]];
+        const pw = r.w / PW_TPM;
+        const ph = r.h / PW_TPM;
+        const low = (side > 0) === hash2(index, 3, 49) > 0.5;
+        const along = low ? 0.6 + hash2(index, side, 50) * 1.2 : d - 1 - pw - hash2(index, side, 51) * 1.5;
+        const y = low ? 1.35 + hash2(index, side, 52) * 0.4 : GROUND_H - 0.2 - ph;
+        const ux = side > 0 ? NZ : Z;
+        const z0 = side > 0 ? -along : -along - pw;
+        b.rect(_o.set(side * (w / 2) + side * 0.013, y, z0), ux, Y, pw, ph, t, { sub: { x: r.x, y: t.h - r.y - r.h, w: r.w, h: r.h } });
       }
     }
     // Back wall (rarely seen): plain.

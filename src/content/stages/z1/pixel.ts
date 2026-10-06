@@ -4,15 +4,20 @@ import { PwBatch, tintFor } from '../../pixelworld/batch';
 import { PwBackdrop } from '../../pixelworld/backdrop';
 import { PW_TPM } from '../../pixelworld/canvas';
 import {
-  acUnitModule, awningTile, corniceTile, doorModule, DOOR_M, drainpipeTile, graffitiDecal, posterDecal, SHOP_BAY_M, SHOPFRONT_H_M, shopfrontModule, shopLightClass, valanceTile,
-  wallFoot, wallHead, WINDOW_M, windowModule, type ShopGoods, type WindowKind,
+  acUnitModule, awningTile, corniceTile, doorModule, DOOR_M, drainpipeTile, posterDecal, SHOP_BAY_M, SHOPFRONT_H_M, shopfrontModule, shopLightClass, valanceTile,
+  WINDOW_M, windowModule, type ShopGoods, type WindowKind,
 } from '../../pixelworld/facade';
-import { kitTileRule, neutral, NEUTRAL_BRICK, NEUTRAL_HEX, retexture, type TileRule } from '../../pixelworld/retexture';
-import { bladeSign as pwBlade, marquee, moviePoster, neonEdge, neonSign } from '../../pixelworld/signs';
+import { kitTileRule, neutral, NEUTRAL_BRICK, retexture, type TileRule } from '../../pixelworld/retexture';
+import { bladeSign as pwBlade, moviePoster, neonEdge, neonSign } from '../../pixelworld/signs';
+import { z1Marquee, z1MarqueeEnd } from '../../pixelworld/z1signs';
+import { z1WallPiece } from '../../pixelworld/z1graffiti';
+import { paintZ1Panel, paintZ1Plaster, z1BrickHoles, z1PanelTile, z1PlasterTile, z1Streaks, z1WallBands, Z1_WEAR } from '../../pixelworld/z1walls';
+import type { PwPainter } from '../../pixelworld/atlas';
+import { z1CorrugatedTile } from '../../pixelworld/z1alley';
 import { skylineTile } from '../../pixelworld/sky';
 import { z1NightSkyTile, z1TownlineTile } from '../../pixelworld/z1sky';
 import {
-  brickTile, curbTile, hash2, metalTile, panelTile, plasterTile, roofTile, sidewalkTile, stoneTile,
+  brickTile, curbTile, hash2, metalTile, paintBrick, roofTile, sidewalkTile, stoneTile,
 } from '../../pixelworld/surfaces';
 import { texStd } from './bake';
 import { z1AsphaltTile, z1PavingTile } from '../../pixelworld/z1ground';
@@ -23,6 +28,7 @@ import { boxFaces, cylinder, Z1Diner } from './pwDiner';
 import { Z1Bus } from './pwBus';
 import { Z1Square } from './pwSquare';
 import { Z1Street } from './pwStreet';
+import { Z1Props } from './pwProps';
 import { PW_PARTS, type PwPart } from './setpieces';
 import { repaintable } from '../../pixelworld/retexture';
 import type { Town } from './town';
@@ -30,9 +36,9 @@ import { Kit } from '../../kit/ModelKit';
 import { M, type FacadeRecord } from './props';
 import type { ZoneId } from './town';
 import { pwMaterial, pwTick } from '../../pixelworld/material';
-import { z1FlameTile, Z1_FLAME_FRAMES, Z1_FLAME_H, Z1_FLAME_W } from '../../pixelworld/z1fire';
+import { z1FlameLevels, z1TongueFlameTile, Z1_FLAME_FRAMES, Z1_FLAME_H, Z1_FLAME_LEVELS, Z1_FLAME_W } from '../../pixelworld/z1fire';
 import { pwPuffTexture } from './vfx';
-import { z1LaundryBay, z1PoliceBay } from '../../pixelworld/z1shops';
+import { z1DarkBay, z1LaundryBay, z1LitBay, z1PoliceBay, type Z1DarkKind, type Z1LitKind } from '../../pixelworld/z1shops';
 import { Destructible } from '../../../gameplay/Props';
 import type { World } from '../../../gameplay/World';
 
@@ -72,6 +78,13 @@ const WALL_KIND: Record<number, 'brick' | 'panel' | 'plaster'> = {
 /** Painted-brick buildings (the blue): brick under peeling paint. */
 const PAINTED: Record<number, number> = { 0x445670: 0x445670 };
 
+/**
+ * Lit-texel gain of the painted scenery: the painted ramps sit their base colour on step 3 with
+ * two darker steps under it, so at the classic gain the street read a good deal darker than PIXEL
+ * CAST (the brick and plaster sank into the night on a phone); this lifts it back to match.
+ */
+export const Z1_GAIN = 1.3;
+
 const STONE_LIGHT = 0x86827a;
 const STONE_DARK = 0x4a4a52;
 
@@ -110,12 +123,18 @@ export class Z1PixelWorld {
   /** PixelWorld meshes for dynamic objects (built in `finish`): batch, parent, world → parent matrix. */
   private dynBatches: { b: PwBatch; parent: THREE.Object3D; local?: boolean; swap?: boolean; anim?: boolean }[] = [];
   /** The fires' flame strips (a small atlas of their own) and their animated material (ticked by `tick`). */
-  readonly fireAtlas = new PwAtlas('z1-fire');
+  readonly fireAtlas = new PwAtlas('z1-fire', { levels: Z1_FLAME_LEVELS });
   private fireMat: THREE.Material | null = null;
+  private flames: PwTile[] = [];
   private bus: Z1Bus;
   private square: Z1Square;
   private street: Z1Street;
+  private props: Z1Props;
   backdrop: PwBackdrop | null = null;
+  /** Running count of the walls given a graffiti piece (no two neighbours share a word). */
+  private grafN = 0;
+  /** Running count of the shuttered / boarded bays (sprayed with one of four pieces each, neighbours differ). */
+  private bayN = 0;
 
   constructor() {
     const a = this.atlas;
@@ -132,10 +151,23 @@ export class Z1PixelWorld {
     ]);
     // Road surfaces (texStd wet asphalt): the z1 wet night asphalt (designed features, no speckle).
     for (const m of roadMaterials()) ov.set(m, () => this.asphalt());
+    // The alley's cold-storage warehouse: calm corrugated cladding (its identity is painted on by pwStreet).
+    ov.set(Kit.tex('corrugated', 0x50535d, 1), () => z1CorrugatedTile(a, 0x50535d));
     // The town square's stone flags.
     ov.set(SQUARE_FLAGS(), () => z1PavingTile(a, { brick: 0x6e4636, granite: 0x6a6862 }));
     this.overrides = ov;
-    this.rule = kitTileRule(a, { overrides: ov, paint: new Set([M.yellowPaint, M.whitePaint]) });
+    const roadPaint = new Set<THREE.Material>([M.yellowPaint, M.whitePaint]);
+    const kit = kitTileRule(a, { overrides: ov, paint: roadPaint });
+    // Every other render / concrete wall in town takes the calm z1 walls the facades use (no generic
+    // blotchy plaster / panel tiles of their own: fewer texels to paint, one wall language).
+    this.rule = (mat, nx, ny, nz) => {
+      if (!ov.has(mat) && !roadPaint.has(mat)) {
+        const tex = mat.userData.retroTex as string | undefined;
+        if (tex === 'stucco' || tex === 'wallpaper' || tex === 'marble') return z1PlasterTile(a);
+        if (tex === 'concrete' && ny <= 0.7) return z1PanelTile(a);
+      }
+      return kit(mat, nx, ny, nz);
+    };
     this.groundMats = new Set<THREE.Material>([sidewalk, curb, SQUARE_FLAGS(), ...roadMaterials()]);
     this.ground = new Z1Ground(a);
     this.cars = new Z1Cars(a);
@@ -144,6 +176,7 @@ export class Z1PixelWorld {
     this.bus = new Z1Bus(a, this.cars.t);
     this.square = new Z1Square(a);
     this.street = new Z1Street(a, this.extras);
+    this.props = new Z1Props(a);
     // The courthouse: rusticated ashlar (tower too), fluted columns.
     for (const mat of [Kit.tex('brick', 0x7a7468, 0.45), Kit.tex('brick', 0x6a645a, 0.45)]) this.overrides.set(mat, () => this.square.t.ashlar);
     this.overrides.set(Kit.tex('stucco', 0x8a847a, 1.5), () => this.square.t.column);
@@ -151,7 +184,8 @@ export class Z1PixelWorld {
 
   /** The street asphalt (roads and the base ground under the town). */
   asphalt(): PwTile {
-    return z1AsphaltTile(this.atlas, { hex: 0x2c2f37, wear: 0.6 });
+    // (A shade lighter than the classic asphalt colour: the wet road has no gloss here to lift it.)
+    return z1AsphaltTile(this.atlas, { hex: 0x363943, wear: 0.6 });
   }
 
   private batch(id: ZoneId): PwBatch {
@@ -183,6 +217,8 @@ export class Z1PixelWorld {
     for (const m of this.square.convert(b, zone)) m.parent?.remove(m);
     // Street hardware and the alley walls: lamps, news boxes, dumpsters, bags, graffiti, fire escapes…
     for (const m of this.street.convert(b, zone)) m.parent?.remove(m);
+    // Small furniture as painted silhouettes: benches, sawhorses, crates, the square's lamps, fountain, memorial, pediment.
+    for (const m of this.props.convert(b, zone)) m.parent?.remove(m);
     zone.updateMatrixWorld(true);
     retexture(zone, b, this.rule, { world: (m) => this.groundMats.has(m.material as THREE.Material) });
   }
@@ -225,15 +261,15 @@ export class Z1PixelWorld {
     town.gas.pwSkin = (g, kind) => this.skinGasProp(g, kind, cageLid);
     // Fires: painted flames (crossed cut-out cards, an animated strip) where the glow cones were.
     // (Their own small atlas: the tall animated strips would leave a 448-texel shelf half empty in the world atlas.)
-    const flames = [z1FlameTile(this.fireAtlas, 0), z1FlameTile(this.fireAtlas, 1)];
+    const flames = (this.flames = [z1TongueFlameTile(this.fireAtlas, 0), z1TongueFlameTile(this.fireAtlas, 1)]);
     const sub = { x: 0, y: 0, w: Z1_FLAME_W, h: Z1_FLAME_H };
     const puff = pwPuffTexture();
     town.anim.fires.forEach((f, fi) => {
       const b = new PwBatch(this.fireAtlas);
       f.plume.flameDefs().forEach((d, i) => {
-        // A card the flame's height (the cones flicker up to ~1.35 ×), the strip's own aspect.
+        // A card the flame's height (the cones flicker up to ~1.35 ×), a little narrower than the strip's own aspect.
         const h = d.h * 1.3;
-        const w = (h * Z1_FLAME_W) / Z1_FLAME_H;
+        const w = ((h * Z1_FLAME_W) / Z1_FLAME_H) * 0.8;
         const yaw0 = hash2(fi, i, 31) * Math.PI;
         const tile = flames[(fi + i) % 2];
         for (let k = 0; k < 3; k++) {
@@ -301,7 +337,7 @@ export class Z1PixelWorld {
       cylinder(b, 0.33, 0.9, 10, t.drum, t.drumLid, 3, 32);
     }
     b.setMatrix(null);
-    const mesh = b.build(undefined, { gain: 1 });
+    const mesh = b.build(undefined, { gain: Z1_GAIN });
     if (!mesh) return;
     g.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -333,13 +369,17 @@ export class Z1PixelWorld {
   finish(zones: Record<ZoneId, THREE.Group>) {
     this.atlas.build();
     for (const [id, b] of this.batches) {
-      const mesh = b.build(undefined, { gain: 1 });
+      const mesh = b.build(undefined, { gain: Z1_GAIN });
       if (mesh) zones[id].add(mesh);
     }
     // Dynamic pieces: world-space geometry under a moving / toggled parent (undo the parent's transform).
     for (const { b, parent, local, swap, anim } of this.dynBatches) {
-      if (anim && !this.fireMat) this.fireMat = pwMaterial(this.fireAtlas, { anim: { frames: Z1_FLAME_FRAMES, fps: 12 }, side: THREE.DoubleSide });
-      const mesh = anim ? b.build(this.fireMat!) : b.build(undefined, { gain: 1 });
+      if (anim && !this.fireMat) {
+        // (Coverage levels: a distant fire keeps its tapered tongues instead of filling in.)
+        z1FlameLevels(this.fireAtlas.build(), this.flames);
+        this.fireMat = pwMaterial(this.fireAtlas, { anim: { frames: Z1_FLAME_FRAMES, fps: 12 }, side: THREE.DoubleSide });
+      }
+      const mesh = anim ? b.build(this.fireMat!) : b.build(undefined, { gain: Z1_GAIN });
       if (!mesh) continue;
       if (swap) {
         // Re-skin an animated mesh in place (same object, same transform): the painted geometry and material.
@@ -366,23 +406,27 @@ export class Z1PixelWorld {
    * tinted per building (vertex colour), plus the peeling painted brick — a
    * handful of tiles (× foot / head variants) for every building of the stage.
    */
-  private wallTile(color: number): PwTile {
+  private wallTile(color: number, tex?: string): { base: PwTile; paint: PwPainter } {
     const a = this.atlas;
-    const kind = WALL_KIND[color] ?? 'brick';
-    if (kind === 'panel') return neutral(panelTile(a, { hex: NEUTRAL_HEX }));
-    if (kind === 'plaster') return neutral(plasterTile(a, { hex: NEUTRAL_HEX, under: 0x7a3a2c }));
-    if (PAINTED[color] !== undefined) return brickTile(a, { hex: 0x6a3a2c, painted: PAINTED[color] });
-    return neutral(brickTile(a, { hex: NEUTRAL_BRICK }), NEUTRAL_BRICK);
+    const kind = tex === 'brick' ? 'brick' : WALL_KIND[color] ?? 'brick';
+    // (Calm z1 render / panels: the wear is composed per building with decals — z1walls.ts.)
+    if (kind === 'panel') return { base: z1PanelTile(a), paint: paintZ1Panel };
+    if (kind === 'plaster') return { base: z1PlasterTile(a), paint: paintZ1Plaster };
+    if (tex !== 'brick' && PAINTED[color] !== undefined) {
+      const o = { hex: 0x6a3a2c, painted: PAINTED[color] };
+      return { base: brickTile(a, o), paint: (c, k) => paintBrick(c, k, o) };
+    }
+    const o = { hex: NEUTRAL_BRICK };
+    return { base: neutral(brickTile(a, o), NEUTRAL_BRICK), paint: (c, k) => paintBrick(c, k, o) };
   }
 
   private facade(b: PwBatch, g: THREE.Object3D, rec: FacadeRecord, index: number) {
     const a = this.atlas;
     const { w, h } = rec;
     const color = rec.spec.color;
-    const base = rec.spec.tex === 'brick' ? neutral(brickTile(a, { hex: NEUTRAL_BRICK }), NEUTRAL_BRICK) : this.wallTile(color);
-    const foot = wallFoot(a, base);
-    const head = wallHead(a, base);
-    foot.neutral = head.neutral = base.neutral;
+    const { base, paint } = this.wallTile(color, rec.spec.tex);
+    // (Short foot / head bands cut from the wall's own pattern: z1walls.ts.)
+    const { foot, head, headV0 } = z1WallBands(a, base, paint);
     // Neutral walls take the building's colour per vertex.
     const tintRGB = base.neutral !== undefined ? tintFor(base, color) : undefined;
     const stone = rec.trimLight ? STONE_LIGHT : STONE_DARK;
@@ -395,12 +439,10 @@ export class Z1PixelWorld {
     const bodyH = Math.max(0, h - footH - headH);
     b.rect(_o.set(-w / 2, 0, 0), X, Y, w, footH, foot, { u0: 0, v0: 0, tintRGB });
     b.rect(_o.set(-w / 2, footH, 0), X, Y, w, bodyH, base, { u0: 0, v0: footH * PW_TPM, tintRGB });
-    // Head band: shifted by whole bond periods (8 rows) so its top lands on a tile top (the drip rows).
-    const vTop = h * PW_TPM;
-    const shift = Math.round((Math.ceil(vTop / head.h) * head.h - vTop) / 8) * 8;
-    b.rect(_o.set(-w / 2, footH + bodyH, 0), X, Y, w, headH, head, { u0: 0, v0: (h - headH) * PW_TPM + shift, tintRGB });
+    // Head band: the base's top rows (the drip rows) — `headV0` lands them as a full-height head variant did.
+    b.rect(_o.set(-w / 2, footH + bodyH, 0), X, Y, w, headH, head, { u0: 0, v0: headV0, tintRGB });
     const style = { wall: color, frame: frameCol, stone };
-    const wallSet = { base, foot, head, tintRGB };
+    const wallSet = { base, foot, head, headV0, tintRGB };
     const wallKind = WALL_KIND[color] === 'brick' || rec.spec.tex === 'brick' || PAINTED[color] !== undefined ? 'brick' : 'plaster';
     // Sides and back (seen down the cross streets): banded like the front, windows, ghost signs.
     this.extras.sides(b, rec, index, wallSet, style);
@@ -420,28 +462,62 @@ export class Z1PixelWorld {
       b.rect(_o.set(wr.x - WINDOW_M.w / 2, wr.y - WINDOW_M.openY, 0.015), X, Y, WINDOW_M.w, WINDOW_M.h, t);
       // An AC unit hanging under a few lit windows.
       if (kind !== 'boarded' && hash2(index, i, 11) > 0.84) b.rect(_o.set(wr.x - 0.44 + 0.2, wr.y - WINDOW_M.openY - 0.6, 0.03), X, Y, 28 / PW_TPM, 22 / PW_TPM, acUnitModule(a));
+      // Rain streaks running down from under about half the sills.
+      else if (hash2(index, i, 13) > 0.5) this.streaks(b, wr.x, wr.y - WINDOW_M.openY, i, tintRGB);
     });
+    // Where the render has come away: a patch or two of bare brick, toward the corners, clear of the openings.
+    if (wallKind === 'plaster') this.holes(b, rec, index, w, h, 0);
     // Ground floor.
     const shop = rec.shop;
     if (shop && !shop.noWindow) {
       const sw = rec.shopW + 0.3;
       const bays = Math.max(1, Math.round(sw / SHOP_BAY_M));
-      const goods = GOODS[shop.board?.text ?? shop.blade?.text ?? ''] ?? 'generic';
+      const name = shop.board?.text ?? shop.blade?.text ?? '';
+      const goods = GOODS[name] ?? 'generic';
+      const riser = goods === 'generic' || hash2(index, 1, 3) > 0.5 ? 0x5a2a2a : 0x2a3a4a;
+      const frame = frameCol === 0xd8d4c8 ? 0x8a8c90 : 0x34343b;
+      // Painted rooms for z1 (z1shops.ts): lit interiors in perspective, dark windows that hold the street.
+      const signs: string[] = [];
+      g.traverse((o) => {
+        const ps = o.userData.pwSign as { text?: string; kind?: string } | undefined;
+        if (ps?.text) signs.push(ps.kind === 'marquee' ? 'MARQUEE' : ps.text);
+      });
+      const lobby = /HOTEL|MOTEL/.test(name) || signs.some((t) => /HOTEL|MOTEL/.test(t));
+      const litKind: Z1LitKind | null = !shop.interior ? null : signs.includes('MARQUEE') ? 'cinema' : lobby ? 'lobby' : goods === 'pharmacy' ? 'pharmacy' : goods === 'liquor' ? 'liquor' : goods === 'bar' ? 'bar' : goods === 'pawn' ? 'pawn' : null;
+      const darkKind: Z1DarkKind | null = shop.interior ? null : shop.boarded ? 'boarded' : shop.shutter ? 'shutter' : name === 'BANK' ? 'bank' : goods === 'cafe' ? 'cafe' : goods === 'barber' ? 'barber' : hash2(index, 1, 5) > 0.5 ? 'lease' : 'closed';
       // (The GAS & GO store gets its own night-lit convenience store bay.)
-      const t = shop.board?.text === 'GAS & GO' ? this.street.gas.store : goods === 'laundry' ? z1LaundryBay(a) : shop.board?.text === 'POLICE' ? z1PoliceBay(a) : shopfrontModule(a, {
+      const t = shop.board?.text === 'GAS & GO' ? this.street.gas.store : goods === 'laundry' ? z1LaundryBay(a) : shop.board?.text === 'POLICE' ? z1PoliceBay(a) : litKind ? z1LitBay(a, litKind, frame, riser) : darkKind === 'shutter' || darkKind === 'boarded' ? z1DarkBay(a, darkKind, 0x34343b, 0x5a2a2a, this.bayN++ % 4) : darkKind ? z1DarkBay(a, darkKind, frame, riser) : shopfrontModule(a, {
         widthM: SHOP_BAY_M,
         goods,
         lit: shop.interior,
-        riser: goods === 'generic' || hash2(index, 1, 3) > 0.5 ? 0x5a2a2a : 0x2a3a4a,
-        frame: frameCol === 0xd8d4c8 ? 0x8a8c90 : 0x34343b,
+        riser,
+        frame,
         shutter: shop.shutter,
         boarded: shop.boarded,
         // (The variant only changes shutters / boards: plain bays share one tile.)
         variant: shop.shutter || shop.boarded ? index % 2 : 0,
       });
+      // The pharmacy's classic shelf silhouettes (flat dark slabs) would stand in front of the painted shelves.
+      if (goods === 'pharmacy') {
+        for (const ch of [...g.children]) {
+          const m = ch as THREE.Mesh;
+          const gp = (m.geometry as THREE.BoxGeometry | undefined)?.parameters;
+          if (m.isMesh && gp && gp.width === 1.6 && gp.height === 1.4 && gp.depth === 0.05) g.remove(m);
+        }
+      }
       const x0 = rec.shopX - sw / 2;
       // Bays across the window (u spans whole bays: a mullion every 4 m), stone jambs at both ends.
-      b.rect(_o.set(x0, 0, 0.02), X, Y, sw, SHOPFRONT_H_M, t, { u0: 0, v0: 0, uScale: (bays * t.w) / (sw * PW_TPM) });
+      if ((darkKind === 'shutter' || darkKind === 'boarded') && bays > 1) {
+        // Every bay of a shuttered / boarded front sprayed with its own piece.
+        const bw = sw / bays;
+        for (let i = 0; i < bays; i++) b.rect(_o.set(x0 + i * bw, 0, 0.02), X, Y, bw, SHOPFRONT_H_M, i === 0 ? t : z1DarkBay(a, darkKind, 0x34343b, 0x5a2a2a, (this.bayN + i) % 4), { u0: 0, v0: 0, uScale: t.w / (bw * PW_TPM) });
+        this.bayN += bays;
+      } else if (shop.board?.text === 'POLICE' && bays > 1) {
+        // The lobby's WANTED board in one bay only (the others its plain variant).
+        const bw = sw / bays;
+        const plain = z1PoliceBay(a, false);
+        for (let i = 0; i < bays; i++) b.rect(_o.set(x0 + i * bw, 0, 0.02), X, Y, bw, SHOPFRONT_H_M, i === 0 ? t : plain, { u0: 0, v0: 0, uScale: t.w / (bw * PW_TPM) });
+      } else b.rect(_o.set(x0, 0, 0.02), X, Y, sw, SHOPFRONT_H_M, t, { u0: 0, v0: 0, uScale: (bays * t.w) / (sw * PW_TPM) });
       const jamb = stoneTile(a, { hex: stone });
       for (const jx of [x0 - 0.2, x0 + sw]) b.rect(_o.set(jx, 0, 0.03), X, Y, 0.2, SHOPFRONT_H_M, jamb);
     }
@@ -465,8 +541,15 @@ export class Z1PixelWorld {
       b.rect(_o.set(px, 1.1 + hash2(index, p, 23) * 0.5, 0.03), X, Y, 24 / PW_TPM, 32 / PW_TPM, posterDecal(a, (index + p) % 4));
     }
     if (hash2(index, 3, 24) > 0.45) {
-      const gx = -w / 2 + 1 + hash2(index, 3, 25) * (w - 3);
-      if (freeX(gx) && freeX(gx + 2)) b.rect(_o.set(gx, 0.25, 0.03), X, Y, 2, 0.75, graffitiDecal(a, index % 7));
+      // A piece of spray paint (each wall its own word, style and colours: z1graffiti.ts).
+      const t = z1WallPiece(a, this.grafN);
+      const gw = t.w / PW_TPM;
+      const gh = t.h / PW_TPM;
+      const gx = -w / 2 + 0.8 + hash2(index, 3, 25) * Math.max(0, w - 1.6 - gw);
+      if (freeX(gx) && freeX(gx + gw)) {
+        b.rect(_o.set(gx, 0.12 + hash2(index, 3, 26) * 0.5, 0.03), X, Y, gw, gh, t);
+        this.grafN++;
+      }
     }
     const pipeX = hash2(index, 4, 26) > 0.5 ? w / 2 - 0.75 : -w / 2 + 0.3;
     b.rect(_o.set(pipeX, 0, 0.04), X, Y, 0.5, h - 0.5, drainpipeTile(a, { hex: 0x4a4c52 }), { u0: 0, v0: 0 });
@@ -497,6 +580,35 @@ export class Z1PixelWorld {
     }
     for (const c of drop) g.remove(c);
     b.setMatrix(null);
+  }
+
+  /** Rain streaks (the wall's own colour, darker) under a sill at (x, y) in the current frame. */
+  streaks(b: PwBatch, x: number, y: number, n: number, tintRGB: readonly number[] | undefined) {
+    const t = z1Streaks(this.atlas);
+    b.rect(_o.set(x - 0.5, y - 1.5 + 0.02, 0.012), X, Y, 1.0, 1.5, t, { sub: { x: (n % 2) * 32, y: 0, w: 32, h: 48 }, tintRGB: tintRGB ?? tintFor(t, 0xd8d8d8) });
+  }
+
+  /** One or two patches of bare brick on a rendered wall (width `w`, height `h`), clear of its openings. */
+  holes(b: PwBatch, rec: FacadeRecord, index: number, w: number, h: number, salt: number) {
+    const t = z1BrickHoles(this.atlas);
+    const names = ['holeA', 'holeB', 'holeC'] as const;
+    const n = hash2(index, 61 + salt, 3) > 0.55 ? 2 : 1;
+    for (let i = 0; i < n; i++) {
+      const r = Z1_WEAR[names[Math.floor(hash2(index, 62 + salt + i, 3) * 3)]];
+      const pw = r.w / PW_TPM;
+      const ph = r.h / PW_TPM;
+      const side = (i + Math.floor(hash2(index, 63 + salt, 3) * 2)) % 2 ? 1 : -1;
+      const x = side * (w / 2 - 0.4 - pw / 2 - hash2(index, 64 + salt + i, 3) * 0.8);
+      const y = hash2(index, 65 + salt + i, 3) > 0.5 ? 1.35 + hash2(index, 66 + salt, 3) * 0.6 : h - 1.6 - ph;
+      // Clear of windows / the shop / the door (front only: `rec` holds those).
+      const hit = (cx: number, cy: number, hw: number, hh: number) => Math.abs(cx - x) < hw + pw / 2 && Math.abs(cy - (y + ph / 2)) < hh + ph / 2;
+      if (salt === 0) {
+        if (rec.windows.some((wr) => hit(wr.x, wr.y - WINDOW_M.openY + WINDOW_M.h / 2, WINDOW_M.w / 2, WINDOW_M.h / 2))) continue;
+        if (rec.shop && hit(rec.shopX, SHOPFRONT_H_M / 2, rec.shopW / 2 + 0.4, SHOPFRONT_H_M / 2)) continue;
+        if (hit(rec.doorX, DOOR_M.h / 2, DOOR_M.w / 2 + 0.3, DOOR_M.h / 2)) continue;
+      }
+      b.rect(_o.set(x - pw / 2, y, 0.013), X, Y, pw, ph, t, { sub: { x: r.x, y: t.h - r.y - r.h, w: r.w, h: r.h } });
+    }
   }
 
   /** The cornice box: moulded front, stone top and returns. */
@@ -541,7 +653,7 @@ export class Z1PixelWorld {
       // The marquee's lit board (the metal box around it is re-painted with the rest).
       s.updateMatrixWorld(true);
       b.setMatrix(s.matrixWorld);
-      const t = marquee(a, info.text.split('/'), { widthM: info.w ?? 12, heightM: info.size });
+      const t = z1Marquee(a, info.text.split('/'), { widthM: info.w ?? 12, heightM: info.size });
       b.rect(_o.set(-t.wM / 2, -t.hM / 2, info.z ?? 0.01), X, Y, t.wM, t.hM, t.tile);
       // The lit end panels (blank glowing boards in the classic look) carry the cinema's name.
       const ends = s.children.filter((c) => isGlow((c as THREE.Mesh).material) && ((c as THREE.Mesh).geometry as THREE.BoxGeometry).parameters?.width < 0.1);
@@ -549,7 +661,7 @@ export class Z1PixelWorld {
         const m = c as THREE.Mesh;
         const p = (m.geometry as THREE.BoxGeometry).parameters;
         // (Painted at the panel's own width: the name is never squeezed.)
-        const end = marquee(a, ['RIALTO'], { widthM: p.depth, heightM: info.size });
+        const end = z1MarqueeEnd(a, 'RIALTO', { widthM: p.depth, heightM: info.size });
         const sx = Math.sign(m.position.x);
         const z0 = m.position.z - p.depth / 2;
         const z1 = m.position.z + p.depth / 2;

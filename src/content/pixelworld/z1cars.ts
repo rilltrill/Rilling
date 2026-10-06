@@ -43,6 +43,12 @@ export interface Z1CarTiles {
   doorIn: PwTile;
   lamp: PwTile;
   tail: PwTile;
+  /** Contact shadow under a car (cut-out, 2.4 × 5 m at 16 texels a metre: a soft stepped edge). */
+  shadow: PwTile;
+  /** Wing mirror (NEUTRAL housing, its glass), an aerial, a mud flap (cut-outs). */
+  mirror: PwTile;
+  aerial: PwTile;
+  flap: PwTile;
   /** Burnt-out shell (own colours, not tinted). */
   burnt: { side: PwTile; top: PwTile; hood: PwTile; roof: PwTile; glass: PwTile; wheel: PwTile; metal: PwTile };
 }
@@ -68,6 +74,10 @@ export function z1CarTiles(a: PwAtlas): Z1CarTiles {
     doorIn: a.tile('z1car|doorin', 34, 20, (c, k) => paintDoorIn(c, k)),
     lamp: a.tile('z1car|lamp', 12, 5, (c, k) => paintLamp(c, k, 0xd8d4c0)),
     tail: a.tile('z1car|tail', 13, 5, (c, k) => paintLamp(c, k, 0x8a1a12)),
+    shadow: a.tile('z1car|shadow', 40, 80, paintShadow),
+    mirror: nt(a.tile('z1car|mirror', 8, 6, paintMirror)),
+    aerial: a.tile('z1car|aerial', 4, 28, paintAerial),
+    flap: a.tile('z1car|flap', 8, 9, paintFlap),
     burnt: {
       side: a.tile('z1car|side|burnt', 144, 20, (c, k) => paintSide(c, k, 0, true)),
       top: a.tile('z1car|top|burnt', 58, 144, (c, k) => paintTop(c, k, true)),
@@ -435,4 +445,47 @@ function paintLamp(c: PwCanvas, k: PwKit, hex: number) {
   c.set(2, 1, r, 5);
   c.set(3, 1, r, 4);
   void PWF;
+}
+
+/** The dark pool under a car: deepest under the middle, a stepped edge breaking into a checker of cut-outs. */
+function paintShadow(c: PwCanvas, k: PwKit) {
+  const tar = k.ramp(0x0c0d12, { light: 0.4 });
+  const W = c.w;
+  const H = c.h;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      // Rounded-rectangle distance (0 inside the footprint core … 1 at the tile edge).
+      const u = Math.max(0, Math.abs(x + 0.5 - W / 2) - (W / 2 - 9)) / 9;
+      const v = Math.max(0, Math.abs(y + 0.5 - H / 2) - (H / 2 - 9)) / 9;
+      const d = Math.hypot(u, v);
+      if (d >= 1) continue;
+      if (d > 0.55 && (x + y) % 2 === 0) continue;
+      if (d > 0.8 && (x % 2 === 1 || y % 2 === 1)) continue;
+      c.set(x, y, tar, d < 0.3 ? 0 : 1);
+    }
+  }
+}
+
+function paintMirror(c: PwCanvas, k: PwKit) {
+  const p = k.ramp(N, { light: 0.6, dark: 0.3, sat: 1 });
+  const glass = k.ramp(0x5a6a94, { light: 0.35 });
+  c.rect(0, 0, 8, 6, p, 3);
+  c.hline(0, 0, 8, p, 4);
+  c.hline(0, 5, 8, p, 1);
+  c.rect(1, 1, 6, 4, glass, 2);
+  c.set(2, 1, glass, 4);
+}
+
+function paintAerial(c: PwCanvas, k: PwKit) {
+  const steel = k.ramp(0x9a9ca4, { light: 0.55, sat: 0.4 });
+  c.vline(1, 2, 26, steel, 3);
+  c.vline(2, 2, 26, steel, 1);
+  c.rect(1, 0, 2, 2, steel, 4);
+}
+
+function paintFlap(c: PwCanvas, k: PwKit) {
+  const rub = k.ramp(0x1a1a1e, { light: 0.4 });
+  c.rect(0, 0, 8, 9, rub, 1);
+  c.hline(0, 0, 8, rub, 3);
+  c.rect(2, 3, 4, 3, rub, 2);
 }

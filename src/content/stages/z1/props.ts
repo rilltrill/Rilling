@@ -494,6 +494,8 @@ export function newsBox(color: number): THREE.Group {
 
 export function bench(): THREE.Group {
   const g = new THREE.Group();
+  // ART: PIXEL WORLD paints it as a slatted cast-iron bench (z1/pwProps.ts).
+  g.userData.pwProp = 'bench';
   box(g, 1.8, 0.07, 0.45, M.wood, 0, 0.45, 0);
   box(g, 1.8, 0.4, 0.06, M.wood, 0, 0.75, -0.22, -0.15);
   box(g, 0.06, 0.45, 0.4, M.metal, -0.8, 0.22, 0);
@@ -522,6 +524,8 @@ export function trafficCone(): THREE.Group {
 /** Police sawhorse barrier with hazard-striped boards, ~2.4 m wide, facing +Z. */
 export function sawhorse(): THREE.Group {
   const g = new THREE.Group();
+  // ART: PIXEL WORLD paints its striped boards and splayed legs (z1/pwProps.ts).
+  g.userData.pwProp = 'sawhorse';
   box(g, 2.4, 0.26, 0.05, M.hazard, 0, 0.95, 0);
   box(g, 2.4, 0.2, 0.05, M.hazard, 0, 0.45, 0);
   const legs = Kit.tex('planks', 0xc8c4ba, 2, 0.5);
@@ -584,6 +588,9 @@ export function trashBags(rng: Rng, n = 4): THREE.Group {
 
 export function crate(s = 0.8): THREE.Group {
   const g = new THREE.Group();
+  // ART: PIXEL WORLD paints its boards, brace and stencil (z1/pwProps.ts).
+  g.userData.pwProp = 'crate';
+  g.userData.pwSize = s;
   box(g, s, s, s, M.wood, 0, s / 2, 0);
   box(g, s + 0.02, 0.08, s + 0.02, M.boardsDark, 0, s * 0.85, 0);
   box(g, s + 0.02, 0.08, s + 0.02, M.boardsDark, 0, s * 0.15, 0);

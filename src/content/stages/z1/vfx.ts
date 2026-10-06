@@ -99,6 +99,19 @@ interface PoolDef {
   wallYaw?: number;
 }
 
+/** ART: PIXEL WORLD pool strength: the lift multiplies the surface by (1 + colour × k × this). */
+export const PW_POOL_GAIN = 2.2;
+
+/** A pool's instance colour in ART: PIXEL WORLD: pale (near-white) lights warmed, × k × PW_POOL_GAIN. */
+export function pwPoolColor(out: THREE.Color, hex: number, k: number): THREE.Color {
+  out.setHex(hex);
+  const hsl = { h: 0, s: 0, l: 0 };
+  out.getHSL(hsl);
+  // Headlamps / floodlights (pale, low saturation) read as warm halogen, never a grey wash.
+  if (hsl.s < 0.6 && hsl.l > 0.8) out.setHSL(hsl.h > 0.4 && hsl.h < 0.75 ? 0.6 : 0.09, 0.75, 0.62);
+  return out.multiplyScalar(k * PW_POOL_GAIN);
+}
+
 /** Additive soft light decals on the ground ("fake" light pools under lamps, signs, fires). */
 export class LightPools {
   private defs: PoolDef[] = [];
@@ -111,6 +124,57 @@ export class LightPools {
   /** Base colour of instance i (for runtime flicker). */
   colorOf(i: number): { color: number; k: number } {
     return this.defs[i];
+  }
+
+  /** Every pool (read-only: ART: PIXEL WORLD paints wet-road reflections from them). */
+  get all(): readonly Readonly<PoolDef>[] {
+    return this.defs;
+  }
+
+  /**
+   * ART: PIXEL WORLD's pools: the stepped pixel rings (`map`) LIFT what they land
+   * on (dst × (1 + pool), never screened toward white), so the painted asphalt /
+   * flags keep their clusters and read lit, not washed into a flat disc. Pale
+   * lights are warmed (halogen headlamps, the floodlight: never a grey disc),
+   * street lamps throw an ellipse along the street, and every pool is gentler.
+   * `colorOf` / `setColorAt` work as for `build` (instance colours = colour × k
+   * × `PW_POOL_GAIN`).
+   */
+  buildPixel(map: THREE.Texture, wallSquash = 1): THREE.InstancedMesh {
+    // Ground pools lift the surface; wall splashes stay screened (a lift would turn every lit shop window
+    // they cross into a bright disc). Two meshes, the same instance indices (each zero-sized in the other).
+    const make = (wall: boolean) => {
+      const mat = Kit.track(new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, toneMapped: false, fog: true }));
+      mat.blending = THREE.CustomBlending;
+      mat.blendEquation = THREE.AddEquation;
+      mat.blendSrc = wall ? THREE.OneMinusDstColorFactor : THREE.DstColorFactor;
+      mat.blendDst = THREE.OneFactor;
+      mat.premultipliedAlpha = true;
+      const mesh = new THREE.InstancedMesh(Kit.track(new THREE.PlaneGeometry(1, 1)), mat, Math.max(1, this.defs.length));
+      this.defs.forEach((d, i) => {
+        const isWall = d.wallYaw !== undefined;
+        if (isWall) _e.set(0, d.wallYaw!, 0);
+        else _e.set(-Math.PI / 2, 0, 0);
+        _q.setFromEuler(_e);
+        // Street lamps (sodium, big): an ellipse along the street (the streets run along z).
+        const lamp = !isWall && d.color === 0xffa54a && d.r > 5;
+        _s.set(d.r * 2 * (lamp ? 0.78 : 1), d.r * 2 * (isWall ? wallSquash : lamp ? 1.25 : 1), 1);
+        if (isWall !== wall) _s.setScalar(0);
+        _m.compose(_p.set(d.x, d.y, d.z), _q, _s);
+        mesh.setMatrixAt(i, _m);
+        mesh.setColorAt(i, pwPoolColor(_c, d.color, d.k * (wall ? 0.32 : 1)));
+      });
+      mesh.count = this.defs.length;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      mesh.computeBoundingSphere();
+      mesh.renderOrder = 2;
+      mesh.name = wall ? 'lightPoolsWall' : 'lightPools';
+      return mesh;
+    };
+    const ground = make(false);
+    ground.add(make(true));
+    return ground;
   }
 
   /** Glow splashed on a wall (neon spill). */
@@ -216,14 +280,24 @@ export class LightBeams {
     return this.defs[i];
   }
 
+  /** Every beam (read-only: ART: PIXEL WORLD paints wet-road reflections under the lamps). */
+  get all(): readonly Readonly<BeamDef>[] {
+    return this.defs;
+  }
+
   /**
-   * `pixel` (ART: PIXEL WORLD): a painted light shaft, not a lit cone. Its
-   * brightness follows the depth of light the eye looks through — full down the
-   * middle, nothing at the silhouette (the hollow cone's wall seen edge-on) — and
-   * fades out well above the ground; that falloff is drawn in flat steps with an
-   * ordered (Bayer) dither between them on the retro pixel grid.
+   * `pixel` (ART: PIXEL WORLD): not a lit cone but a painted light shaft — a
+   * card that turns round the beam's axis to face the eye (so it never shows a
+   * cone's silhouette), drawn the way a pixel artist draws lamp light: a
+   * stepped halo round the lamp head, a faint fill under it, and four or five
+   * ray strips fanning down from the head with broken, hand-wobbled edges,
+   * each fading out at its own length well before the ground. Brightness is
+   * quantised to four flat steps with an ordered (Bayer) dither across each
+   * seam on the screen's pixel grid, and eases off with distance (a far
+   * lamp is a halo and a couple of faint rays, never a solid wedge).
    */
   build(pixel = false): THREE.InstancedMesh {
+    if (pixel) return this.buildPixel();
     const mat = Kit.track(
       new THREE.MeshBasicMaterial({
         vertexColors: true,
@@ -236,50 +310,6 @@ export class LightBeams {
         fog: true,
       }),
     );
-    if (pixel) {
-      mat.onBeforeCompile = (sh) => {
-        sh.vertexShader = sh.vertexShader
-          .replace('#include <common>', '#include <common>\nvarying float vPwGrad;\nvarying vec3 vPwN;\nvarying vec3 vPwV;')
-          .replace('#include <color_vertex>', '#include <color_vertex>\n  vPwGrad = color.r;')
-          .replace(
-            '#include <project_vertex>',
-            `#include <project_vertex>
-  {
-    // The wall's normal (inverse-transpose of the instance's rotation × scale) and the eye ray, in view space.
-    vec3 pwN = normal;
-    #ifdef USE_INSTANCING
-      mat3 pwIm = mat3(instanceMatrix);
-      vec3 pwSc = vec3(dot(pwIm[0], pwIm[0]), dot(pwIm[1], pwIm[1]), dot(pwIm[2], pwIm[2]));
-      pwN = pwIm * (normal / pwSc);
-    #endif
-    vPwN = normalMatrix * pwN;
-    vPwV = -mvPosition.xyz;
-  }`,
-          );
-        sh.fragmentShader = sh.fragmentShader
-          .replace('#include <common>', '#include <common>\nvarying float vPwGrad;\nvarying vec3 vPwN;\nvarying vec3 vPwV;')
-          .replace(
-            '#include <color_fragment>',
-            `#include <color_fragment>
-  {
-    ivec2 bp = ivec2(mod(gl_FragCoord.xy, 4.0));
-    int bi = bp.y * 4 + bp.x;
-    float bt = float(bi == 0 ? 0 : bi == 1 ? 8 : bi == 2 ? 2 : bi == 3 ? 10 : bi == 4 ? 12 : bi == 5 ? 4 : bi == 6 ? 14 : bi == 7 ? 6 : bi == 8 ? 3 : bi == 9 ? 11 : bi == 10 ? 1 : bi == 11 ? 9 : bi == 12 ? 15 : bi == 13 ? 7 : bi == 14 ? 13 : 5);
-    float g = max(vPwGrad, 1e-3);
-    // Depth of light along the eye ray: 0 at the silhouette, 1 down the middle; gone in the lower third.
-    float ndv = abs(dot(normalize(vPwN), normalize(vPwV)));
-    float core = smoothstep(0.08, 0.75, ndv);
-    float b = g * core * smoothstep(0.04, 0.32, g);
-    // Four flat steps, ordered-dithered across the seam between them.
-    float s = b * 4.0;
-    float f = fract(s);
-    float q = floor(s) + (f > 0.45 ? step((bt + 0.5) / 16.0, (f - 0.45) / 0.55) : 0.0);
-    diffuseColor.rgb *= 0.85 * (q / 4.0) / g;
-  }`,
-          );
-      };
-      mat.customProgramCacheKey = () => 'z1PixelBeam';
-    }
     const mesh = new THREE.InstancedMesh(beamGeometry(), mat, Math.max(1, this.defs.length));
     this.defs.forEach((d, i) => {
       _e.set(d.rx, d.ry, 0, 'YXZ');
@@ -295,6 +325,238 @@ export class LightBeams {
     mesh.computeBoundingSphere();
     mesh.renderOrder = 3;
     mesh.name = 'lightBeams';
+    return mesh;
+  }
+  private buildPixel(): THREE.InstancedMesh {
+    const mat = Kit.track(
+      new THREE.MeshBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.16,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+        fog: true,
+      }),
+    );
+    mat.onBeforeCompile = (sh) => {
+      const decl = 'varying vec2 vPwCard;\nvarying float vPwZ;\nflat varying vec3 vPwDim;';
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>\n${decl}`).replace(
+        '#include <project_vertex>',
+        `vec4 mvPosition;
+  {
+    // Instance: apex = translation, axis = local −Y × len, radius = |local X|.
+    vec3 apex = instanceMatrix[3].xyz;
+    vec3 down = -instanceMatrix[1].xyz;
+    float len = length(down);
+    float rad = length(instanceMatrix[0].xyz);
+    vec3 A = down / max(len, 1e-4);
+    float t = -position.y;
+    vec3 P = apex + down * t;
+    vec3 eye = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz;
+    vec3 S = cross(A, eye - P);
+    float sl = length(S);
+    S = sl > 1e-4 ? S / sl : normalize(cross(A, abs(A.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+    // The card: wide enough at the top for the halo, the cone's own width lower down.
+    float halo = clamp(rad * 0.18, 0.25, 0.5);
+    float hw = max(rad * mix(0.22, 1.0, clamp(t, 0.0, 1.0)), halo * (1.0 - clamp(t * len / (halo * 1.5), 0.0, 1.0)));
+    P += S * position.x * hw;
+    vPwCard = vec2(position.x * hw, t * len);
+    vPwDim = vec3(rad, len, float(gl_InstanceID));
+    mvPosition = modelViewMatrix * vec4(P, 1.0);
+    vPwZ = -mvPosition.z;
+    gl_Position = projectionMatrix * mvPosition;
+  }`,
+      );
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${decl}`).replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+  {
+    ivec2 bp = ivec2(mod(gl_FragCoord.xy, 4.0));
+    int bi = bp.y * 4 + bp.x;
+    float bt = (float(bi == 0 ? 0 : bi == 1 ? 8 : bi == 2 ? 2 : bi == 3 ? 10 : bi == 4 ? 12 : bi == 5 ? 4 : bi == 6 ? 14 : bi == 7 ? 6 : bi == 8 ? 3 : bi == 9 ? 11 : bi == 10 ? 1 : bi == 11 ? 9 : bi == 12 ? 15 : bi == 13 ? 7 : bi == 14 ? 13 : 5) + 0.5) / 16.0;
+    float rad = vPwDim.x;
+    float len = vPwDim.y;
+    float seed = vPwDim.z * 7.31;
+    float t = vPwCard.y / len;
+    // Across the cone (−1…1) at this depth: rays fan out from the head.
+    float u = vPwCard.x / max(rad * mix(0.22, 1.0, clamp(t, 0.0, 1.0)), 1e-3);
+    // Halo: two stepped rings round the lamp head (metres).
+    float hr = clamp(rad * 0.18, 0.25, 0.5);
+    float d = length(vPwCard) / hr;
+    float b = d < 0.5 ? 0.9 : d < 1.0 ? 0.5 : 0.0;
+    if (t > 0.0) {
+      // The body of the shaft: brightest under the head, falling off to nothing at the cone's edges and
+      // well above the ground (so its silhouette is a dithered fade, never a hard wedge).
+      float au = abs(u);
+      float fill = 0.5 * pow(max(0.0, 1.0 - au), 1.3) * pow(max(0.0, 1.0 - t / 0.9), 1.4);
+      // Rays: four broad strips at fixed fan angles from the lamp's seed, each fading out at its own
+      // length; their edges hand-broken per 20 cm row.
+      float row = floor(vPwCard.y / 0.2);
+      float rays = 0.0;
+      for (int i = 0; i < 4; i++) {
+        float fi = float(i);
+        float h1 = fract(sin(seed + fi * 12.9898) * 43758.5453);
+        float h2 = fract(sin(seed * 1.7 + fi * 78.233) * 43758.5453);
+        float c = -0.6 + fi * 0.4 + (h1 - 0.5) * 0.2;
+        float w = 0.1 + h2 * 0.1;
+        float jit = (fract(sin(row * 19.19 + fi * 5.3 + seed) * 23421.631) - 0.5) * 0.05;
+        float e = abs(u - c - jit) / w;
+        float L = 0.5 + h1 * 0.4;
+        float fade = 1.0 - smoothstep(L * 0.4, L, t);
+        rays += (0.22 + 0.16 * h2) * max(0.0, 1.0 - e) * fade;
+      }
+      b = max(b, fill + rays);
+    }
+    // Far lamps ease off (a halo and faint rays), so no distant solid wedge.
+    float far = 1.0 - 0.55 * smoothstep(12.0, 48.0, vPwZ);
+    b *= far;
+    // Four flat steps, ordered-dithered across the seam between them.
+    float st = b * 4.0;
+    float f = fract(st);
+    float q = floor(st) + (f > 0.45 ? step(bt, (f - 0.45) / 0.55) : 0.0);
+    if (q <= 0.0) discard;
+    diffuseColor.rgb *= q / 4.0;
+  }`,
+      );
+    };
+    mat.customProgramCacheKey = () => 'z1PixelShaft2';
+    // A strip: x across (−1…1), y from just above the head (+) down the beam (−1 = its full length).
+    const g = new THREE.BufferGeometry();
+    const pos: number[] = [];
+    const idx: number[] = [];
+    const ys = [0.12, 0, -0.08, -0.2, -0.35, -0.5, -0.7, -0.85, -1];
+    ys.forEach((y) => pos.push(-1, y, 0, 1, y, 0));
+    for (let j = 0; j < ys.length - 1; j++) {
+      const a = j * 2;
+      idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+    }
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(new Array(pos.length).fill(1), 3));
+    g.setIndex(idx);
+    Kit.track(g);
+    const mesh = new THREE.InstancedMesh(g, mat, Math.max(1, this.defs.length));
+    this.defs.forEach((d, i) => {
+      _e.set(d.rx, d.ry, 0, 'YXZ');
+      _q.setFromEuler(_e);
+      _s.set(d.radius, d.len, d.radius);
+      _m.compose(_p.set(d.x, d.y, d.z), _q, _s);
+      mesh.setMatrixAt(i, _m);
+      mesh.setColorAt(i, _c.setHex(d.color).multiplyScalar(d.k));
+    });
+    mesh.count = this.defs.length;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    // (The cards turn in the vertex shader: bound the beams generously.)
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 3;
+    mesh.name = 'lightBeams';
+    return mesh;
+  }
+}
+
+/**
+ * ART: PIXEL WORLD's wet-road reflections: under every light that would mirror
+ * in the rain-soaked asphalt (fires, neon, street lamps) a painted streak lies
+ * on the ground and turns (in the vertex shader) to run from the light's foot
+ * toward the eye, the way a puddle-black street throws a light back at you:
+ * horizontal dashes of uneven width stacked into a broken vertical streak,
+ * brightest at its root, thinning out — three flat steps with an ordered
+ * dither on the screen's pixel grid. One instanced draw, no per-frame work.
+ */
+export class WetReflections {
+  private defs: { x: number; z: number; w: number; len: number; color: number; k: number; start: number }[] = [];
+
+  /** A streak from (x, z) toward the eye: `start` metres out from the foot (past whatever stands on it), `len` long. */
+  add(x: number, z: number, w: number, len: number, color: number, k = 1, start = 0) {
+    this.defs.push({ x, z, w, len, color, k, start });
+  }
+
+  get count(): number {
+    return this.defs.length;
+  }
+
+  build(y = 0.03): THREE.InstancedMesh {
+    const mat = Kit.track(
+      new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: true, side: THREE.DoubleSide }),
+    );
+    mat.onBeforeCompile = (sh) => {
+      const decl = 'varying vec2 vPwR;\nflat varying vec2 vPwRD;';
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>\n${decl}`).replace(
+        '#include <project_vertex>',
+        `vec4 mvPosition;
+  {
+    vec3 foot = instanceMatrix[3].xyz;
+    float w = length(instanceMatrix[0].xyz);
+    float len = length(instanceMatrix[1].xyz);
+    float start = instanceMatrix[2].z;
+    vec3 eye = (inverse(modelMatrix) * vec4(cameraPosition, 1.0)).xyz;
+    vec2 d = eye.xz - foot.xz;
+    float dl = length(d);
+    d = dl > 1e-3 ? d / dl : vec2(0.0, 1.0);
+    // Never past the eye.
+    float L = min(len, max(0.5, dl - 1.5 - start));
+    vec2 side = vec2(-d.y, d.x);
+    vec3 P = foot + vec3(d.x, 0.0, d.y) * (start + position.y * L) + vec3(side.x, 0.0, side.y) * (position.x * w);
+    vPwR = vec2(position.x, position.y);
+    vPwRD = vec2(L, float(gl_InstanceID));
+    mvPosition = modelViewMatrix * vec4(P, 1.0);
+    gl_Position = projectionMatrix * mvPosition;
+  }`,
+      );
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${decl}`).replace(
+        '#include <color_fragment>',
+        `#include <color_fragment>
+  {
+    ivec2 bp = ivec2(mod(gl_FragCoord.xy, 4.0));
+    int bi = bp.y * 4 + bp.x;
+    float bt = (float(bi == 0 ? 0 : bi == 1 ? 8 : bi == 2 ? 2 : bi == 3 ? 10 : bi == 4 ? 12 : bi == 5 ? 4 : bi == 6 ? 14 : bi == 7 ? 6 : bi == 8 ? 3 : bi == 9 ? 11 : bi == 10 ? 1 : bi == 11 ? 9 : bi == 12 ? 15 : bi == 13 ? 7 : bi == 14 ? 13 : 5) + 0.5) / 16.0;
+    float v = vPwR.y;
+    float seed = vPwRD.y * 3.17;
+    // 10 cm rows: each a dash of its own width (some missing), the streak wavering.
+    float row = floor(v * vPwRD.x / 0.1);
+    float h1 = fract(sin(row * 12.9898 + seed) * 43758.5453);
+    float h2 = fract(sin(row * 78.233 + seed * 1.3) * 23421.631);
+    float wdt = (0.25 + 0.75 * h1) * (1.0 - v * 0.6);
+    float off = (h2 - 0.5) * 0.25 * v;
+    float on = abs(vPwR.x * 2.0 - off) < wdt && h2 > 0.18 ? 1.0 : 0.0;
+    float b = on * pow(1.0 - v, 1.3) * (0.55 + 0.45 * h1);
+    float st = b * 3.0;
+    float f = fract(st);
+    float q = floor(st) + (f > 0.4 ? step(bt, (f - 0.4) / 0.6) : 0.0);
+    if (q <= 0.0) discard;
+    diffuseColor.rgb *= q / 3.0;
+  }`,
+      );
+    };
+    mat.customProgramCacheKey = () => 'z1PixelWetRefl';
+    const g = new THREE.BufferGeometry();
+    const pos: number[] = [];
+    const idx: number[] = [];
+    const ys = [0, 0.15, 0.35, 0.6, 1];
+    ys.forEach((yy) => pos.push(-0.5, yy, 0, 0.5, yy, 0));
+    for (let j = 0; j < ys.length - 1; j++) {
+      const a = j * 2;
+      idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('color', new THREE.Float32BufferAttribute(new Array(pos.length).fill(1), 3));
+    g.setIndex(idx);
+    Kit.track(g);
+    const mesh = new THREE.InstancedMesh(g, mat, Math.max(1, this.defs.length));
+    this.defs.forEach((d, i) => {
+      // (Scale z carries the start offset: the shader reads it back, the plane has no depth.)
+      _m.makeScale(d.w, d.len, d.start).setPosition(d.x, y, d.z);
+      mesh.setMatrixAt(i, _m);
+      mesh.setColorAt(i, _c.setHex(d.color).multiplyScalar(d.k));
+    });
+    mesh.count = this.defs.length;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 2;
+    mesh.name = 'wetReflections';
     return mesh;
   }
 }

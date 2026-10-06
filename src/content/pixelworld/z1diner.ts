@@ -35,15 +35,18 @@ export interface Z1DinerTiles {
   stoolSide: PwTile;
   stoolTop: PwTile;
   door: PwTile;
+  /** A roof exhaust fan housing with its stack (cut-out). */
+  fan: PwTile;
 }
 
 export function z1DinerTiles(a: PwAtlas): Z1DinerTiles {
   return {
-    flute: a.tile('z1diner|flute', 32, 32, paintFlute, { wrap: true }),
+    flute: a.tile('z1diner|steel', 80, 48, paintFlute, { wrap: true }),
     stripe: a.tile('z1diner|stripe', 32, 16, paintStripe, { wrap: true }),
-    checker: a.tile('z1diner|checker', 32, 16, paintCheckerBand, { wrap: true }),
+    checker: a.tile('z1diner|checker2', 32, 16, paintCheckerBand, { wrap: true }),
     panel: a.tile('z1diner|panel', 64, 32, paintPanel, { wrap: true }),
-    wall: a.tile('z1diner|wall', 64, 128, paintWall, { wrap: true }),
+    wall: a.tile('z1diner|wall2', 64, 128, paintWall, { wrap: true }),
+    fan: a.tile('z1diner|fan', 40, 32, paintFan),
     menu: a.tile('z1diner|menu', 96, 48, paintMenu),
     clock: a.tile('z1diner|clock', 20, 20, paintClock),
     pass: a.tile('z1diner|pass', 80, 40, paintPass),
@@ -62,20 +65,52 @@ export function z1DinerTiles(a: PwAtlas): Z1DinerTiles {
 
 const steel = (k: PwKit) => k.ramp(0x9aa4ae, { light: 0.75, sat: 0.4 });
 
-/** Fluted stainless (lit): 4-texel flutes, a seam with rivets every metre. */
+/**
+ * Stainless front (lit), 80 × 48 wrap laid from each band's foot: the steel
+ * painted as what it mirrors — a pink kick of the wet street's neon at the
+ * bottom, the dark street, a hard band of street light, the night sky above —
+ * with soft 3-texel flutes inside the bands (no hairline stripes to crawl), a
+ * panel seam with rivets every 1.25 m, a dent, rust along the foot.
+ */
 function paintFlute(c: PwCanvas, k: PwKit) {
   const s = steel(k);
-  for (let x = 0; x < c.w; x++) {
-    const f = x & 3;
-    c.rect(x, 0, 1, c.h, s, f === 0 ? 5 : f === 1 ? 4 : f === 2 ? 2 : 1);
+  const sky = k.ramp(0x3a4668, { light: 0.45, sat: 0.7 });
+  const pink = k.ramp(0xc85a8a, { light: 0.45, sat: 0.9 });
+  const warm = k.ramp(0xe8d8b8, { light: 0.35, sat: 0.5 });
+  const rust = k.ramp(0x7a4a2c, { light: 0.4 });
+  const W = c.w;
+  const H = c.h;
+  for (let y = 0; y < H; y++) {
+    // Height above the band's foot (texels): canvas row H-1 is the foot.
+    const z = H - 1 - y;
+    for (let x = 0; x < W; x++) {
+      const f = Math.floor(x / 3) % 2;
+      let r = s;
+      let t = 3;
+      if (z < 5) (r = pink), (t = z < 2 ? 2 : 3);
+      else if (z < 13) (r = s), (t = 1.6);
+      else if (z < 17) (r = warm), (t = z === 15 ? 5 : 4);
+      else if (z < 21) (r = s), (t = 3);
+      else (r = sky), (t = z > 30 ? 2 : 3);
+      // Flutes: every other 3-texel rib a half step up (rounds within the band's look).
+      c.set(x, y, r, t + (f ? 0.4 : -0.1));
+    }
   }
-  c.hline(0, 0, c.w, s, 1);
-  for (let x = 2; x < c.w; x += 8) c.set(x, 2, s, 5);
-  // Rain streaks / grime toward the foot.
-  for (let i = 0; i < 6; i++) {
-    const x = k.rng.int(0, c.w - 1);
-    for (let y = k.rng.int(16, 24); y < c.h; y++) c.shift(x, y, -1);
+  // Seams with rivets every 40 texels (1.25 m).
+  for (const sx of [0, 40]) {
+    c.vline(sx, 0, H, s, 0.6);
+    c.vline(sx + 1, 0, H, s, 4);
+    for (let y = 3; y < H; y += 8) c.set(sx + 3, y, s, 5);
   }
+  // A dent: a shallow dark crease with a lit lip, the bands bent round it.
+  for (let x = 52; x < 64; x++) {
+    const y = H - 22 + Math.round(Math.sin((x - 52) * 0.3) * 1.5);
+    c.set(x, y, s, 1);
+    c.set(x, y + 1, warm, 5);
+  }
+  // Rust along the foot, a run or two up the seams.
+  for (let x = 0; x < W; x++) if (hash2(x >> 1, 7, 3) > 0.45) c.set(x, H - 1, rust, 2);
+  for (const sx of [2, 42]) for (let j = 1; j < 6 + (sx % 5); j++) c.tint(sx, H - 1 - j, rust, -0.5);
 }
 
 /** Red enamel stripe with chrome edges (the band is the bottom 6 rows of the tile). */
@@ -88,17 +123,25 @@ function paintStripe(c: PwCanvas, k: PwKit) {
   for (let i = 0; i < 4; i++) c.set(k.rng.int(0, c.w - 1), k.rng.int(11, 14), red, 1);
 }
 
-/** Black / white enamel checker band (two rows of 4-texel squares = the bottom 8 rows), chipped. */
+/** Black / white enamel checker band: one row of 8-texel squares (the bottom 8 rows), a few cracked or missing. */
 function paintCheckerBand(c: PwCanvas, k: PwKit) {
   const wht = k.ramp(0xe8e4dc, { light: 0.3, sat: 0.5 });
   const blk = k.ramp(0x1c1c22, { light: 0.5 });
+  const bare = k.ramp(0x5a5e66, { light: 0.45, sat: 0.4 });
   for (let y = 8; y < 16; y++) {
     for (let x = 0; x < c.w; x++) {
-      const on = ((x >> 2) + (y >> 2)) & 1;
-      c.set(x, y, on ? blk : wht, (x & 3) === 0 || y === 8 ? 4 : (y & 3) === 3 ? 2 : 3);
+      const sq = x >> 3;
+      const on = sq & 1;
+      // One square of the four missing (bare steel and adhesive), one cracked.
+      if (sq === 2) {
+        c.set(x, y, bare, (x + y) % 5 === 0 ? 2 : 3);
+        continue;
+      }
+      c.set(x, y, on ? blk : wht, (x & 7) === 0 || y === 8 ? 4 : y === 15 ? 2 : 3);
     }
   }
-  for (let i = 0; i < 5; i++) c.set(k.rng.int(0, c.w - 1), k.rng.int(9, 15), blk, 1);
+  for (let i = 0; i < 6; i++) c.set(1 + i, 9 + (i >> 1), wht, 1);
+  c.frame(16, 8, 8, 8, bare, 1);
 }
 
 /** Stainless panels with rivet lines (shell sides / back). */
@@ -150,6 +193,8 @@ function paintWall(c: PwCanvas, k: PwKit) {
     }
   }
   c.rect(0, 124, W, 4, base, 2, F);
+  // A step down overall: a lit room seen from the dark street, not a lightbox.
+  c.shade(0, 0, W, c.h, -0.7);
 }
 
 /** Menu board (GLOW): black letter board in a chrome frame, white 3×5 type. 3 × 1.5 m. */
@@ -411,4 +456,21 @@ function paintDoor(c: PwCanvas, k: PwKit) {
   drawText(c, 'PUSH', 14, 64, FONT_3x5, chrome, 1, { flag: F });
   c.rect(4, H - 10, W - 8, 8, chrome, 2, F);
   void FONT_5x7;
+}
+
+/** Roof exhaust: a louvred housing on a curb, its stack and rain cap (cut-out, 40 × 32 = 1.25 × 1 m). */
+function paintFan(c: PwCanvas, k: PwKit) {
+  const s = k.ramp(0x8a9098, { light: 0.55, sat: 0.4 });
+  const dark = k.ramp(0x2a2c32, { light: 0.4 });
+  const rust = k.ramp(0x7a4a2c, { light: 0.4 });
+  c.rect(2, 14, 24, 18, s, 3);
+  c.hline(2, 14, 24, s, 4);
+  c.vline(25, 14, 18, s, 1);
+  for (let y = 17; y < 29; y += 3) c.hline(4, y, 20, dark, 1);
+  c.rect(0, 30, 28, 2, s, 2);
+  c.rect(30, 4, 5, 28, s, 3);
+  c.vline(30, 4, 28, s, 4);
+  c.rect(28, 1, 9, 3, s, 3);
+  c.hline(28, 1, 9, s, 4);
+  for (let j = 0; j < 8; j++) c.tint(33, 6 + j * 2, rust, -0.5);
 }

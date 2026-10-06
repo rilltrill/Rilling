@@ -570,7 +570,7 @@ export function buildTown(): Town {
       Kit.add(tri, Kit.box(0.05, 2.6, 0.05), M.metal, Math.cos(a) * 0.4, 1.25, Math.sin(a) * 0.4, Math.sin(a) * 0.15, 0, -Math.cos(a) * 0.15);
     }
     Kit.add(tri, Kit.box(0.9, 0.6, 0.4), M.metal, 0, 2.7, 0, -0.2);
-    Kit.add(tri, Kit.box(0.8, 0.5, 0.05), Kit.glow(0xf4f8ff, 2), 0, 2.72, -0.22, -0.2);
+    Kit.add(tri, Kit.box(0.8, 0.5, 0.05), Kit.glow(0xf4f8ff, 2), 0, 2.72, -0.22, -0.2).userData.pwProp = 'flood';
     // Placed behind the barricade, aimed down the street (away from the player).
     put(tri, -7.2, z - 6.5, Math.PI - 0.3);
     beams.add(-7.2 - 0.07, 2.75, z - 6.5 - 0.22, 14, 2.2, 0xdfe8ff, 0.35, -Math.PI / 2 + 0.18, Math.PI - 0.3);
@@ -1025,7 +1025,7 @@ export function buildTown(): Town {
       // Portico.
       Kit.add(g, Kit.box(14, 0.8, 4), M.trimLight, 0, 7.2, 2).userData.pwSq = 'frieze';
       g.userData.pwCourt = true;
-      Kit.add(g, Kit.cone(8.2, 2.2, 3), M.trimLight, 0, 8.7, 2, 0, Math.PI / 2, 0, 1, 1, 0.3);
+      Kit.add(g, Kit.cone(8.2, 2.2, 3), M.trimLight, 0, 8.7, 2, 0, Math.PI / 2, 0, 1, 1, 0.3).userData.pwProp = 'pediment';
       for (let i = 0; i < 6; i++) Kit.add(g, Kit.cyl(0.38, 0.45, 6.8, 8), Kit.tex('stucco', 0x8a847a, 1.5), -6 + i * 2.4, 3.4, 3.4);
       for (let i = 0; i < 3; i++) Kit.add(g, Kit.box(14 - i * 0.6, 0.2, 1.2), M.concrete, 0, 0.1 + i * 0.2, 4.8 - i * 0.4);
       // Windows.
@@ -1062,7 +1062,7 @@ export function buildTown(): Town {
     // Bandstand (second spitter perch).
     {
       const g = new THREE.Group();
-      Kit.add(g, Kit.cyl(3.8, 3.9, 0.8, 8), M.concrete, 0, 0.4, 0);
+      Kit.add(g, Kit.cyl(3.8, 3.9, 0.8, 8), M.concrete, 0, 0.4, 0).userData.pwProp = 'bandBase';
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
         Kit.add(g, Kit.cyl(0.1, 0.1, 2.8, 6), M.white, Math.cos(a) * 3.3, 2.2, Math.sin(a) * 3.3).userData.pwSq = 'bandPost';
@@ -1084,6 +1084,8 @@ export function buildTown(): Town {
     // Fountain + war memorial.
     {
       const g = new THREE.Group();
+      // ART: PIXEL WORLD paints the stone basin, the water, the column and bowl (z1/pwProps.ts).
+      g.userData.pwProp = 'fountain';
       Kit.add(g, Kit.cyl(3.2, 3.3, 0.7, 12), M.concrete, 0, 0.35, 0);
       Kit.add(g, Kit.cyl(2.9, 2.9, 0.1, 12), texStd(0x142232, 0.1, 0.4, 'water', 1.5, 0.5), 0, 0.62, 0);
       Kit.add(g, Kit.cyl(0.5, 0.7, 1.6, 8), M.concrete, 0, 1.4, 0);
@@ -1092,7 +1094,7 @@ export function buildTown(): Town {
       put(g, -36, -293, 0, 0, 'E');
       const st = new THREE.Group();
       const bronze = Kit.tex('metal', 0x3e6050, 2, 0.6);
-      Kit.add(st, Kit.box(2, 2.2, 2), Kit.tex('brick', 0x6a665e, 1), 0, 1.1, 0);
+      Kit.add(st, Kit.box(2, 2.2, 2), Kit.tex('brick', 0x6a665e, 1), 0, 1.1, 0).userData.pwProp = 'plinth';
       Kit.add(st, Kit.box(1.4, 0.4, 1.4), bronze, 0, 2.4, 0);
       Kit.add(st, Kit.capsule(0.32, 0.9, 2, 6), bronze, 0, 3.3, 0).userData.pwSq = 'statue';
       Kit.add(st, Kit.box(0.3, 0.3, 0.3), bronze, 0, 4.1, 0).userData.pwSq = 'drop';
@@ -1104,6 +1106,8 @@ export function buildTown(): Town {
     const lampPos: [number, number][] = [[-64, -266], [-64, -300], [-28, -266], [-28, -300], [-46, -300], [-46, -266]];
     for (const [x, z] of lampPos) {
       const g = new THREE.Group();
+      // ART: PIXEL WORLD: a cast-iron post and glowing globe cards (z1/pwProps.ts).
+      g.userData.pwProp = 'sqLamp';
       Kit.add(g, Kit.cyl(0.08, 0.14, 4.2, 6), M.metal, 0, 2.1, 0);
       Kit.add(g, Kit.box(1.2, 0.08, 0.08), M.metal, 0, 4.2, 0);
       for (const sx of [-0.6, 0.6]) Kit.add(g, Kit.sphere(0.24, 8, 6), globe, sx, 4.45, 0);

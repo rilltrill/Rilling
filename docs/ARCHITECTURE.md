@@ -718,10 +718,10 @@ answers "what do I draw"):
 
 | budget | limit | z1 MAIN STREET | d1 JUNGLE RUN |
 |---|---|---|---|
-| atlas memory (all levels) | ≤ 24 MB | 14.3 MB (world 2048×1040 10.8 MB + sky 2048×368 2.9 MB + fire strips 256×448 0.6 MB) | 9.7 MB (world 1024×848 4.6 MB + sky 2048×576 4.7 MB, one level + jeep 256×240 0.3 MB; FLORA stone / herd sprites R8) |
-| paint at stage load | ≤ 300 ms on a phone | ≈ 200 ms warm, min of 8 at load avg 8–16 (world ≈ 165, sky ≈ 25, fire ≈ 6; the z1 tile painters ≈ 70 ms of it, the rest the shared resolve / pack / mip pass over 1.7 M texels) | R2: 102 ms CPU, min of 12 at load avg 25 (world 67, sky 32, jeep 3; 129–146 ms in runs beside a full test suite); per-tile minima: world tiles 35 + resolve 5, sky tiles 24–43 + resolve 8 — + FLORA stones 16 (7 species) / herd 7 ms |
-| draw calls (same frame) | ≤ 250 | 15–61 over 26 beats (PIXEL CAST 21–90) | 26–48 over 18 shots, boss included (PIXEL CAST 35–77) |
-| triangles (same frame) | — | 15–42 k (PIXEL CAST 19–74 k) | 20–22 k (PIXEL CAST 23–33 k) |
+| atlas memory (all levels) | ≤ 24 MB | 15.3 MB (world 2048×1136 11.8 MB + sky 2048×368 2.9 MB + fire strips 256×448 0.6 MB) | 9.7 MB (world 1024×848 4.6 MB + sky 2048×576 4.7 MB, one level + jeep 256×240 0.3 MB; FLORA stone / herd sprites R8) |
+| paint at stage load | ≤ 300 ms on a phone | ≈ 230 ms warm, min of 10 at load avg 8–16 (world ≈ 190, sky ≈ 28, fire ≈ 10 incl. its coverage-built levels; the z1 tile painters ≈ 50 ms of it, the rest the shared resolve / pack / mip pass over 1.79 M texels in 352 tiles) | R2: 102 ms CPU, min of 12 at load avg 25 (world 67, sky 32, jeep 3; 129–146 ms in runs beside a full test suite); per-tile minima: world tiles 35 + resolve 5, sky tiles 24–43 + resolve 8 — + FLORA stones 16 (7 species) / herd 7 ms |
+| draw calls (same frame) | ≤ 250 | 20–64 over 26 beats (PIXEL CAST 21–91) | 26–48 over 18 shots, boss included (PIXEL CAST 35–77) |
+| triangles (same frame) | — | 15–38 k (PIXEL CAST 19–75 k) | 20–22 k (PIXEL CAST 23–33 k) |
 | per-frame work | no allocations | backdrop follow (a position set per layer) | same |
 
 Keep tiles few: a NEUTRAL tile tinted per material beats a tile per colour; wrap shop
@@ -763,21 +763,37 @@ load skips painting), paint the one-level sky atlas after the first frame.
 
 - **z1 MAIN STREET** (converted end to end; `stages/z1/pixel.ts` + `pw*.ts`; painters
   `pixelworld/z1*.ts`): wet asphalt with patches / tar snakes / alligator cracks and a
-  decal sheet (skids, blood, manholes, puddles), herringbone brick + granite setts in the
-  square; facades with string courses, copings, pediments, chimney pots, aerials, fire
-  escapes, ghost signs and a billboard; painted cars (body / glass / chrome / police /
-  burnt), the diner (lit flutes, interior counter, stools, menu, pass), the overturned bus
-  (legible roof, windowed sides, soot), the gas station (canopy, logo, price sign, pillars,
-  a convenience-store bay, pumps / propane cage / drums painted over their unchanged hit
-  boxes, a pale canopy top for the collapse), PRIME MEATS (cold-room windows, doorway,
-  doors, awning, valance, cleaver blade), kiosks (bills, fascia, bundles), the bandstand
-  (turned posts, balustrade, lace, shingles), the courthouse (ashlar, columns, frieze,
-  clock), shop bays for the laundry and the police lobby, hand-drawn animated flames for
-  every fire (`z1fire.ts`, own atlas) with stepped pixel puffs, soft-edged dithered lamp
-  shafts, stepped light pools; the night panorama with the MILLBROOK townline. Still
-  classic: trees (FLORA), lamp-globe spheres, the fountain, benches / crates / sawhorses
-  outside the barricade, the courthouse pediment, the extra glass panes, the title-screen
-  backdrop.
+  decal sheet (skids, blood, manholes, puddles); granite flags with a soldier course, wear
+  clusters, a sunken flag holding water and drain grates in the square (`z1PavingTile`);
+  calm walls (`z1walls.ts`: render with a few re-rendered patches, concrete panels with
+  joints and form ties — every render / concrete wall in town uses them) whose wear is
+  PLACED: rain streaks under about half the sills, render come away to the brick near
+  corners and feet, a damp foot and a drip-stained head as 48-row bands cut from the base
+  pattern; facades with string courses, copings, pediments, chimney pots, aerials, fire
+  escapes, one ghost sign per tall side wall (three different), a billboard; shop bays by
+  shop (lit cinema / hotel lobby / pharmacy / liquor / bar / pawn interiors, dark bank /
+  cafe / barber / to-let / closed bays, shutters and boarded fronts sprayed with four
+  different pieces — neighbours never match — the police lobby boarded once, clear
+  elsewhere); spray-can graffiti (`z1graffiti.ts`: tags, throw-ups and stencils from a word
+  list, never the same piece twice running); the RIALTO's changeable-letter marquee in
+  2-texel slotted letters (`z1signs.ts`); painted cars with contact shadows, mirrors,
+  aerials, mud flaps; the diner (stainless flutes with reflected bands, seams and a dent,
+  checker, menu, roof fans); the overturned bus; the gas station (canopy, roofing membrane,
+  pillars with a notice, store bay); the alley's cold-storage warehouse (calm corrugated
+  cladding, COLD STORAGE sign, roller door, bulkhead lamp, conduit); PRIME MEATS (calm
+  cold-room windows: carcass silhouettes, condensation, oxblood tiles), kiosks each with
+  their own bill sheet, the bandstand, the courthouse with a real gable pediment; the
+  furniture as painted cut-outs (`pwProps.ts` on `userData.pwProp` tags: benches,
+  sawhorses, crates, the square's lamp posts with glowing globe cards, the fountain, the
+  plinth, the floodlight lens, the bandstand base); hand-drawn three-tongue flames on their
+  own atlas with coverage-built levels (`z1FlameLevels`: still flames at a distance, never
+  rectangles); lamp shafts as soft ray fans (camera-facing cards: halo, four rays, Bayer
+  steps, far fade); light pools lifted onto the ground and screened onto walls in sodium /
+  warm colours; wet reflections under fires, lamps and lit pools (dash rows, flickering with
+  their source); the night panorama (violet gradient, stepped moon halo with earthshine,
+  warm cloud bellies over the fires, the MILLBROOK townline). Zone / dynamic batches at
+  gain 1.3 (as bright as PIXEL CAST). Still classic: trees (FLORA), the extra glass panes,
+  the title-screen backdrop.
 - **d1 JUNGLE RUN** (converted end to end; `stages/d1/pixel.ts`, `jeepPixel.ts`,
   `herdPixel.ts`, `pwShapes.ts`; painters `pixelworld/d1*.ts`): the road (`d1RoadTile`: ruts
   with worn tread prints, damp hollows, pebbles, dry-grass crown tufts, brown leaf litter by

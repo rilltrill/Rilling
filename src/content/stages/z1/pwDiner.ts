@@ -106,6 +106,16 @@ export class Z1Diner {
           break;
         case 'roof':
           boxFaces(b, p.width, p.height, p.depth, { py: this.roof, pz: t.flute, px: t.panel, nx: t.panel, nz: t.panel, ny: t.panel });
+          // Roof clutter breaking the box: two exhaust fans (crossed cut-outs) on the roof deck.
+          for (const fx of [-5.5, 6.2]) {
+            const fw = t.fan.w / PW_TPM;
+            const fh = t.fan.h / PW_TPM;
+            const y0 = p.height / 2;
+            const z0 = -1.5;
+            b.rect(_o.set(fx - fw / 2, y0, z0), X, Y, fw, fh, t.fan);
+            b.rect(_o.set(fx + fw / 2, y0, z0 - 0.02), NX, Y, fw, fh, t.fan, { flipU: true });
+            b.rect(_o.set(fx, y0, z0 + fw / 2), NZ, Y, fw, fh, t.fan);
+          }
           break;
         case 'kick':
         case 'header':

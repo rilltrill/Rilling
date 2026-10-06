@@ -103,17 +103,20 @@ export class Z1Square {
           // paper's bundles stacked at the front corner.
           const hatch = o.parent!.children.find((c) => c.userData.pwSq === 'newsHatch' || c.userData.pwSq === 'coffeeHatch');
           const facing = hatch && hatch.position.x < 0 ? -1 : 1;
-          const bw = t.bills.w / PW_TPM;
-          const bh = t.bills.h / PW_TPM;
+          // Each kiosk its own sheet of bills, each face a different 80-texel crop of it.
+          const sheet = hatch?.userData.pwSq === 'newsHatch' ? t.bills : t.bills2;
+          const crop = (x: number) => ({ tint: bt, sub: { x, y: 0, w: 80, h: sheet.h } });
+          const bw = 80 / PW_TPM;
+          const bh = sheet.h / PW_TPM;
           const hw = p.width / 2 + 0.008;
           const hd = p.depth / 2 + 0.008;
           const y0 = -p.height / 2 + 0.28;
           // (Damp paper in the dark: a shade under full white.)
           const bt = 0xa8a4a0;
-          b.rect(_o.set(-bw / 2 - 0.1, y0, hd), X, Y, bw, bh, t.bills, { tint: bt });
-          b.rect(_o.set(bw / 2 + 0.15, y0 + 0.1, -hd), NX, Y, bw, bh, t.bills, { tint: bt });
-          if (facing > 0) b.rect(_o.set(-hw, y0 - 0.05, -bw / 2 + 0.1), Z, Y, bw, bh, t.bills, { tint: bt });
-          else b.rect(_o.set(hw, y0 - 0.05, bw / 2), NZ, Y, bw, bh, t.bills, { tint: bt });
+          b.rect(_o.set(-bw / 2 - 0.1, y0, hd), X, Y, bw, bh, sheet, crop(0));
+          b.rect(_o.set(bw / 2 + 0.15, y0 + 0.1, -hd), NX, Y, bw, bh, sheet, crop(48));
+          if (facing > 0) b.rect(_o.set(-hw, y0 - 0.05, -bw / 2 + 0.1), Z, Y, bw, bh, sheet, crop(24));
+          else b.rect(_o.set(hw, y0 - 0.05, bw / 2), NZ, Y, bw, bh, sheet, crop(24));
           if (hatch?.userData.pwSq === 'newsHatch') {
             const uw = t.bundle.w / PW_TPM;
             const uh = t.bundle.h / PW_TPM;

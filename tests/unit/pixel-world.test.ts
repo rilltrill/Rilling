@@ -343,6 +343,37 @@ describe('PixelWorld stages (budgets, gameplay unchanged)', () => {
     cl.dispose();
     Kit.disposeAll();
   });
+
+  it('z1: the furniture PIXEL WORLD paints over (benches, sawhorses, crates, square lamps, fountain, plinth, pediment, floodlight, bandstand base) is scenery in every ART', { timeout: 180_000 }, () => {
+    const tagged = (w: World) => {
+      const out: THREE.Object3D[] = [];
+      w.scene.traverse((o) => {
+        if (o.userData.pwProp) out.push(o);
+      });
+      return out;
+    };
+    const sp = build('z1', 'sprites');
+    const props = tagged(sp);
+    // (PIXEL CAST bakes their meshes into the zone's static scenery mesh — scenery by construction; the
+    // single tagged meshes go with the bake, the tagged groups stay as empty nodes.)
+    expect([...new Set(props.map((o) => o.userData.pwProp as string))].sort()).toEqual(['bench', 'crate', 'fountain', 'sawhorse', 'sqLamp']);
+    // Never an occluder, never a target: dropping the classic meshes changes no gameplay.
+    const occ = new Set(sp.env!.occluders ?? []);
+    const shoot = new Set(sp.shootables.objects);
+    for (const p of props) {
+      p.traverse((o) => {
+        expect(occ.has(o)).toBe(false);
+        expect(shoot.has(o)).toBe(false);
+      });
+    }
+    // PIXEL WORLD: the classic meshes are gone (painted on the zone batch instead).
+    const px = build('z1', 'pixel');
+    for (const p of tagged(px)) p.traverse((o) => expect((o as THREE.Mesh).isMesh ?? false).toBe(false));
+    expect(px.shootables.objects.length).toBe(sp.shootables.objects.length);
+    sp.dispose();
+    px.dispose();
+    Kit.disposeAll();
+  });
 });
 
 describe('d2 RESEARCH LABS in PIXEL WORLD (budgets, gameplay unchanged)', () => {

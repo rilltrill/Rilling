@@ -150,97 +150,141 @@ export function paintZ1Asphalt(c: PwCanvas, k: PwKit, o: Z1AsphaltOpts) {
 // ─── Square paving ──────────────────────────────────────────────────────────
 
 /**
- * The town square's paving, 256 × 256 (8 m): herringbone brick pavers (8 × 4
- * texels = 25 × 12.5 cm) framed by granite sett bands on a 4 m grid — each
- * brick its own tone with a lit upper-left arris, moss and grit in a few
- * joints, a missing brick holding water, sunken wet patches.
+ * The town square's paving, 256 × 256 (8 m): 4 m panels of granite flags laid in
+ * courses (0.75 m courses, flags 0.75–1.25 m long, staggered; each flag one of
+ * two granites, its top arris lit, joints a single step darker — never a
+ * high-contrast grid), framed by a soldier course of brick pavers. A few big,
+ * readable features instead of texture noise: a cracked flag, a sunken one
+ * holding water (the sky in it), an iron drain grate, moss in a couple of
+ * joints. Low-frequency by design: the joints thin out of the coarse levels
+ * and nothing crawls in motion.
  */
 export function z1PavingTile(atlas: PwAtlas, o: { brick: number; granite: number; moss?: number }): PwTile {
-  return atlas.tile(`z1paving|${h6(o.brick)}|${h6(o.granite)}|${h6(o.moss ?? 0x3e5a32)}`, 256, 256, (c, k) => paintZ1Paving(c, k, o), { wrap: true });
+  return atlas.tile(`z1flags|${h6(o.brick)}|${h6(o.granite)}|${h6(o.moss ?? 0x3e5a32)}`, 256, 256, (c, k) => paintZ1Paving(c, k, o), { wrap: true });
 }
 
 export function paintZ1Paving(c: PwCanvas, k: PwKit, o: { brick: number; granite: number; moss?: number }) {
   const rng = k.rng;
   const W = c.w;
   const H = c.h;
-  const br = k.ramp(o.brick, { light: 0.42, sat: 0.9 });
-  const br2 = k.ramp(darken(o.brick, 0.86), { light: 0.42, sat: 0.95 });
-  const br3 = k.ramp(0x7a5a3a, { light: 0.4, sat: 0.85 });
-  const gran = k.ramp(o.granite, { light: 0.42, sat: 0.6 });
-  const joint = k.ramp(darken(o.brick, 0.45), { light: 0.3 });
+  const gran = k.ramp(o.granite, { light: 0.36, sat: 0.6 });
+  const gran2 = k.ramp(darken(o.granite, 0.9), { light: 0.36, sat: 0.7, shift: 0.6 });
+  const br = k.ramp(o.brick, { light: 0.36, sat: 0.85 });
   const moss = k.ramp(o.moss ?? 0x3e5a32, { light: 0.35 });
   const water = k.ramp(0x1c2434, { light: 0.4 });
+  const sky = k.ramp(0x4a5a84, { light: 0.35, sat: 0.9 });
+  const iron = k.ramp(0x34363c, { light: 0.45 });
   const R = c.ramp;
   const T = c.tone;
-  const BAND = 8;
+  const BAND = 12;
+  const CH = 24;
+  // Flag ids per texel (for the cracked / sunken flags), filled course by course.
+  const fid = new Int32Array(W * H).fill(-1);
+  for (let y = 0; y < H; y++) {
+    const by = y & 127;
+    for (let x = 0; x < W; x++) {
+      const bx = x & 127;
+      const i = y * W + x;
+      if (bx < BAND || by < BAND) {
+        // Soldier course: bricks 8 texels wide across the band, a step-darker joint between, each brick its own tone.
+        const along = bx < BAND ? y : x;
+        const across = bx < BAND ? bx : by;
+        const jt = along % 8 === 0 || across === 0 || across === BAND - 1;
+        R[i] = br;
+        T[i] = jt ? 2 : across === 1 ? 3.6 : hash2(along >> 3, bx < BAND ? x >> 7 : y >> 7, 61) > 0.7 ? 2.4 : 3;
+        continue;
+      }
+      R[i] = gran;
+      T[i] = 3;
+    }
+  }
+  // Flags inside each panel: courses of random lengths, staggered.
+  let id = 0;
+  for (let py = 0; py < 2; py++) {
+    for (let px = 0; px < 2; px++) {
+      const x0 = px * 128 + BAND;
+      const y0 = py * 128 + BAND;
+      const pw = 128 - BAND;
+      const ph = 128 - BAND;
+      for (let cy = 0; cy < ph; cy += CH) {
+        let cx = -rng.int(0, 16);
+        while (cx < pw) {
+          const len = rng.int(24, 40);
+          const ramp = rng.chance(0.35) ? gran2 : gran;
+          const tone = 3;
+          for (let y = cy; y < Math.min(ph, cy + CH); y++) {
+            for (let x = Math.max(0, cx); x < Math.min(pw, cx + len); x++) {
+              const i = (y0 + y) * W + x0 + x;
+              const joint = y === cy || x === cx;
+              R[i] = ramp;
+              T[i] = joint ? 2 : y === cy + 1 ? 3.6 : tone;
+              fid[i] = joint ? -1 : id;
+            }
+          }
+          cx += len;
+          id++;
+        }
+      }
+    }
+  }
+  // Wear: a few low-contrast chips and stains per flag (clusters, never per-texel noise).
+  for (let i = 0; i < 90; i++) {
+    const x = rng.int(0, W - 3);
+    const y = rng.int(0, H - 3);
+    if (fid[y * W + x] < 0) continue;
+    c.cluster(x, y, rng.int(0, 9), 0, rng.chance(0.65) ? -0.6 : 0.6);
+  }
+  // Moss in a couple of joints.
+  for (let m = 0; m < 6; m++) {
+    const x = rng.int(0, W - 8);
+    const y = rng.int(0, H - 2);
+    for (let j = 0; j < rng.int(3, 7); j++) if (T[y * W + x + j] === 2) R[y * W + x + j] = moss;
+  }
+  // A sunken flag holding water: the sky in it, a darker lip.
+  const area = new Map<number, number>();
+  for (let i = 0; i < W * H; i++) if (fid[i] >= 0) area.set(fid[i], (area.get(fid[i]) ?? 0) + 1);
+  const pick = (n: number) => {
+    for (let t = 0; t < 400; t++) {
+      const x = rng.int(20, W - 20);
+      const y = rng.int(20, H - 20);
+      const f = fid[y * W + x];
+      if (f >= 0 && f !== n && (area.get(f) ?? 0) > 500) return f;
+    }
+    return 0;
+  };
+  const sunk = pick(-1);
+  const crack = pick(sunk);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const i = y * W + x;
-      const bx = x & 127;
-      const by = y & 127;
-      if (bx < BAND || by < BAND) {
-        // Granite setts (8 × 8), joints dark, a lit arris, the odd darker sett.
-        const sx = x >> 3;
-        const sy = y >> 3;
-        const lx = x & 7;
-        const ly = y & 7;
-        const jt = lx === 0 || ly === 0;
-        R[i] = jt ? joint : gran;
-        T[i] = jt ? 1 : lx === 1 || ly === 1 ? 4 : hash2(sx, sy, 71) > 0.8 ? 2 : 3;
-        continue;
+      if (fid[i] === sunk) {
+        const top = fid[(y - 1) * W + x] !== sunk;
+        R[i] = top ? water : (x + y) % 9 === 0 ? sky : water;
+        T[i] = top ? 1 : 2;
       }
-      const X = x >> 2;
-      const Y = y >> 2;
-      const p = (((X - Y) % 4) + 4) % 4;
-      const lx = x & 3;
-      const ly = y & 3;
-      let jt = false;
-      let id = 0;
-      let edgeLo = false;
-      if (p === 0) {
-        jt = lx === 0 || ly === 0;
-        id = X * 977 + Y;
-        edgeLo = ly === 3;
-      } else if (p === 1) {
-        jt = ly === 0;
-        id = (X - 1) * 977 + Y;
-        edgeLo = ly === 3 || lx === 3;
-      } else if (p === 3) {
-        jt = lx === 0 || ly === 0;
-        id = X * 977 + Y;
-        edgeLo = lx === 3;
-      } else {
-        jt = lx === 0;
-        id = X * 977 + (Y - 1);
-        edgeLo = lx === 3 || ly === 3;
-      }
-      if (jt) {
-        const m = hash2(x >> 1, y >> 1, 5) > 0.93;
-        R[i] = m ? moss : joint;
-        T[i] = m ? 2 : 3;
-        continue;
-      }
-      const v = hash2(id, 3, 17);
-      R[i] = v < 0.2 ? br2 : v > 0.92 ? br3 : br;
-      const lit = (p === 0 || p === 3 ? lx === 1 || ly === 1 : p === 1 ? ly === 1 : lx === 1);
-      T[i] = lit ? 4 : edgeLo ? 2 : 3;
     }
   }
-  // Sunken wet patches: a step darker in broad smooth areas, the sky caught at their far rim.
-  // (Sampled per 4 × 4 block: the patch edges follow the brick grain.)
-  for (let by = 0; by < H; by += 4) {
-    for (let bx = 0; bx < W; bx += 4) {
-      if (smooth(bx + 2, by + 2, W, H, 4, 77) >= 0.28) continue;
-      for (let y = by; y < by + 4; y++) for (let x = bx; x < bx + 4; x++) T[y * W + x] = Math.max(0, T[y * W + x] - 1);
+  // The cracked flag: a jagged crack corner to corner, a lit lip on one side.
+  {
+    let x = -1;
+    let y = -1;
+    for (let i = 0; i < W * H && x < 0; i++) if (fid[i] === crack) (x = i % W), (y = (i / W) | 0);
+    for (let j = 0; j < 40 && x >= 0; j++) {
+      if (fid[y * W + x] !== crack) break;
+      c.set(x, y, gran, 1);
+      c.shift(x + 1, y, 0.6);
+      x += rng.chance(0.6) ? 1 : 0;
+      y += 1;
     }
   }
-  // Missing bricks (water standing in the hole), grit.
-  for (let m = 0; m < 4; m++) {
-    const X = rng.int(4, 60);
-    const Y = rng.int(4, 60);
-    for (let y = Y * 4 + 1; y < Y * 4 + 4; y++) for (let x = X * 4 + 1; x < X * 4 + 8; x++) c.set(x, y, water, y === Y * 4 + 1 ? 3 : 1);
+  // An iron drain grate in one panel's band corner.
+  {
+    const gx = 128 + BAND + 4;
+    const gy = BAND + 4;
+    c.rect(gx, gy, 20, 14, iron, 2);
+    c.frame(gx, gy, 20, 14, iron, 3);
+    for (let x = gx + 2; x < gx + 18; x += 3) c.vline(x, gy + 2, 10, iron, 0.6);
   }
-  for (let g = 0; g < 160; g++) c.cluster(rng.int(0, W - 2), rng.int(0, H - 2), rng.int(0, 3), 0, rng.chance(0.6) ? -1 : 1);
 }
 
 // ─── Decal sheet ────────────────────────────────────────────────────────────

@@ -2,10 +2,12 @@ import * as THREE from 'three';
 import type { PwAtlas, PwTile } from '../../pixelworld/atlas';
 import { tintFor, type PwBatch } from '../../pixelworld/batch';
 import { PW_TPM } from '../../pixelworld/canvas';
-import { acUnitModule, doorModule, DOOR_M, drainpipeTile, WINDOW_M, windowModule, type WindowKind } from '../../pixelworld/facade';
+import { acUnitModule, doorModule, DOOR_M, drainpipeTile, posterDecal, WINDOW_M, windowModule, type WindowKind } from '../../pixelworld/facade';
 import { chainFenceTile } from '../../pixelworld/props';
 import { metalTile } from '../../pixelworld/surfaces';
-import { z1AlleyTiles, z1GasTiles, z1Graffiti, type Z1AlleyTiles, type Z1GasTiles } from '../../pixelworld/z1alley';
+import { z1AlleyTiles, z1BulkheadLamp, z1ColdStorageSign, z1GasTiles, z1RollerDoor, type Z1AlleyTiles, type Z1GasTiles } from '../../pixelworld/z1alley';
+import { ALLEY_N } from './layout';
+import { z1AlleyPiece } from '../../pixelworld/z1graffiti';
 import { boxFaces, cylinder } from './pwDiner';
 import type { Z1FacadeExtras } from './pwFacade';
 import type { PwPart } from './setpieces';
@@ -27,6 +29,7 @@ const Y = new THREE.Vector3(0, 1, 0);
 const Z = new THREE.Vector3(0, 0, 1);
 const NX = new THREE.Vector3(-1, 0, 0);
 const NZ = new THREE.Vector3(0, 0, -1);
+const NY = new THREE.Vector3(0, -1, 0);
 const _o = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _u = new THREE.Vector3();
@@ -37,6 +40,7 @@ export class Z1Street {
   readonly gas: Z1GasTiles;
   private metal: PwTile;
   private fence: PwTile;
+  private grafN = 0;
   constructor(
     private atlas: PwAtlas,
     private extras: Z1FacadeExtras,
@@ -127,7 +131,7 @@ export class Z1Street {
           b.rect(_o.set(r.x - 0.44, r.y - 0.34, 0.03), X, Y, 28 / PW_TPM, 22 / PW_TPM, acUnitModule(a));
           break;
         case 'graffiti': {
-          const t = z1Graffiti(a, r.word ?? 'RUN', r.col ?? 0xc83a8a);
+          const t = z1AlleyPiece(a, r.word ?? 'RUN', r.col ?? 0xc83a8a, this.grafN++);
           const k = (r.size ?? 0.45) / 0.44;
           const w = (t.w / PW_TPM) * k;
           const h = (t.h / PW_TPM) * k;
@@ -147,8 +151,30 @@ export class Z1Street {
       drop.push(c);
     }
     for (const fx of rec.fireEscapes ?? []) this.extras.fireEscape(b, rec.floors, fx, 1.2);
+    // The corrugated warehouse across the alley: who it belonged to, in faded paint, its loading dock.
+    g.updateMatrixWorld(true);
+    if (Math.abs(g.matrixWorld.elements[14] - ALLEY_N) < 0.2) this.coldStorage(b, rec);
     b.setMatrix(null);
     return drop;
+  }
+
+  /** MILLBROOK COLD STORAGE: faded lettering over the ground floor, a roller door with a caged lamp, conduit, bills (wall frame). */
+  private coldStorage(b: PwBatch, rec: { x0: number; x1: number }) {
+    const a = this.atlas;
+    const sign = z1ColdStorageSign(a);
+    const sw = sign.w / PW_TPM;
+    const sh = sign.h / PW_TPM;
+    b.rect(_o.set(-sw / 2 - 1.5, 3.25, 0.03), X, Y, sw, sh, sign);
+    // The loading dock: roller door, its caged lamp, a light pool's worth of grime under it.
+    const door = z1RollerDoor(a);
+    const dx = -6.2;
+    b.rect(_o.set(dx - 1.6, 0, 0.025), X, Y, 3.2, 3.4, door);
+    b.rect(_o.set(dx - 7 / PW_TPM, 3.45, 0.04), X, Y, 14 / PW_TPM, 10 / PW_TPM, z1BulkheadLamp(a));
+    // Conduit along the wall under the lettering (the drainpipe painted on its side).
+    const pipe = drainpipeTile(a, { hex: 0x4a4c52 });
+    b.rect(_o.set(rec.x0 + 1, 3.37, 0.035), NY, X, 0.32, rec.x1 - rec.x0 - 2, pipe, { u0: 0, v0: 0 });
+    // Bills pasted by the dock door.
+    for (const [px, v] of [[dx + 2.4, 0], [dx + 3.3, 2], [dx - 3.0, 1]] as const) b.rect(_o.set(px, 1.2, 0.03), X, Y, 24 / PW_TPM, 32 / PW_TPM, posterDecal(a, v));
   }
 
   /** A tagged street part (lamp, news box, mailbox, tape, ad, dumpster); false = not ours. */
@@ -222,7 +248,7 @@ export class Z1Street {
 
   /** A canopy pillar (crumples when the canopy buckles), painted in its own frame. */
   pillar(b: PwBatch, w: number, h: number, d: number) {
-    boxFaces(b, w, h, d, { px: this.gas.pillar, nx: this.gas.pillar, pz: this.gas.pillar, nz: this.gas.pillar }, {});
+    boxFaces(b, w, h, d, { px: this.gas.pillar, nx: this.gas.pillar, pz: this.gas.pillarNotice, nz: this.gas.pillar }, {});
   }
 }
 

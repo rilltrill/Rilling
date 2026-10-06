@@ -2,7 +2,7 @@ import { PWF, type PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { drawText, FONT_3x5, FONT_BOLD, textWidth } from './font';
 import { NEUTRAL_HEX, neutral } from './retexture';
-import { hash2 } from './surfaces';
+import { hash2, smooth } from './surfaces';
 
 /**
  * The back alley (and the street's small hardware) in ART: PIXEL WORLD:
@@ -44,6 +44,101 @@ export function z1Graffiti(atlas: PwAtlas, word: string, color: number): PwTile 
       const py = k.rng.int(0, H - 1);
       if (!c.at(px, py)) c.set(px, py, fill, 2);
     }
+  });
+}
+
+// ─── The cold-storage warehouse (the alley's corrugated wall) ─────────────────
+
+/**
+ * Corrugated steel cladding, 128 × 64 wrap (4 × 2 m): low-contrast ribs (two
+ * close shades, no hairline stripes), sheet laps every 1 m with a bolt row
+ * bleeding rust down the ribs, a newer galvanised sheet patched in, grime at
+ * the foot. Painted in its own colour.
+ */
+export function z1CorrugatedTile(atlas: PwAtlas, hex: number): PwTile {
+  return atlas.tile(`z1corr|${hex.toString(16)}`, 128, 64, (c, k) => {
+    const rng = k.rng;
+    const a = k.ramp(hex, { light: 0.32, sat: 0.8 });
+    const b = k.ramp(0x5a5f6a, { light: 0.32, sat: 0.7 });
+    const patch = k.ramp(0x7a8088, { light: 0.32, sat: 0.4 });
+    const rust = k.ramp(0x7a4024, { light: 0.4 });
+    for (let y = 0; y < c.h; y++) {
+      for (let x = 0; x < c.w; x++) {
+        const sheet = Math.floor(x / 32);
+        const r = sheet === 2 && y < 40 ? patch : hash2(sheet, Math.floor(y / 32), 7) > 0.5 ? b : a;
+        const rib = x % 4;
+        c.set(x, y, r, rib === 0 ? 3.6 : rib === 3 ? 2.4 : 3);
+      }
+    }
+    // Sheet laps (vertical) and bolt rows (every 1 m), rust bleeding down from some bolts.
+    for (let x = 0; x < c.w; x += 32) {
+      c.vline(x, 0, c.h, a, 1.6);
+      c.vline(x + 1, 0, c.h, a, 3.6);
+    }
+    for (let y = 2; y < c.h; y += 32) {
+      for (let x = 3; x < c.w; x += 8) {
+        c.set(x, y, a, 4.4);
+        c.set(x, y + 1, a, 1.6);
+        if (hash2(x, y, 9) > 0.62) for (let j = 2; j < rng.int(6, 18); j++) if (((x + j) & 3) !== 0 || j < 5) c.tint(x, (y + j) % c.h, rust, j < 6 ? 0 : -0.4);
+      }
+    }
+  }, { wrap: true });
+}
+
+/** MILLBROOK COLD STORAGE in faded, flaking white paint (cut-out: the cladding shows through). */
+export function z1ColdStorageSign(atlas: PwAtlas): PwTile {
+  const text = 'MILLBROOK COLD STORAGE';
+  const s = 3;
+  const tw = textWidth(text, FONT_BOLD, { scale: s });
+  return atlas.tile('z1coldstore', Math.ceil((tw + 8) / 2) * 2, 7 * s + 8, (c, k) => {
+    const paint = k.ramp(0xd8d0bc, { light: 0.3, sat: 0.5 });
+    drawText(c, text, 4, 4, FONT_BOLD, paint, 3, { scale: s, shadeFn: (_u, v) => (v < 0.2 ? 0.6 : 0) });
+    // Flaked away in patches (clusters, not speckle), the paint thinner toward the right end.
+    for (let i = 0; i < 260; i++) {
+      const x = k.rng.int(0, c.w - 3);
+      const y = k.rng.int(0, c.h - 3);
+      if (hash2(x >> 3, y >> 2, 5) < 0.45 + (x / c.w) * 0.2) for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) c.ramp[(y + dy) * c.w + x + dx] = 0;
+    }
+    // Rust runs through what is left.
+    for (let i = 0; i < 30; i++) c.shift(k.rng.int(0, c.w - 1), k.rng.int(0, c.h - 1), -1.5);
+  });
+}
+
+/** A roller loading door, 3.2 × 3.4 m (102 × 108): slats, the hood at the top, a bottom rail with a handle, dents, rust, a stencil. */
+export function z1RollerDoor(atlas: PwAtlas): PwTile {
+  return atlas.tile('z1rollerdoor', 102, 108, (c, k) => {
+    const s = k.ramp(0x6a6e78, { light: 0.4, sat: 0.5 });
+    const frame = k.ramp(0x3a3c44, { light: 0.4 });
+    const rust = k.ramp(0x7a4024, { light: 0.4 });
+    const ink = k.ramp(0xe8d84a, { light: 0.35 });
+    const W = c.w;
+    const H = c.h;
+    c.rect(0, 0, W, H, frame, 2);
+    c.rect(0, 0, W, 12, frame, 3);
+    c.hline(0, 0, W, frame, 4);
+    c.hline(0, 11, W, frame, 1);
+    for (let y = 12; y < H - 6; y++) c.hline(5, y, W - 10, s, (y - 12) % 5 === 0 ? 1.6 : (y - 12) % 5 === 1 ? 3.6 : 3);
+    c.rect(5, H - 6, W - 10, 4, s, 2.4);
+    c.hline(5, H - 6, W - 10, s, 4);
+    c.rect(W / 2 - 4, H - 10, 8, 3, frame, 1);
+    for (const x of [2, W - 3]) c.vline(x, 12, H - 12, frame, 1);
+    // A dent (something big hit it from inside), rust along the bottom, a stencil.
+    for (let y = 50; y < 66; y++) for (let x = 60; x < 76; x++) if (Math.hypot(x - 68, y - 58) < 7) c.shift(x, y, (x - 68) + (y - 58) < 0 ? -1 : 0.6);
+    for (let x = 5; x < W - 5; x++) if (hash2(x >> 1, 3, 11) > 0.4) for (let j = 0; j < 2 + (x % 5); j++) c.tint(x, H - 7 - j, rust, -0.4);
+    drawText(c, 'NO PARKING', 18, 30, FONT_3x5, ink, 2.4);
+    drawText(c, 'DOCK 2', 34, 38, FONT_3x5, ink, 2.4);
+  });
+}
+
+/** A caged bulkhead lamp (GLOW glass in a wire cage), 14 × 10. */
+export function z1BulkheadLamp(atlas: PwAtlas): PwTile {
+  return atlas.tile('z1bulkhead', 14, 10, (c, k) => {
+    const cage = k.ramp(0x3a3c44, { light: 0.4 });
+    const glow = k.ramp(0xffe0a0, { light: 0.3 });
+    c.rect(0, 0, 14, 10, cage, 2);
+    c.rect(2, 2, 10, 6, glow, 4, PWF.GLOW);
+    for (const x of [4, 7, 10]) c.vline(x, 2, 6, cage, 1);
+    c.hline(2, 5, 10, cage, 1);
   });
 }
 
@@ -225,6 +320,8 @@ export interface Z1GasTiles {
   logo: PwTile;
   price: PwTile;
   pillar: PwTile;
+  /** A pillar face with a posted notice. */
+  pillarNotice: PwTile;
   ad: PwTile;
   tape: PwTile;
   /** The GAS & GO store window bay (wrap along u, 128 × 112 = one 4 m shop bay). */
@@ -251,7 +348,8 @@ export function z1GasTiles(a: PwAtlas): Z1GasTiles {
     soffit: a.tile('z1gas|soffit', 64, 64, paintSoffit, { wrap: true }),
     logo: a.tile('z1gas|logo', 192, 24, paintLogo),
     price: a.tile('z1gas|price', 70, 77, paintPrice),
-    pillar: a.tile('z1gas|pillar', 16, 32, paintPillar, { wrap: true }),
+    pillar: a.tile('z1gas|pillar2|0', 16, 166, (c, k) => paintPillar(c, k, false)),
+    pillarNotice: a.tile('z1gas|pillar2|1', 16, 166, (c, k) => paintPillar(c, k, true)),
     ad: a.tile('z1gas|ad', 35, 54, paintAd),
     tape: a.tile('z1gas|tape', 96, 16, paintTape, { wrap: true }),
     store: a.tile('z1gas|store', 128, 112, paintStore, { wrap: true }),
@@ -263,7 +361,7 @@ export function z1GasTiles(a: PwAtlas): Z1GasTiles {
     cageSide: a.tile('z1gas|cageS', 29, 54, (c, k) => paintCage(c, k, 1)),
     drum: a.tile('z1gas|drum', 64, 32, paintDrum, { wrap: true }),
     drumLid: a.tile('z1gas|drumLid', 22, 22, paintDrumLid),
-    roofTop: a.tile('z1gas|roofTop', 64, 64, paintRoofTop, { wrap: true }),
+    roofTop: a.tile('z1gas|roofTop2', 128, 128, paintRoofTop, { wrap: true }),
   };
 }
 
@@ -551,18 +649,47 @@ function paintDrumLid(c: PwCanvas, k: PwKit) {
 }
 
 /** Canopy top (wrap 64 × 64): pale membrane sheets with lapped seams, dark ponding stains, grit and a lost bottle cap. */
+/**
+ * The canopy's flat roof (seen when it buckles), 128 × 128 wrap (4 m): a dark
+ * bitumen membrane in rolls with lapped seams, a drain with its grate, a worn
+ * scuff path where the service crew walked, gravel collected in clusters,
+ * the square footprint where an AC unit stood, standing puddles holding the
+ * sky, and scorch blooming in from the fire.
+ */
 function paintRoofTop(c: PwCanvas, k: PwKit) {
+  const rng = k.rng;
   const W = c.w;
   const H = c.h;
-  const m = k.ramp(0xb8b8b0, { light: 0.4, sat: 0.4 });
-  const stain = k.ramp(0x6a6e70, { light: 0.4, sat: 0.4 });
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) c.set(x, y, m, y % 32 === 0 ? 4 : y % 32 === 1 ? 2 : 3);
-  for (let i = 0; i < 3; i++) {
-    const cx = Math.floor(hash2(i, 1, 13) * W);
-    const cy = Math.floor(hash2(i, 2, 13) * H);
-    for (let y = -6; y <= 6; y++) for (let x = -10; x <= 10; x++) if ((x * x) / 100 + (y * y) / 36 < 0.8 + (hash2(cx + x, cy + y, 3) - 0.5) * 0.4) c.set((cx + x + W) % W, (cy + y + H) % H, stain, 2);
+  const m = k.ramp(0x3a3a40, { light: 0.36, sat: 0.6 });
+  const m2 = k.ramp(0x44444a, { light: 0.36, sat: 0.6 });
+  const grav = k.ramp(0x8a8478, { light: 0.4, sat: 0.4 });
+  const sky = k.ramp(0x4a5a84, { light: 0.35 });
+  const soot = k.ramp(0x14120f, { light: 0.4 });
+  const iron = k.ramp(0x2a2c32, { light: 0.4 });
+  // Rolls 1 m wide (32 rows) with a lapped seam: a lit lip over a dark line.
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) c.set(x, y, (y >> 5) % 2 ? m2 : m, y % 32 === 0 ? 1 : y % 32 === 1 ? 4 : 3);
+  // The scuff path: a lighter, smoother band wandering across.
+  for (let x = 0; x < W; x++) {
+    const yc = 64 + Math.round(Math.sin((x / W) * Math.PI * 2) * 10);
+    for (let y = yc - 5; y <= yc + 5; y++) if (Math.abs(y - yc) < 4 || hash2(x >> 1, y >> 1, 5) > 0.5) c.shift(x, (y + H) % H, 0.6);
   }
-  c.scatter(k.rng, 0, 0, W, H, 18, stain, 1, { shapes: 2 });
+  // The AC footprint: a paler square with bolt holes.
+  c.rect(14, 14, 26, 20, m2, 4);
+  c.frame(14, 14, 26, 20, m2, 2);
+  for (const [x, y] of [[16, 16], [37, 16], [16, 31], [37, 31]]) c.set(x, y, iron, 0);
+  // Drain + grate, puddles round it holding the sky.
+  c.ellipse(96, 100, 10, 6, sky, 2);
+  c.ellipse(96, 100, 7, 4, sky, 1);
+  c.rect(93, 98, 7, 5, iron, 1);
+  for (let x = 94; x < 99; x += 2) c.vline(x, 99, 3, iron, 0);
+  c.ellipse(30, 96, 8, 4, sky, 2);
+  // Gravel gathered in clusters along the seams.
+  for (let i = 0; i < 70; i++) {
+    const y = (rng.int(0, 3) * 32 + rng.int(-3, 3) + H) % H;
+    c.cluster(rng.int(0, W - 3), y, rng.int(0, 9), grav, rng.chance(0.5) ? 3 : 2);
+  }
+  // Scorch blooming in (blotches, not speckle).
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (smooth(x, y, W, H, 3, 31) > 0.72) c.tint(x, y, soot, smooth(x, y, W, H, 3, 31) > 0.8 ? -1 : 0);
 }
 
 /** Canopy fascia: white enamel panels with seams, rain streaks, a lit lip. */
@@ -637,10 +764,45 @@ function paintPrice(c: PwCanvas, k: PwKit) {
 }
 
 /** Canopy pillar (wrap along v): white enamel, a red band, scuffs and a sticker. */
-function paintPillar(c: PwCanvas, k: PwKit) {
+/**
+ * A canopy pillar face (module 16 × 166 = 0.45 × 5.2 m): a diamond-plate kick
+ * plate, a yellow-and-black hazard band, white enamel with grime running down
+ * from the joints and rust at the base, a dark band under the canopy; the
+ * `notice` faces carry a posted ENGINE OFF / NO SMOKING card.
+ */
+function paintPillar(c: PwCanvas, k: PwKit, notice: boolean) {
+  const W = c.w;
+  const H = c.h;
   const w = k.ramp(0xd2cec4, { light: 0.4, sat: 0.6 });
-  for (let x = 0; x < c.w; x++) c.rect(x, 0, 1, c.h, w, x < 3 ? 4 : x > 12 ? 2 : 3);
-  c.scatter(k.rng, 0, 0, c.w, c.h, 6, 0, -1, { shapes: 3 });
+  const plate = k.ramp(0x7a7c84, { light: 0.5, sat: 0.4 });
+  const yel = k.ramp(0xe8c43a, { light: 0.4 });
+  const blk = k.ramp(0x1c1c20, { light: 0.4 });
+  const rust = k.ramp(0x7a4024, { light: 0.4 });
+  const paper = k.ramp(0xe8e4d8, { light: 0.3 });
+  const red = k.ramp(0xc8302a, { light: 0.45 });
+  // Enamel, rounded by shading (lit left, dark right).
+  for (let x = 0; x < W; x++) c.rect(x, 0, 1, H, w, x < 2 ? 4 : x > 12 ? 2 : 3);
+  // Top band under the canopy, a joint every 1.3 m with grime running down from it.
+  c.rect(0, 0, W, 6, blk, 2);
+  for (const jy of [48, 90, 132]) {
+    c.hline(0, jy, W, w, 1.6);
+    for (let i = 0; i < 4; i++) {
+      const x = 2 + Math.floor(hash2(i, jy, 7) * (W - 4));
+      for (let j = 1; j < 6 + Math.floor(hash2(jy, i, 8) * 14); j++) c.shift(x, jy + j, -1);
+    }
+  }
+  // Hazard band (diagonal stripes) and the kick plate (diamond pattern).
+  const hz0 = H - 30;
+  for (let y = hz0; y < hz0 + 10; y++) for (let x = 0; x < W; x++) c.set(x, y, ((x + y) >> 2) % 2 ? blk : yel, x < 2 ? 4 : 3);
+  for (let y = H - 20; y < H; y++) for (let x = 0; x < W; x++) c.set(x, y, plate, (x + y * 2) % 6 === 0 || (x - y * 2 + 600) % 6 === 0 ? 4 : x > 12 ? 2 : 3);
+  c.hline(0, H - 20, W, plate, 5);
+  for (let x = 0; x < W; x++) if (hash2(x, 1, 9) > 0.45) for (let j = 0; j < 1 + (x % 4); j++) c.tint(x, H - 1 - j, rust, -0.3);
+  if (notice) {
+    c.rect(2, 66, 12, 15, paper, 3);
+    c.hline(2, 66, 12, paper, 4);
+    c.rect(3, 68, 10, 3, red, 3);
+    for (let l = 0; l < 4; l++) c.hline(3, 73 + l * 2, 9 - (l % 2) * 3, blk, 1.6);
+  }
 }
 
 /** Bus-shelter lightbox ad (GLOW): the cola poster under its plastic. */

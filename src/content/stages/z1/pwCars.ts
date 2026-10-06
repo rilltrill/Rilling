@@ -25,6 +25,11 @@ const _o = new THREE.Vector3();
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
+const _p = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _s = new THREE.Vector3();
+const _e = new THREE.Euler();
+const _m = new THREE.Matrix4();
 
 type Face = 'px' | 'nx' | 'py' | 'pz' | 'nz';
 
@@ -51,9 +56,47 @@ export class Z1Cars {
       const v = hash2(Math.round(g.position.x * 10), Math.round(g.position.z * 10), 5) > 0.55 ? 1 : 0;
       const paintHex = o.police ? 0x18191f : o.color;
       for (const m of parts) if (this.part(b, m, o, v, paintHex)) drop.push(m);
+      this.extras(b, g, o, paintHex, v);
     }
     b.setMatrix(null);
     return drop;
+  }
+
+  /**
+   * What breaks the box: the dark contact shadow it sits in (cars stop floating),
+   * wing mirrors, an aerial on the rear fender, mud flaps behind the wheels.
+   */
+  private extras(b: PwBatch, g: THREE.Object3D, o: CarOptions, paintHex: number, v: number) {
+    const t = this.t;
+    g.matrixWorld.decompose(_p, _q, _s);
+    _e.setFromQuaternion(_q, 'YXZ');
+    // Contact shadow on the ground (upright cars only), in the car's yaw.
+    if (Math.abs(_e.x) < 0.2 && Math.abs(_e.z) < 0.2) {
+      _m.makeRotationY(_e.y).setPosition(_p.x, 0.022, _p.z);
+      b.setMatrix(_m);
+      b.rect(_o.set(-1.25, 0, 2.6), X, NZ, 2.5, 5.2, t.shadow);
+    }
+    b.setMatrix(g.matrixWorld);
+    const tint = { tintRGB: tintFor(t.mirror, paintHex) };
+    // Mirrors on the door tops by the A-pillars (a face each way and one seen from the side).
+    for (const sx of [-1, 1]) {
+      const x = sx * 1.0;
+      b.rect(_o.set(x - 0.12, 0.98, 0.7), X, Y, 0.24, 0.18, t.mirror, tint);
+      b.rect(_o.set(x + 0.12, 0.98, 0.7), NX, Y, 0.24, 0.18, t.mirror, { ...tint, flipU: true });
+      b.rect(_o.set(x, 0.98, 0.82), Z, Y, 0.12, 0.18, t.mirror, { ...tint, sub: { x: 0, y: 0, w: 4, h: 6 } });
+      b.rect(_o.set(x, 0.98, 0.58), NZ, Y, 0.12, 0.18, t.mirror, { ...tint, sub: { x: 0, y: 0, w: 4, h: 6 } });
+    }
+    if (!o.burnt) {
+      // The aerial on the rear fender (crossed), mud flaps behind the rear wheels.
+      const ax = v ? 0.72 : -0.72;
+      b.rect(_o.set(ax - 0.03, 0.93, -1.95), X, Y, 0.06, 0.85, t.aerial);
+      b.rect(_o.set(ax, 0.93, -1.98), Z, Y, 0.06, 0.85, t.aerial);
+      for (const sx of [-1, 1]) {
+        b.rect(_o.set(sx * 0.86 - 0.13, 0.06, -1.86), X, Y, 0.26, 0.28, t.flap);
+        b.rect(_o.set(sx * 0.86 + 0.13, 0.06, -1.86), NX, Y, 0.26, 0.28, t.flap);
+      }
+    }
+    b.setMatrix(null);
   }
 
   /** Emit one part; false = keep the classic mesh (glows). */

@@ -6,13 +6,13 @@ import { Kit } from '../../kit/ModelKit';
 import { GAS_Z0, GAS_Z1, ROOF_PADS, SECOND_W, SQ_Z0 } from './layout';
 import { buildTown, type Town, type ZoneId } from './town';
 import { bakeMerge, retroParams, type RetroParams } from './bake';
-import { FirePlume, Rain, nightSky } from './vfx';
+import { FirePlume, Rain, WetReflections, nightSky, pwPoolColor } from './vfx';
 import { FloraField, floraArtToggle, floraAtlas } from '../../pixel/floraField';
 import { Z1_BIOME } from '../../pixel/floraBiomes';
 import { STREET_TREE } from '../../pixel/floraSpecies';
 import { STREET_PROPS } from '../../pixel/floraProps';
 import { pixelWorld } from '../../../core/art';
-import { Z1PixelWorld, pwPoolTexture } from './pixel';
+import { Z1PixelWorld, Z1_GAIN, pwPoolTexture } from './pixel';
 import { PwBatch } from '../../pixelworld/batch';
 
 /** Per-world handles the stage script needs (set pieces, lights). */
@@ -113,7 +113,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     for (const id of Object.keys(town.zones) as ZoneId[]) pw.convertZone(id, town.zones[id]);
     pw.convertDyn(town);
     pw.finish(town.zones);
-    const m = baseGround?.build();
+    const m = baseGround?.build(undefined, { gain: Z1_GAIN });
     if (m) root.add(m);
   }
   const zoneBoxes: { id: ZoneId; groups: THREE.Group[]; box: THREE.Box3 }[] = [];
@@ -152,9 +152,29 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   vegPx.add(flora2d.build());
   root.add(veg3D, vegPx);
   const untoggle = floraArtToggle(scene, [vegPx], [veg3D]);
-  const pools = pw ? town.pools.build(undefined, pwPoolTexture(), true, 0.5) : town.pools.build(poolSurface);
+  const pools = pw ? town.pools.buildPixel(pwPoolTexture(), 0.5) : town.pools.build(poolSurface);
   const beams = town.beams.build(!!pw);
   root.add(pools, beams);
+  // ART: PIXEL WORLD: painted wet-road reflections under the fires, the neon and the street lamps.
+  let refl: THREE.InstancedMesh | null = null;
+  const reflFire: number[] = [];
+  let reflBadLamp = -1;
+  if (pw) {
+    const wr = new WetReflections();
+    for (const f of town.anim.fires) {
+      reflFire.push(wr.count);
+      wr.add(f.pos.x, f.pos.z, 1.6, 9, 0xff7a2a, 1.25, 1.4);
+    }
+    for (const d of town.pools.all) if (d.wallYaw !== undefined) wr.add(d.x - Math.sin(d.wallYaw) * 0.3, d.z - Math.cos(d.wallYaw) * 0.3, 0.8, 4.5, d.color, d.k * 1.4);
+    town.beams.all.forEach((d, i) => {
+      if (d.color !== 0xffa54a) return;
+      if (town.anim.badLamp?.beam === i) reflBadLamp = wr.count;
+      wr.add(d.x, d.z, 0.7, 9, d.color, 0.55);
+    });
+    refl = wr.build();
+    root.add(refl);
+  }
+  const reflOn = reflFire.map(() => true);
   const rain = new Rain(420);
   root.add(rain.mesh);
   scene.add(root);
@@ -282,10 +302,17 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     fireLight.intensity = fireTarget ? bestBase * fireFade * (0.75 + 0.17 * Math.sin(t * 21) + 0.1 * Math.sin(t * 47 + 1.3)) : 0;
 
     // Fires (only the ones that are near are worth animating).
-    for (const f of anim.fires) {
+    for (let i = 0; i < anim.fires.length; i++) {
+      const f = anim.fires[i];
       const near = f.pos.distanceTo(_cam) < FOG_FAR;
       f.plume.group.visible = f.plume.active && near;
       if (near && f.plume.active) f.plume.update(dt);
+      // (A fire's reflection shows only while it burns.)
+      if (refl && reflOn[i] !== f.plume.active) {
+        reflOn[i] = f.plume.active;
+        refl.setColorAt(reflFire[i], _c.setHex(0xff7a2a).multiplyScalar(f.plume.active ? 1.25 : 0));
+        if (refl.instanceColor) refl.instanceColor.needsUpdate = true;
+      }
     }
 
     // Police light bars.
@@ -305,7 +332,12 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       const on = rf || buzzK(t * 0.7, 9.1) > 0.5;
       badLamp.glow.visible = on;
       const k = on ? 1 : 0.08;
-      pools.setColorAt(badLamp.pool, _c.setHex(poolDef.color).multiplyScalar(poolDef.k * k));
+      if (pw) pools.setColorAt(badLamp.pool, pwPoolColor(_c, poolDef.color, poolDef.k * k));
+      else pools.setColorAt(badLamp.pool, _c.setHex(poolDef.color).multiplyScalar(poolDef.k * k));
+      if (refl && reflBadLamp >= 0) {
+        refl.setColorAt(reflBadLamp, _c.setHex(beamDef.color).multiplyScalar(0.55 * k));
+        if (refl.instanceColor) refl.instanceColor.needsUpdate = true;
+      }
       beams.setColorAt(badLamp.beam, _c.setHex(beamDef.color).multiplyScalar(beamDef.k * k));
       if (pools.instanceColor) pools.instanceColor.needsUpdate = true;
       if (beams.instanceColor) beams.instanceColor.needsUpdate = true;

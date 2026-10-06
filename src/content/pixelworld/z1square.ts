@@ -34,8 +34,9 @@ export interface Z1SquareTiles {
   cleaverL: PwTile;
   butcherTiles: PwTile;
   kioskWall: PwTile;
-  /** Bills pasted over a kiosk's boards (cut-out collage, its own colours). */
+  /** Bills pasted over a kiosk's boards (cut-out collage, its own colours): two sheets, each face an 80-texel crop. */
   bills: PwTile;
+  bills2: PwTile;
   /** Two tied bundles of the evening paper (cut-out). */
   bundle: PwTile;
   /** Kiosk roof fascia (wrap; the board in the bottom 8 rows): green newsstand / red coffee stand. */
@@ -64,16 +65,17 @@ export interface Z1SquareTiles {
 
 export function z1SquareTiles(a: PwAtlas): Z1SquareTiles {
   return {
-    meatWindow: a.tile('z1sq|meatwin', 134, 77, paintMeatWindow),
+    meatWindow: a.tile('z1sq|meatwin2', 134, 77, paintMeatWindow),
     meatDoorway: a.tile('z1sq|doorway', 102, 109, paintDoorway),
     meatDoor: a.tile('z1sq|meatdoor', 50, 102, paintMeatDoor),
     awning: a.tile('z1sq|awning', 96, 64, paintAwning, { wrap: true }),
     valance: a.tile('z1sq|valance', 448, 16, paintValance),
     cleaver: a.tile('z1sq|cleaver|r', 77, 45, (c, k) => paintCleaver(c, k, false)),
     cleaverL: a.tile('z1sq|cleaver|l', 77, 45, (c, k) => paintCleaver(c, k, true)),
-    butcherTiles: a.tile('z1sq|btiles', 64, 32, paintButcherTiles, { wrap: true }),
+    butcherTiles: a.tile('z1sq|btiles2', 64, 32, paintButcherTiles, { wrap: true }),
     kioskWall: a.tile('z1sq|kiosk', 64, 64, paintKioskWall, { wrap: true }),
-    bills: a.tile('z1sq|bills', 80, 48, paintBills),
+    bills: a.tile('z1sq|bills2|0', 128, 48, (c, k) => paintBills(c, k, 0)),
+    bills2: a.tile('z1sq|bills2|1', 128, 48, (c, k) => paintBills(c, k, 1)),
     bundle: a.tile('z1sq|bundle', 24, 14, paintBundle),
     fasciaGreen: a.tile('z1sq|fascia|g', 64, 16, (c, k) => paintFascia(c, k, 0x3a6a52, 0xe8d8a0), { wrap: true }),
     fasciaRed: a.tile('z1sq|fascia|r', 64, 16, (c, k) => paintFascia(c, k, 0x7a3434, 0xe8d8a0), { wrap: true }),
@@ -100,108 +102,71 @@ export function z1SquareTiles(a: PwAtlas): Z1SquareTiles {
 
 // ─── PRIME MEATS ────────────────────────────────────────────────────────────
 
-/** Red-lit cold-room display (GLOW), 4.2 × 2.4 m. */
+/**
+ * Red-lit cold-room display (GLOW), 4.2 × 2.4 m — held at calm mid values (the
+ * Butcher fights in front of it): a dark oxblood back wall, the carcasses on the
+ * hook rail as low-contrast silhouettes with one lit edge, the glass fogged
+ * with condensation at the top (cleared by drips running down), a single lit
+ * price card and the counter's steel lip. The strongest contrast is kept for
+ * the sign and the awning above.
+ */
 function paintMeatWindow(c: PwCanvas, k: PwKit) {
   const rng = k.rng;
   const W = c.w;
   const H = c.h;
-  const tile = k.ramp(0xc89a90, { light: 0.4, sat: 0.9 });
-  const grout = k.ramp(0x7a4a44, { light: 0.35 });
+  const wallR = k.ramp(0x5a1e1a, { light: 0.4, sat: 0.9 });
+  const grout = k.ramp(0x3a1210, { light: 0.35 });
   const red = k.ramp(0xff3a2a, { light: 0.5 });
-  const meat = k.ramp(0x9a2a24, { light: 0.45, sat: 1.1 });
-  const fat = k.ramp(0xe8c8a8, { light: 0.35 });
-  const bone = k.ramp(0xe8dcc0, { light: 0.3 });
-  const steel = k.ramp(0xb8b8c0, { light: 0.6, sat: 0.4 });
-  const blood = k.ramp(0x5a0808, { light: 0.4 });
-  const card = k.ramp(0xf0ece0, { light: 0.3 });
+  const meat = k.ramp(0x6a1a16, { light: 0.4, sat: 1.0 });
+  const meatLit = k.ramp(0xa8423a, { light: 0.4, sat: 1.0 });
+  const fat = k.ramp(0xb88a78, { light: 0.35 });
+  const steel = k.ramp(0x8a7a7a, { light: 0.45, sat: 0.4 });
+  const fog = k.ramp(0xb87a70, { light: 0.35, sat: 0.6 });
+  const card = k.ramp(0xe8dcc8, { light: 0.3 });
   const ink = k.ramp(0x1a1a20, { light: 0.4 });
   const frame = k.ramp(0x2a2a30, { light: 0.45 });
-  // Back wall: tiles washed red by the lamps (lighter at the top under the tubes).
+  // Back wall: big dull tiles in the red light (no pale grout grid).
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      const joint = y % 6 === 0 || (x + ((y / 6) | 0) % 2 * 3) % 6 === 0;
-      c.set(x, y, joint ? grout : tile, joint ? 2 : y < 10 ? 4 : y > H - 20 ? 2 : 3, F);
+      const joint = y % 10 === 0 || (x + ((y / 10) | 0) % 2 * 5) % 10 === 0;
+      c.set(x, y, joint ? grout : wallR, joint ? 2 : y < 14 ? 2.8 : y > H - 22 ? 1.8 : 2.2, F);
     }
   }
-  // Red tubes washing the wall.
-  for (let y = 0; y < 3; y++) c.hline(4, y + 1, W - 8, red, y === 1 ? 5 : 4, F);
-  for (let y = 4; y < 22; y++) for (let x = 0; x < W; x++) if (c.at(x, y) === tile && (y - 4) / 18 < 0.5 + 0.5 * Math.sin(x * 0.7)) c.tint(x, y, red, -1);
-  // Blood smears on the tiles, run down.
-  for (let i = 0; i < 6; i++) {
-    const x = rng.int(4, W - 6);
-    const y = rng.int(20, 40);
-    c.rect(x, y, rng.int(2, 5), rng.int(2, 4), blood, 2, F);
-    for (let j = 0; j < rng.int(6, 20); j++) c.set(x + 1, y + 3 + j, blood, 2, F);
-  }
-  // Hook rail and hooks; sides of beef (marbled, a bone end), hams, links of sausages.
-  c.rect(2, 9, W - 4, 2, steel, 4, F);
-  c.hline(2, 11, W - 4, steel, 2, F);
-  const hang = [
-    { x: 14, kind: 'side' },
-    { x: 34, kind: 'ham' },
-    { x: 52, kind: 'links' },
-    { x: 72, kind: 'side' },
-    { x: 94, kind: 'ham' },
-    { x: 114, kind: 'side' },
-  ];
-  for (const hh of hang) {
-    c.vline(hh.x, 11, 4, steel, 3, F);
-    c.set(hh.x + 1, 15, steel, 3, F);
-    if (hh.kind === 'side') {
-      // A side of beef: long tapering slab, marbled fat, the white bone knuckle at the top, ribs.
-      for (let y = 16; y < 58; y++) {
-        const t = (y - 16) / 42;
-        const hw = Math.round(4 + Math.sin(t * Math.PI) * 5 - t * 2);
-        for (let x = hh.x - hw; x <= hh.x + hw; x++) {
-          const u = (x - (hh.x - hw)) / (hw * 2 + 1);
-          const marble = hash2(x, y, 3) > 0.86 || (y % 7 === 3 && u > 0.5);
-          c.set(x, y, marble ? fat : meat, marble ? 3 : u < 0.25 ? 4 : u > 0.8 ? 2 : 3, F);
-        }
-        if (y > 24 && y < 48 && y % 4 === 0) c.hline(hh.x - hw + 2, y, hw, bone, 2, F);
-      }
-      c.ellipse(hh.x, 17, 2.5, 2, bone, 4, F);
-    } else if (hh.kind === 'ham') {
-      for (let y = 16; y < 40; y++) {
-        const t = (y - 16) / 24;
-        const hw = Math.round(1 + t * 6 - Math.max(0, t - 0.8) * 20);
-        for (let x = hh.x - hw; x <= hh.x + hw; x++) c.set(x, y, meat, x < hh.x - hw / 2 ? 4 : x > hh.x + hw / 2 ? 2 : 3, F);
-      }
-      c.hline(hh.x - 6, 34, 13, fat, 3, F);
-      c.vline(hh.x, 14, 3, bone, 4, F);
-    } else {
-      for (let y = 16; y < 50; y += 5) {
-        c.ellipse(hh.x, y + 2, 2, 2.5, meat, 3, F);
-        c.set(hh.x - 1, y + 1, meat, 5, F);
-        c.set(hh.x, y + 5, fat, 2, F);
+  // The red tube along the top (thin: the eye goes to the sign above, not here).
+  c.hline(4, 2, W - 8, red, 4, F);
+  c.hline(4, 3, W - 8, red, 3, F);
+  // Hook rail and three hanging sides of beef as dark shapes, the lamp catching their left edges.
+  c.hline(2, 9, W - 4, steel, 2.6, F);
+  for (const hx of [24, 66, 106]) {
+    c.vline(hx, 10, 4, steel, 2.4, F);
+    for (let y = 14; y < 54; y++) {
+      const t = (y - 14) / 40;
+      const hw = Math.round(3 + Math.sin(t * Math.PI) * 5 - t * 2);
+      for (let x = hx - hw; x <= hx + hw; x++) {
+        const edge = x <= hx - hw + 1;
+        const marble = hash2(x >> 1, y, 3) > 0.88;
+        c.set(x, y, edge ? meatLit : marble ? fat : meat, edge ? 3 : marble ? 1.8 : 2.2, F);
       }
     }
   }
-  // Price cards, a magnet bar of cleavers, the counter with trays of cuts.
-  for (const [x, txt] of [
-    [24, 'CHOPS'],
-    [82, 'STEAK'],
-  ] as const) {
-    c.rect(x, 44, 22, 10, card, 4, F);
-    drawText(c, txt, x + 2, 45, FONT_3x5, ink, 1, { flag: F });
-    drawText(c, '39c', x + 6, 50, FONT_3x5, red, 3, { flag: F });
+  // One lit price card.
+  c.rect(84, 46, 18, 9, card, 3.2, F);
+  drawText(c, 'CHOPS', 85, 48, FONT_3x5, ink, 1, { flag: F });
+  // The counter: a steel lip and a dark front.
+  c.rect(0, H - 13, W, 13, k.ramp(0x3a2a2a, { light: 0.4 }), 1.6, F);
+  c.hline(0, H - 13, W, steel, 3, F);
+  for (let x = 6; x < W - 16; x += 26) c.rect(x, H - 16, 16, 3, meat, 2, F);
+  // Condensation: the upper glass fogged (a dither thinning downwards), drips clearing runs through it.
+  const runs = new Set<number>();
+  for (let i = 0; i < 9; i++) runs.add(rng.int(4, W - 5));
+  for (let y = 4; y < 36; y++) {
+    const share = 0.5 * (1 - (y - 4) / 32);
+    for (let x = 1; x < W - 1; x++) {
+      if (runs.has(x) && y > 8) continue;
+      if (hash2(x >> 1, y >> 1, 77) < share) c.set(x, y, fog, 2.4, F);
+    }
   }
-  c.rect(100, 40, 26, 2, ink, 2, F);
-  for (let i = 0; i < 3; i++) {
-    c.rect(102 + i * 8, 42, 6, 9, steel, i === 1 ? 5 : 4, F);
-    c.rect(104 + i * 8, 51, 2, 4, ink, 2, F);
-  }
-  c.rect(0, H - 14, W, 14, steel, 3, F);
-  c.hline(0, H - 14, W, steel, 5, F);
-  for (let x = 4; x < W - 16; x += 22) {
-    c.rect(x, H - 13, 18, 5, fat, 3, F);
-    for (let j = 0; j < 6; j++) c.ellipse(x + 3 + j * 2.6, H - 11, 1.6, 1.4, meat, j % 2 ? 3 : 4, F);
-  }
-  c.rect(0, H - 6, W, 6, frame, 2, F);
-  // Glass: two reflection streaks and the frame.
-  for (let y = 0; y < H - 6; y++) {
-    const x0 = 30 + Math.round(y * 0.5);
-    for (let x = x0; x < x0 + 3; x++) if (x < W) c.shift(x, y, 1);
-  }
+  for (const x of runs) c.set(x, 8 + (x % 5), fog, 3.2, F);
   c.frame(0, 0, W, H, frame, 2, F);
 }
 
@@ -367,20 +332,19 @@ function paintCleaver(c: PwCanvas, k: PwKit, mirror: boolean) {
   c.ellipse(mx(20), 43, 1.2, 1.2, neon, 4, F);
 }
 
-/** White glazed tiles with a green trim line (wrap, 64 × 32 = 2 × 1 m), chipped, blood-spattered. */
+/** Oxblood glazed tiles under the windows with a dark trim line (wrap, 64 × 32 = 2 × 1 m), chipped — low-key, not a pale band. */
 function paintButcherTiles(c: PwCanvas, k: PwKit) {
-  const w = k.ramp(0xd8d4c8, { light: 0.3, sat: 0.6 });
-  const grout = k.ramp(0x8a8a80, { light: 0.3 });
-  const green = k.ramp(0x2a6a4a, { light: 0.4 });
-  const blood = k.ramp(0x5a0808, { light: 0.4 });
+  const w = k.ramp(0x6a2422, { light: 0.4, sat: 0.9 });
+  const grout = k.ramp(0x3a1614, { light: 0.3 });
+  const trim = k.ramp(0x2a2a2e, { light: 0.4 });
+  const chip = k.ramp(0x9a8478, { light: 0.3 });
   for (let y = 0; y < c.h; y++) for (let x = 0; x < c.w; x++) {
     const joint = y % 8 === 0 || x % 8 === 0;
-    c.set(x, y, joint ? grout : w, joint ? 2 : x % 8 === 1 || y % 8 === 1 ? 4 : 3);
+    c.set(x, y, joint ? grout : w, joint ? 2 : x % 8 === 1 || y % 8 === 1 ? 3.4 : 2.8);
   }
-  c.rect(0, 0, c.w, 3, green, 3);
-  c.hline(0, 0, c.w, green, 4);
-  for (let i = 0; i < 9; i++) c.cluster(k.rng.int(0, c.w - 3), k.rng.int(6, c.h - 3), k.rng.int(0, 8), blood, 2);
-  for (let i = 0; i < 6; i++) c.cluster(k.rng.int(0, c.w - 3), k.rng.int(4, c.h - 3), k.rng.int(0, 3), grout, 1);
+  c.rect(0, 0, c.w, 3, trim, 3);
+  c.hline(0, 0, c.w, trim, 4);
+  for (let i = 0; i < 5; i++) c.cluster(k.rng.int(0, c.w - 3), k.rng.int(6, c.h - 3), k.rng.int(0, 3), chip, 2);
 }
 
 // ─── Kiosks ─────────────────────────────────────────────────────────────────
@@ -406,7 +370,7 @@ function paintKioskWall(c: PwCanvas, k: PwKit) {
  * poster with its photo, a gig bill for THE GHOULS, a torn cola ad — overlapping,
  * corners lifting, paste runs and rain streaks; the boards show between them.
  */
-function paintBills(c: PwCanvas, k: PwKit) {
+function paintBills(c: PwCanvas, k: PwKit, v: number) {
   const rng = k.rng;
   const paper = k.ramp(0xe8e0c8, { light: 0.4, sat: 0.5 });
   const white = k.ramp(0xf0f0ea, { light: 0.35, sat: 0.3 });
@@ -431,11 +395,14 @@ function paintBills(c: PwCanvas, k: PwKit) {
     c.rect(x + 1, y, 3, 2, tape, 3);
   };
   // Torn remains of older bills underneath (strips).
-  for (let i = 0; i < 5; i++) {
-    const x = rng.int(0, 70);
+  for (let i = 0; i < 8; i++) {
+    const x = rng.int(0, 118);
     const y = rng.int(2, 40);
     c.rect(x, y, rng.int(4, 9), rng.int(3, 7), [paper, yel, white][i % 3], 2);
   }
+  if (v === 1) {
+    paintBillsB(c, k, sheet, { paper, white, ink, red, yel, blue, photo, skin });
+  } else {
   // EXTRA — the evening paper's bill.
   sheet(0, 6, 31, 36, paper, 1);
   drawText(c, 'EXTRA', 1, 11, FONT_5x7, ink, 1);
@@ -464,12 +431,69 @@ function paintBills(c: PwCanvas, k: PwKit) {
   // A torn strip of cola ad across the corner.
   sheet(20, 36, 18, 10, blue, 4);
   drawText(c, 'COLA', 22, 38, FONT_3x5, white, 4);
+  // LOST DOG with a drawing, a civil defence notice half torn away.
+  sheet(82, 4, 22, 28, paper, 5);
+  drawText(c, 'LOST', 85, 6, FONT_3x5, ink, 1);
+  drawText(c, 'DOG', 87, 12, FONT_3x5, ink, 1);
+  c.ellipse(92, 22, 6, 3.5, photo, 3);
+  c.ellipse(87, 19, 2.5, 2.5, photo, 3);
+  for (const lx of [88, 91, 94, 97]) c.vline(lx, 25, 3, photo, 2);
+  c.set(86, 18, ink, 0);
+  sheet(104, 14, 24, 30, yel, 6);
+  c.rect(106, 17, 20, 7, ink, 1);
+  drawText(c, 'CIVIL', 107, 18, FONT_3x5, yel, 4);
+  drawText(c, 'DEFENSE', 105, 26, FONT_3x5, ink, 1);
+  c.ellipse(116, 36, 4, 4, red, 3);
+  c.hline(112, 36, 9, white, 4);
+  }
   // Paste runs and rain streaks down the lower edges.
-  for (let i = 0; i < 16; i++) {
-    const x = rng.int(0, 79);
+  for (let i = 0; i < 24; i++) {
+    const x = rng.int(0, 127);
     const y0 = rng.int(20, 40);
     for (let y = y0; y < Math.min(47, y0 + rng.int(3, 9)); y++) if (c.at(x, y)) c.shift(x, y, -1);
   }
+}
+
+/** The second kiosk's bills: CURFEW, a revival meeting, FIGHT NITE, a ROOM TO LET card, a torn cola strip. */
+function paintBillsB(
+  c: PwCanvas,
+  k: PwKit,
+  sheet: (x: number, y: number, w: number, h: number, ramp: number, seed: number) => void,
+  r: { paper: number; white: number; ink: number; red: number; yel: number; blue: number; photo: number; skin: number },
+) {
+  const green = k.ramp(0x3a7a4a, { light: 0.45 });
+  const purple = k.ramp(0x5a3a7a, { light: 0.45 });
+  // CURFEW — the city's notice with its seal.
+  sheet(0, 3, 39, 40, r.white, 11);
+  drawText(c, 'CITY OF', 6, 6, FONT_3x5, r.ink, 1);
+  c.ellipse(19, 17, 5, 5, r.blue, 2);
+  c.ellipse(19, 17, 3, 3, r.white, 3);
+  drawText(c, 'CURFEW', 2, 25, FONT_5x7, r.red, 2);
+  drawText(c, '8 PM', 9, 34, FONT_5x7, r.ink, 1);
+  // REPENT — a revival meeting in purple and white.
+  sheet(38, 8, 24, 34, purple, 12);
+  drawText(c, 'REPENT', 39, 11, FONT_3x5, r.white, 4);
+  c.vline(49, 18, 12, r.yel, 4);
+  c.hline(45, 22, 9, r.yel, 4);
+  drawText(c, 'TENT', 42, 33, FONT_3x5, r.yel, 4);
+  // FIGHT NITE — boxing bill, two silhouettes squaring up.
+  sheet(62, 2, 30, 38, r.yel, 13);
+  drawText(c, 'FIGHT', 65, 4, FONT_5x7, r.red, 2);
+  c.ellipse(70, 17, 2, 2, r.ink, 1);
+  c.rect(68, 19, 4, 8, r.ink, 1);
+  c.hline(72, 21, 4, r.ink, 1);
+  c.ellipse(84, 17, 2, 2, r.ink, 1);
+  c.rect(82, 19, 4, 8, r.ink, 1);
+  c.hline(78, 21, 4, r.ink, 1);
+  drawText(c, 'NITE', 67, 31, FONT_5x7, r.ink, 1);
+  // ROOM TO LET card, a torn green cola strip.
+  sheet(94, 6, 20, 16, r.paper, 14);
+  drawText(c, 'ROOM', 96, 8, FONT_3x5, r.ink, 1);
+  drawText(c, 'TO LET', 95, 14, FONT_3x5, r.ink, 1);
+  sheet(100, 26, 28, 14, green, 15);
+  drawText(c, 'SUNSHINE', 101, 30, FONT_3x5, r.white, 4);
+  sheet(30, 38, 22, 9, r.red, 16);
+  drawText(c, 'VOTE', 33, 40, FONT_3x5, r.white, 4);
 }
 
 /** Two bundles of the evening paper, tied with string (24 × 14, cut-out). */

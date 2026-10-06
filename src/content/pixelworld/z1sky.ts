@@ -48,10 +48,14 @@ export function z1NightSkyTile(atlas: PwAtlas, o: Z1SkyOpts): PwTile {
 function paintSky(c: PwCanvas, k: PwKit, o: Z1SkyOpts) {
   const rng = k.rng;
   const H = c.h;
-  const sky = k.ramp(o.horizon, { light: 0.35, dark: 0.18, shift: 1.2 });
+  const fogR = k.ramp(o.horizon, { light: 0.35, dark: 0.18, shift: 1.2 });
+  // The night over the town: a dusky violet (the moonlit haze), deepening overhead — never black.
+  const vio = k.ramp(0x2e2b4a, { light: 0.32, dark: 0.3, shift: 1.1, sat: 0.85 });
+  const deep = k.ramp(0x221f3a, { light: 0.3, dark: 0.3, sat: 0.85 });
   const moonR = k.ramp(0xe6e8f4, { light: 0.45, sat: 0.5 });
   const star = k.ramp(0xc8d4ff, { light: 0.7 });
   const cloud = k.ramp(0x3a4260, { light: 0.42, sat: 0.9 });
+  const ember = k.ramp(0x9a4a34, { light: 0.45, sat: 1.05 });
   const fire = k.ramp(0xc84a1a, { light: 0.55, sat: 1.1 });
   const smoke = k.ramp(0x2a2428, { light: 0.4 });
   const R = c.ramp;
@@ -59,18 +63,35 @@ function paintSky(c: PwCanvas, k: PwKit, o: Z1SkyOpts) {
   const FL = c.flag;
   const mx = colOf(o.moonAz);
   const my = Math.round(((o.el1 - o.moonEl) / (o.el1 - o.el0)) * H);
-  // Gradient: horizon = step 3 (the fog), climbing to step 0 overhead; dithered seams (one fill per row).
+  const BAY = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  const by = (x: number, y: number) => (BAY[(y & 3) * 4 + (x & 3)] + 0.5) / 16;
+  // Gradient: flat bands climbing from the fog at the horizon through the violet haze to the deep
+  // violet overhead, each seam an ordered-dither band ~1.5° wide (the pixel artist's sky, not a ramp).
+  const bands: { el: number; r: number; t: number }[] = [
+    { el: -99, r: fogR, t: 3 },
+    { el: 2.5, r: vio, t: 3.6 },
+    { el: 8, r: vio, t: 3 },
+    { el: 15, r: vio, t: 2.4 },
+    { el: 23, r: deep, t: 3 },
+    { el: 31, r: deep, t: 2.4 },
+  ];
+  const SEAM = 1.6;
   for (let y = 0; y < H; y++) {
     const el = elOf(y, H, o.el0, o.el1);
-    const t = 3 - Math.min(3, Math.max(0, (el - 1) / 9) ** 0.8 * 1.15);
+    let j = 0;
+    while (j + 1 < bands.length && el >= bands[j + 1].el) j++;
     const i0 = y * TW;
-    R.fill(sky, i0, i0 + TW);
-    T.fill(t, i0, i0 + TW);
-    FL.fill(PWF.DITHER, i0, i0 + TW);
+    // Within SEAM° above a band's start, dither in from the band below.
+    const f = j > 0 ? (el - bands[j].el) / SEAM : 1;
+    for (let x = 0; x < TW; x++) {
+      const b = f < 1 && by(x, y) > f ? bands[j - 1] : bands[j];
+      R[i0 + x] = b.r;
+      T[i0 + x] = b.t;
+      FL[i0 + x] = 0;
+    }
   }
   // Fire glow on the horizon: a warm wash rising a few degrees at each fire's azimuth, dithered into the
   // sky (the share of fire texels falls off with the distance — no hard dome edge).
-  const BAY = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   for (const az of o.fires) {
     const fx = colOf(az);
     const span = 90;
@@ -83,21 +104,40 @@ function paintSky(c: PwCanvas, k: PwKit, o: Z1SkyOpts) {
         const x = wrapX(fx + dx);
         const i = y * TW + x;
         const share = (1 - d) ** 1.6 * 0.95;
-        if ((BAY[(y & 3) * 4 + (x & 3)] + 0.5) / 16 > share) continue;
+        if (by(x, y) > share) continue;
         R[i] = fire;
         T[i] = d < 0.3 ? 2 : 1;
         FL[i] = 0;
       }
     }
   }
-  // Moon halo: one step up in a soft, dithered disc (no hard ring).
-  const GR = Math.ceil(11 * PW_BACKDROP_TPD);
+  // Moon halo: stepped rings (moonlit haze, three steps up toward the disc) with dithered seams.
+  const h1 = k.ramp(0x332d56, { light: 0.3 });
+  const h2 = k.ramp(0x3f3768, { light: 0.3 });
+  const h3 = k.ramp(0x51477e, { light: 0.3 });
+  const rings: [number, number, number][] = [
+    [9.5, h1, 3],
+    [6, h2, 3],
+    [3.8, h3, 3],
+  ];
+  const GR = Math.ceil(10.5 * PW_BACKDROP_TPD);
   for (let y = Math.max(0, my - GR); y < Math.min(H, my + GR); y++) {
     for (let dxp = -GR; dxp <= GR; dxp++) {
-      const dm = Math.hypot(dxp, y - my) / PW_BACKDROP_TPD;
-      if (dm >= 11) continue;
-      const i = y * TW + wrapX(mx + dxp);
-      T[i] = Math.min(4.2, T[i] + ((11 - dm) / 11) ** 1.6 * 1.6);
+      const x = wrapX(mx + dxp);
+      const dm = Math.hypot(dxp, (y - my) * 1.05) / PW_BACKDROP_TPD;
+      const i = y * TW + x;
+      for (let r = rings.length - 1; r >= 0; r--) {
+        const [rad, rr, tt] = rings[r];
+        // Ring edge wobbles a little (painted, not compass-drawn), a 0.7° dither seam.
+        const wob = rad * (1 + Math.sin(Math.atan2(y - my, dxp) * 3 + r) * 0.04);
+        const e = (wob - dm) / 0.7;
+        if (e <= 0) continue;
+        if (e < 1 && by(x, y) > e) continue;
+        R[i] = rr;
+        T[i] = tt;
+        FL[i] = 0;
+        break;
+      }
     }
   }
   // Stars: sparse, brighter higher up, none in the moon's glow or over the fire glow.
@@ -126,11 +166,16 @@ function paintSky(c: PwCanvas, k: PwKit, o: Z1SkyOpts) {
       if (m > 0.66) t = 2;
       else if (m > 0.56) t = 3;
       if (d > MR - 1.4 && x + y < 0) t = 5;
-      if (term) t = Math.max(1, t - 2);
+      // The shadowed part: earthshine — just a step over the halo around it (no grey wedge).
+      if (term) {
+        c.set(px, py, h3, d > MR - 1.4 ? 3.6 : 4.2, PWF.GLOW);
+        continue;
+      }
       c.set(px, py, moonR, t, PWF.GLOW);
     }
   }
   for (const [x, y] of [[-5, 3], [-2, -6], [3, 5], [-7, -1]]) {
+    if (c.at(wrapX(mx + x), my + y) !== moonR || c.at(wrapX(mx + x + 1), my + y + 1) !== moonR) continue;
     c.set(wrapX(mx + x), my + y, moonR, 2, PWF.GLOW);
     c.set(wrapX(mx + x + 1), my + y + 1, moonR, 5, PWF.GLOW);
   }
@@ -156,7 +201,10 @@ function paintSky(c: PwCanvas, k: PwKit, o: Z1SkyOpts) {
   }
   for (const [cx, el, w, h] of banks) {
     const base = Math.round(((o.el1 - el) / (o.el1 - o.el0)) * H);
-    cloudBank(c, cloud, cx, base, w, h, mx < cx ? -1 : 1, hash2(cx, base, 5) * 1000);
+    // Low banks near a fire (or over the lit town) catch its glow on their bellies.
+    const near = Math.min(...o.fires.map((az) => dcol(cx, colOf(az)) / (TW / 360)));
+    const warm = Math.max(0, 1 - near / 70) * Math.max(0, 1 - (el - 4) / 12);
+    cloudBank(c, cloud, cx, base, w, h, mx < cx ? -1 : 1, hash2(cx, base, 5) * 1000, ember, warm);
   }
   // Smoke columns over the fires: broad billowing columns leaning with the wind, lumpy edges, lit
   // orange from below, thinning into the sky at the top.
@@ -199,7 +247,7 @@ function paintSky(c: PwCanvas, k: PwKit, o: Z1SkyOpts) {
  * the way a pixel artist shades a cloud — a lit crust along its top edge (two
  * steps toward the moon side), the body, a darker belly breaking into dither.
  */
-function cloudBank(c: PwCanvas, ramp: number, cx: number, base: number, w: number, h: number, side: number, seed: number) {
+function cloudBank(c: PwCanvas, ramp: number, cx: number, base: number, w: number, h: number, side: number, seed: number, belly = 0, warm = 0) {
   const n = Math.max(4, Math.round(w / 11));
   const x0 = Math.floor(cx - w / 2 - h * 3);
   const BW = Math.ceil(w + h * 6) + 2;
@@ -240,12 +288,14 @@ function cloudBank(c: PwCanvas, ramp: number, cx: number, base: number, w: numbe
       const towardMoon = side < 0 ? !mask[j - 1] : !mask[j + 1];
       let t = depth < 1 ? 3 : depth < 3 ? 2 : 1;
       if (towardMoon && depth < 4) t = 3;
-      const belly = base - y;
-      if (belly < 2 && (B[(y & 3) * 4 + (x & 3)] + 0.5) / 16 > 0.5) {
+      const bl = base - y;
+      if (bl < 2 && (B[(y & 3) * 4 + (x & 3)] + 0.5) / 16 > 0.5) {
         depth++;
         continue;
       }
-      c.set(x, y, ramp, t, PWF.GLOW);
+      // The underside lit by the town / the fires below: a warm band breaking up into dither.
+      if (belly && depth > 1 && bl < 4 && (bl < 2 ? warm > 0.35 : (B[(y & 3) * 4 + (x & 3)] + 0.5) / 16 < warm - 0.3)) c.set(x, y, belly, bl < 2 ? 2 : 1.6, PWF.GLOW);
+      else c.set(x, y, ramp, t, PWF.GLOW);
       depth++;
     }
   }
