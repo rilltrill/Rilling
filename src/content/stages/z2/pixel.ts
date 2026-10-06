@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { Kit } from '../../kit/ModelKit';
 import type { TexName } from '../../kit/Textures';
 import { PwAtlas, type PwTile } from '../../pixelworld/atlas';
 import { PwBatch, planarUv } from '../../pixelworld/batch';
@@ -1446,7 +1449,75 @@ export class Z2PixelWorld {
       g.setAttribute('pwRect', new THREE.BufferAttribute(rect, 4));
       g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
       p.material = mat;
+      // What flies when the brute bursts it (`burstWall` swaps it in): the block broken off
+      // (corners chipped away, painted brick face, rubble core on every break).
+      p.userData.pwChunk = this.wallChunk(p, w.pieces.indexOf(p), face.tile, core, _col);
     }
+  }
+
+  /**
+   * A chipped wall block: the convex hull of the block's corners with about half of them
+   * knocked off at uneven depths (and every block a little smaller than its slot), so the
+   * burst throws broken masonry rather than cubes. Front / back faces keep the wall's
+   * painted block face (continuous u / v as in the wall), every break shows the rubble core.
+   */
+  private wallChunk(p: THREE.Mesh, i: number, face: PwTile, core: PwTile, tint: THREE.Color): THREE.BufferGeometry {
+    const bp = (p.geometry as THREE.BoxGeometry).parameters;
+    const hx = (bp?.width ?? 1) / 2;
+    const hy = (bp?.height ?? 1) / 2;
+    const hz = (bp?.depth ?? 0.3) / 2;
+    // Cracked through: two convex halves either side of a slanted break (a few cm apart, they
+    // fly as one), each with chipped corners.
+    const s1 = (hash2(i, 12, 84) - 0.5) * hx * 0.7;
+    const s2 = (hash2(i, 13, 85) - 0.5) * hx * 0.7;
+    const gap = 0.025;
+    const half = (side: -1 | 1): THREE.BufferGeometry => {
+      const pts: THREE.Vector3[] = [];
+      let k = side < 0 ? 0 : 8;
+      for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+        const h = hash2(i, k, 77);
+        const ax = hx * (0.15 + 0.3 * hash2(i, k, 78));
+        const ay = hy * (0.22 + 0.4 * hash2(i, k, 79));
+        const az = hz * (0.3 + 0.5 * hash2(i, k, 80));
+        const sx = side;
+        if (h < 0.6) {
+          pts.push(new THREE.Vector3(sx * (hx - ax), sy * hy, sz * hz), new THREE.Vector3(sx * hx, sy * (hy - ay), sz * hz), new THREE.Vector3(sx * hx, sy * hy, sz * (hz - az)));
+        } else pts.push(new THREE.Vector3(sx * hx, sy * hy, sz * hz));
+        k++;
+        // The break: the slanted cut, a little rough (one point set back from it).
+        const cx = (sy > 0 ? s1 : s2) + side * gap;
+        pts.push(new THREE.Vector3(cx, sy * hy, sz * hz));
+      }
+      const mid = (s1 + s2) / 2 + side * (gap + hx * 0.12 * hash2(i, side + 20, 86));
+      pts.push(new THREE.Vector3(mid, (hash2(i, side + 22, 87) - 0.5) * hy, hz), new THREE.Vector3(mid, (hash2(i, side + 24, 88) - 0.5) * hy, -hz));
+      for (const q of pts) q.multiplyScalar(0.92);
+      return new ConvexGeometry(pts);
+    };
+    const g = mergeGeometries([half(-1), half(1)], false)!;
+    const pos = g.getAttribute('position');
+    const nrm = g.getAttribute('normal');
+    const n = pos.count;
+    const uv = new Float32Array(n * 2);
+    const rect = new Int16Array(n * 4);
+    const col = new Uint8Array(n * 3);
+    for (let v = 0; v < n; v++) {
+      _a.fromBufferAttribute(pos, v);
+      const nz = nrm.getZ(v);
+      const front = Math.abs(nz) > 0.85;
+      const t = front ? face : core;
+      const wx = _a.x + p.position.x;
+      const wy = _a.y + p.position.y;
+      uv[v * 2] = (front ? (nz > 0 ? wx : -wx) : Math.abs(nrm.getX(v)) > Math.abs(nrm.getY(v)) ? _a.z + wy : wx + _a.z) * PW_TPM;
+      uv[v * 2 + 1] = (front ? wy : Math.abs(nrm.getY(v)) > 0.7 ? _a.z : wy) * PW_TPM;
+      rect.set([t.x, t.y, t.w, t.h], v * 4);
+      if (front) col.set([Math.round(tint.r * 255), Math.round(tint.g * 255), Math.round(tint.b * 255)], v * 3);
+      else col.set([255, 255, 255], v * 3);
+    }
+    g.setAttribute('pwUv', new THREE.BufferAttribute(uv, 2));
+    g.setAttribute('pwRect', new THREE.BufferAttribute(rect, 4));
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
+    Kit.track(g);
+    return g;
   }
 
   /**

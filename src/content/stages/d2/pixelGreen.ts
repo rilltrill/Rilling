@@ -7,7 +7,7 @@ import type { BurstDoor } from './setpieces';
 import { ashlarPlinthTile, canopyFasciaTile, flagstoneTile, glazingTile, jungleFlatTile, rubbleTile, soilTile } from '../../pixelworld/d2green';
 import { moonTile, nightSkyPlaneTile, bloodDragTile, paperTile, vineCurtainTile } from '../../pixelworld/d2lobby';
 import { acousticTile } from '../../pixelworld/d2shop';
-import { biohazardTile, gratingTile, helixScreenTile, hoseCardTile, incubatorApronTile, incubatorPanelTile, nestTile, sequencerTile, subwayTileWall, vinylFloorTile } from '../../pixelworld/d2lab';
+import { biohazardTile, gratingTile, helixScreenTile, hoseCardTile, incubatorApronTile, incubatorPanelTile, labCabinetTile, nestTile, sequencerTile, subwayTileWall, vinylFloorTile } from '../../pixelworld/d2lab';
 import { gougeDecal } from '../../pixelworld/d2decals';
 import { condensationTile, glassSheenTile } from '../../pixelworld/d2glass';
 import { tintFor } from '../../pixelworld/batch';
@@ -213,6 +213,9 @@ function convertHatch(pw: D2PixelWorld, parts: RoomParts) {
       }
     });
   });
+  // Two dark equipment cabinets on the right wall behind where the lab tech takes cover
+  // (W(8, -140); the wall face is 0.2 m in from R.x1): her white coat reads against them, not the pale tiles.
+  for (const z0 of [-143.7, -142.1]) b.rect(_o.set(R.x1 - 0.25, 0, z0), Z, Y, 1.5, 2, labCabinetTile(a));
   // Genome displays: the sequencer above each console, a helix on each monitor.
   for (const s of [-1, 1]) {
     const cx = exitX + s * 5.5;

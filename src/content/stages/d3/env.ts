@@ -7,6 +7,7 @@ import { EnvKit } from '../../kit/EnvKit';
 import { Kit } from '../../kit/ModelKit';
 import { Rng } from '../../../core/Rng';
 import { clamp, smoothstep } from '../../../core/math';
+import { hash2 } from '../../pixelworld/surfaces';
 import { Baker, Sink, type Prefab } from './bake';
 import { Flora } from './flora';
 import { Storm, STORM } from './weather';
@@ -757,7 +758,8 @@ export class ParkEnv {
             const lat = rng.spread(3);
             const yaw = h + rng.range(0, 3);
             const sz = rng.range(1.2, 2.2);
-            this.pw.puddle(this.at(d, lat, 0.045), yaw, r, r * sz, d);
+            // Half of the classic ones (by hash, not a draw): ≈ 0.06 a metre.
+            if (hash2(d, 0, 907) < 0.5) this.pw.puddle(this.at(d, lat, 0.045), yaw, r, r * sz, d);
           }
           continue;
         }
@@ -1242,7 +1244,9 @@ export class ParkEnv {
         const d = rng.range(D.MUD_FROM + 2, D.MUD_TO - 2);
         const lat = rng.spread(4.5);
         const yaw = this.heading(d) + rng.range(0, 3);
-        this.pw.puddle(this.at(d, lat, 0.05), yaw, r, r * rng.range(1.3, 2.4), i, true);
+        const sz = rng.range(1.3, 2.4);
+        // (Five of the nine classic pools: the stretch reads as mud with pools, not a lake of rings.)
+        if (i < 5) this.pw.puddle(this.at(d, lat, 0.05), yaw, r, r * sz, i, true);
         continue;
       }
       const m = Kit.add(pools, Kit.cyl(r, r, 0.02, 10), this.puddleMat);

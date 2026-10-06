@@ -175,8 +175,10 @@ export class D3PixelWorld {
   readonly skyAtlas = new PwAtlas('d3-sky', { levels: 1 });
   /** The terrain: one planar mesh (world-projected wrap tiles, per-vertex tint). */
   readonly terrain: PwBatch;
-  /** Animated strips (puddles, water). */
+  /** Animated strips (water, foam, flames). */
   readonly anim: PwBatch;
+  /** Rain puddles: animated, on their own material (levels a step early: calm dark pools at a distance). */
+  readonly puddles: PwBatch;
   /** Static painted scenery per 60 m chunk (fog-culled with the classic chunks). */
   private chunks = new Map<number, PwBatch>();
   /** Signs per chunk (their own material: level bias −0.25, the letters stay whole further away). */
@@ -206,6 +208,7 @@ export class D3PixelWorld {
   private fog: THREE.Fog | null = null;
   private fogBase = new THREE.Color(STORM.fog);
   private animMat: THREE.Material | null = null;
+  private puddleMat: THREE.Material | null = null;
   /** The forks' material (made at `finish`: the world atlas must be painted first). */
   boltMat!: THREE.MeshBasicMaterial;
   private floorT: PwTile;
@@ -221,6 +224,7 @@ export class D3PixelWorld {
     this.terrain = new PwBatch(a, { planar: true });
     this.stones = new FloraField(floraAtlas(D1_STONES, D3_STONE_BIOME, 'd3-stones'), { far: 88, rim: 0x8aa4d8, rimStrength: 0.22, gain: 0.74, localCap: 0.3 });
     this.anim = new PwBatch(a);
+    this.puddles = new PwBatch(a);
     this.floorT = d3FloorTile(a, { hex: D3C.grass, dark: D3C.loam, leaf: D3C.leaf, water: D3C.sky, stone: D3C.stone });
     this.mudT = d3MudTile(a, { hex: D3C.mud, water: D3C.water });
     this.rockT = d3RockTile(a, { hex: 0x5c5a52, moss: 0x34492d });
@@ -298,7 +302,7 @@ export class D3PixelWorld {
     const sx = rx * 2.3;
     const sz = rz * 2.3;
     const o = new THREE.Vector3(p.x, p.y, p.z).addScaledVector(ax, -sx / 2).addScaledVector(az, sz / 2);
-    this.anim.rect(o, ax, az.negate(), sx, sz, t, { sub, flipU: (variant & 1) === 1 });
+    this.puddles.rect(o, ax, az.negate(), sx, sz, t, { sub, flipU: (variant & 1) === 1 });
   }
 
   /** A Tyrant footprint at (x, y, z), toes along `yaw` (+z of that frame), `s` × the 2 × 2.5 m print. */
@@ -829,6 +833,36 @@ export class D3PixelWorld {
       b.withMatrix(b.matrix.clone().multiply(_m), () => pwPanel(b, V(0, 0, 0), X, Y, 2.25, 0.3, d3BumperModule(a), { back: true }));
       _m.makeTranslation(0.5, 2.6, -1.2).multiply(new THREE.Matrix4().makeRotationX(-0.35));
       b.withMatrix(b.matrix.clone().multiply(_m), () => b.box(0, 0, 0, 0.3, 0.3, 4.2, crane));
+      // Profiled like z3's vehicles (round 5): the cab's box broken by a sun visor over the
+      // windscreen, an amber beacon, mirrors out on arms, rubber fender arches over every
+      // wheel and mud flaps behind them.
+      const black = d3EnamelTile(a, { hex: 0x1c1c1e });
+      const amber = d3EnamelTile(a, { hex: 0xe0a020 });
+      const steel = d3EnamelTile(a, { hex: 0x8a8a86 });
+      const M = b.matrix.clone();
+      const at = (m: THREE.Matrix4, fn: () => void) => b.withMatrix(M.clone().multiply(m), fn);
+      at(new THREE.Matrix4().makeTranslation(0, 2.33, 2.86).multiply(new THREE.Matrix4().makeRotationX(0.3)), () => b.box(0, 0, 0, 2.24, 0.05, 0.3, black));
+      b.box(0.72, 2.4, 2.35, 0.26, 0.2, 0.26, { px: amber, nx: amber, pz: amber, nz: amber, py: amber, ny: null });
+      b.box(0.72, 2.29, 2.35, 0.34, 0.04, 0.34, black);
+      for (const sx of [-1, 1]) {
+        b.box(sx * 1.24, 2.05, 2.62, 0.3, 0.04, 0.04, steel);
+        b.box(sx * 1.4, 1.95, 2.62, 0.06, 0.42, 0.24, { pz: black, nz: steel, px: black, nx: black, py: black, ny: black });
+        // Fender arches: six rubber segments round each wheel, standing 0.12 m proud of the body.
+        for (const wz of [-2.4, -0.6, 1.9]) {
+          const side = wz > 1 ? 1.1 : 1.15;
+          for (let k = 0; k < 6; k++) {
+            const a0 = (k / 6) * Math.PI;
+            const a1 = ((k + 1) / 6) * Math.PI;
+            const am = (a0 + a1) / 2;
+            const r = 0.62;
+            const len = 2 * r * Math.sin((a1 - a0) / 2) + 0.02;
+            _m.makeTranslation(sx * (side + 0.04), 0.4 + Math.sin(am) * r, wz + Math.cos(am) * r).multiply(new THREE.Matrix4().makeRotationX(-(am - Math.PI / 2)));
+            at(_m, () => b.box(0, 0, 0, 0.14, 0.07, len, black));
+          }
+          // Mud flap behind the wheel (rubber, caked).
+          b.box(sx * 1.02, 0.42, wz - 0.66, 0.36, 0.56, 0.03, { pz: black, nz: black, px: black, nx: black, py: null, ny: null });
+        }
+      }
     });
   }
 
@@ -1300,6 +1334,12 @@ export class D3PixelWorld {
     this.animMat = pwMaterial(this.atlas, { anim: { frames: D3_ANIM_FRAMES, fps: 8 } });
     const an = this.anim.build(this.animMat);
     if (an) root.add(an);
+    this.puddleMat = pwMaterial(this.atlas, { anim: { frames: D3_ANIM_FRAMES, fps: 8 }, bias: 1, tag: 'puddle' });
+    const pu = this.puddles.build(this.puddleMat);
+    if (pu) {
+      pu.name = 'pw:d3-puddles';
+      root.add(pu);
+    }
     for (const [p, c] of this.late) p.add(c);
     for (const p of this.parts) {
       const m = p.batch.build(p.mat === 'sign' ? signMat : p.mat === 'calm' ? calmMat : undefined);
@@ -1328,6 +1368,7 @@ export class D3PixelWorld {
   update(dt: number, cam: THREE.Vector3, flash: number, gust = 0) {
     this.time += dt;
     if (this.animMat) pwTick(this.animMat, dt);
+    if (this.puddleMat) pwTick(this.puddleMat, dt);
     for (const sk of this.socks) {
       const t = this.time;
       sk.rotation.y = -0.45 + Math.sin(t * 0.7) * 0.22 - gust * 0.2;

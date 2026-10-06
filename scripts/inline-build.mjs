@@ -18,6 +18,11 @@ const OUT = path.join(DIST, 'overrun.html');
 // PIXEL WORLD stages landed: their environments are painted by code at load (no image
 // assets), so the art lives in the script. A claude.ai artifact page takes up to 16 MB.
 const LIMIT = 3.5 * 1024 * 1024;
+// Size regression check: the committed baseline (the size at HEAD). Growth beyond SLACK fails
+// the build so every increase is a conscious one: accept it with
+//   SINGLE_SIZE_UPDATE=1 npm run build:single     (rewrites scripts/single-size.json — commit it)
+const BASELINE = path.join(ROOT, 'scripts', 'single-size.json');
+const SLACK = 64 * 1024;
 
 if (!fs.existsSync(path.join(DIST, 'index.html'))) {
   console.error('dist-single/index.html not found — run `vite build --mode single` first.');
@@ -82,4 +87,19 @@ console.log(
 if (size > LIMIT) {
   console.error(`[single] WARNING: ${(size / 1048576).toFixed(2)} MB exceeds the ${LIMIT / 1048576} MB budget`);
   process.exitCode = 1;
+}
+let base = null;
+try {
+  base = JSON.parse(fs.readFileSync(BASELINE, 'utf8')).bytes;
+} catch {}
+if (process.env.SINGLE_SIZE_UPDATE) {
+  fs.writeFileSync(BASELINE, JSON.stringify({ bytes: size, kb: Math.round(size / 1024), note: 'dist-single/overrun.html size at HEAD (scripts/inline-build.mjs size regression check)' }, null, 2) + '\n');
+  console.log(`[single] size baseline updated: ${(size / 1024).toFixed(0)} KB${base ? ` (was ${(base / 1024).toFixed(0)} KB)` : ''}`);
+} else if (typeof base === 'number') {
+  const d = size - base;
+  console.log(`[single] ${d >= 0 ? '+' : ''}${(d / 1024).toFixed(1)} KB vs the committed baseline (${(base / 1024).toFixed(0)} KB)`);
+  if (d > SLACK) {
+    console.error(`[single] SIZE REGRESSION: ${(d / 1024).toFixed(0)} KB over the baseline (slack ${SLACK / 1024} KB). If intended: SINGLE_SIZE_UPDATE=1 npm run build:single, and commit scripts/single-size.json.`);
+    process.exitCode = 1;
+  }
 }

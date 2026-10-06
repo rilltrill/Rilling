@@ -150,6 +150,8 @@ const FALL_TIME = 1.7;
 const RUN_SPEED = 2.8;
 /** Seconds a run aims to stay on screen (Operation Wolf civilians cross the view). */
 const FLEE_SCREEN = 3;
+/** A rescued civilian walking off blinks out once this close to the camera (m, view depth). */
+const LEAVE_NEAR = 4;
 const STARTLE_TIME = 0.12;
 const FLINCH_TIME = 0.22;
 /** The yank: the civilian lurches this far toward the zombie (m), the zombie steps back this far. */
@@ -211,6 +213,10 @@ export class Civilian extends Entity {
   private rig: HumanoidRig;
   private baked: BakedHumanoid;
   rescued = false;
+  /** Phase time the walk-off was last re-aimed. */
+  private leaveAim = 0;
+  /** Walking off near the lens: blinking out (s), −1 = not yet. */
+  private blinkT = -1;
   shot = false;
   /** Got away off screen (hidden, no target): paid when the encounter is cleared. */
   escaped = false;
@@ -767,8 +773,14 @@ export class Civilian extends Entity {
       }
       case 'flee':
       case 'leave': {
-        if (!this.destSet) this.pickDest(this.phase === 'flee' ? FLEE_SCREEN : 1.8);
-        const run = this.phase === 'flee' ? RUN_SPEED : 2.6;
+        // (Walking off: re-aimed every half second, so a moving camera never ends up in their path.)
+        if (this.phase === 'leave' && t - this.leaveAim > 0.5) {
+          this.leaveAim = t;
+          this.destSet = false;
+        }
+        // (Walking off: the quickest way out of the side of the view.)
+        if (!this.destSet) this.pickDest(this.phase === 'flee' ? FLEE_SCREEN : 0.5);
+        const run = this.phase === 'flee' ? RUN_SPEED : 3;
         this.speed = Math.min(run, this.speed + dt * 8);
         this.runT += dt;
         _n.copy(this.dest).sub(this.root.position).setY(0);
@@ -797,7 +809,14 @@ export class Civilian extends Entity {
             break;
           }
         }
-        if (this.offScreen() && t > 0.3) {
+        if (this.phase === 'leave' && (this.blinkT >= 0 || this.nearLens())) {
+          // Never fills the lens on the way out: within ~4 m of the camera they blink out,
+          // the arcade way (on / off every 0.06 s for 0.42 s), then they're gone.
+          if (this.blinkT < 0) this.blinkT = 0;
+          this.blinkT += dt;
+          this.root.visible = Math.floor(this.blinkT / 0.06) % 2 === 1;
+          if (this.blinkT > 0.42) this.removed = true;
+        } else if (this.offScreen() && t > 0.3) {
           // Got away: safe off screen.
           if (this.phase === 'leave') this.removed = true;
           else this.escape();
@@ -1008,6 +1027,7 @@ export class Civilian extends Entity {
     this.phaseT = 0;
     if (p === 'plead') this.say(CIV_STAMP.bubble.help, Math.min(this.helpTime, 2));
     if (p === 'thanks') this.say(CIV_STAMP.bubble.thanks, 1.3);
+    if (p === 'leave') this.leaveAim = 0;
     if (p === 'backaway' && this.helps === 0) this.say(CIV_STAMP.bubble.help, 0.9);
     if (p === 'flee') {
       this.lookBackT = 0.6;
@@ -1273,7 +1293,19 @@ export class Civilian extends Entity {
     const X = Math.abs(this.viewX(p));
     const Z = Math.max(0.5, this.viewZ(p));
     const E = this.edgeTan();
+    // A rescued civilian walking off never heads toward the lens: to the nearer screen side,
+    // a little away from the camera (re-aimed as the camera moves, see 'leave').
+    const leave = this.phase === 'leave';
+    if (leave) {
+      const vx = this.viewX(p);
+      if (Math.abs(vx) > 0.3) this.side = vx > 0 ? 1 : -1;
+    }
+    const i0 = leave ? 6 : 0;
     for (let i = 0; i < HEADINGS; i++) {
+      if (i < i0) {
+        _cost[i] = Infinity;
+        continue;
+      }
       const a = -0.6 + i * 0.115;
       const ca = Math.cos(a);
       const sa = Math.sin(a);
@@ -1284,8 +1316,8 @@ export class Civilian extends Entity {
       _len[i] = l;
       _cost[i] = Math.abs(l / RUN_SPEED - secs) + 0.4 * Math.abs(a);
     }
-    let pick = 0;
-    for (let i = 1; i < HEADINGS; i++) if (_cost[i] < _cost[pick]) pick = i;
+    let pick = i0;
+    for (let i = i0 + 1; i < HEADINGS; i++) if (_cost[i] < _cost[pick]) pick = i;
     this.headingTo(pick, _len[pick] + 3, this.dest);
     this.dest.y = p.y;
   }
@@ -1324,6 +1356,12 @@ export class Civilian extends Entity {
     if (this.viewZ(_v) < 0.4) return true;
     _v.project(this.world.camera);
     return _v.z > 1 || Math.abs(_v.x) > 1.12 || _v.y < -1.15;
+  }
+
+  /** Within LEAVE_NEAR of the camera (in front of it): a walk-off ends here rather than filling the screen. */
+  private nearLens(): boolean {
+    this.rig.chest.getWorldPosition(_v);
+    return this.viewZ(_v) < LEAVE_NEAR;
   }
 
   /** The chest well inside the view (|NDC x| < `margin`). */

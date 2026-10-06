@@ -91,6 +91,13 @@ const PW_SMOKE_FIRE = new THREE.Color(0x6a2c18);
 const PW_SMOKE_SOOT = new THREE.Color(0x1c1618);
 const PW_SMOKE_BODY = new THREE.Color(0x3a302e);
 const PW_SMOKE_THIN = new THREE.Color(0x3a3448);
+/** A smoke particle's first (stagger) life is at most 4 s: a pre-rolled billow's virtual life. */
+const PW_PREROLL = 4;
+/** −1…1 from an index and a seed (no RNG draw). */
+function hashSigned(i: number, seed: number): number {
+  const x = Math.sin(i * 12.9898 + seed * 78.233) * 43758.5453;
+  return (x - Math.floor(x)) * 2 - 1;
+}
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -639,7 +646,16 @@ export class FirePlume {
   private smoke: Cloud;
   private rng: Rng;
   private t = 0;
-  active = true;
+  private lit = true;
+  /** Cleared before the first update (a fire ignited in play, not burning since the stage began). */
+  private litFromStart = true;
+  get active() {
+    return this.lit;
+  }
+  set active(v: boolean) {
+    if (!v && this.t === 0) this.litFromStart = false;
+    this.lit = v;
+  }
   private o: Required<Omit<FireOptions, 'light'>> & { light: THREE.PointLight | null };
 
   constructor(o: FireOptions = {}) {
@@ -699,10 +715,20 @@ export class FirePlume {
     this.group.remove(this.smoke.points);
     this.group.add(im);
     this.puffs = im;
+    this.born = new Uint8Array(this.smoke.n);
   }
 
   /** ART: PIXEL WORLD's painted smoke billows (replaces the smoke points). */
   private puffs: THREE.InstancedMesh | null = null;
+  /**
+   * PIXEL WORLD: which smoke particles have been (re)spawned at least once. A particle's
+   * FIRST life is a stagger (`life` 0…4 s against `max` 1, at the origin, not moving): the
+   * classic points hide it in their alpha, a billow must not be drawn from it (k > 1 made
+   * negative ages: 40–176 m red-orange squares). Until its first spawn a billow is either
+   * hidden (a fire ignited in play: the column builds up) or, for a fire burning since the
+   * stage began, drawn as a pre-rolled billow of an already standing column — no RNG.
+   */
+  private born: Uint8Array | null = null;
 
   update(dt: number) {
     this.group.visible = this.active;
@@ -755,6 +781,7 @@ export class FirePlume {
       m.life[i] -= dt;
       const j = i * 3;
       if (m.life[i] <= 0) {
+        if (this.born) this.born[i] = 1;
         m.max[i] = m.life[i] = this.rng.range(3, 5);
         m.pos[j] = this.rng.spread(0.5 * s);
         m.pos[j + 1] = 1.4 * s;
@@ -777,11 +804,18 @@ export class FirePlume {
       if (this.puffs) {
         // Painted billows: a dense core low, cauliflower billows in the body, thinning wisps and
         // sheared tops high up; grow as they rise, shrink in / out instead of fading (cut-out texels).
-        const age = 1 - k;
+        let kk = k;
+        if (this.born![i]) _p.set(m.pos[j], m.pos[j + 1], m.pos[j + 2]);
+        else if (this.litFromStart) {
+          // Pre-rolled: as if spawned PW_PREROLL s before this particle's first real spawn.
+          kk = m.life[i] / PW_PREROLL;
+          const el = PW_PREROLL - m.life[i];
+          _p.set(hashSigned(i, this.o.seed) * 0.5 * s + 0.25 * el, 1.4 * s + 1.3 * el, hashSigned(i + 31, this.o.seed) * 0.8 * s);
+        } else kk = 0;
+        const age = Math.min(1, Math.max(0, 1 - kk));
         const grow = s * (0.95 + age * 2.1);
-        const fade = Math.min(1, age / 0.1, k / 0.22);
+        const fade = Math.max(0, Math.min(1, age / 0.1, kk / 0.22));
         const cell = age < 0.28 ? (i % 2 ? 3 : i % 3) : age > 0.62 ? 4 + (i & 1) : (i + 1) % 3;
-        _p.set(m.pos[j], m.pos[j + 1], m.pos[j + 2]);
         _s.set(Math.max(0.001, grow * fade), Math.max(0.001, grow * fade), 1 + cell);
         _m.compose(_p, _q.identity(), _s);
         this.puffs.setMatrixAt(i, _m);

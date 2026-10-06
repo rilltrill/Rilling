@@ -208,7 +208,7 @@ export function d3TruckDoorModule(atlas: PwAtlas, o: { hex: number }): PwTile {
 export function d3TruckFrontModule(atlas: PwAtlas, o: { hex: number }): PwTile {
   const W = 70;
   const H = 52;
-  return atlas.tile(`d3truckfront2|${h6(o.hex)}`, W, H, (c, k) => {
+  return atlas.tile(`d3truckfront3|${h6(o.hex)}`, W, H, (c, k) => {
     const y = k.ramp(o.hex, { light: 0.45, sat: 1.0 });
     const dark = k.ramp(0x1c1c1e, { light: 0.4 });
     const st = k.ramp(0x8a8a86, { light: 0.5, sat: 0.6 });
@@ -250,6 +250,13 @@ export function d3TruckFrontModule(atlas: PwAtlas, o: { hex: number }): PwTile {
     c.rect(27, 44, 16, 4, k.ramp(0xe8e2c8, { light: 0.3 }), 3.6);
     drawText(c, 'PI 3', 29, 44, FONT_3x5, dark, 1);
     c.scatter(k.rng, 0, 36, W, 16, 40, mud, 2.6, { shapes: 6 });
+    // Rounded front corners: the outer columns turn away from the light (left a lit roll, right a shadowed one).
+    for (let yy = 0; yy < H; yy++) {
+      c.shift(0, yy, 1);
+      c.shift(1, yy, 0.5);
+      c.shift(W - 1, yy, -1.2);
+      c.shift(W - 2, yy, -0.6);
+    }
   });
 }
 

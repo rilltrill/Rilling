@@ -183,6 +183,8 @@ export function burstWall(world: World) {
   world.fx.dust(_v.copy(bw.centre).setY(B + 0.4), 2.2, 0x8a8478);
   world.fx.debris(_v.copy(bw.centre).setZ(bw.centre.z + 0.6), 0x6a6c66);
   for (const p of bw.pieces) {
+    // ART: PIXEL WORLD: the block flies as broken masonry (chipped chunk painted at load).
+    if (p.userData.pwChunk) p.geometry = p.userData.pwChunk as THREE.BufferGeometry;
     sc.root.attach(p);
     sc.flyers.push({
       obj: p,

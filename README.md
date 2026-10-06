@@ -123,7 +123,11 @@ ios/  android/ Capacitor native projects             tests/         vitest (unit
   Vite's `base` is `./`, so the game works from any sub-path.
 - **Single file:** `npm run build:single` produces `dist-single/overrun.html` (about 3.3 MB, ≈ 1 MB gzipped) with all JS, CSS,
   fonts and icons inlined. Open it from disk, host it anywhere, or share it as a claude.ai artifact.
-  CI attaches it to every run as the `overrun-single-file` artifact.
+  CI attaches it to every run as the `overrun-single-file` artifact. Its budget is **3.5 MB**
+  (a deliberate raise from 3 MB when the six PIXEL WORLD stages landed: their art is painted by
+  code, so it lives in the script), and every build compares the file with the committed size
+  baseline (`scripts/single-size.json`, the size at HEAD): growth over 64 KB fails the build until
+  accepted with `SINGLE_SIZE_UPDATE=1 npm run build:single` (commit the updated JSON).
 - **Offline / PWA:** the build emits `sw.js`. It precaches the hashed app shell, serves assets
   cache-first and `index.html` network-first, and drops old caches when a new version activates.
 

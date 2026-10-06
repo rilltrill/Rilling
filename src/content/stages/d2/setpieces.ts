@@ -569,6 +569,11 @@ export class SkeletonDisplay {
     return this.t >= 0;
   }
 
+  /** The skull's chunk holder (ART: PIXEL WORLD paints it as cut-out cards; skull frame = its inner group's origin, tilted −0.18 about z). */
+  get skullHolder(): THREE.Group {
+    return this.skull;
+  }
+
   /** Start the collapse (call once). */
   collapse(world: World) {
     if (this.t >= 0) return;

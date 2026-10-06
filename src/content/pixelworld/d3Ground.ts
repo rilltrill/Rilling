@@ -1,4 +1,4 @@
-import { bayer, PWF, type PwCanvas } from './canvas';
+import { bayer, type PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { crack, hash2, smooth } from './surfaces';
 
@@ -614,14 +614,18 @@ export function d3GravelTile(atlas: PwAtlas, o: { hex: number; silt: number }): 
 
 /**
  * A rain puddle (animated module, 64 × 48 a frame, cut out): a ragged muddy
- * rim, dark water mirroring the storm sky (a paler band toward the far edge),
- * ripple rings from the rain expanding frame by frame.
+ * rim, calm dark water a step darker toward the middle, the storm sky caught in
+ * a few broken 2-texel reflection dashes (LIT, tone ≤ 2.2: they brighten with the
+ * lightning instead of glowing all night) and at most three rain rings as 2-texel
+ * arcs on their near half, opening over the frames (lit, tone ≤ 3). No unlit
+ * texels, no 1-texel rings: at a distance the puddle stays a calm dark pool (the
+ * puddle material also takes its levels a step early, see `D3PixelWorld.puddle`).
  */
 export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; sky: number }, variant = 0): PwTile {
   const F = D3_ANIM_FRAMES;
   const W = 64;
   const FH = 48;
-  return atlas.tile(`d3puddle3|${h6(o.rim)}|${h6(o.water)}|${h6(o.sky)}|${variant}|${F}`, W, FH * F, (c, k) => {
+  return atlas.tile(`d3puddle4|${h6(o.rim)}|${h6(o.water)}|${h6(o.sky)}|${variant}|${F}`, W, FH * F, (c, k) => {
     const rim = k.ramp(o.rim, { light: 0.42 });
     const wat = k.ramp(o.water, { light: 0.45, sat: 0.9 });
     const sky = k.ramp(o.sky, { light: 0.4, sat: 0.8 });
@@ -636,8 +640,6 @@ export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; s
         shape[y * W + x] = Math.hypot(u, v) / r;
       }
     }
-    // Deep water darker than the ground round it, a dark wet rim, and the sky caught in broken
-    // reflection streaks (unlit: they read as water from any side, in any light).
     d3Frames(c, F, (x, vt, f, y) => {
       const ly = FH - 1 - vt;
       const d = shape[ly * W + x];
@@ -647,28 +649,35 @@ export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; water: number; s
         c.set(x, y, rim, d > 0.92 ? 1.6 : 1.2);
         return;
       }
-      // Streaks: 2-texel bands, broken into dashes that shift a texel or two per frame (the wind).
-      const band = (ly >> 1) % 5;
-      const dash = hash2((x + f * (band & 1 ? 1 : -1) * 2) >> 3, ly >> 1, 152 + variant);
-      if ((band === 0 && dash > 0.3) || (band === 2 && dash > 0.55) || (band === 4 && dash > 0.7)) c.set(x, y, sky, band === 0 ? 2.8 : 2.4, PWF.GLOW);
-      else c.set(x, y, wat, d > 0.72 ? 1.6 : 2.2);
+      // Reflection dashes: 2 rows in every 12, 6–12 texels long, drifting a texel a frame (the wind).
+      const band = Math.floor(ly / 2);
+      if (band % 6 === 1 && d < 0.78) {
+        const dash = hash2((x + f) >> 3, band, 152 + variant);
+        if (dash > 0.5) {
+          c.set(x, y, sky, dash > 0.8 ? 2.2 : 2, 0);
+          return;
+        }
+      }
+      // Calm water: a step darker in the middle (2 tones, no dither speckle).
+      c.set(x, y, wat, d > 0.6 ? 2.3 : 1.9, 0);
     });
-    // Rain rings: drawn as outlines per frame (each ring opens over the frames, fading at the last).
-    for (let i = 0; i < 7; i++) {
-      const rx = 8 + hash2(i, 1, 151 + variant) * (W - 16);
-      const ry = 6 + hash2(i, 2, 151 + variant) * (FH - 12);
-      const ph = Math.floor(hash2(i, 3, 151) * F);
+    // Rain rings: three, each a near-half arc (2-texel dashes) opening over the frames.
+    for (let i = 0; i < 3; i++) {
+      const rx = 14 + hash2(i, 1, 151 + variant) * (W - 28);
+      const ry = 12 + hash2(i, 2, 151 + variant) * (FH - 24);
+      const ph = (i * 3 + variant) % F;
       for (let f = 0; f < F; f++) {
         const age = (f + ph) % F;
-        const rr = 1.5 + age * 2.2;
+        const rr = 2 + age * 2;
         const y0 = c.h - (f + 1) * FH;
-        const n = Math.max(8, Math.round(rr * 7));
+        const n = Math.max(8, Math.round(rr * 6));
         for (let q = 0; q < n; q++) {
           const a = (q / n) * Math.PI * 2;
+          if (Math.sin(a) < 0.3 || (q >> 1) % 2 === 1) continue; // near half, 2 on 2 off
           const x = Math.round(rx + Math.cos(a) * rr * 1.3 - 0.5);
           const ly = Math.round(ry + Math.sin(a) * rr - 0.5);
-          if (x < 0 || x >= W || ly < 0 || ly >= FH || shape[ly * W + x] > 0.84) continue;
-          c.set(x, y0 + ly, sky, age === F - 1 ? 2.8 : Math.sin(a) < 0 ? 3 : 4.2, PWF.GLOW);
+          if (x < 0 || x >= W || ly < 0 || ly >= FH || shape[ly * W + x] > 0.8) continue;
+          c.set(x, y0 + ly, sky, age === F - 1 ? 2.2 : 2.8, 0);
         }
       }
     }

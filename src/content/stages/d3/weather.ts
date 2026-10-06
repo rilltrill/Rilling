@@ -186,6 +186,11 @@ export class Storm {
    */
   usePixelSky(boltMat: THREE.MeshBasicMaterial, boltGeometry: (i: number) => THREE.BufferGeometry) {
     this.sky.visible = false;
+    // Ground splashes: dim storm-blue ripples, not white rings scattered over the road (the
+    // telegraph rings must stay the only bright ellipses on the ground).
+    const sm = this.splash.material as THREE.MeshBasicMaterial;
+    sm.color.setHex(0x6a7ea4);
+    sm.opacity = 0.26;
     this.boltMat = boltMat;
     this.bolts.forEach((b, i) => {
       b.geometry = boltGeometry(i);

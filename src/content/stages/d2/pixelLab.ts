@@ -9,13 +9,17 @@ import { acousticTile } from '../../pixelworld/d2shop';
 import {
   applianceTile, bulkheadTile, cableDropTile, gratingTile, kitchenChequerTile, kitchenNoticesTile, rackEndTile, rackFrontTile, raisedFloorTile, serverWallTile,
 } from '../../pixelworld/d2lab';
-import { cabinetFrontTile, counterClutterTile, hoodFrontTile, hoodUndersideTile, islandEndTile, kitchenWallTile, panCardTile, sootDecalTile } from '../../pixelworld/d2kitchen';
+import {
+  cabinetFrontTile, counterClutterTile, counterLipTile, counterTopTile, floorDrainTile, greaseStainTile, hoodFrontTile, hoodUndersideTile, islandEndTile, kitchenWallTile, panCardTile, sootDecalTile, storesShelfTile, utensilRailTile,
+} from '../../pixelworld/d2kitchen';
+import { z2PoolMesh, z2PoolTexture } from '../../pixelworld/z2bay';
 import { bloodDecal, gougeDecal, splatDecal } from '../../pixelworld/d2decals';
 import { tintFor } from '../../pixelworld/batch';
 
 /** The staff KITCHEN and the SERVER ROOM in PIXEL WORLD. */
 
 const _o = new THREE.Vector3();
+const _bb = new THREE.Box3();
 
 function convertKitchen(pw: D2PixelWorld, parts: RoomParts) {
   const R = ROOMS.kitchen;
@@ -32,6 +36,8 @@ function convertKitchen(pw: D2PixelWorld, parts: RoomParts) {
   const islandEnd = islandEndTile(a);
   const freezerZ = -183.5;
   const cards = pw.card('kitchen');
+  const top = counterTopTile(a);
+  const lip = counterLipTile(a);
 
   pw.copyShell(shell, b, (m, _f, _c, wface) => {
     if (wface === 'ny') return { tile: ceil, map: 'world' };
@@ -72,6 +78,15 @@ function convertKitchen(pw: D2PixelWorld, parts: RoomParts) {
       case 'bloodSpot':
         return { tile: bloodDecal(a, 1, false), map: 'fit' };
     }
+    // Counter tops (the thin stainless slabs at 0.88…0.96 m): a sheened top, a lit edge over a dark lip.
+    if (matIs(m, 0xb8bec4, 'metal')) {
+      _bb.setFromObject(m);
+      if (_bb.max.y - _bb.min.y < 0.1 && _bb.min.y > 0.85 && _bb.max.y < 1.0 && Math.max(_bb.max.x - _bb.min.x, _bb.max.z - _bb.min.z) > 1) {
+        if (wface === 'py') return { tile: top, map: 'world' };
+        if (wface === 'ny') return null;
+        return { tile: lip, map: 'fit' };
+      }
+    }
     if (matIs(m, 0xc4c4bc, 'checker')) return wface === 'py' ? { tile: floor, map: 'world' } : null;
     if (matIs(m, 0x8a9aa0, 'concrete')) return { tile: wall, map: 'world' };
     return undefined;
@@ -93,14 +108,47 @@ function convertKitchen(pw: D2PixelWorld, parts: RoomParts) {
       }
     }
   }
+  // Over the ovens and sinks: a utensil rail on the splash-back and a shelf of stores above it
+  // (the long counter runs broken up); clutter on the wall counters between the appliances.
+  for (const s of [-1, 1]) {
+    const x = s * 8.735;
+    const ux = s < 0 ? NZ : Z;
+    let n = 0;
+    for (let z = -165; z > -192; z -= 3.4) {
+      if (s > 0 && Math.abs(z - freezerZ) < 2) continue;
+      const kind = Math.abs(Math.round(z)) % 3;
+      if (kind === 0) continue;
+      b.rect(_o.set(x, 1.18, z + (s < 0 ? 0.75 : -0.75)), ux, Y, 1.5, 0.6, utensilRailTile(a, n + (s > 0 ? 1 : 0)));
+      n++;
+    }
+    for (const z of [-168.4, -175.2, -188.8]) {
+      if (s > 0 && Math.abs(z - freezerZ) < 2.5) continue;
+      const cx = s * 8.45;
+      const u = s < 0 ? NZ : Z;
+      cards.rect(_o.set(cx, 0.96, z + (s < 0 ? 0.375 : -0.375)), u, Y, 0.75, 0.5, counterClutterTile(a, (Math.round(z) & 3) + (s > 0 ? 1 : 0)));
+    }
+    for (const z of [-172, -186]) {
+      if (s > 0 && Math.abs(z - freezerZ) < 2.5) continue;
+      b.rect(_o.set(s * 8.73, 1.62, z + (s < 0 ? 1 : -1)), ux, Y, 2, 0.6, storesShelfTile(a, (z & 1) + (s > 0 ? 1 : 0)));
+    }
+  }
+  // A floor drain in the aisle, grease trodden out from the ranges.
+  for (const z of [-170.5, -184]) b.rect(_o.set(-0.375, 0.011, z + 0.375), X, NZ, 0.75, 0.75, floorDrainTile(a));
+  [[-6.4, -165.6, 0], [6.4, -172.4, 1], [-6.5, -179.3, 1], [6.3, -189.5, 0]].forEach(([x, z, v]) => b.rect(_o.set(x - 0.75, 0.009, z + 0.5), X, NZ, 1.5, 1, greaseStainTile(a, v)));
+  // Stepped light pools under the troffers (additive, one draw); the failing one stays dark.
+  const pools: number[][] = [];
+  for (let z = R.z0 - 3; z > R.z1 + 1; z -= 6) {
+    for (const x of [-4.5, 4.5]) if (!(z < -180 && x < 0)) pools.push([0xf0f4ff, x, 0.013, z, 3.4, 3.4, 0.16]);
+  }
+  if (parts.root) parts.root.add(z2PoolMesh(z2PoolTexture(), pools));
   // Clutter stood on the island tops (breaking their flat top line), turned to the aisle.
   for (const sgn of [-1, 1]) {
     for (const [z0, z1] of [[-167, -176], [-178.6, -187.6]] as const) {
       const cxI = sgn * 4.6;
-      [z0 - 1.6, z1 + 2.2].forEach((z, i) => {
+      [z0 - 1.6, (z0 + z1) / 2 + 0.6, z1 + 2.2].forEach((z, i) => {
         const yaw = sgn * 0.5;
         const u = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
-        cards.rect(_o.set(cxI - sgn * 0.25 - u.x * 0.375, 0.95, z - u.z * 0.375), u, Y, 0.75, 0.5, counterClutterTile(a, i + (sgn > 0 ? 1 : 0)));
+        cards.rect(_o.set(cxI - sgn * 0.25 - u.x * 0.375, 0.95, z - u.z * 0.375), u, Y, 0.75, 0.5, counterClutterTile(a, i === 1 ? 2 + (sgn > 0 ? 1 : 0) : i + (sgn > 0 ? 1 : 0)));
       });
     }
   }

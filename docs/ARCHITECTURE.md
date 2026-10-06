@@ -191,13 +191,18 @@ hand ever goes over a head, no arm is ever held out sideways.
 `help` (seconds) puts a HELP! before the act (by default only `plead` and `auto`
 open with one; cowering and backing off call from inside the act). Rescued
 civilians sigh, then give a thumbs-up at chest height with two nods or a wave
-of the forearm beside the head (elbow down; THANKS!), and jog off screen.
+of the forearm beside the head (elbow down; THANKS!), and jog off screen — always to the
+nearer side of the view and a little away from the camera (re-aimed every 0.5 s while the rail
+camera moves: `pickDest` never picks a heading toward the lens for `leave`). If the camera
+still closes on them (a beat that pushes forward), within 4 m (`LEAVE_NEAR`) they blink out
+the arcade way — on / off every 0.06 s for 0.42 s — instead of walking into the lens.
 Civilians standing on something raised (the d3 truck bed: `PerchedCivilian`)
 only plead or cower. Each civilian takes ONE draw from the world RNG (as
 before) and seeds its own: adding acts never shifts a stage's random stream.
 Looks (`VARIANTS`): bright, clean, saturated, never a zombie's outfit for the
 same job; `tech` (the d2 lab staff) wears the lab coat open over a
-safety-orange polo — a white coat alone vanished against the pale shop and lab.
+safety-orange polo — a white coat alone vanished against the pale shop and lab (PIXEL WORLD
+also stands two dark-slate equipment cabinets on the hatchery wall behind where she takes cover).
 
 **Fairness (hard rules).** Civilians never stand in an enemy's attack lane:
 they stay where the stage put them — out at the side of the frame, away from
@@ -821,12 +826,16 @@ With the CPU throttled 3× (a phone proxy): z1 cold 3.4 s / warm 1.8 s, z3 3.8 /
 4.9 / 3.4 (d1's world build alone 2.7–2.9 s) — a first-ever load may hold the card on
 LOADING... for up to ~2 s; later loads fit inside the card except d1, whose build is the cost.
 Writes to the store cost 50–75 ms (one atlas a frame); reads 30–65 ms (≈ 15–25 MB, during
-the card). Longest single paint step 40–75 ms (a 2048-wide sky band). The long tasks left
-under the card are the world build itself (as in PIXEL CAST) and warm-up + first render;
-none in play comes from PIXEL WORLD (the only in-play long frame, 0.2–0.5 s on SwiftShader
-when the first characters draw a few seconds in, is the same in PIXEL CAST). Next steps: a
-Worker for the cold paint (painters are DOM-free and node-safe), and splitting the world build
-itself (d1's 0.9–1.0 s, shared with PIXEL CAST) over frames.
+the card). Longest single paint step 40–75 ms (a 2048-wide sky band). The long task left
+under the card is the world build itself (as in PIXEL CAST). **In play: no long task in either
+ART** (round 5): the 0.2–0.55 s frame a few seconds in (the first character's paint, 50 %
+longer in PIXEL WORLD) was the first use of programs compiled at warm-up but never linked —
+they are now linked behind the card (`linkSlice`, step 6 of the load: 200–250 ms over 6–7
+frames in PIXEL WORLD, 45–80 ms in PIXEL CAST, inside the card); measured with
+`scripts/load-bench.mjs --intro --play 6` (z1, d3: `playLong` empty in both ARTs) and a CPU
+profile of the frame (`getProgramInfoLog` / `getUniforms` under `onFirstUse` was 250 of its
+300 ms). Next steps: a Worker for the cold paint (painters are DOM-free and node-safe), and
+splitting the world build itself (d1's 0.9–1.0 s, shared with PIXEL CAST) over frames.
 
 ### How to convert a stage
 
@@ -1133,6 +1142,45 @@ itself (d1's 0.9–1.0 s, shared with PIXEL CAST) over frames.
   swaying vegetation (the FLORA billboards of PIXEL CAST), the helipad edge lights, the jeep's
   glass / lamps, FX.
 
+### Round 5 (review fixes, PIXEL WORLD only unless noted)
+
+- **z1 painted smoke** (`FirePlume` puffs): a smoke particle's FIRST life is a stagger (`life`
+  0…4 s against `max` 1, unmoving at the origin) — `k = life / max` up to 4 made negative ages:
+  40–176 m red-orange squares in the sky at the stage start and a full-screen orange wall at
+  the gas-station inferno. Billows are now drawn only from spawned particles; before its first
+  spawn a billow is hidden (a fire ignited in play: the column builds up) or, for a fire burning
+  since the stage began (`active` never cleared before the first update), drawn as a pre-rolled
+  billow of a standing column (hashed position, no RNG). Age / fade clamped. The classic points
+  are untouched (`tests/unit/z1-smoke.test.ts`: scale ≤ 3.1 × the fire, colours in [0, 1],
+  classic arrays identical with and without the billows).
+- **z1 overturned bus**: the rear's emergency-door opening shows the inside once the door is
+  blown (one-point perspective: seat backs in rows down the aisle, window bays — moonlit on the
+  side to the sky, dark on the road side — ceiling ribs, ribbed flooring, the windscreen at the
+  far end lit orange by the engine fire), round it a rubber seal, hinge strip, tail lamps,
+  rust runs and a dented bumper (`z1bus.ts` `paintRear`).
+- **z2 boiler-wall burst**: each block flies as broken masonry — `burstWall` swaps in a chunk
+  painted at load (`Z2PixelWorld.wallChunk`: two convex halves either side of a slanted crack,
+  corners chipped at uneven depths, the wall's painted face front and back, the rubble core on
+  every break). Flyer RNG, velocities and floor rest untouched.
+- **d2 skeleton collapse**: the skull falls as three crossed painted cut-outs in its own frame
+  (profile with the hanging jaw, top, back: `d2skull.ts`) — openings cut out, tooth rows,
+  fossil-cast bone lit upper left — instead of its box stack (`SkeletonDisplay.skullHolder`).
+- **d2 kitchen**: stainless counter tops (a stepped diagonal sheen band, brushed streaks, food
+  stains, knife scratches) with a lit edge over a dark lip; grimy grout and grease spatter on
+  the splash-back, fallen tiles showing the adhesive comb; utensil rails and shelves of stores
+  over the ovens / sinks; more clutter cards (mixer and plates, mugs) on the islands and wall
+  counters; floor drains, grease trodden out from the ranges; stepped additive light pools
+  under the troffers (the failing one dark).
+- **d3 puddles**: calm dark water (two lit tones, no unlit texels), reflection dashes 2 rows in
+  12 lit at tone ≤ 2.2 (they brighten with the lightning), ≤ 3 rain rings as 2-texel arcs on
+  the near half; their own material with levels a step early (`bias 1`); half the road puddles
+  (by hash: the classic draws unchanged), five of the nine mud-stretch pools. The rain splash
+  rings dim to storm blue (opacity 0.26) so the telegraph rings stay the only bright ellipses.
+- **d3 mud-hold truck**: a sun visor, an amber beacon, mirrors out on arms, rubber fender arches
+  over every wheel, mud flaps, rounded front corners in the cab front module.
+- **Every ART**: the first-draw hitch fixed by linking programs behind the card (see *Stage
+  loading*); rescued civilians never walk into the lens (see *Civilians*).
+
 ## Audio
 
 `audio/`: `Audio.ts` (buses, voice pool, pre-render cache, ducking, iOS unlock,
@@ -1203,9 +1251,16 @@ pressed RETRY / RESTART screen — never in play):
    run out (`LOAD_PAINT_SLICE_MS` / `LOAD_PAINT_RUSH_MS`); a step is one tile (the biggest,
    a 2048-wide sky band, ≈ 60–140 ms on this box cold).
 4. `pwStoreFlush(1)` hands each freshly painted atlas to the store, one a frame.
-5. `finishLoading`: shader warm-up, and every live PixelWorld texture is uploaded
-   (`renderer.initTexture`) — a set piece's atlas never uploads the first time it comes into
-   view — then the first render.
+5. Shader warm-up (`warmUp`, its own frame): every program the stage will need is compiled
+   and every live PixelWorld texture is uploaded (`renderer.initTexture`) — a set piece's
+   atlas never uploads the first time it comes into view.
+6. `linkSlice` (every ART): `compile()` only CREATES the programs; the driver finishes one
+   (SwiftShader / ANGLE: the link) the first time it is queried, which three.js does on its
+   first draw — that was the 0.2–0.5 s freeze when the first character painted a few seconds
+   into a stage. Each never-used program is queried here (`getUniforms()`), a slice a frame
+   (14 / 45 ms like the paint); with KHR_parallel_shader_compile a program still compiling in
+   the background waits for a later frame (up to 1.5 s, then it is forced).
+7. `finishLoading`: the first render, then play (or the card).
 A world still loading is never drawn (in every ART): the card stays over the last frame on the
 canvas (the title's), so no half-painted scenery shows through it and the build's frame does
 not also compile every shader. If the card's 2.8 s run out (or it is tapped) before the load is
@@ -1213,8 +1268,8 @@ done, it stays up saying LOADING... until play can begin (`showStageIntro`'s `on
 false). The title's painted scenery is freed when a stage builds (`MenuBackdrop.release`). The
 attract demo builds at once (the store was read before it started: `startDemo` waits for it;
 the title's atlases stay cached beside the demo stage's) and paints during its opening black
-cut. `Game.lastLoad` records build / paint (+ frames) / store / warm-up / render / total ms
-(`scripts/load-bench.mjs`).
+cut. `Game.lastLoad` records build / paint (+ frames) / store / warm-up / link (+ frames) /
+render / total ms (`scripts/load-bench.mjs`).
 
 ## Renderer policy
 

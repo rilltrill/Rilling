@@ -102,6 +102,10 @@ interface Loading {
   t0: number;
   /** Freshly painted atlases handed to the persistent store. */
   stored?: boolean;
+  /** Shader warm-up done (its programs are linked over the next frames, see `linkSlice`). */
+  warmed?: boolean;
+  /** When the linking started (a driver compiling in parallel gets LOAD_STORE_WAIT_MS before we block on it). */
+  linkT0?: number;
 }
 
 interface Run {
@@ -210,6 +214,9 @@ export class Game implements MenuActions {
     /** Handing the freshly painted atlases to the persistent store. */
     store: number;
     warm: number;
+    /** Linking the warmed-up shader programs, sliced over `linkFrames` frames behind the card. */
+    link: number;
+    linkFrames: number;
     render: number;
     /** Wall-clock from the request to ready (the card may run longer). */
     total: number;
@@ -477,7 +484,7 @@ export class Game implements MenuActions {
         } finally {
           pwDeferPaint(false);
         }
-        this.lastLoad = { stage: l.stage.id, art: this.world?.art ?? this.artStyle, build: performance.now() - t0, paint: 0, paintFrames: 0, store: 0, warm: 0, render: 0, total: 0 };
+        this.lastLoad = { stage: l.stage.id, art: this.world?.art ?? this.artStyle, build: performance.now() - t0, paint: 0, paintFrames: 0, store: 0, warm: 0, link: 0, linkFrames: 0, render: 0, total: 0 };
         l.built = true;
       }
       return;
@@ -501,6 +508,23 @@ export class Game implements MenuActions {
       l.stored = true;
       if (this.lastLoad && this.lastLoad.store > 0.5) return;
     }
+    // Shader warm-up (compiles every program the stage will need), then link them a slice a frame.
+    const w = this.world;
+    if (!l.warmed && w) {
+      l.warmed = true;
+      const t2 = performance.now();
+      this.warmUp(w, l.stage);
+      if (this.lastLoad) this.lastLoad.warm = performance.now() - t2;
+      return;
+    }
+    const t3 = performance.now();
+    l.linkT0 ??= t3;
+    const linked = this.linkSlice(l.showIntro && !l.introDone ? LOAD_PAINT_SLICE_MS : LOAD_PAINT_RUSH_MS, t3 - l.linkT0 > LOAD_STORE_WAIT_MS);
+    if (this.lastLoad) {
+      this.lastLoad.link += performance.now() - t3;
+      this.lastLoad.linkFrames++;
+    }
+    if (!linked) return;
     this.finishLoading();
     if (this.lastLoad) this.lastLoad.total = performance.now() - l.t0;
   }
@@ -577,9 +601,12 @@ export class Game implements MenuActions {
     const stage = l.stage;
     // The attract demo (god mode + aimbot) shrugs off first-appearance hitches, but a
     // multi-second warm-up block would freeze the title screen it starts from.
-    const t0 = performance.now();
-    if (!this.demo) this.warmUp(w, stage);
-    if (this.lastLoad) this.lastLoad.warm = performance.now() - t0;
+    // (A normal load warmed up and linked behind the card, see loadingTick.)
+    if (!this.demo && !l.warmed) {
+      const t0 = performance.now();
+      this.warmUp(w, stage);
+      if (this.lastLoad) this.lastLoad.warm = performance.now() - t0;
+    }
     this.music(stage.music ?? (this.campaignOf(stage).id === 'zombie' ? 'zombie' : 'dino'));
     if (this.demo) {
       // Starts on a black cut that fast-forwards to the first enemies (see demoTick).
@@ -622,6 +649,35 @@ export class Game implements MenuActions {
       console.warn('[game] shader warm-up failed', err);
     }
   }
+
+  /**
+   * Link the compiled shader programs that have never been used, for at most `ms`. `compile()`
+   * only creates them: the driver finishes a program (SwiftShader / ANGLE: the link) the first
+   * time it is queried, which three.js does on its first draw — a 0.2–0.3 s freeze the first
+   * time each character painter / effect draws in play. Querying them here, behind the card,
+   * pays that while nothing moves. With KHR_parallel_shader_compile a program still compiling in
+   * the background is left for a later frame (no block); true once every program is linked.
+   */
+  private linkSlice(ms: number, force = false): boolean {
+    if (this.engine.contextLost) return true;
+    const progs = (this.engine.renderer.info.programs ?? []) as unknown as { getUniforms(): unknown; isReady(): boolean }[];
+    const t0 = performance.now();
+    let waiting = false;
+    for (const p of progs) {
+      if (this.linkedPrograms.has(p)) continue;
+      if (!force && !p.isReady()) {
+        waiting = true;
+        continue;
+      }
+      p.getUniforms();
+      this.linkedPrograms.add(p);
+      if (performance.now() - t0 > ms) return false;
+    }
+    return !waiting;
+  }
+
+  /** Programs `linkSlice` has finished (weak: three.js releases unused programs). */
+  private linkedPrograms = new WeakSet<object>();
 
   private beginPlay() {
     this.state = 'playing';

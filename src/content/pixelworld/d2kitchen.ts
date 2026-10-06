@@ -27,7 +27,7 @@ const N = NEUTRAL_HEX;
  */
 export function kitchenWallTile(atlas: PwAtlas): PwTile {
   return atlas.tile(
-    'd2kitwall',
+    'd2kitwall|2',
     128,
     144,
     (c, k) => {
@@ -57,7 +57,9 @@ export function kitchenWallTile(atlas: PwAtlas): PwTile {
             const r = isGreen ? green : isRed ? red : tile;
             let t = 3 + (hash2(x >> 4, course, 3) > 0.8 ? -0.25 : 0);
             if (lx === 0 || ly === 0) {
-              c.set(x, y, isGreen || isRed ? r : grout, isGreen || isRed ? 1.75 : 2.5);
+              // Splash-back band over the counters (0.95 … 1.65 m): the grout has gone grimy.
+              const splash = fromFloor >= 30 && fromFloor < 53;
+              c.set(x, y, isGreen || isRed ? r : grout, isGreen || isRed ? 1.75 : splash ? (hash2(x >> 2, fromFloor >> 2, 31) > 0.35 ? 1.5 : 2) : 2.5);
               continue;
             }
             // Glaze: a lit top row and a lit left column on each tile.
@@ -91,6 +93,29 @@ export function kitchenWallTile(atlas: PwAtlas): PwTile {
         c.cluster(x, y, k.rng.int(4, 9), 0, -1);
       }
       scuffs(c, k.rng, 0, row(0.35), 128, 6, 10, -0.75);
+      // A few tiles fallen off (grey adhesive with its comb lines showing), cracked tiles.
+      const glue = k.ramp(0x8a8a80, { light: 0.4, sat: 0.4 });
+      for (let i = 0; i < 5; i++) {
+        const tx = k.rng.int(0, 7) * 16;
+        const course = k.rng.int(1, 9);
+        if (course === 4 || course === 8) continue;
+        const y0 = H - 1 - 3 - (course + 1) * 8 + 1;
+        c.rect(tx + 1, y0, 15, 7, glue, (xx: number, yy: number) => ((yy - y0) % 2 ? 1.75 : 2.25) + (xx === tx + 1 ? -0.5 : 0));
+        c.hline(tx + 1, y0, 15, glue, 1);
+      }
+      for (let i = 0; i < 4; i++) {
+        const x = k.rng.int(0, 120);
+        const y = k.rng.int(capY + 8, row(0.3));
+        c.line(x, y, x + k.rng.int(3, 9), y + k.rng.int(2, 6), grout, 1.25);
+      }
+      // Grease spatter on the splash-back (2×2 clumps, a few runs).
+      const greaseR = k.ramp(0x6a4a20, { light: 0.45 });
+      for (let i = 0; i < 26; i++) {
+        const x = k.rng.int(0, 63) * 2;
+        const y = row(1.0) - k.rng.int(0, 18);
+        c.rect(x, y, 2, 2, greaseR, k.rng.chance(0.5) ? 2 : 2.5);
+        if (i % 5 === 0) for (let j = 2; j < 6; j++) c.rect(x, y + j, 2, 1, greaseR, 2.5);
+      }
     },
     { wrap: true },
   );
@@ -326,11 +351,37 @@ export function panCardTile(atlas: PwAtlas, v: number): PwTile {
  * island's flat top line. 24 × 16.
  */
 export function counterClutterTile(atlas: PwAtlas, v: number): PwTile {
-  return atlas.tile(`d2clutter|${v % 2}`, 24, 16, (c, k) => {
+  return atlas.tile(`d2clutter|${v % 4}`, 24, 16, (c, k) => {
     const steel = k.ramp(0xb8bec4, { light: 0.55, sat: 0.4 });
     const dark = k.ramp(0x2a2a2e, { light: 0.4 });
     const wood = k.ramp(0x9a6a3a, { light: 0.45 });
     const red = k.ramp(0xc03a2a, { light: 0.45 });
+    const cream = k.ramp(0xe8e4d8, { light: 0.4, sat: 0.4 });
+    if (v % 4 === 2) {
+      // A stand mixer (red, its bowl) and a stack of plates.
+      c.rect(2, 3, 9, 4, red, (x: number) => (x < 4 ? 4 : 3));
+      c.rect(8, 7, 3, 7, red, 2.5);
+      c.rect(1, 14, 11, 2, red, 2);
+      c.rect(2, 9, 6, 5, steel, (x: number) => (x < 4 ? 4.5 : 3));
+      for (let i = 0; i < 6; i++) c.hline(14, 15 - i * 2, 9, cream, i % 2 ? 2.5 : 4);
+      c.outline(0);
+      return;
+    }
+    if (v % 4 === 3) {
+      // A tray of mugs and a rolled tea towel.
+      c.hline(1, 15, 22, steel, 2);
+      c.hline(1, 14, 22, steel, 4);
+      for (let i = 0; i < 4; i++) {
+        const x = 2 + i * 5;
+        c.rect(x, 9, 4, 5, i % 2 ? cream : red, (xx: number) => (xx === x ? 4 : 3));
+        c.set(x + 4, 10, i % 2 ? cream : red, 2.5);
+        c.set(x + 4, 12, i % 2 ? cream : red, 2.5);
+      }
+      c.rect(4, 5, 14, 3, cream, 3);
+      for (let x = 5; x < 18; x += 3) c.vline(x, 5, 3, red, 3);
+      c.outline(0);
+      return;
+    }
     if (v % 2 === 0) {
       // Trays (stacked, lit lips), the pot with a ladle.
       for (let i = 0; i < 4; i++) {
@@ -355,5 +406,226 @@ export function counterClutterTile(atlas: PwAtlas, v: number): PwTile {
       c.line(21, 9, 22, 3, wood, 3);
     }
     c.outline(0);
+  });
+}
+
+/**
+ * Stainless counter top (world, wrap 64 × 64, seen from above at a glance): a
+ * broad diagonal sheen band in two steps, a few 2-texel brushed streaks along
+ * the run, food stains, water spots and knife scratches as small clusters —
+ * calm under the moving camera (no per-texel grain). Round 5: the island and
+ * wall-counter tops were the generic steel.
+ */
+export function counterTopTile(atlas: PwAtlas): PwTile {
+  return atlas.tile(
+    'd2countertop|2',
+    64,
+    64,
+    (c, k) => {
+      const rng = k.rng;
+      const m = k.ramp(0xb8bec4, { light: 0.55, sat: 0.4 });
+      const stain = k.ramp(0x6a4a2a, { light: 0.45, sat: 0.8 });
+      const sauce = k.ramp(0x8a2a10, { light: 0.45 });
+      for (let y = 0; y < 64; y++) {
+        for (let x = 0; x < 64; x++) {
+          const d = (x + y) % 64;
+          c.set(x, y, m, d >= 18 && d < 36 ? (d >= 23 && d < 31 ? 4.25 : 3.5) : 2.75);
+        }
+      }
+      // Brushed streaks (2 texels tall, broken) along the run.
+      for (let i = 0; i < 7; i++) {
+        const y = rng.int(0, 31) * 2;
+        const x = rng.int(0, 63);
+        const len = rng.int(8, 20);
+        for (let j = 0; j < len; j++) if ((j >> 2) % 3 !== 2) c.rect((x + j) % 64, y, 1, 2, m, 2.6);
+      }
+      // Food stains, a smear of sauce, water spots, knife scratches.
+      for (let i = 0; i < 5; i++) c.cluster(rng.int(2, 60), rng.int(2, 60), rng.int(2, 8), stain, 2);
+      c.cluster(rng.int(4, 56), rng.int(4, 56), 6, sauce, 2.5);
+      for (let i = 0; i < 6; i++) {
+        const x = rng.int(0, 62);
+        const y = rng.int(0, 62);
+        c.rect(x, y, 2, 2, m, 2.5);
+      }
+      for (let i = 0; i < 5; i++) {
+        const x = rng.int(4, 56);
+        const y = rng.int(4, 56);
+        for (let j = 0; j < 5; j++) c.set(x + j, y + (j >> 1), m, 4.5);
+      }
+    },
+    { wrap: true },
+  );
+}
+
+/** The counter top's front lip (fit across the 7 cm edge, 16 × 4): a lit rolled edge over a dark drip lip. */
+export function counterLipTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('d2counterlip', 16, 4, (c, k) => {
+    const m = k.ramp(0xb8bec4, { light: 0.55, sat: 0.4 });
+    c.hline(0, 0, 16, m, 4.75);
+    c.hline(0, 1, 16, m, 3.5);
+    c.hline(0, 2, 16, m, 1.5);
+    c.hline(0, 3, 16, m, 0.75);
+  });
+}
+
+/**
+ * A utensil rail on the splash-back (cut out, 1.5 × 0.6 m = 48 × 20): a steel
+ * bar on two brackets with ladles, a slotted turner, a whisk, tongs, a sieve
+ * and a cleaver hung from S-hooks — lit upper left, outlined.
+ */
+export function utensilRailTile(atlas: PwAtlas, v: number): PwTile {
+  return atlas.tile(`d2utensils|${v % 2}`, 48, 20, (c, k) => {
+    const steel = k.ramp(0xb8bec4, { light: 0.55, sat: 0.4 });
+    const dark = k.ramp(0x2a2a2e, { light: 0.4 });
+    const wood = k.ramp(0x8a5a2e, { light: 0.45 });
+    const red = k.ramp(0xb03a2a, { light: 0.45 });
+    // Bar and brackets.
+    c.hline(1, 1, 46, steel, 4.5);
+    c.hline(1, 2, 46, steel, 2.5);
+    for (const x of [2, 44]) c.rect(x, 0, 2, 4, dark, 2);
+    const kinds = v % 2 ? [3, 0, 4, 1, 5, 2] : [0, 1, 2, 3, 4, 5];
+    kinds.forEach((kind, i) => {
+      const x = 6 + i * 7;
+      c.set(x, 3, dark, 2);
+      c.set(x, 4, dark, 2.5);
+      switch (kind) {
+        case 0: // ladle
+          c.vline(x, 5, 9, steel, 4);
+          c.ellipse(x + 0.5, 15.5, 2.5, 2, steel, (u, w) => (u + w < -0.3 ? 4.5 : u + w > 0.6 ? 2 : 3));
+          break;
+        case 1: // slotted turner, wooden handle
+          c.rect(x, 5, 1, 6, wood, 3);
+          c.rect(x - 1, 11, 3, 6, steel, 3.5);
+          c.vline(x, 12, 4, dark, 1.5);
+          break;
+        case 2: // whisk
+          c.vline(x, 5, 5, steel, 4);
+          // Three wire loops (outer pair and the middle wire), the gaps between them open.
+          for (let yy = 10; yy < 18; yy++) {
+            const t = (yy - 10) / 7;
+            const half = Math.round(Math.sin(t * Math.PI * 0.95 + 0.15) * 2);
+            c.set(x - half, yy, steel, 4);
+            c.set(x + half, yy, steel, 2.5);
+            c.set(x, yy, steel, 3.25);
+          }
+          break;
+        case 3: // tongs
+          c.line(x, 5, x - 1, 16, steel, 4);
+          c.line(x + 1, 5, x + 2, 16, steel, 2.5);
+          break;
+        case 4: // sieve
+          c.vline(x, 5, 5, dark, 2);
+          c.ellipse(x + 0.5, 13.5, 3, 3, steel, (u, w) => (u * u + w * w > 0.55 ? 4 : (Math.round(u * 6) + Math.round(w * 6)) % 2 ? 1.5 : 2.5));
+          break;
+        default: // cleaver, red handle
+          c.rect(x, 5, 1, 4, red, 3);
+          c.rect(x - 2, 9, 4, 7, steel, (xx: number) => (xx < x - 1 ? 4.5 : 3.25));
+          c.hline(x - 2, 15, 4, steel, 1.75);
+      }
+    });
+    c.outline(0);
+  });
+}
+
+/**
+ * A wall shelf (cut out, 2 × 0.6 m = 64 × 20) on two brackets: jars of pickles and
+ * beans, labelled tins, cereal boxes, a stack of bowls, an oil bottle — the
+ * counter run's long flat line broken by a skyline of stores.
+ */
+export function storesShelfTile(atlas: PwAtlas, v: number): PwTile {
+  return atlas.tile(`d2stores|${v % 2}`, 64, 20, (c, k) => {
+    const rng = k.rng;
+    const steel = k.ramp(0x9aa0a8, { light: 0.55, sat: 0.4 });
+    const glass = k.ramp(0x8ab0a0, { light: 0.4, sat: 0.6 });
+    const cols = [0xc03a2a, 0x2a8a4a, 0xe0b020, 0x2a5aa0, 0xd8d0c0].map((h) => k.ramp(h, { light: 0.45 }));
+    const dark = k.ramp(0x2a2a2e, { light: 0.4 });
+    // Shelf plank and brackets.
+    c.rect(0, 16, 64, 2, steel, 3.5);
+    c.hline(0, 16, 64, steel, 4.5);
+    c.hline(0, 18, 64, steel, 1.5);
+    for (const x of [6, 56]) c.line(x, 18, x + 3, 19, dark, 2);
+    let x = 1 + (v % 2) * 3;
+    while (x < 60) {
+      const kind = rng.int(0, 4);
+      const col = cols[rng.int(0, cols.length - 1)];
+      if (kind === 0) {
+        // Jar: glass with contents, a lid.
+        const h = rng.int(7, 10);
+        c.rect(x, 16 - h, 5, h, glass, (xx: number) => (xx === x ? 4 : 2.5));
+        c.rect(x + 1, 16 - h + 3, 3, h - 4, col, 2.5);
+        c.rect(x, 16 - h - 1, 5, 1, dark, 3);
+        x += 6;
+      } else if (kind === 1) {
+        // Tins: two stacked, label band.
+        for (let j = 0; j < 2; j++) {
+          const y = 16 - 5 * (j + 1);
+          c.rect(x, y, 4, 5, steel, 3);
+          c.rect(x, y + 1, 4, 3, col, 3);
+          c.vline(x, y, 5, steel, 4.5);
+        }
+        x += 5;
+      } else if (kind === 2) {
+        // Cereal-style box, a darker side.
+        const h = rng.int(9, 13);
+        c.rect(x, 16 - h, 6, h, col, (xx: number) => (xx >= x + 4 ? 2 : 3));
+        c.rect(x + 1, 16 - h + 2, 3, 3, cols[4], 3.5);
+        x += 7;
+      } else if (kind === 3) {
+        // Stack of bowls.
+        for (let j = 0; j < 3; j++) c.rect(x + j % 2, 15 - j * 2, 6, 2, cols[4], j % 2 ? 3 : 4);
+        x += 7;
+      } else {
+        // Oil bottle.
+        c.rect(x, 7, 3, 9, cols[2], (xx: number) => (xx === x ? 4 : 2.5));
+        c.rect(x + 1, 4, 1, 3, cols[2], 3);
+        c.set(x + 1, 3, dark, 2);
+        x += 4;
+      }
+    }
+    c.outline(0);
+  });
+}
+
+/** A floor drain (cut out round its wet ring, 0.75 m = 24 × 24): a slotted steel grate, rust in the slots, a dark damp halo. */
+export function floorDrainTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('d2drain', 24, 24, (c, k) => {
+    const m = k.ramp(0x8a9098, { light: 0.5, sat: 0.4 });
+    const wet = k.ramp(0x3a3e3a, { light: 0.4, sat: 0.6 });
+    const rust = k.ramp(0x7a3a1c, { light: 0.4 });
+    for (let y = 0; y < 24; y++) {
+      for (let x = 0; x < 24; x++) {
+        const u = (x + 0.5 - 12) / 12;
+        const w = (y + 0.5 - 12) / 12;
+        const d = u * u + w * w;
+        if (d > 1 || (d > 0.7 && hash2(x >> 1, y >> 1, 5) > 0.5)) continue;
+        c.set(x, y, wet, 2);
+      }
+    }
+    c.rect(5, 5, 14, 14, m, 3);
+    c.hline(5, 5, 14, m, 4.25);
+    c.vline(5, 5, 14, m, 4);
+    c.hline(5, 18, 14, m, 1.75);
+    for (let y = 8; y < 17; y += 3) {
+      c.rect(7, y, 10, 1, m, 0.75);
+      if (y % 2) c.set(8 + (y % 5), y, rust, 2);
+    }
+  });
+}
+
+/** A grease stain on the vinyl (cut out, 1.5 × 1 m = 48 × 32): 2×2 clumps, densest at the middle, a faint lighter sheen arc. */
+export function greaseStainTile(atlas: PwAtlas, v: number): PwTile {
+  return atlas.tile(`d2grease|${v % 2}`, 48, 32, (c, k) => {
+    const g = k.ramp(0x4a3a24, { light: 0.4, sat: 0.7 });
+    for (let y = 0; y < 32; y += 2) {
+      for (let x = 0; x < 48; x += 2) {
+        const u = (x + 1 - 24) / 22;
+        const w = (y + 1 - 16) / 14;
+        const r = Math.hypot(u, w) * (1 + Math.sin(Math.atan2(w, u) * 3 + v) * 0.18);
+        const dens = 1 - r;
+        if (dens <= 0 || hash2((x >> 1) + v * 17, y >> 1, 41) > dens * 1.6) continue;
+        const sheen = Math.abs(r - 0.45) < 0.06 && u < 0;
+        c.rect(x, y, 2, 2, g, sheen ? 3 : dens > 0.5 ? 1.5 : 2);
+      }
+    }
   });
 }

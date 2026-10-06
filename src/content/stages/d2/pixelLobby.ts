@@ -15,6 +15,7 @@ import { stoneTile } from '../../pixelworld/surfaces';
 import { terrazzoTile } from '../../pixelworld/interior';
 import { tintFor } from '../../pixelworld/batch';
 import { hash2 } from '../../pixelworld/surfaces';
+import { SKULL_BACK, SKULL_PROFILE, SKULL_TOP, skullBackTile, skullProfileTile, skullTopTile } from '../../pixelworld/d2skull';
 
 /**
  * The visitor-centre LOBBY in PIXEL WORLD (see pixel.ts for the scheme).
@@ -273,6 +274,10 @@ function skeleton(pw: D2PixelWorld, s: SkeletonDisplay) {
   for (const holder of root.children.slice(1)) {
     const inner = holder.children[0];
     if (!inner) continue;
+    if (holder === s.skullHolder) {
+      skullCards(pw, inner);
+      continue;
+    }
     const list: THREE.Mesh[] = [];
     inner.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) list.push(o as THREE.Mesh);
@@ -287,6 +292,27 @@ function skeleton(pw: D2PixelWorld, s: SkeletonDisplay) {
   }
   void _v;
   void hexOf;
+}
+
+/**
+ * The skull as three crossed painted cut-outs in its own frame (the profile with the hanging jaw,
+ * the top, the back) in place of its box stack: it tumbles and lands as a skull from any side.
+ */
+function skullCards(pw: D2PixelWorld, inner: THREE.Object3D) {
+  dropMeshes(inner, () => true);
+  const a = pw.atlas;
+  const cb = pw.dynamic(inner, true);
+  const R = new THREE.Matrix4().makeRotationZ(-0.18);
+  const ax = X.clone().applyMatrix4(R);
+  const ay = Y.clone().applyMatrix4(R);
+  const az = Z.clone().applyMatrix4(R);
+  const P = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyMatrix4(R);
+  const pr = SKULL_PROFILE;
+  cb.rect(P(pr.x0, pr.y0, 0), ax, ay, pr.w, pr.h, skullProfileTile(a));
+  const tp = SKULL_TOP;
+  cb.rect(P(tp.x0, 0.32, tp.z0), ax, az, tp.w, tp.d, skullTopTile(a));
+  const bk = SKULL_BACK;
+  cb.rect(P(-0.5, bk.y0, bk.z0), az, ay, bk.d, bk.h, skullBackTile(a));
 }
 
 ROOM_CONVERTERS.set('lobby', convertLobby);

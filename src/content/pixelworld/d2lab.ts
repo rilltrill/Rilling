@@ -802,3 +802,38 @@ export function cableDropTile(atlas: PwAtlas, v: number): PwTile {
     c.outline(0);
   });
 }
+
+/**
+ * A tall dark-slate equipment cabinet against the hatchery's pale tiles (module 48 × 64 =
+ * 1.5 × 2 m): two steel doors with shadow gaps and bar handles, a small lit status panel,
+ * a biohazard label, scuffs at the foot — a dark ground the lab staff's white coats read
+ * against.
+ */
+export function labCabinetTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('d2labcabinet', 48, 64, (c, k) => {
+    const m = k.ramp(0x3a424a, { light: 0.5, sat: 0.5 });
+    const ink = k.ramp(0x14181c, { light: 0.4 });
+    const amber = k.ramp(0xe0a020, { light: 0.5 });
+    const green = k.ramp(0x40d070, { light: 0.5 });
+    c.rect(0, 0, 48, 64, m, 2.6);
+    c.hline(0, 0, 48, m, 4);
+    c.vline(0, 0, 64, m, 3.6);
+    c.vline(47, 0, 64, m, 1.4);
+    for (const x0 of [2, 25]) {
+      c.rect(x0, 10, 21, 50, m, 2.8);
+      c.frame(x0, 10, 21, 50, ink, 1);
+      c.hline(x0 + 1, 11, 19, m, 3.8);
+      c.vline(x0 + 1, 11, 48, m, 3.4);
+      const hx = x0 === 2 ? x0 + 17 : x0 + 2;
+      c.rect(hx, 28, 2, 10, m, 4.4);
+      c.vline(hx + 2, 29, 10, ink, 1.2);
+    }
+    // Status panel with lamps; the hazard label.
+    c.rect(4, 2, 40, 7, ink, 1);
+    for (let i = 0; i < 5; i++) c.rect(7 + i * 7, 4, 3, 3, i === 1 ? amber : green, i === 1 ? 3.5 : 4, PWF.GLOW);
+    c.rect(29, 16, 12, 10, amber, 3.4);
+    c.frame(29, 16, 12, 10, ink, 1.2);
+    c.ellipse(35, 21, 3, 3, ink, 1.2);
+    c.scatter(k.rng, 0, 54, 48, 10, 12, 0, -0.8, { shapes: 4 });
+  });
+}
