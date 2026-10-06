@@ -134,6 +134,17 @@ ios/  android/ Capacitor native projects             tests/         vitest (unit
 | `pages.yml` | Deploys to GitHub Pages |
 | `android.yml` | Debug APK (artifact) |
 
+## Saved versions
+
+Earlier looks stay reachable in this branch's history (and the in-game **Settings → ART** switch keeps the older looks selectable):
+
+| Version | Commit | What it is |
+|---|---|---|
+| Pixel cast (v3) | `dbb66ee` | Pixel-art characters, bosses, props and plants over the 3D environments. Playable copy: https://claude.ai/artifact/SxuHBiXEMmVwBSqiARdujb |
+| Classic 3D | `37d8ada` | The first build played on iPhone (retro-textured 3D characters). |
+
+To run one: `git checkout <commit> && npm ci && npm run dev`.
+
 ## Android (secondary)
 
 `android/` is a Capacitor project: landscape, immersive fullscreen, keep-screen-on. Run
