@@ -41,6 +41,15 @@ export function grp(g: O, x: number, y: number, z: number, ry = 0): THREE.Group 
   return s;
 }
 
+/**
+ * ART: PIXEL WORLD record: what a prop group / mesh is, for z2/pixel.ts to paint
+ * in its place. A tag only (userData): the classic build is unchanged.
+ */
+export function pwTag<T extends THREE.Object3D>(o: T, kind: string, data: Record<string, unknown> = {}): T {
+  o.userData.pw = { kind, ...data };
+  return o;
+}
+
 const steel = () => T(C.steel, TX.steel);
 const rubber = () => M(0x1c1e1e);
 const white = () => T(0xd6dcd6, TX.cloth);
@@ -55,7 +64,7 @@ export interface GurneyOpts {
 }
 
 export function gurney(g: O, x: number, y: number, z: number, ry: number, o: GurneyOpts = {}): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'gurney', { ...o });
   const h = o.tipped ? null : s;
   const root = h ?? grp(s, 0, 0.33, 0, 0);
   if (o.tipped) root.rotation.z = Math.PI / 2 - 0.08;
@@ -95,7 +104,7 @@ export function gurney(g: O, x: number, y: number, z: number, ry: number, o: Gur
 }
 
 export function wheelchair(g: O, x: number, y: number, z: number, ry: number, tipped = false): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'wheelchair', { tipped });
   const r = tipped ? grp(s, 0, 0.32, 0, 0) : s;
   if (tipped) r.rotation.z = 1.45;
   const st = steel();
@@ -114,7 +123,7 @@ export function wheelchair(g: O, x: number, y: number, z: number, ry: number, ti
 }
 
 export function ivStand(g: O, x: number, y: number, z: number, bag = 0xd8e8d0, liquid = 0xc8d8a0): THREE.Group {
-  const s = grp(g, x, y, z, 0);
+  const s = pwTag(grp(g, x, y, z, 0), 'iv', { bag, liquid });
   const st = steel();
   cyl(s, 0.015, 0.015, 1.95, st, 0, 0.98, 0, 5);
   for (let i = 0; i < 5; i++) {
@@ -137,7 +146,7 @@ export interface BedOpts {
 
 /** Hospital bed, head at local -Z (against the wall), foot at +Z. */
 export function bed(g: O, x: number, y: number, z: number, ry: number, rng: Rng, o: BedOpts = {}): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'bed', { ...o });
   const st = steel();
   const frame = T(0xb8beb8, TX.paint);
   blk(s, 0.96, 0.1, 2.05, st, 0, 0.42, 0);
@@ -179,7 +188,7 @@ export function bed(g: O, x: number, y: number, z: number, ry: number, rng: Rng,
 
 /** Wall-mounted vitals monitor with a glowing trace. */
 export function monitor(g: O, x: number, y: number, z: number, ry: number, on = true, color: number = C.screen): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'monitor', { on, color });
   blk(s, 0.42, 0.32, 0.12, T(0x2a2e30, TX.paint), 0, 0, 0);
   box(s, 0.36, 0.25, 0.01, on ? G(0x0a2418, 1) : M(0x101414), 0, 0.16, 0.062);
   if (on) {
@@ -192,7 +201,7 @@ export function monitor(g: O, x: number, y: number, z: number, ry: number, on = 
 }
 
 export function bedside(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'bedside');
   blk(s, 0.45, 0.75, 0.42, T(0xa8b0aa, TX.paint), 0, 0, 0);
   box(s, 0.4, 0.01, 0.01, M(0x5a605c), 0, 0.5, 0.215);
   box(s, 0.08, 0.02, 0.02, steel(), 0, 0.6, 0.22);
@@ -202,7 +211,7 @@ export function bedside(g: O, x: number, y: number, z: number, ry: number): THRE
 
 /** Row of linked waiting-room chairs along local X. */
 export function chairRow(g: O, x: number, y: number, z: number, ry: number, n: number, color = 0x2f5a8a, missing: number[] = []): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'chairs', { n, color, missing });
   const st = steel();
   const mat = T(color, TX.cloth);
   const w = 0.56;
@@ -223,7 +232,7 @@ export function chairRow(g: O, x: number, y: number, z: number, ry: number, n: n
 }
 
 export function vending(g: O, x: number, y: number, z: number, ry: number, color: number, lit = true, rng?: Rng): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'vending', { color, lit });
   blk(s, 1.0, 1.95, 0.85, T(color, TX.paint), 0, 0, 0);
   blk(s, 0.06, 1.8, 0.04, M(0x1a1a1a), 0.22, 0.08, 0.43);
   // Product window.
@@ -243,7 +252,7 @@ export function vending(g: O, x: number, y: number, z: number, ry: number, color
 
 /** Reception / nurse-station counter (front faces +Z), `w` wide. */
 export function counter(g: O, x: number, y: number, z: number, ry: number, w: number, rng: Rng, screens = 2): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'counter', { w });
   const front = T(0x5c7a74, TX.wood);
   const top = M(0xb9b3a2);
   blk(s, w, 1.1, 0.12, front, 0, 0, 0.4);
@@ -267,7 +276,7 @@ export function counter(g: O, x: number, y: number, z: number, ry: number, w: nu
 }
 
 export function crashCart(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'crashCart');
   blk(s, 0.7, 0.95, 0.5, T(0xb02828, TX.paint), 0, 0.08, 0);
   for (let i = 0; i < 4; i++) box(s, 0.66, 0.01, 0.01, M(0x5a1010), 0, 0.3 + i * 0.2, 0.255);
   for (let i = 0; i < 4; i++) box(s, 0.2, 0.025, 0.03, steel(), 0, 0.22 + i * 0.2, 0.26);
@@ -278,7 +287,7 @@ export function crashCart(g: O, x: number, y: number, z: number, ry: number): TH
 }
 
 export function laundryCart(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'laundryCart');
   blk(s, 0.9, 0.06, 0.55, steel(), 0, 0.12, 0);
   blk(s, 0.86, 0.7, 0.5, T(0x3a5a8a, TX.cloth), 0, 0.18, 0);
   box(s, 0.6, 0.18, 0.45, T(C.sheet, TX.cloth), 0.05, 0.92, 0.02, 0, 0.2, 0.1);
@@ -288,7 +297,7 @@ export function laundryCart(g: O, x: number, y: number, z: number, ry: number): 
 }
 
 export function fireExt(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'fireExt');
   cyl(s, 0.09, 0.09, 0.5, T(0xc81e1e, TX.paint), 0, 0.25, 0.1, 8);
   cyl(s, 0.03, 0.04, 0.1, M(0x222222), 0, 0.55, 0.1, 6);
   box(s, 0.3, 0.18, 0.02, G(0xff3020, 0.9), 0, 0.85, 0.01);
@@ -296,7 +305,7 @@ export function fireExt(g: O, x: number, y: number, z: number, ry: number): THRE
 }
 
 export function wallClock(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'clock');
   cyl(s, 0.2, 0.2, 0.05, M(0x1a1a1a), 0, 0, 0.02, 12, Math.PI / 2);
   cyl(s, 0.17, 0.17, 0.02, M(0xe8e8e0), 0, 0, 0.045, 12, Math.PI / 2);
   box(s, 0.02, 0.12, 0.01, M(0x111111), 0.02, 0.04, 0.06, 0, 0, -0.4);
@@ -305,7 +314,7 @@ export function wallClock(g: O, x: number, y: number, z: number, ry: number): TH
 }
 
 export function trashBin(g: O, x: number, y: number, z: number, tipped = false): THREE.Group {
-  const s = grp(g, x, y, z, 0);
+  const s = pwTag(grp(g, x, y, z, 0), 'bin', { tipped });
   if (tipped) {
     cyl(s, 0.2, 0.17, 0.55, T(0x3a5a4a, TX.paint), 0, 0.2, 0, 8, Math.PI / 2 - 0.1);
     box(s, 0.4, 0.04, 0.5, M(0xd8d8d0), 0.1, 0.02, 0.45, 0.4);
@@ -317,7 +326,7 @@ export function trashBin(g: O, x: number, y: number, z: number, tipped = false):
 }
 
 export function plant(g: O, x: number, y: number, z: number, rng: Rng): THREE.Group {
-  const s = grp(g, x, y, z, 0);
+  const s = pwTag(grp(g, x, y, z, 0), 'plant');
   cyl(s, 0.25, 0.2, 0.45, M(0x6a4a3a), 0, 0.22, 0, 8);
   // The blades: a group on the pot's rim (a pixel billboard in ART: SPRITES, see env.ts; the pot stays 3D).
   const blades = grp(s, 0, 0.45, 0);
@@ -333,7 +342,7 @@ export function plant(g: O, x: number, y: number, z: number, rng: Rng): THREE.Gr
 }
 
 export function whiteboard(g: O, x: number, y: number, z: number, ry: number, rng: Rng): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'whiteboard');
   box(s, 1.6, 1.0, 0.04, T(0x8a8f90, TX.steel), 0, 0, 0);
   box(s, 1.5, 0.9, 0.01, M(0xd8dcd8), 0, 0, 0.025);
   const ink = [M(0x203a8a), M(0xa02020), M(0x205a30)];
@@ -350,7 +359,7 @@ export function whiteboard(g: O, x: number, y: number, z: number, ry: number, rn
 
 /** Recessed fluorescent panel; returns the diffuser mesh (for flicker). */
 export function ceilingPanel(g: O, x: number, y: number, z: number, ry: number, on: boolean, warm = false): THREE.Mesh {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'panel', { on, warm });
   box(s, 0.66, 0.05, 1.26, M(0xb8bcb4), 0, -0.02, 0);
   const diff = box(s, 0.58, 0.03, 1.18, on ? G(warm ? C.panelWarm : C.panel, 1.15) : M(0x3a403c), 0, -0.05, 0);
   return diff;
@@ -358,7 +367,7 @@ export function ceilingPanel(g: O, x: number, y: number, z: number, ry: number, 
 
 /** Wall-mounted green EXIT sign (front faces +Z). */
 export function exitSign(g: O, x: number, y: number, z: number, ry: number, label = 'EXIT'): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'exit', { label });
   box(s, 0.62, 0.24, 0.08, M(0x1d2420), 0, 0, 0);
   const px = 0.028;
   const w = (label.length * 6 - 1) * px;
@@ -370,7 +379,7 @@ export function exitSign(g: O, x: number, y: number, z: number, ry: number, labe
 
 /** Caged red emergency lamp (static part). Returns the lamp holder group. */
 export function emergencyLamp(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'elamp');
   box(s, 0.22, 0.08, 0.14, M(0x2a2a2a), 0, 0, 0.0);
   cyl(s, 0.08, 0.09, 0.12, G(C.red, 1.6), 0, -0.1, 0.0, 8);
   return s;
@@ -380,16 +389,16 @@ export function emergencyLamp(g: O, x: number, y: number, z: number, ry: number)
 
 /** Flat smear on a floor (y = floor). */
 export function smear(g: O, x: number, y: number, z: number, len: number, w: number, ry: number, color: number = C.blood): void {
-  box(g, w, 0.012, len, M(color), x, y + 0.008, z, ry);
+  pwTag(box(g, w, 0.012, len, M(color), x, y + 0.008, z, ry), 'smear', { len, w, color });
 }
 
 export function bloodPool(g: O, x: number, y: number, z: number, r: number, rng: Rng): void {
   const mat = M(C.bloodDark);
-  cyl(g, r, r, 0.012, mat, x, y + 0.006, z, 10);
+  pwTag(cyl(g, r, r, 0.012, mat, x, y + 0.006, z, 10), 'pool', { r });
   for (let i = 0; i < 4; i++) {
     const a = rng.next() * Math.PI * 2;
     const rr = r * rng.range(0.25, 0.5);
-    cyl(g, rr, rr, 0.012, M(C.blood), x + Math.cos(a) * r * 0.9, y + 0.007, z + Math.sin(a) * r * 0.9, 8);
+    pwTag(cyl(g, rr, rr, 0.012, M(C.blood), x + Math.cos(a) * r * 0.9, y + 0.007, z + Math.sin(a) * r * 0.9, 8), 'poolDrop');
   }
 }
 
@@ -400,15 +409,18 @@ export function dragTrail(g: O, x0: number, z0: number, x1: number, z1: number, 
   const len = Math.hypot(dx, dz);
   const ry = Math.atan2(dx, dz);
   const n = Math.max(2, Math.round(len / 1.2));
+  const first = g.children.length;
   for (let i = 0; i < n; i++) {
     const k = (i + 0.5) / n;
     smear(g, x0 + dx * k + rng.spread(0.1), y + i * 0.0004, z0 + dz * k + rng.spread(0.1), (len / n) * 1.1, rng.range(0.1, 0.2), ry + rng.spread(0.15), rng.chance(0.2) ? C.blood : C.bloodDark);
   }
+  // (PIXEL WORLD paints the whole trail as one ribbon from (x0, z0) to (x1, z1).)
+  for (let i = first; i < g.children.length; i++) pwTag(g.children[i], 'trail', { x0, z0, x1, z1, y, head: i === first });
 }
 
 /** Bloody hand prints / smear on a wall. Wall plane faces +Z in the sub-group. */
 export function wallSmear(g: O, x: number, y: number, z: number, ry: number, rng: Rng, big = false): void {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'wallSmear', { big });
   const mat = M(rng.chance(0.5) ? C.bloodFresh : C.blood);
   if (big) {
     box(s, 0.9, 0.5, 0.01, mat, 0, 0, 0, 0, 0, rng.spread(0.4));
@@ -427,7 +439,7 @@ export function wallSmear(g: O, x: number, y: number, z: number, ry: number, rng
 export function papers(g: O, cx: number, cz: number, rx: number, rz: number, n: number, y: number, rng: Rng): void {
   const mats = [MD(0xe8e8e0), MD(0xd8d4b8), MD(0xc8d8e8), MD(0xe0e0d8)];
   for (let i = 0; i < n; i++) {
-    const m = new THREE.Mesh(Kit.box(0.21, 0.004, 0.29), rng.pick(mats));
+    const m = pwTag(new THREE.Mesh(Kit.box(0.21, 0.004, 0.29), rng.pick(mats)), 'paper', { cx, cz, rx, rz, n, y, i });
     m.position.set(cx + rng.spread(rx), y + 0.012 + i * 0.0002, cz + rng.spread(rz));
     m.rotation.set(rng.spread(0.05), rng.next() * Math.PI, rng.spread(0.05));
     g.add(m);
@@ -435,7 +447,7 @@ export function papers(g: O, cx: number, cz: number, rx: number, rz: number, n: 
 }
 
 export function bodyBag(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'bodyBag');
   const mat = T(0x22322c, TX.cloth);
   box(s, 0.55, 0.26, 1.7, mat, 0, 0.13, 0);
   box(s, 0.4, 0.24, 0.35, mat, 0, 0.14, -0.95);
@@ -445,7 +457,7 @@ export function bodyBag(g: O, x: number, y: number, z: number, ry: number): THRE
 
 /** A corpse lying on the floor (simple humanoid boxes). */
 export function corpse(g: O, x: number, y: number, z: number, ry: number, rng: Rng, shirt = 0x8fb4c4): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'corpse', { shirt });
   const skin = T(rng.pick([0x8a9a80, 0x9aa08a, 0x7a8a7a]), TX.skin);
   const cloth = T(shirt, TX.cloth);
   box(s, 0.42, 0.18, 0.62, cloth, 0, 0.09, 0);
@@ -462,7 +474,7 @@ export function corpse(g: O, x: number, y: number, z: number, ry: number, rng: R
 
 /** Wall of morgue cold-storage doors; front faces +Z. Returns the door slot centres (local). */
 export function morgueWall(g: O, x: number, y: number, z: number, ry: number, cols: number, rows: number, skip: Set<string>): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'morgueWall', { cols, rows, skip: [...skip] });
   const w = cols * 0.78;
   const st = T(C.steel, TX.steel);
   blk(s, w + 0.2, rows * 0.72 + 0.35, 0.4, T(0x6a7476, TX.steel), 0, 0, -0.2);
@@ -484,7 +496,7 @@ export function morgueWall(g: O, x: number, y: number, z: number, ry: number, co
 
 /** Steel autopsy table (long axis along local Z). */
 export function autopsyTable(g: O, x: number, y: number, z: number, ry: number, rng: Rng, o: { body?: boolean; open?: boolean } = {}): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'autopsy', { ...o });
   const st = T(C.steel, TX.steel);
   blk(s, 0.32, 0.8, 0.32, T(C.steelDark, TX.steel), 0, 0, 0);
   blk(s, 0.9, 0.06, 2.1, st, 0, 0.82, 0);
@@ -514,7 +526,7 @@ export function autopsyTable(g: O, x: number, y: number, z: number, ry: number, 
 
 /** Big round surgical lamp hanging from the ceiling at `yCeil`. */
 export function surgicalLamp(g: O, x: number, yCeil: number, z: number, lampY: number): THREE.Group {
-  const s = grp(g, x, 0, z, 0);
+  const s = pwTag(grp(g, x, 0, z, 0), 'surgLamp', { yCeil, lampY });
   const arm = T(0xd8dcd8, TX.paint);
   cyl(s, 0.12, 0.12, 0.1, arm, 0, yCeil - 0.05, 0, 8);
   cyl(s, 0.05, 0.05, yCeil - lampY - 0.3, arm, 0, (yCeil + lampY + 0.3) / 2, 0, 6);
@@ -532,7 +544,7 @@ export function surgicalLamp(g: O, x: number, yCeil: number, z: number, lampY: n
 }
 
 export function opTable(g: O, x: number, y: number, z: number, ry: number, rng: Rng): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'opTable');
   blk(s, 0.4, 0.75, 0.6, T(0x5a6266, TX.steel), 0, 0, 0);
   blk(s, 0.7, 0.12, 2.1, T(0x2a4a5a, TX.cloth), 0, 0.78, 0);
   blk(s, 0.72, 0.03, 2.0, T(0x6a9a8a, TX.cloth), 0, 0.9, 0.05);
@@ -545,7 +557,7 @@ export function opTable(g: O, x: number, y: number, z: number, ry: number, rng: 
 }
 
 export function anesthesia(g: O, x: number, y: number, z: number, ry: number): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'anesthesia');
   blk(s, 0.7, 1.2, 0.6, T(0xc8ccc4, TX.paint), 0, 0.1, 0);
   blk(s, 0.5, 0.4, 0.06, M(0x202428), 0, 1.35, 0.1);
   box(s, 0.44, 0.32, 0.01, G(0x082a2a, 1), 0, 1.55, 0.135);
@@ -559,7 +571,7 @@ export function anesthesia(g: O, x: number, y: number, z: number, ry: number): T
 
 /** Instrument trolley. */
 export function trolley(g: O, x: number, y: number, z: number, ry: number, rng: Rng): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'trolley');
   const st = steel();
   blk(s, 0.8, 0.03, 0.5, st, 0, 0.85, 0);
   blk(s, 0.8, 0.03, 0.5, st, 0, 0.3, 0);
@@ -616,7 +628,7 @@ export interface Ambulance {
 
 /** Box ambulance, length along local Z (front at +Z), ~6.2 m long. */
 export function ambulance(): Ambulance {
-  const root = new THREE.Group();
+  const root = pwTag(new THREE.Group(), 'ambulance');
   const body = new THREE.Group();
   root.add(body);
   const white = T(0xd8dcd6, TX.panel);
@@ -684,7 +696,7 @@ export function ambulance(): Ambulance {
 
 /** Parked car silhouette (front at +Z). */
 export function car(g: O, x: number, y: number, z: number, ry: number, color: number): THREE.Group {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'car', { color });
   const paint = T(color, TX.panel);
   blk(s, 1.8, 0.7, 4.3, paint, 0, 0.3, 0);
   blk(s, 1.6, 0.6, 2.2, paint, 0, 1.0, -0.3);
@@ -698,6 +710,6 @@ export function car(g: O, x: number, y: number, z: number, ry: number, color: nu
 /** Straight pipe between two points at height y (along X or Z). */
 export function pipe(g: O, x0: number, z0: number, x1: number, z1: number, y: number, r: number, mat: THREE.Material): void {
   const len = Math.hypot(x1 - x0, z1 - z0);
-  const s = grp(g, (x0 + x1) / 2, y, (z0 + z1) / 2, Math.atan2(x1 - x0, z1 - z0));
+  const s = pwTag(grp(g, (x0 + x1) / 2, y, (z0 + z1) / 2, Math.atan2(x1 - x0, z1 - z0)), 'pipe', { len, r });
   cyl(s, r, r, len, mat, 0, 0, 0, 6, Math.PI / 2);
 }

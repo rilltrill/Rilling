@@ -6,7 +6,9 @@ import { Kit } from '../../kit/ModelKit';
 import { Rng } from '../../../core/Rng';
 import { clamp } from '../../../core/math';
 import { B, RAIL_LENGTH, dAt, groundAt } from './layout';
-import { bake } from './bake';
+import { bake, setBakeHook } from './bake';
+import { pixelWorld } from '../../../core/art';
+import { Z2PixelWorld } from './pixel';
 import { FloraField, floraArtToggle, floraAtlas, floraReach } from '../../pixel/floraField';
 import { DEAD_TREE, GRASS } from '../../pixel/floraSpecies';
 import { Z2_BIOME } from '../../pixel/floraBiomes';
@@ -163,11 +165,19 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   };
   setZ2Scene(world, sc);
   const occluders: THREE.Object3D[] = [];
-  const ctx: ZoneCtx = { rng, sc, dyn, occluders };
+  // ART: PIXEL WORLD (z2/pixel.ts): painted walls, floors, ceilings, props, signs, sky — null otherwise.
+  const pw = pixelWorld(world) ? new Z2PixelWorld() : null;
+  const ctx: ZoneCtx = { rng, sc, dyn, occluders, pw };
+  setBakeHook(pw ? (g, parent) => pw.convertInto(g, parent) : null);
 
-  // Night sky over the bay (follows the camera on XZ).
+  // Night sky over the bay (follows the camera on XZ); PIXEL WORLD: a painted storm panorama instead.
   const sky = EnvKit.sky(0x05070d, 0x1a2436, 0x121b27, 300);
   root.add(sky);
+  const pwSky = pw ? pw.buildBackdrop(FOGS[0].color, FOGS[0].color) : null;
+  if (pwSky) {
+    sky.visible = false;
+    root.add(pwSky);
+  }
 
   // ─── Zones (each baked to a handful of draws, culled by rail distance) ───
   const zones: { g: THREE.Group; from: number; to: number }[] = [];
@@ -208,6 +218,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       veg3D.add(vg);
       zones.push({ g: vg, from, to });
     }
+    pw?.convertZone(g);
     bake(g);
     root.add(g);
     zones.push({ g, from, to });
@@ -229,6 +240,11 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   buildCrashAmbulance(ctx);
   zones.push({ g: buildShafts(ctx), from: D.or, to: Infinity });
   buildCocoon(ctx);
+  if (pw) {
+    setBakeHook(null);
+    pw.registerDynamic(sc.flickers, sc.vents.map((v) => v.grate));
+    pw.finish(1, sc.flickers);
+  }
   const vegPx = new THREE.Group();
   vegPx.name = 'z2-vegPx';
   vegPx.add(flora2d.build());
@@ -321,7 +337,11 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
     cam.getWorldPosition(_cam);
     cam.getWorldDirection(_dir);
     sky.position.set(_cam.x, 0, _cam.z);
-    sky.visible = d < D.corrA;
+    sky.visible = !pwSky && d < D.corrA;
+    if (pwSky) {
+      pwSky.visible = d < D.corrA;
+      pw!.backdrop!.update(_cam);
+    }
 
     // Flashlight from just below/right of the eye, aimed where the camera looks.
     _right.set(-_dir.z, 0, _dir.x).normalize();
@@ -369,6 +389,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
       if (!calm) bolt = flashT > 0.36 ? 1.8 : 1.8 * Math.pow(flashT / 0.36, 1.6);
     }
     hemi.intensity = hemiK * surgeK + bolt;
+    pw?.lightning(bolt);
     sun.intensity = 0.9 * surgeK + bolt * 0.6;
     ambT -= dt;
     if (ambT <= 0) {

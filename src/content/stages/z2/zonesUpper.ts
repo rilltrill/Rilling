@@ -24,6 +24,7 @@ import {
   monitor,
   papers,
   plant,
+  pwTag,
   smear,
   trashBin,
   vending,
@@ -81,7 +82,7 @@ export function buildBay(ctx: ZoneCtx): { near: THREE.Group; field: THREE.Group 
   // Puddles.
   for (let i = 0; i < 9; i++) {
     const r = rng.range(0.6, 1.6);
-    const p = cyl(f, r, r, 0.01, T(0x243444, TX.water), rng.spread(9), 0.006, rng.range(-20, 18), 10);
+    const p = pwTag(cyl(f, r, r, 0.01, T(0x243444, TX.water), rng.spread(9), 0.006, rng.range(-20, 18), 10), 'puddle', { r });
     p.scale.z = rng.range(0.5, 1);
   }
 
@@ -100,16 +101,16 @@ export function buildBay(ctx: ZoneCtx): { near: THREE.Group; field: THREE.Group 
     for (let x = -32; x <= 32; x += 3.2) {
       if (Math.abs(x) < 9.6 && fl === 2) continue;
       const on = rng.chance(0.18);
-      box(g, 1.7, 1.7, 0.1, on ? rng.pick(lit) : winDark, x, y, -25.82);
-      box(g, 1.9, 0.12, 0.25, T(0x7a766c, TX.concrete), x, y - 0.92, -25.75);
+      pwTag(box(g, 1.7, 1.7, 0.1, on ? rng.pick(lit) : winDark, x, y, -25.82), 'win', { on, fl });
+      pwTag(box(g, 1.9, 0.12, 0.25, T(0x7a766c, TX.concrete), x, y - 0.92, -25.75), 'sill');
     }
   }
   // Hospital name sign on the roofline.
   sign(g, 'ST MERCY HOSPITAL', 0, 13.3, -25.7, 0, 0.15, 0xdff4ff, 0x1a2024, 1.25, [3, 12]);
   box(g, 18.5, 0.25, 0.5, T(0x3a3e42, TX.paint), 0, 12.2, -25.6);
   // Big red cross.
-  box(g, 0.9, 2.6, 0.2, G(0xff2a2a, 1.4), 12.5, 13.3, -25.7);
-  box(g, 2.6, 0.9, 0.2, G(0xff2a2a, 1.4), 12.5, 13.3, -25.7);
+  pwTag(box(g, 0.9, 2.6, 0.2, G(0xff2a2a, 1.4), 12.5, 13.3, -25.7), 'cross');
+  pwTag(box(g, 2.6, 0.9, 0.2, G(0xff2a2a, 1.4), 12.5, 13.3, -25.7), 'crossBar');
 
   // ─── Entrance: broken sliding doors ──────────────────────────────────────
   const glass = Kit.mat(0x8ab8c0, { transparent: true, opacity: 0.28 });
@@ -158,14 +159,14 @@ export function buildBay(ctx: ZoneCtx): { near: THREE.Group; field: THREE.Group 
   for (let fl = 0; fl < 3; fl++) {
     for (let z = -24; z <= 10; z += 3.2) {
       const on = rng.chance(0.12);
-      box(f, 0.1, 1.6, 1.7, on ? rng.pick(lit) : winDark, -17.95, 2.4 + fl * 3.4, z);
+      pwTag(box(f, 0.1, 1.6, 1.7, on ? rng.pick(lit) : winDark, -17.95, 2.4 + fl * 3.4, z), 'wingWin', { on, fl });
     }
   }
   sign(f, 'OUTPATIENTS', -17.85, 10.6, -8, Math.PI / 2, 0.11, 0x9fd8ff, 0x101418, 1.1, [2, 7]);
   // Low wall + fence on the right.
   box(f, 0.4, 0.9, 50, T(0x5e5e58, TX.concrete), 18, 0.45, 0);
   for (let z = -24; z <= 24; z += 2.5) cyl(f, 0.04, 0.04, 2.4, M(0x4a4e50), 18, 1.6, z, 5);
-  box(f, 0.03, 1.5, 50, Kit.mat(0x8a9498, { transparent: true, opacity: 0.4, tex: 'grate', texScale: 1.5, texStrength: 1 }), 18, 1.75, 0);
+  pwTag(box(f, 0.03, 1.5, 50, Kit.mat(0x8a9498, { transparent: true, opacity: 0.4, tex: 'grate', texScale: 1.5, texStrength: 1 }), 18, 1.75, 0), 'fence');
   car(f, 23, 0, -12, 0.1, 0x6a2a2a);
   car(f, 23.5, 0, -4, -0.05, 0x2a3a5a);
   car(f, 24, 0, 8, 3.1, 0x8a8a84);
@@ -190,7 +191,7 @@ export function buildBay(ctx: ZoneCtx): { near: THREE.Group; field: THREE.Group 
   // Distant skyline blocks to the right (beyond the fog edge they read as silhouettes).
   for (let i = 0; i < 6; i++) {
     const h = rng.range(10, 26);
-    box(f, rng.range(8, 14), h, rng.range(8, 14), T(0x1e222a, TX.concrete), 44 + rng.range(0, 10), h / 2, -40 + i * 14);
+    pwTag(box(f, rng.range(8, 14), h, rng.range(8, 14), T(0x1e222a, TX.concrete), 44 + rng.range(0, 10), h / 2, -40 + i * 14), 'skyline');
   }
 
   // ─── Parked ambulance (lights going) ─────────────────────────────────────
@@ -216,8 +217,8 @@ export function buildBay(ctx: ZoneCtx): { near: THREE.Group; field: THREE.Group 
   papers(f, 0, -12, 6, 10, 40, 0, rng);
   // Traffic cones.
   for (const [cx, cz] of [[-5, 4], [-4.2, 6.4], [5.2, -1]] as [number, number][]) {
-    cyl(f, 0.02, 0.22, 0.7, M(0xe0601a), cx, 0.35, cz, 8);
-    box(f, 0.45, 0.04, 0.45, M(0x1a1a1a), cx, 0.02, cz);
+    pwTag(cyl(f, 0.02, 0.22, 0.7, M(0xe0601a), cx, 0.35, cz, 8), 'cone', { foot: 0.35 });
+    pwTag(box(f, 0.45, 0.04, 0.45, M(0x1a1a1a), cx, 0.02, cz), 'coneBase');
   }
   return { near: g, field: f };
 }
@@ -329,7 +330,7 @@ export function buildER(ctx: ZoneCtx): THREE.Group {
   vending(g, 10.4, 0, -29.6, -Math.PI / 2, 0x2a4a9a, true, rng);
   plant(g, 9.9, 0, -38.8, rng);
   // TV with an emergency broadcast.
-  const tv = grp(g, 10.8, 2.6, -35.5, -Math.PI / 2);
+  const tv = pwTag(grp(g, 10.8, 2.6, -35.5, -Math.PI / 2), 'tv');
   box(tv, 1.5, 0.9, 0.1, M(0x151515), 0, 0, 0);
   box(tv, 1.36, 0.78, 0.01, G(0x1a3a8a, 1.1), 0, 0, 0.055);
   box(tv, 1.36, 0.16, 0.01, G(0xff2020, 1.4), 0, -0.22, 0.06);
@@ -508,8 +509,8 @@ export function buildWard(ctx: ZoneCtx): THREE.Group {
   for (const x of [56, 62, 68.5]) {
     for (const z of [r.z0, r.z1]) {
       const inward = z === r.z0 ? 1 : -1;
-      box(g, 1.8, 1.2, 0.04, G(C.moon, 0.55), x, 2.1, z - inward * 0.1);
-      for (let i = 0; i < 7; i++) box(g, 1.78, 0.05, 0.03, M(0x8a908c), x, 1.56 + i * 0.17, z + inward * 0.02, 0, 0.6 * inward);
+      pwTag(box(g, 1.8, 1.2, 0.04, G(C.moon, 0.55), x, 2.1, z - inward * 0.1), 'moonWin', { inward });
+      for (let i = 0; i < 7; i++) pwTag(box(g, 1.78, 0.05, 0.03, M(0x8a908c), x, 1.56 + i * 0.17, z + inward * 0.02, 0, 0.6 * inward), 'blind');
     }
   }
   sign(g, 'WARD 3', 53.2, 3.1, -40.5, Math.PI / 2, 0.05, 0xbfe8ff, 0x101418, 1.1);

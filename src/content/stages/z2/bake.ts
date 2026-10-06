@@ -303,6 +303,14 @@ function swap(a: THREE.BufferAttribute, i: number, j: number) {
   a.setXYZ(j, x, y, z);
 }
 
+/** ART: PIXEL WORLD hook run by `bakeInto` before its bake while a stage builds (null otherwise). */
+let bakeHook: ((g: THREE.Group, parent: THREE.Object3D) => void) | null = null;
+
+/** Set (or clear) the `bakeInto` hook: only for the duration of a synchronous stage build. */
+export function setBakeHook(h: ((g: THREE.Group, parent: THREE.Object3D) => void) | null) {
+  bakeHook = h;
+}
+
 /**
  * Build meshes into a temporary group, bake them, and attach the results to
  * `parent` in the same local frame (one or two draws for an animated part).
@@ -310,6 +318,8 @@ function swap(a: THREE.BufferAttribute, i: number, j: number) {
 export function bakeInto(parent: THREE.Object3D, build: (g: THREE.Group) => void): THREE.Mesh[] {
   const g = new THREE.Group();
   build(g);
+  // ART: PIXEL WORLD re-paints the set piece first (its batch joins `parent`); the bake keeps the rest.
+  bakeHook?.(g, parent);
   const meshes = bake(g);
   for (const m of meshes) {
     g.remove(m);

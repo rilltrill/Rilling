@@ -23,6 +23,7 @@ import {
   papers,
   pipe,
   plant,
+  pwTag,
   smear,
   surgicalLamp,
   trolley,
@@ -364,8 +365,8 @@ export function buildOR(ctx: ZoneCtx): THREE.Group {
   cyl(mstand, 0.03, 0.03, 1.3, T(C.steel, TX.steel), 0, 0.65, 0, 5);
   // X-ray light boxes on the north wall.
   for (const sx of [73.2, 74.8]) {
-    box(g, 1.3, 0.9, 0.05, G(0xd8f0ff, 0.9), sx, B + 1.9, r.z1 - 0.17);
-    for (let k = 0; k < 5; k++) box(g, 0.08, 0.5, 0.01, M(0x2a2e30), sx - 0.3 + k * 0.15, B + 1.9, r.z1 - 0.2, 0, 0, (k - 2) * 0.12);
+    pwTag(box(g, 1.3, 0.9, 0.05, G(0xd8f0ff, 0.9), sx, B + 1.9, r.z1 - 0.17), 'xray', { v: sx > 74 ? 1 : 0 });
+    for (let k = 0; k < 5; k++) pwTag(box(g, 0.08, 0.5, 0.01, M(0x2a2e30), sx - 0.3 + k * 0.15, B + 1.9, r.z1 - 0.2, 0, 0, (k - 2) * 0.12), 'xrayFilm');
   }
   // Scrub sink.
   blk(g, 2.6, 0.95, 0.6, T(C.steel, TX.steel), 76.4, B, r.z1 - 0.45);
@@ -473,7 +474,7 @@ export function buildCorrC(ctx: ZoneCtx): THREE.Group {
   exitSign(g, 52.4, B + 2.9, -122.6, -Math.PI / 2);
   // Gore + puddles.
   dragTrail(g, 70, -121.4, 52, -120.2, B, rng);
-  for (let i = 0; i < 4; i++) cyl(g, rng.range(0.4, 0.9), rng.range(0.4, 0.9), 0.01, T(0x222e36, TX.water), rng.range(53, 70), B + 0.006, -121 + rng.spread(1.4), 10);
+  for (let i = 0; i < 4; i++) pwTag(cyl(g, rng.range(0.4, 0.9), rng.range(0.4, 0.9), 0.01, T(0x222e36, TX.water), rng.range(53, 70), B + 0.006, -121 + rng.spread(1.4), 10), 'puddle', { indoor: true });
   wallSmear(g, 57, B + 1.2, r.z1 - 0.17, Math.PI, rng, true);
   // (Under the smear, well ahead of the brute-hold camera.)
   corpse(g, 57.4, B, -119.45, Math.PI / 2 + 0.2, rng, 0x6fb8ac);

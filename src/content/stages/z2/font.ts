@@ -72,6 +72,8 @@ export function textWidth(text: string, px: number): number {
  */
 export function pixelText(g: THREE.Object3D, text: string, x: number, y: number, z: number, ry: number, o: TextOpts): THREE.Group {
   const holder = new THREE.Group();
+  // ART: PIXEL WORLD record (the painted stencil / sign replaces the block letters).
+  holder.userData.pw = { kind: 'text', text, px: o.px, color: (o.mat as THREE.MeshBasicMaterial).color?.getHex?.() ?? 0xffffff, glow: (o.mat as THREE.MeshBasicMaterial).isMeshBasicMaterial === true };
   holder.position.set(x, y, z);
   holder.rotation.y = ry;
   g.add(holder);

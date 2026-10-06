@@ -2,11 +2,12 @@ import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import type { Rng } from '../../../core/Rng';
 import { C, G, M, type Preset, T, TB, TX } from './mats';
-import { box, ceilingPanel, grp } from './props';
+import { box, ceilingPanel, grp, pwTag } from './props';
 import type { WallStyle } from './shell';
 import type { Z2Scene } from './scene';
 import { pixelText } from './font';
 import { bakeInto } from './bake';
+import type { Z2PixelWorld } from './pixel';
 
 /** Build context shared by the zone builders. */
 export interface ZoneCtx {
@@ -16,6 +17,8 @@ export interface ZoneCtx {
   dyn: THREE.Group;
   /** Invisible proxy boxes that stop bullets. */
   occluders: THREE.Object3D[];
+  /** ART: PIXEL WORLD painter (null in CLASSIC / PIXEL CAST). */
+  pw?: Z2PixelWorld | null;
 }
 
 export const styles = {
@@ -84,7 +87,7 @@ export function panel(g: THREE.Object3D, x: number, y: number, z: number, ry = 0
  * group and registered with the scene.
  */
 export function flickerPanel(ctx: ZoneCtx, g: THREE.Object3D, x: number, y: number, z: number, ry: number, mode: 'buzz' | 'blink' | 'dying', warm = false) {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'flickerFrame', { warm });
   box(s, 0.66, 0.05, 1.26, M(0xb8bcb4), 0, -0.02, 0);
   const on = G(warm ? C.panelWarm : C.panel, 1.15);
   const off = M(0x3a403c);
@@ -98,7 +101,7 @@ export function flickerPanel(ctx: ZoneCtx, g: THREE.Object3D, x: number, y: numb
 /** A ceiling panel hanging by one corner from its wires, swinging and sparking. */
 export function danglingPanel(ctx: ZoneCtx, g: THREE.Object3D, x: number, y: number, z: number, ry: number) {
   // Hole in the ceiling.
-  box(g, 0.7, 0.02, 1.3, M(0x0c0e0e), x, y - 0.005, z, ry);
+  pwTag(box(g, 0.7, 0.02, 1.3, M(0x0c0e0e), x, y - 0.005, z, ry), 'panelHole');
   const pivot = new THREE.Group();
   pivot.position.set(x, y - 0.02, z);
   pivot.rotation.y = ry;
@@ -123,7 +126,7 @@ export function danglingPanel(ctx: ZoneCtx, g: THREE.Object3D, x: number, y: num
 
 /** Ceiling vent: static dark hole + dynamic grate (falls out when a crawler drops through). */
 export function vent(ctx: ZoneCtx, g: THREE.Object3D, x: number, y: number, z: number, floor: number) {
-  box(g, 0.74, 0.02, 0.74, M(0x08090a), x, y - 0.004, z);
+  pwTag(box(g, 0.74, 0.02, 0.74, M(0x08090a), x, y - 0.004, z), 'ventHole');
   box(g, 0.82, 0.03, 0.06, M(0x8a908c), x, y - 0.015, z - 0.4);
   box(g, 0.82, 0.03, 0.06, M(0x8a908c), x, y - 0.015, z + 0.4);
   const grate = new THREE.Mesh(Kit.box(0.7, 0.03, 0.7), T(0x9aa09c, TX.grate));
@@ -156,7 +159,7 @@ export function sideRoom(
 
 /** Glowing sign with backing plate; front faces +Z of the sub-group. */
 export function sign(g: THREE.Object3D, text: string, x: number, y: number, z: number, ry: number, px: number, color: number, plate: number | null = 0x14181a, intensity = 1.3, broken?: number[]) {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'lit', { text, px, color, plate, broken });
   const w = (text.length * 6 - 1) * px;
   if (plate !== null) box(s, w + px * 4, px * 11, 0.04, M(plate), 0, 0, -0.02);
   pixelText(s, text, 0, 0, px * 0.3, 0, { px, mat: G(color, intensity), depth: px * 0.5, broken, brokenMat: M(0x2a1a1a) });
@@ -165,7 +168,7 @@ export function sign(g: THREE.Object3D, text: string, x: number, y: number, z: n
 
 /** Flat painted sign (unlit text on a light plate). */
 export function plateSign(g: THREE.Object3D, text: string, x: number, y: number, z: number, ry: number, px: number, ink: number, plate: number) {
-  const s = grp(g, x, y, z, ry);
+  const s = pwTag(grp(g, x, y, z, ry), 'plate', { text, px, ink, plate });
   const w = (text.length * 6 - 1) * px;
   box(s, w + px * 4, px * 11, 0.03, M(plate), 0, 0, -0.015);
   pixelText(s, text, 0, 0, 0.004, 0, { px, mat: M(ink), depth: 0.01 });
