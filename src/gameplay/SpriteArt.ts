@@ -87,6 +87,18 @@ const MAX_TEX_BOSS = 512;
 const SCRATCH = 512;
 /** NDC margin kept beyond the screen edge, so a sprite moving in between bakes doesn't show a cut edge. */
 const EDGE = 0.12;
+/**
+ * When a sprite just baked is next due on its schedule (`fps` redraws a second).
+ * A bake on time moves the schedule on by an interval (its phase kept, never
+ * bunching up); an early one — its view turned, the grid changed — leaves it
+ * where it was, and never further than an interval ahead: a sprite re-baked
+ * every frame while the camera pans (or it runs across close by) must not run
+ * its schedule up a second ahead and then freeze for that long once it stops.
+ */
+export function nextBake(next: number, now: number, fps: number): number {
+  return now >= next ? Math.max(next + 1 / fps, now + 0.5 / fps) : Math.min(next, now + 1 / fps);
+}
+
 /** Re-bake when the view direction to a sprite turned by more than this (cos 4°). */
 const TURN_COS = Math.cos((4 * Math.PI) / 180);
 /** Layer nothing renders: parts hidden from one camera without touching `visible`. */
@@ -1072,7 +1084,7 @@ export class SpriteArt {
           spent += s.cost;
           texels += area;
           // Spread the next bakes over the interval (phase kept, never bunching up).
-          s.next = Math.max(s.next + 1 / sch.fps, w.time + 0.5 / sch.fps);
+          s.next = nextBake(s.next, w.time, sch.fps);
           if (this.bake(s, cam)) bakes++;
         }
       } finally {

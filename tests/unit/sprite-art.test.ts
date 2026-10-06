@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { autoTexelScale, DEFAULT_LOOK, keepLive, parseLook, SPRITE_FPS, spriteSchedule } from '../../src/gameplay/SpriteArt';
+import { autoTexelScale, DEFAULT_LOOK, keepLive, nextBake, parseLook, SPRITE_FPS, spriteSchedule } from '../../src/gameplay/SpriteArt';
 import { buildPalette, linearToOklab, oklchToLinear, PALETTE_MAX } from '../../src/gameplay/spritePalette';
 import { DEFAULT_SETTINGS } from '../../src/core/types';
 import { Save } from '../../src/core/Save';
@@ -51,6 +51,40 @@ describe('ART: SPRITES', () => {
     expect(low.fps).toBeGreaterThanOrEqual(10);
     expect(low.maxBakes).toBeLessThan(med.maxBakes);
     expect(low.texelBudget).toBeLessThanOrEqual(med.texelBudget * 0.75);
+  });
+
+  it('redraw schedule: re-bakes for a turning view never run the schedule ahead (no freeze once it stops)', () => {
+    const fps = SPRITE_FPS;
+    const dt = 1 / 60;
+    // A sprite whose view turns past the re-bake angle every frame for 1 s (a
+    // camera pan, a civilian running across close by), then holds still.
+    let next = 0;
+    let lastBake = 0;
+    let maxGapAfter = 0;
+    for (let f = 0; f < 150; f++) {
+      const now = f * dt;
+      const turned = now < 1;
+      if (now >= next || turned) {
+        if (now >= 1) maxGapAfter = Math.max(maxGapAfter, now - Math.max(1, lastBake));
+        next = nextBake(next, now, fps);
+        lastBake = now;
+      }
+      expect(next - now, `schedule ${f}`).toBeLessThanOrEqual(1 / fps + 1e-9);
+    }
+    // Stopped turning at 1 s: the next scheduled redraw comes within an interval (and a frame).
+    expect(maxGapAfter).toBeLessThanOrEqual(1 / fps + dt + 1e-9);
+    // Held still, it redraws at the schedule's rate (not every frame).
+    let n = 0;
+    next = 0;
+    for (let f = 0; f < 120; f++) {
+      const now = f * dt;
+      if (now >= next) {
+        next = nextBake(next, now, fps);
+        n++;
+      }
+    }
+    expect(n).toBeGreaterThanOrEqual(Math.floor(2 * fps) - 1);
+    expect(n).toBeLessThanOrEqual(Math.ceil(2 * fps) + 1);
   });
 
   it('picks whole pixel scales by size, with hysteresis', () => {
