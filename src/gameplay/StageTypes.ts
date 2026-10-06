@@ -144,6 +144,12 @@ export interface CivilianDef {
   attacker?: string;
   /** Seconds of HELP! waving before the act (default: per act). */
   help?: number;
+  /**
+   * Where they run in from (a doorway, from behind a car — rig-relative unless
+   * `world`) to `pos` as the encounter starts. Default: in view at `pos`, they
+   * run in from the nearer edge of the view (or appear there if it's far).
+   */
+  from?: V3;
 }
 
 interface BeatBase {

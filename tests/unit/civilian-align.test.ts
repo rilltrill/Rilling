@@ -141,6 +141,8 @@ function expectAligned(c: Check, label: string) {
 
 function civ(world: World, variant: string, act: Civilian['act'], x = -0.3, z = -4.2): Civilian {
   const c = world.add(new Civilian(world, new THREE.Vector3(x, 0, z), 'world', variant, { act }));
+  // (In plain view they'd run in from the edge: hold them on their spot.)
+  c.root.position.set(x, 0, z);
   return c;
 }
 
@@ -152,13 +154,24 @@ const ALL = [0, 0.9, -0.9, 2.3, -2.3, Math.PI];
 
 /** [phase, seconds into it, options, label, views]. */
 const POSES: [CivPhase, number, Parameters<Civilian['debugPose']>[2], string, number[]][] = [
-  ['plead', 0.5, {}, 'HELP! waving', FRONT],
-  ['plead', 1.1, { bubble: CIV_STAMP.bubble.help }, 'HELP! with its bubble', FRONT],
-  ['cower', 1.2, { peek: 0 }, 'cowering, hands on the head', FRONT],
-  ['cower', 1.7, { peek: 1 }, 'cowering, peeking up', FRONT],
-  ['hide', 0.8, { peek: 0 }, 'hiding, ducked', REAR],
+  ['arrive', 0.3, {}, 'running in', ALL],
+  ['plead', 0.1, {}, 'HELP! calling, hand at the mouth, waving (key A)', FRONT],
+  ['plead', 0.3, { bubble: CIV_STAMP.bubble.help }, 'HELP! with its bubble (key B)', FRONT],
+  ['plead', 0.1, { far: true }, 'HELP! far off: the arm overhead', FRONT],
+  ['startle', 0.05, {}, 'startled', FRONT],
+  // (Cowering keeps three-quarters to the camera, turning as it moves: never seen from behind.)
+  ['cower', 1.2, { peek: 0 }, 'cowering on one knee, hands on the head', FRONT],
+  ['cower', 1.2, { peek: 0, flinch: true }, 'cowering, flinching', FRONT],
+  ['cower', 1.7, { peek: 1 }, 'cowering, peeking out between the forearms', FRONT],
+  ['cower', 1.7, { peek: 1, peekCam: true, bubble: CIV_STAMP.bubble.help }, 'cowering, calling HELP! to the player', FRONT],
+  ['hide', 0.8, { peek: 0 }, 'hiding, braced, hand over the mouth', REAR],
   ['hide', 1.3, { peek: 1, glance: 1 }, 'hiding, peeking, glancing back', REAR],
-  ['backaway', 0.6, {}, 'backing away, hands up', ALL],
+  ['backaway', 0.6, {}, 'backing away, forearm over the face', ALL],
+  ['backaway', 1.4, { bubble: CIV_STAMP.bubble.help }, 'backing away, HELP! over the shoulder', ALL],
+  ['fall', 0.15, {}, 'tripping backwards', ALL],
+  ['fall', 0.6, {}, 'on the seat, scooting back', ALL],
+  ['fall', 1.25, {}, 'rolling over', ALL],
+  ['fall', 1.55, {}, 'scrambling up', ALL],
   ['flee', 0.4, { look: 0 }, 'running', ALL],
   ['flee', 0.7, { look: 1 }, 'running, looking back', ALL],
   ['stumble', 0.15, {}, 'tripping', ALL],
@@ -176,8 +189,9 @@ describe('PixelCast alignment: civilian acts (sprite parts land on the hitboxes)
       const c = civ(world, variant, 'cower');
       for (const [phase, t, o, label, views] of POSES) {
         for (const yaw of views) {
-          c.debugPose(phase, t, o);
+          // (Turned first: some gestures pick their hand by the side they're seen from.)
           c.root.rotation.y = Math.atan2(-c.root.position.x, -c.root.position.z) + yaw;
+          c.debugPose(phase, t, o);
           expectAligned(check(world, camera, c), `${variant} ${label} (yaw ${yaw.toFixed(2)})`);
         }
       }
@@ -219,19 +233,30 @@ describe('PixelCast alignment: civilian acts (sprite parts land on the hitboxes)
     expect(f.layerIndex + 1).toBeLessThanOrEqual(MAX_LAYERS);
   });
 
-  it('grabbed: the civilian and the zombie holding on both line up, mid-struggle', { timeout: 60_000 }, () => {
+  it('grabbed: the civilian and the zombie holding on both line up, mid-struggle and on a yank; its head stays the frontmost thing there', { timeout: 60_000 }, () => {
     const { world, camera } = makeWorld();
     const c = civ(world, 'nurse', 'grabbed', 0.9, -5.2);
     const g = c.holder!;
     expect(g).toBeTruthy();
-    for (const t of [0.6, 1.4, 2.9]) {
+    for (const [t, yank] of [
+      [0.6, 0],
+      [1.4, 1],
+      [2.9, 0.5],
+    ]) {
       for (let i = 0; i < 10; i++) {
         c.update(1 / 60);
         g.update(1 / 60);
       }
-      c.debugPose('grabbed', t);
-      expectAligned(check(world, camera, c), `grabbed civilian t=${t}`);
-      expectAligned(check(world, camera, g), `grabbing zombie t=${t}`);
+      c.debugPose('grabbed', t, { yank });
+      g.update(0);
+      expectAligned(check(world, camera, c), `grabbed civilian t=${t} yank ${yank}`);
+      expectAligned(check(world, camera, g), `grabbing zombie t=${t} yank ${yank}`);
+      // A shot through the zombie's head hits the zombie.
+      world.scene.updateMatrixWorld(true);
+      const h = g.headAnchor!.getWorldPosition(new THREE.Vector3());
+      ray.setFromCamera(new THREE.Vector2().copy(h.clone().project(camera) as unknown as THREE.Vector2), camera);
+      const hit = ray.intersectObjects(world.shootables.objects, false)[0];
+      expect((hit?.object.userData.shot as { owner: Entity } | undefined)?.owner).toBe(g);
     }
   });
 });

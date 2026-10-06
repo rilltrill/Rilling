@@ -12,19 +12,24 @@ import { humanLook, paintHuman, type HumanLook, type HumanPose } from '../conten
 import type { PixelFigure } from './pixel/figure';
 import { CIV_STAMP, HAND } from './pixel/stamps';
 import {
-  aimArm,
+  J,
+  applyArms,
   applyPose,
   blendPose,
+  grabArms,
   poseBackAway,
   poseBuf,
   poseCower,
+  poseFall,
   poseFlee,
   poseGrabbed,
   poseHide,
   poseJog,
   posePlead,
+  poseStartle,
   poseStumble,
   poseThanks,
+  shiver,
   tremble,
   type PoseBuf,
 } from './civPoses';
@@ -68,72 +73,112 @@ const VARIANTS: Record<string, CivLook> = {
 /**
  * What a civilian does (a stage's `CivilianDef.act`, else `auto`):
  *
- *   cower     crouched low, forearms over the head, trembling; peeks up
- *             between attacks, tucks in when something lunges.
- *   hide      ducked behind cover with the back to the camera, peeking over
- *             it and glancing back for help; drops down when a threat is near.
- *   flee      runs for it — toward the camera and out past the nearer side of
- *             the screen (or to `to`), looking back over the shoulder, tripping
- *             once and scrambling up. Safe off screen = rescued.
- *   backaway  backs off from the nearest threat, hands up, then turns and runs.
- *   grabbed   held by a zombie (spawned with it); shoot the zombie and they're
- *             free; left too long they wrench free and run.
- *   plead     waves for help ("HELP!") on and off, cowering in between.
+ *   cower     down on one knee, folded over, hands clasped over the head,
+ *             shaking; peeks out between the forearms now and then (calling
+ *             HELP! to the player the first times), tucks in harder at a shot
+ *             nearby, a kill close by, anything winding up.
+ *   hide      crouched among foliage / low cover with the back to the camera,
+ *             a hand braced on the floor and one over the mouth, peeking out
+ *             and glancing back for help. Only where the stage put cover in
+ *             front of them — never in the open.
+ *   flee      waits cowering until the danger is real (a threat close, an
+ *             attack starting), then runs for it — across and out of the view
+ *             (or to `to`), looking back over the shoulder, maybe tripping once
+ *             on screen and scrambling up.
+ *   backaway  edges back from the nearest threat for a moment, forearm up over
+ *             the face, then turns and runs — sometimes tripping onto the seat
+ *             first and scooting back.
+ *   grabbed   held by a zombie (spawned with it): a tug of war, the zombie
+ *             yanking them in, them hauling back on the held wrist with both
+ *             hands. Shoot the zombie (or its holding arm off) and they're free.
+ *   plead     calls HELP! — leaning in, a hand at the mouth, waving from the
+ *             elbow — on and off, cowering in between.
  *   auto      a short HELP!, then cowers; backs away and runs if a threat gets close.
  */
 export type CivAct = 'auto' | 'cower' | 'hide' | 'flee' | 'backaway' | 'grabbed' | 'plead';
 
 export interface CivilianOpts {
   act?: CivAct;
-  /** flee: where to run (world). Default: off the nearer side of the screen. */
+  /** flee: where to run (world). Default: out across the nearer side of the view. */
   to?: THREE.Vector3 | null;
+  /** Where they run in from (world): a doorway, from behind a car. */
+  from?: THREE.Vector3 | null;
   /** grabbed: the zombie's outfit variant (default 'civilian'). */
   attacker?: string;
-  /** Seconds of HELP! waving before the act (default: per act). */
+  /** Seconds of HELP! before the act (default: per act). */
   help?: number;
 }
 
 /** What the civilian is doing right now. */
-export type CivPhase = 'plead' | 'cower' | 'hide' | 'backaway' | 'flee' | 'stumble' | 'grabbed' | 'thanks' | 'leave';
+export type CivPhase = 'arrive' | 'plead' | 'startle' | 'cower' | 'hide' | 'backaway' | 'fall' | 'flee' | 'stumble' | 'grabbed' | 'thanks' | 'leave';
 type Phase = CivPhase;
 
 /**
  * Root-to-root distance (m) a grabbing zombie keeps, toward the middle of the
- * view: both arms straight, so its head and chest sit well clear of the civilian
- * on screen (≈ 3 aim-error σ of the human-like bot at the z2 ER's 8.6 m).
+ * view: arm's length — the two hands meet on the held wrist — with both leaning
+ * hard away from each other, so the heads end up ~1.7 m apart and its head and
+ * chest are clear shots well away from the civilian on screen (≈ 3.5 aim-error
+ * σ of the human-like bot at the z2 ER, civilian 7.0 m and zombie 6.3 m from the
+ * camera; still > 3 σ on a yank).
  */
-export const GRAB_SEP = 1.55;
-/** Seconds of HELP! before each act (when the stage doesn't say). */
-const HELP_FIRST: Record<CivAct, number> = { auto: 1.5, cower: 1.2, hide: 0, flee: 0, backaway: 0.9, grabbed: 0, plead: 2.2 };
+export const GRAB_SEP = 1.25;
+/** Seconds of HELP! before each act (when the stage doesn't say). Cowering and backing off call out from inside the act. */
+const HELP_FIRST: Record<CivAct, number> = { auto: 1.5, cower: 0, hide: 0, flee: 0, backaway: 0, grabbed: 0, plead: 2.2 };
 /** A threat this close (m, ground) panics an `auto` civilian into backing off / running. */
 const PANIC_ZOMBIE = 2.6;
 const PANIC_DINO = 4.2;
 /** A threat this close makes a cowering / hiding civilian duck (no peeking). */
 const DUCK_DIST = 4;
+/** FLEE runs once a threat is this close (m), something winds up, or FLEE_WAIT s pass. */
+const FLEE_NEAR_ZOMBIE = 7;
+const FLEE_NEAR_DINO = 12;
+const FLEE_WAIT = 8;
 const STUMBLE_TIME = 1.35;
-const RUN_SPEED = 3.6;
+const FALL_TIME = 1.7;
+const RUN_SPEED = 2.8;
+/** Seconds a run aims to stay on screen (Operation Wolf civilians cross the view). */
+const FLEE_SCREEN = 3;
+const STARTLE_TIME = 0.12;
+const FLINCH_TIME = 0.22;
+/** The yank: the civilian lurches this far toward the zombie (m), the zombie steps back this far. */
+const YANK_LURCH = 0.22;
+const YANK_STEP = 0.08;
+/** Waving the whole arm overhead only from this far off (m) — or perched up on something. */
+const FAR_WAVE = 15;
+/** A shot landing within this many screen px of the head makes them flinch. */
+const FLINCH_PX = 110;
+/** Longest run in from the edge of the view (m) for a civilian who'd otherwise pop up in plain sight. */
+const ARRIVE_MAX = 7.5;
+const ARRIVE_SPEED = 3.4;
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
+const _g = new THREE.Vector3();
+const _h = new THREE.Vector3();
 const _cam = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
 const _n = new THREE.Vector3();
+/** Run headings tried (−0.6 … +0.55 rad off straight across, in 0.115 steps) and their scratch. */
+const HEADINGS = 11;
+const _len = new Float32Array(HEADINGS);
+const _cost = new Float32Array(HEADINGS);
 
 /**
  * Innocent bystander. Don't shoot! Shooting one costs a life and points.
- * Rescued (bonus) when the encounter is cleared, when the zombie holding them
- * is shot, or when they get away off screen.
+ * Rescued (bonus) when the encounter is cleared, or on the spot when the player
+ * shoots the zombie holding them. One who gets away off screen is safe — paid
+ * with the rest when the encounter is cleared, as ever.
  *
  * Look: a humanoid with a screaming face and variant props (lab coat, ranger
  * hat, cop cap, hi-vis vest…), baked like the zombies into a few textured,
  * vertex-coloured meshes — faces and props cost no extra draw calls.
  *
  * Behaviour: a small repertoire of frightened acts (`CivAct`) in the spirit of
- * the arcade light-gun games — they cower and peek, hide behind cover, run for
- * it and trip, back off from a zombie, get grabbed, wave for help, and thank
- * you when saved. Poses are written to a pose buffer (civPoses.ts) and blended,
- * so ART: 3D and ART: SPRITES (which paints from the same rig) show the same.
+ * the arcade light-gun games — they cower and peek, hide in cover, run for it
+ * and trip, back off from a zombie, get grabbed, call for help, and thank you
+ * when saved. Poses are written to a pose buffer (civPoses.ts) and blended, so
+ * ART: 3D and ART: SPRITES (which paints from the same rig) show the same.
  * Never in an attack lane: they stay where the stage put them or run outward,
  * away from the middle of the view where everything comes at the player.
  */
@@ -142,6 +187,8 @@ export class Civilian extends Entity {
   private baked: BakedHumanoid;
   rescued = false;
   shot = false;
+  /** Got away off screen (hidden, no target): paid when the encounter is cleared. */
+  escaped = false;
   /** ART: SPRITES — what the PixelCast painter draws. */
   private look: HumanLook;
   private pose2d: HumanPose = { severed: [0, 0], headless: false, jaw: 0.8, face: 'scream', squash: 0, time: 0, speed: 0 };
@@ -152,6 +199,8 @@ export class Civilian extends Entity {
   private phaseT = 0;
   /** Phase after the opening HELP!. */
   private main: Phase = 'cower';
+  /** Phase after a startle. */
+  private next: Phase = 'cower';
   private helpTime: number;
   private readonly rng: Rng;
   private readonly pose = poseBuf();
@@ -173,21 +222,33 @@ export class Civilian extends Entity {
   private alarm = false;
   /** Screen side (+1 right half, −1 left). */
   private side = 1;
-  // Peeking (cower / hide), glancing back (hide).
+  // Peeking (cower / hide), glancing back (hide), flinching.
   private peek = 0;
   private peekOn = false;
-  private peekT = 0;
+  private peekT = 1;
+  /** This peek looks at the player (calling HELP!) rather than at the threat. */
+  private peekCam = true;
+  private peeks = 0;
   private glance = 0;
   private glanceT = 2.5;
   private glanceAmt = 0;
+  private flinchT = 0;
+  private flinchDir = 1;
+  /** Which knee goes down cowering (+1 left), which forearm guards the face backing off. */
+  private readonly kneel: number;
+  private readonly guard: number;
+  private readonly seed: number;
   // Moving.
   private readonly dest = new THREE.Vector3();
   private destSet = false;
   private readonly to: THREE.Vector3 | null;
+  private readonly comeFrom: THREE.Vector3 | null;
   private stride = 0;
+  private amp = 0.2;
   private speed = 0;
   private yawGoal = 0;
   private stumbleAt = -1;
+  private readonly fallOver: boolean;
   private lookBack = 0;
   private lookBackT = 1;
   private lookAmt = 0;
@@ -199,21 +260,30 @@ export class Civilian extends Entity {
   private grabSide = 1;
   private grabTime = 7.5;
   /** BACK AWAY: seconds edging back before turning to run (if nothing comes close first). */
-  private backTime = 5;
-  private pull = 0;
+  private backTime = 2;
+  /** The tug of war: seconds into this yank, its length, and the jerk 0..1. */
+  private yankT = 0;
+  private yankPeriod = 1.3;
+  private yankAmt = 0;
   /** Where the zombie holding on stands (world), its extra turn, and where the hands meet. */
   readonly grabSpot = new THREE.Vector3();
   grabTurn = 0;
   readonly grabHand = new THREE.Vector3();
   private readonly grabBase = new THREE.Vector3();
+  private readonly grabRoot = new THREE.Vector3();
+  /** Where the stage put them (they run in to it from off screen). */
+  private readonly spot = new THREE.Vector3();
   // Speech bubble, gestures.
   private bubble = -1;
   private bubbleT = 0;
   private helps = 0;
   /** ART: 3D's copy of the bubble (PixelCast stamps its own). */
   private readonly bubble3d = new Bubble3D(this.root);
+  /** The waving hand (+1 left); the other calls at the mouth. */
   private waveSide = 1;
   private thumb = false;
+  private offShot: (() => void) | null = null;
+  private offKill: (() => void) | null = null;
 
   constructor(world: World, pos: THREE.Vector3, frame: Frame, variant = 'default', opts: CivilianOpts = {}) {
     super(world);
@@ -243,23 +313,31 @@ export class Civilian extends Entity {
     this.baked = bakeHumanoid(this.rig, { skin: v.skin });
     this.root.add(this.rig.root);
     // (One draw from the world's RNG, as ever: the civilian's own randomness comes from it.)
-    this.rng = new Rng(Math.floor(world.rng.next() * 0x7fffffff) + 1);
+    const rng = (this.rng = new Rng(Math.floor(world.rng.next() * 0x7fffffff) + 1));
     this.perched = pos.y > world.groundAt(pos.x, pos.z) + 0.4;
     this.dino = world.stage?.campaign === 'dino';
     this.to = opts.to ? opts.to.clone() : null;
+    this.comeFrom = opts.from ? opts.from.clone() : null;
     this.attacker = opts.attacker ?? 'civilian';
     let act = opts.act ?? 'auto';
-    // Up on a truck bed nobody runs, hides or gets grabbed: they wave for help.
+    // Up on a truck bed nobody runs, hides or gets grabbed: they call for help.
     if (this.perched && act !== 'cower') act = 'plead';
     this.act = act;
     this.helpTime = opts.help ?? HELP_FIRST[act];
     this.main = act === 'hide' ? 'hide' : act === 'flee' ? 'flee' : act === 'backaway' ? 'backaway' : act === 'grabbed' ? 'grabbed' : 'cower';
-    this.waveSide = this.rng.next() < 0.5 ? 1 : -1;
-    this.grabTime = 7 + this.rng.next() * 1.5;
-    this.backTime = 4.5 + this.rng.next() * 2;
-    this.peekT = 1 + this.rng.next() * 1.5;
-    this.thumb = this.rng.next() < 0.5;
-    if (this.rng.next() < 0.75) this.stumbleAt = 0.7 + this.rng.next() * 0.7;
+    this.waveSide = rng.next() < 0.5 ? 1 : -1;
+    this.kneel = rng.next() < 0.5 ? 1 : -1;
+    this.guard = rng.next() < 0.5 ? 1 : -1;
+    this.grabTime = 7 + rng.next() * 1.5;
+    this.backTime = 1.5 + rng.next();
+    this.peekT = 0.6 + rng.next() * 0.5;
+    this.thumb = rng.next() < 0.5;
+    this.stumbleAt = rng.next() < 0.75 ? 0.35 + rng.next() * 0.25 : -1;
+    this.fallOver = rng.next() < 0.5;
+    this.seed = rng.next() * 7;
+    this.yankPeriod = 1.1 + rng.next() * 0.5;
+    // (The first yank comes half a second in.)
+    this.yankT = this.yankPeriod - 0.5;
   }
 
   override onAdded(): void {
@@ -268,12 +346,19 @@ export class Civilian extends Entity {
     for (const m of z.torso) this.hitbox(m, 'torso');
     for (const m of z.limb) this.hitbox(m, 'limb');
     this.view();
-    // Face the player; the screen side decides which way is "outward".
-    this.root.rotation.y = this.yawGoal = this.faceCamYaw();
+    // The screen side decides which way is "outward".
     this.side = this.viewX(this.root.position) >= 0 ? 1 : -1;
     this.sense();
+    this.offShot = this.world.events.on('shot', (e) => this.nearShot(e.x, e.y));
+    this.offKill = this.world.events.on('kill', (e) => this.nearKill(e.enemy));
     if (this.main === 'grabbed') this.startGrab();
-    this.enter(this.helpTime > 0 ? 'plead' : this.main, 0.01);
+    this.spot.copy(this.root.position);
+    // Not popping up out of nowhere in plain sight: run in from the edge of the view.
+    if (!this.arriving()) this.enter(this.helpTime > 0 ? 'plead' : this.afterHelp(), 0.01);
+    // Already turned the way the act faces (no spin on the spot as they appear).
+    if (this.phase === 'flee') this.pickDest(FLEE_SCREEN);
+    if (this.phase === 'arrive') this.dest.copy(this.spot);
+    this.root.rotation.y = this.yawGoal = this.phaseYaw();
     this.writePose(0);
     this.blendT = 1;
     this.pose.set(this.target);
@@ -282,21 +367,75 @@ export class Civilian extends Entity {
   }
 
   override dispose(): void {
+    this.offShot?.();
+    this.offKill?.();
+    this.offShot = this.offKill = null;
     super.dispose();
     releaseGeos(this.baked.geos);
   }
 
-  /** Called by the stage runner when the encounter is cleared (and when they're saved / get away). */
-  rescue() {
+  /**
+   * Rescued: by the stage runner when the encounter is cleared, or on the spot
+   * when the player shoots the zombie holding them (`run`: its arm shot off, it's
+   * still on its feet — no stopping to say thanks). One who already got away off
+   * screen is paid now, at the edge of the view they ran out of.
+   */
+  rescue(run = false) {
     if (this.shot || this.rescued) return;
     this.rescued = true;
+    if (this.escaped) {
+      this.edgePoint(this.root.position);
+      this.world.onCivilianRescued(this);
+      this.removed = true;
+      return;
+    }
     this.world.shootables.removeOwner(this);
     this.world.onCivilianRescued(this);
     this.age = 0;
     this.letGo();
-    const running = this.phase === 'flee' || this.phase === 'stumble' || this.phase === 'backaway';
+    const running = run || this.phase === 'flee' || this.phase === 'stumble' || this.phase === 'backaway' || this.phase === 'fall';
     this.destSet = false;
+    if (run) this.say(CIV_STAMP.bubble.thanks, 1.1);
     this.enter(running ? 'leave' : 'thanks', running ? 0.25 : 0.3);
+  }
+
+  /** Got away off screen: out of play (hidden, not a target) until the encounter is cleared. */
+  private escape() {
+    this.escaped = true;
+    this.letGo();
+    this.world.shootables.removeOwner(this);
+    this.root.visible = false;
+    this.bubble = -1;
+    this.bubble3d.hide();
+  }
+
+  /**
+   * A civilian who would appear in plain view (the stage spawns them as the
+   * encounter starts) runs in from just past the nearer edge of the view to
+   * their spot instead — level with it, so the run stays in the outer part of
+   * the screen on their side — shouting for help; or in from where the stage
+   * says (`from`: a doorway). Not the grabbed (a set piece), the perched,
+   * runners (they run anyway) or spots too far in.
+   */
+  private arriving(): boolean {
+    if (this.perched || this.main === 'grabbed') return false;
+    const p = this.root.position;
+    let run = 0;
+    if (this.comeFrom) {
+      // The stage's way in (a doorway…).
+      run = this.comeFrom.distanceTo(p);
+      p.copy(this.comeFrom);
+    } else {
+      if (this.main === 'flee' || !this.onScreen(1.05)) return false;
+      run = this.edgeTan() * Math.max(0.5, this.viewZ(p)) - Math.abs(this.viewX(p)) + 0.5;
+      if (run > ARRIVE_MAX) return false;
+      p.addScaledVector(_right, this.side * run);
+    }
+    p.y = this.world.groundAt(p.x, p.z);
+    this.enter('arrive', 0.01);
+    this.say(CIV_STAMP.bubble.help, Math.min(1.6, run / ARRIVE_SPEED + 0.3));
+    this.speed = ARRIVE_SPEED;
+    return true;
   }
 
   // ─── Grabbed ──────────────────────────────────────────────────────────────
@@ -304,6 +443,7 @@ export class Civilian extends Entity {
   /** Spawn the zombie holding on: level with us, toward the middle of the view. */
   private startGrab() {
     const p = this.root.position;
+    this.grabRoot.copy(p);
     // Toward the screen centre (−side along the view's right), a touch nearer the camera.
     this.grabBase.copy(p).addScaledVector(_right, -this.side * GRAB_SEP).addScaledVector(_fwd, -0.15);
     this.grabBase.y = this.world.groundAt(this.grabBase.x, this.grabBase.z);
@@ -316,10 +456,10 @@ export class Civilian extends Entity {
     this.grabber = this.world.add(g);
   }
 
-  /** The zombie lost its hold (its gripping arm shot off): pull free and run. */
+  /** The zombie lost its hold — its gripping arm shot off: saved, and off they run. */
   grabberLost() {
     this.grabber = null;
-    if (this.phase === 'grabbed') this.enter('flee', 0.2);
+    if (this.phase === 'grabbed') this.rescue(true);
   }
 
   private letGo() {
@@ -334,10 +474,16 @@ export class Civilian extends Entity {
     return a.shoulder.getWorldPosition(out);
   }
 
+  /** The zombie's jerk on the arm right now (0..1): it leans back into it. */
+  get yank(): number {
+    return this.yankAmt;
+  }
+
   // ─── Per frame ────────────────────────────────────────────────────────────
 
   update(dt: number): void {
     this.age += dt;
+    if (this.escaped) return;
     const r = this.rig;
     if (this.shot) {
       this.bubble3d.hide();
@@ -357,15 +503,19 @@ export class Civilian extends Entity {
       this.bubbleT -= dt;
       if (this.bubbleT <= 0) this.bubble = -1;
     }
+    if (this.flinchT > 0) this.flinchT -= dt;
     this.think(dt);
-    if (this.removed) return;
+    if (this.removed || this.escaped) return;
+    // Turn (quick when running; otherwise a shuffle, never a spin on the spot).
+    const run = this.phase === 'flee' || this.phase === 'leave' || this.phase === 'arrive';
+    const turn = angleDelta(this.root.rotation.y, this.yawGoal) * (1 - Math.exp(-(run ? 9 : 5) * dt));
+    const maxTurn = (run || this.phase === 'fall' || this.phase === 'stumble' ? 9 : 2.6) * dt;
+    this.root.rotation.y += clamp(turn, -maxTurn, maxTurn);
     this.writePose(dt);
     this.blendT = Math.min(1, this.blendT + dt / this.blendDur);
     if (this.blendT < 1) blendPose(this.pose, this.from, this.target, smoothstep(0, 1, this.blendT));
     else this.pose.set(this.target);
     applyPose(r, this.pose);
-    const turn = 1 - Math.exp(-(this.phase === 'flee' || this.phase === 'leave' ? 9 : 5) * dt);
-    this.root.rotation.y += angleDelta(this.root.rotation.y, this.yawGoal) * turn;
     if (this.phase === 'grabbed' && this.grabber) this.reachForGrabber();
     this.updateBubble3d();
   }
@@ -383,7 +533,11 @@ export class Civilian extends Entity {
     this.bubble3d.update(this.bubble, _v, this.world.camera);
   }
 
-  /** The tug of war: our near hand and the zombie's gripping hand meet between our shoulders. */
+  /**
+   * The tug of war: the zombie's gripping hand and ours meet between our
+   * shoulders; both our hands haul on the held wrist (IK into the pose buffer, so
+   * whatever comes next blends from exactly what was drawn).
+   */
   private reachForGrabber() {
     const g = this.grabber!;
     const gr = g.rig;
@@ -391,9 +545,25 @@ export class Civilian extends Entity {
     const ga = gr ? (g.gripSide > 0 ? gr.armL : gr.armR) : null;
     if (ga) ga.shoulder.getWorldPosition(_w);
     else _w.copy(this.grabSpot).setY(_v.y);
-    this.grabHand.lerpVectors(_v, _w, 0.5);
-    this.grabHand.y -= 0.12;
-    aimArm(this.grabSide > 0 ? this.rig.armL : this.rig.armR, this.grabHand);
+    // The grip: on the line between the two shoulders, a little low, where both
+    // arms reach (each its share; at full stretch if they can't quite).
+    _n.copy(_w).sub(_v);
+    const d = _n.length();
+    _n.divideScalar(Math.max(1e-4, d));
+    const reach = 0.6 * this.rig.scale;
+    const theirs = ga ? 0.6 * gr!.scale : reach;
+    const at = d <= reach + theirs ? (d * reach) / (reach + theirs) : reach * 0.98;
+    this.grabHand.copy(_v).addScaledVector(_n, at);
+    this.grabHand.y -= 0.1;
+    // Our free hand hauls on the held forearm, a hand's width nearer us.
+    _h.copy(_v).addScaledVector(_n, at - 0.16);
+    _h.y -= 0.1;
+    const chest = this.rig.chest;
+    chest.updateWorldMatrix(true, false);
+    chest.worldToLocal(_g.copy(this.grabHand));
+    chest.worldToLocal(_h);
+    grabArms(this.pose, this.grabSide, _g, _h);
+    applyArms(this.rig, this.pose);
   }
 
   /** Decide: transitions, movement and facing for the current phase. */
@@ -406,34 +576,52 @@ export class Civilian extends Entity {
       if (Math.abs(x) > 0.4) this.side = x > 0 ? 1 : -1;
     }
     switch (this.phase) {
+      case 'arrive': {
+        _n.copy(this.spot).sub(this.root.position).setY(0);
+        const d = _n.length();
+        this.stride += dt * 10.5;
+        if (d > 0.25) {
+          _n.divideScalar(d);
+          this.yawGoal = Math.atan2(_n.x, _n.z);
+          this.step(_n, Math.min(d, this.speed * dt));
+        } else {
+          // There: into the act (diving down into a crouch, or calling out).
+          const n = this.helpTime > 0 ? 'plead' : this.afterHelp();
+          this.enter(n, n === 'cower' || n === 'hide' ? 0.35 : 0.25);
+        }
+        break;
+      }
       case 'plead':
-        this.yawGoal = this.faceCamYaw();
-        if (t > this.helpTime) this.enter(this.main);
-        else this.panic();
+        this.yawGoal = this.phaseYaw();
+        if (t > this.helpTime) {
+          const n = this.afterHelp();
+          // Ducking down from HELP!: a startled jolt first.
+          if (n === 'cower') this.startle('cower');
+          else this.enter(n, 0.25);
+        } else this.panic();
+        break;
+      case 'startle':
+        if (t > STARTLE_TIME) this.enter(this.next, this.next === 'cower' ? 0.42 : 0.25);
         break;
       case 'cower':
       case 'hide': {
-        // Cowering turned three-quarters away from the threat (toward the screen
-        // edge); hiding with the back three-quarters to the camera. (A crouch reads
-        // in a 3/4 view; head-on it looks like standing on bent knees.)
-        this.yawGoal = this.phase === 'hide' ? this.faceCamYaw() + Math.PI + this.side * 0.6 : this.faceCamYaw() + this.side * 0.95;
+        this.yawGoal = this.phaseYaw();
         this.peeking(dt);
         if (this.phase === 'hide') this.glancing(dt);
-        if (this.act === 'plead' && t > 3.2 && !this.alarm && this.threatDist > DUCK_DIST) {
+        if (this.act === 'plead' && t > 3.2 && !this.alarm && this.threatDist > DUCK_DIST && this.flinchT <= 0) {
           this.helpTime = 1.6;
-          this.enter('plead');
-        } else this.panic();
+          this.enter('plead', 0.4);
+        } else if (this.main === 'flee' && this.fleeReady()) this.enter('flee', 0.25);
+        else this.panic();
         break;
       }
       case 'backaway': {
         const th = this.threat;
-        if (th) {
-          th.root.getWorldPosition(_v);
-          this.yawGoal = Math.atan2(_v.x - this.root.position.x, _v.z - this.root.position.z);
-        } else this.yawGoal = this.faceCamYaw();
+        this.yawGoal = this.phaseYaw();
         // Back off, away from it and outward on screen.
         this.outward(_n);
         if (th) {
+          th.root.getWorldPosition(_v);
           _w.copy(this.root.position).sub(_v).setY(0).normalize();
           _n.add(_w).normalize();
         }
@@ -442,16 +630,38 @@ export class Civilian extends Entity {
         const near = this.threatDist < (this.dino ? 4.5 : 3.2);
         const slow = this.act === 'backaway' && !near;
         this.speed = slow ? 0.35 : 0.9;
-        this.stride += dt * (slow ? 3.5 : 6.5);
+        this.amp = slow ? 0.2 : 0.34;
+        // (Steps sized to the ground covered: the feet don't skate.)
+        this.stride += ((dt * this.speed) / (1.8 * Math.sin(this.amp))) * Math.PI;
         this.step(_n, this.speed * dt);
-        if (this.threatDist < 1.7 || (slow ? t > this.backTime : t > 2.2 || (this.act === 'backaway' && t > 1.2))) this.enter('flee', 0.2);
+        if (this.threatDist < 1.7 || (slow ? t > this.backTime : t > 1.4)) {
+          // (Tripping onto the seat only with the danger still a way off: close up, they just run.)
+          if (this.act === 'backaway' && this.fallOver && this.threatDist > 8 && !this.alarm && t > 0.8) this.enter('fall', 0.15);
+          else this.enter('flee', 0.2);
+        }
+        break;
+      }
+      case 'fall': {
+        const u = t / FALL_TIME;
+        if (u > 0.18 && u < 0.66) {
+          // Scooting back on the seat.
+          const y = this.root.rotation.y;
+          _n.set(-Math.sin(y), 0, -Math.cos(y));
+          this.step(_n, 0.32 * dt);
+        }
+        if (u > 0.62) {
+          // Rolling over toward where they'll run.
+          if (!this.destSet) this.pickDest(FLEE_SCREEN);
+          this.yawGoal = Math.atan2(this.dest.x - this.root.position.x, this.dest.z - this.root.position.z);
+        }
+        if (u >= 1) this.enter('flee', 0.2);
         break;
       }
       case 'flee':
       case 'leave': {
-        if (!this.destSet) this.pickDest();
-        const run = this.phase === 'flee' ? RUN_SPEED : 2.8;
-        this.speed = Math.min(run, this.speed + dt * 9);
+        if (!this.destSet) this.pickDest(this.phase === 'flee' ? FLEE_SCREEN : 1.8);
+        const run = this.phase === 'flee' ? RUN_SPEED : 2.6;
+        this.speed = Math.min(run, this.speed + dt * 8);
         this.runT += dt;
         _n.copy(this.dest).sub(this.root.position).setY(0);
         const d = _n.length();
@@ -462,7 +672,7 @@ export class Civilian extends Entity {
           const facing = Math.cos(angleDelta(this.root.rotation.y, this.yawGoal));
           this.step(_n, Math.min(d, this.speed * dt * clamp(facing * 1.5, 0.2, 1)));
         }
-        this.stride += dt * (this.phase === 'flee' ? 11.5 : 10);
+        this.stride += dt * (this.phase === 'flee' ? 10.5 : 9.5);
         // A look back over the shoulder now and then.
         this.lookBackT -= dt;
         if (this.lookBackT <= 0) {
@@ -472,17 +682,20 @@ export class Civilian extends Entity {
         if (this.lookBackT < 0.75) this.lookBack = 0;
         if (this.phase === 'flee' && this.stumbleAt > 0 && this.runT > this.stumbleAt) {
           this.stumbleAt = -1;
-          this.enter('stumble', 0.12);
-          break;
+          // (Only where the player sees it.)
+          if (this.onScreen(0.8)) {
+            this.enter('stumble', 0.12);
+            break;
+          }
         }
         if (this.offScreen() && t > 0.3) {
-          // Got away (safe off screen: that's a rescue).
-          if (!this.rescued) this.rescue();
-          this.removed = true;
+          // Got away: safe off screen.
+          if (this.phase === 'leave') this.removed = true;
+          else this.escape();
         } else if (d < 0.4) {
           // Reached the stage's spot, still in view: hide there.
           if (this.phase === 'leave') this.removed = true;
-          else this.enter('cower');
+          else this.startle('cower');
         } else if (this.phase === 'leave' && this.age > 7) this.removed = true;
         break;
       }
@@ -497,27 +710,38 @@ export class Civilian extends Entity {
       }
       case 'grabbed': {
         const g = this.grabber;
-        this.yawGoal = this.faceCamYaw() - this.grabSide * 0.45;
+        this.yawGoal = this.phaseYaw();
         if (!g || g.removed || g.state === 'dying') {
           // The zombie's down: saved!
           this.grabber = null;
           this.rescue();
           break;
         }
-        // Tug of war: we pull away, it drags us back.
-        this.pull = Math.sin(t * 2.6) * 0.7 + 0.3 * Math.sin(t * 6.1);
-        this.grabSpot.copy(this.grabBase).addScaledVector(_right, this.side * 0.07 * this.pull);
+        // The tug of war, keyed: it YANKS (a lurch toward it, 0.08 s), holds,
+        // they drag back over half a second, brace, and it yanks again.
+        this.yankT += dt;
+        if (this.yankT >= this.yankPeriod) {
+          this.yankT -= this.yankPeriod;
+          this.yankPeriod = 1.1 + this.rng.next() * 0.5;
+        }
+        const k = this.yankT;
+        this.yankAmt = k < 0.08 ? 1 - (1 - k / 0.08) ** 2 : k < 0.3 ? 1 : 1 - smoothstep(0.3, 0.8, k);
+        _n.copy(this.grabBase).sub(this.grabRoot).setY(0).normalize();
+        this.root.position.copy(this.grabRoot).addScaledVector(_n, YANK_LURCH * this.yankAmt);
+        this.root.position.y = this.world.groundAt(this.root.position.x, this.root.position.z);
+        this.grabSpot.copy(this.grabBase).addScaledVector(_n, YANK_STEP * this.yankAmt);
         this.grabTurn = -this.side * 0.8;
         if (t > 0.4 && this.helps === 0) this.say(CIV_STAMP.bubble.help, 1.6);
         if (t > this.grabTime) {
-          // Wrenched free.
+          // Wrenched free (they get away; paid with the rest at the clear).
+          this.yankAmt = 0;
           this.letGo();
           this.enter('flee', 0.15);
         }
         break;
       }
       case 'thanks':
-        this.yawGoal = this.faceCamYaw();
+        this.yawGoal = this.phaseYaw();
         if (t > 1.25) {
           this.destSet = false;
           this.enter('leave', 0.3);
@@ -526,25 +750,109 @@ export class Civilian extends Entity {
     }
   }
 
+  /** Where the act faces (yaw). */
+  private phaseYaw(): number {
+    const cam = this.faceCamYaw();
+    switch (this.phase) {
+      case 'plead':
+        return cam + this.side * 0.15;
+      case 'cower':
+        // Three-quarters away toward the screen edge (a crouch reads in a 3/4 view;
+        // head-on it looks like standing on bent knees).
+        return cam + this.side * 0.6;
+      case 'hide':
+        return cam + Math.PI + this.side * 0.6;
+      case 'backaway': {
+        // Facing the threat — but never further than 3/4 from the camera (in
+        // profile, arms forward, a backing civilian reads as a zombie).
+        const th = this.threat;
+        if (!th) return cam;
+        th.root.getWorldPosition(_v);
+        const to = Math.atan2(_v.x - this.root.position.x, _v.z - this.root.position.z);
+        return cam + clamp(angleDelta(cam, to), -0.7, 0.7);
+      }
+      case 'grabbed':
+        return cam - this.grabSide * 0.45;
+      case 'thanks':
+        return cam;
+      case 'flee':
+      case 'leave':
+      case 'arrive':
+        return Math.atan2(this.dest.x - this.root.position.x, this.dest.z - this.root.position.z);
+      default:
+        return this.root.rotation.y;
+    }
+  }
+
+  /** What follows the opening HELP!: the act — or, for FLEE, cowering until the danger is real. */
+  private afterHelp(): Phase {
+    if (this.main === 'flee' && !this.fleeReady()) return 'cower';
+    return this.main;
+  }
+
+  /** FLEE goes once a threat is close, something winds up an attack, or it has waited long enough. */
+  private fleeReady(): boolean {
+    return this.alarm || this.threatDist < (this.dino ? FLEE_NEAR_DINO : FLEE_NEAR_ZOMBIE) || this.age > FLEE_WAIT;
+  }
+
   /** `auto` civilians back off and run when a threat comes close. */
   private panic() {
     if (this.act !== 'auto' || this.perched) return;
     if (this.threatDist < (this.dino ? PANIC_DINO : PANIC_ZOMBIE)) this.enter(this.threatDist < 1.6 ? 'flee' : 'backaway', 0.2);
   }
 
-  /** Cower / hide: duck while anything is close or attacking, peek up in between. */
+  /** A jolt (STARTLE_TIME), then `next`. */
+  private startle(next: Phase) {
+    this.next = next;
+    this.enter('startle', 0.06);
+  }
+
+  /** Something made them jump: tuck in, head jerking, no peeking for a moment. */
+  private flinch() {
+    if (this.phase !== 'cower' && this.phase !== 'hide' && this.phase !== 'grabbed' && this.phase !== 'backaway' && this.phase !== 'plead') return;
+    this.flinchT = FLINCH_TIME;
+    this.flinchDir = this.rng.next() < 0.5 ? 1 : -1;
+    this.peekOn = false;
+    this.peek *= 0.3;
+  }
+
+  /** A shot fired close to us on screen (client px). */
+  private nearShot(x: number, y: number) {
+    if (this.shot || this.rescued || this.escaped || this.removed) return;
+    this.rig.head.getWorldPosition(_v).project(this.world.camera);
+    const vp = this.world.viewport;
+    const sx = (_v.x * 0.5 + 0.5) * vp.width;
+    const sy = (-_v.y * 0.5 + 0.5) * vp.height;
+    if (_v.z < 1 && Math.hypot(sx - x, sy - y) < FLINCH_PX) this.flinch();
+  }
+
+  /** Something killed close by. */
+  private nearKill(e: Enemy) {
+    if (this.shot || this.rescued || this.escaped || this.removed) return;
+    e.root.getWorldPosition(_v);
+    const p = this.root.position;
+    if (Math.hypot(_v.x - p.x, _v.z - p.z) < 4) this.flinch();
+  }
+
+  /** Cower / hide: duck while anything is close or attacking, peek up in between (0.4–0.8 s up, a 0.1 s duck back). */
   private peeking(dt: number) {
-    const danger = this.alarm || this.threatDist < DUCK_DIST;
+    const danger = this.alarm || this.threatDist < DUCK_DIST || this.flinchT > 0;
     this.peekT -= dt;
     if (danger) {
       this.peekOn = false;
       this.peekT = Math.max(this.peekT, 0.8);
     } else if (this.peekT <= 0) {
       this.peekOn = !this.peekOn;
-      this.peekT = this.peekOn ? 1 + this.rng.next() * 0.7 : 1.4 + this.rng.next() * 1.4;
+      if (this.peekOn) {
+        this.peekT = 0.4 + this.rng.next() * 0.4;
+        // Every other peek looks at the player — HELP! the first times.
+        this.peekCam = this.peeks % 2 === 0;
+        this.peeks++;
+        if (this.peekCam && this.phase === 'cower' && this.helps < 2) this.say(CIV_STAMP.bubble.help, this.peekT + 0.25);
+      } else this.peekT = 1.4 + this.rng.next() * 1.4;
     }
     const goal = this.peekOn ? 1 : 0;
-    this.peek += (goal - this.peek) * (1 - Math.exp(-(goal > this.peek ? 5 : 9) * dt));
+    this.peek += (goal - this.peek) * (1 - Math.exp(-(goal > this.peek ? 9 : 30) * dt));
   }
 
   /** Hiding: now and then a look back over the shoulder at the camera (HELP! the first times). */
@@ -571,14 +879,23 @@ export class Civilian extends Entity {
     this.phaseT = 0;
     if (p === 'plead') this.say(CIV_STAMP.bubble.help, Math.min(this.helpTime, 2));
     if (p === 'thanks') this.say(CIV_STAMP.bubble.thanks, 1.3);
+    if (p === 'backaway' && this.helps === 0) this.say(CIV_STAMP.bubble.help, 0.9);
     if (p === 'flee') {
       this.lookBackT = 0.6;
+      this.runT = 0;
       if (this.speed < 1) this.speed = 1;
     }
     if (p === 'cower' || p === 'hide') {
       this.peek = 0;
       this.peekOn = false;
     }
+  }
+
+  /** Blend from what is drawn now into the current phase's pose again (a change of hands). */
+  private reblend(blend: number) {
+    this.from.set(this.pose);
+    this.blendT = 0;
+    this.blendDur = blend;
   }
 
   private say(id: number, seconds: number) {
@@ -594,24 +911,49 @@ export class Civilian extends Entity {
     const ph = this.pose2d;
     ph.handL = ph.handR = undefined;
     ph.hairSwing = 0;
+    const flinch = this.flinchT > 0 ? Math.min(1, this.flinchT / 0.08) : 0;
+    const calling = this.bubble === CIV_STAMP.bubble.help;
     switch (this.phase) {
+      case 'arrive':
+        poseFlee(p, this.stride, 0, 1);
+        ph.face = 'scream';
+        ph.jaw = 0.8;
+        break;
       case 'plead': {
-        const point = this.threat && Math.abs(this.threatAng) < 2.2 ? this.threatAng : null;
-        posePlead(p, t, this.waveSide, point);
+        const big = this.perched || this.camDist() > FAR_WAVE;
+        // Seen from a side, the waving arm is the near one (the hand calling at
+        // the mouth stays round the far side of the face) — swapped smoothly.
+        const view = angleDelta(this.root.rotation.y, this.faceCamYaw());
+        if (Math.abs(view) > 0.6 && Math.sign(view) !== this.waveSide) {
+          this.waveSide = -this.waveSide;
+          this.reblend(0.25);
+        }
+        // At the player; a quick look at the threat now and then.
+        const look = this.threat && Math.sin(this.phaseT * 2.2 + this.seed) > 0.55 ? clamp(this.threatAng, -1, 1) * 0.6 : 0;
+        posePlead(p, t, this.waveSide, big, look);
         tremble(p, t, 0.3);
         ph.face = 'scream';
-        ph.jaw = 0.55 + 0.4 * Math.abs(Math.sin(t * 6));
-        ph.hairSwing = Math.sin(t * 9) * 0.6;
+        ph.jaw = 0.6 + 0.35 * Math.abs(Math.sin(t * 6));
+        ph.hairSwing = Math.sin(t * 9) * 0.5;
         break;
       }
+      case 'startle':
+        poseStartle(p, this.phaseT);
+        ph.face = 'terror';
+        ph.jaw = 0.85;
+        ph.hairSwing = 1;
+        break;
       case 'cower': {
-        const curl = this.threatDist < 2.4 ? 1 : this.alarm ? 0.5 : 0;
-        poseCower(p, t, this.peek, clamp(this.threatAng, -1.2, 1.2), curl);
-        const shake = 0.6 + (this.alarm ? 0.4 : 0) + 0.3 * curl;
-        tremble(p, t, shake);
-        ph.face = curl > 0.6 ? 'strain' : 'terror';
-        ph.jaw = 0.35 + 0.25 * Math.abs(Math.sin(t * 4.3));
-        ph.hairSwing = Math.sin(t * 37) * 0.25 * shake;
+        const curl = Math.max(this.threatDist < 2.4 ? 1 : this.alarm ? 0.5 : 0, flinch);
+        const look = this.peekCam ? angleDelta(this.root.rotation.y, this.faceCamYaw()) : this.threatAng;
+        poseCower(p, t, this.peek, clamp(look, -1.2, 1.2), curl, this.kneel, this.peekCam && calling ? this.waveSide : 0);
+        p[J.HEAD_Y] += this.flinchDir * 0.15 * flinch;
+        const shake = 0.7 + (this.alarm ? 0.3 : 0);
+        shiver(p, t, shake, this.seed);
+        tremble(p, t, 0.3);
+        ph.face = curl > 0.6 ? 'strain' : calling && this.peek > 0.5 ? 'scream' : 'terror';
+        ph.jaw = calling ? 0.75 : 0.35 + 0.25 * Math.abs(Math.sin(t * 4.3));
+        ph.hairSwing = (Math.floor(t * 10.5 + this.seed) & 1 ? 0.3 : -0.3) * shake;
         break;
       }
       case 'hide': {
@@ -619,19 +961,36 @@ export class Civilian extends Entity {
         // over the shoulder nearer to it.
         this.glanceAmt += (this.glance - this.glanceAmt) * (1 - Math.exp(-7 * dt));
         poseHide(p, t, this.peek, this.side, -this.glanceAmt * this.side);
-        tremble(p, t, 0.45);
+        p[J.HEAD_Y] += this.flinchDir * 0.25 * flinch;
+        shiver(p, t, 0.45, this.seed);
         ph.face = 'terror';
-        ph.jaw = 0.3 + 0.2 * Math.abs(Math.sin(t * 3.7));
-        ph.hairSwing = Math.sin(t * 33) * 0.15;
+        ph.jaw = calling ? 0.7 : 0.3 + 0.2 * Math.abs(Math.sin(t * 3.7));
+        ph.hairSwing = Math.floor(t * 10.5 + this.seed) & 1 ? 0.15 : -0.15;
         break;
       }
       case 'backaway': {
         const fear = clamp((4 - this.threatDist) / 2.5, 0, 1);
-        poseBackAway(p, this.stride, 1, fear);
-        tremble(p, t, 0.5);
-        ph.face = fear > 0.5 ? 'scream' : 'terror';
-        ph.jaw = 0.45 + 0.4 * fear;
+        poseBackAway(p, this.stride, this.amp, fear, this.guard);
+        // HELP! over the shoulder at the player, first.
+        if (calling) p[J.HEAD_Y] = clamp(angleDelta(this.root.rotation.y, this.faceCamYaw()), -1.1, 1.1);
+        shiver(p, t, 0.5, this.seed);
+        ph.face = fear > 0.5 || calling ? 'scream' : 'terror';
+        ph.jaw = 0.45 + 0.4 * Math.max(fear, calling ? 1 : 0);
         ph.hairSwing = Math.sin(this.stride) * 0.4;
+        break;
+      }
+      case 'fall': {
+        const u = this.phaseT / FALL_TIME;
+        if (u < 0.82) poseFall(p, u, t);
+        else {
+          poseFall(this.aux, 0.7, t);
+          poseFlee(p, this.stride, 0, 1);
+          blendPose(p, this.aux, p, smoothstep(0.82, 1, u));
+        }
+        ph.face = u < 0.18 ? 'scream' : 'terror';
+        ph.jaw = 0.8;
+        // (Hair thrown about — and flung aside as they roll over, not draped over the head.)
+        ph.hairSwing = u < 0.18 ? -1 : u > 0.62 ? 0.9 : 0;
         break;
       }
       case 'flee': {
@@ -655,16 +1014,17 @@ export class Civilian extends Entity {
         break;
       }
       case 'grabbed': {
-        const look = Math.sin(this.phaseT * 1.3) > 0.2 ? 1 : -1;
-        poseGrabbed(p, t, this.grabSide, this.pull, look);
-        tremble(p, t, 0.35);
+        // Straining back at the zombie just after a yank; screaming to the player in between.
+        const look = this.yankT < 0.85 ? -1 : 1;
+        poseGrabbed(p, t, this.grabSide, this.yankAmt, look);
+        shiver(p, t, 0.35, this.seed);
         ph.face = look > 0 ? 'scream' : 'strain';
-        ph.jaw = look > 0 ? 0.75 + 0.2 * Math.sin(t * 7) : 0.2;
-        ph.hairSwing = this.pull * -this.grabSide;
+        ph.jaw = look > 0 ? 0.8 + 0.15 * Math.sin(t * 7) : 0.2;
+        ph.hairSwing = this.yankAmt * this.grabSide;
         break;
       }
       case 'thanks': {
-        poseThanks(p, t, this.waveSide, this.thumb, clamp(1 - this.phaseT / 0.35, 0, 1));
+        poseThanks(p, this.phaseT, this.waveSide, this.thumb, clamp(1 - this.phaseT / 0.35, 0, 1));
         if (this.thumb) {
           if (this.waveSide > 0) ph.handL = HAND.THUMB;
           else ph.handR = HAND.THUMB;
@@ -703,6 +1063,8 @@ export class Civilian extends Entity {
     }
     this.threat = thr;
     this.threatDist = best;
+    // An attack winding up close by: a jolt.
+    if (alarm && !this.alarm && best < 6) this.flinch();
     this.alarm = alarm;
     if (thr) {
       thr.root.getWorldPosition(_v);
@@ -733,29 +1095,70 @@ export class Civilian extends Entity {
     return Math.atan2(_cam.x - p.x, _cam.z - p.z);
   }
 
+  private camDist(): number {
+    const p = this.root.position;
+    return Math.hypot(p.x - _cam.x, p.z - _cam.z);
+  }
+
   /** Unit ground direction outward on screen (away from the middle of the view) and toward the camera. */
   private outward(out: THREE.Vector3): THREE.Vector3 {
     return out.copy(_right).multiplyScalar(this.side).addScaledVector(_fwd, -0.6).normalize();
   }
 
+  /** Tangent of the half view angle across, at the edge where a body has left it. */
+  private edgeTan(): number {
+    const c = this.world.camera;
+    return c.aspect * Math.tan((c.fov * Math.PI) / 360) * 1.12;
+  }
+
   /**
-   * Where to run: the stage's `to`, else out past the nearer side of the screen —
-   * toward the camera (the screen edge comes in close there) and further out, so
-   * the run only ever moves away from the middle of the view.
+   * Where to run: the stage's `to`, else out across the nearer side of the
+   * view — the heading (from straight across to a little toward or away from
+   * the camera) that keeps them on screen about `secs` at running speed, so the
+   * run reads, Operation Wolf style. Screen x only ever moves outward: never
+   * back toward the middle of the view where everything comes at the player
+   * (deeper runs stay under the angle that would turn them back inward).
    */
-  private pickDest() {
+  private pickDest(secs: number) {
     this.destSet = true;
-    if (this.to && this.phase === 'flee') {
+    if (this.to && (this.phase === 'flee' || this.phase === 'fall')) {
       this.dest.copy(this.to);
       return;
     }
     const p = this.root.position;
-    const x = this.viewX(p);
-    const z = this.viewZ(p);
-    const ox = this.side * Math.max(Math.abs(x) + 2.2, 3.2);
-    const oz = Math.min(z, Math.max(1.4, z * 0.15));
-    this.dest.copy(_cam).addScaledVector(_right, ox).addScaledVector(_fwd, oz);
+    const X = Math.abs(this.viewX(p));
+    const Z = Math.max(0.5, this.viewZ(p));
+    const E = this.edgeTan();
+    for (let i = 0; i < HEADINGS; i++) {
+      const a = -0.6 + i * 0.115;
+      const ca = Math.cos(a);
+      const sa = Math.sin(a);
+      // Distance until |x| / z passes the edge (or the camera plane, running in).
+      const den = ca - E * sa;
+      let l = den > 1e-3 ? Math.max(0, (E * Z - X) / den) : 99;
+      if (sa < 0) l = Math.min(l, (Z - 0.4) / -sa);
+      _len[i] = l;
+      _cost[i] = Math.abs(l / RUN_SPEED - secs) + 0.4 * Math.abs(a);
+    }
+    let pick = 0;
+    for (let i = 1; i < HEADINGS; i++) if (_cost[i] < _cost[pick]) pick = i;
+    this.headingTo(pick, _len[pick] + 3, this.dest);
     this.dest.y = p.y;
+  }
+
+  /** Where heading `i` (of `pickDest`'s fan) runs to after `l` metres. */
+  private headingTo(i: number, l: number, out: THREE.Vector3): THREE.Vector3 {
+    const a = -0.6 + i * 0.115;
+    _n.copy(_right).multiplyScalar(this.side * Math.cos(a)).addScaledVector(_fwd, Math.sin(a));
+    return out.copy(this.root.position).addScaledVector(_n, l);
+  }
+
+  /** A point just inside the edge of the view on our side, at our depth (where an escaped civilian's RESCUED! shows). */
+  private edgePoint(out: THREE.Vector3): THREE.Vector3 {
+    this.view();
+    const z = Math.max(2, this.viewZ(out));
+    const x = this.side * z * (this.edgeTan() / 1.12) * 0.8;
+    return out.copy(_cam).addScaledVector(_fwd, z).addScaledVector(_right, x).setY(this.world.groundAt(out.x, out.z));
   }
 
   /**
@@ -779,6 +1182,14 @@ export class Civilian extends Entity {
     return _v.z > 1 || Math.abs(_v.x) > 1.12 || _v.y < -1.15;
   }
 
+  /** The chest well inside the view (|NDC x| < `margin`). */
+  private onScreen(margin: number): boolean {
+    this.rig.chest.getWorldPosition(_v);
+    if (this.viewZ(_v) < 0.6) return false;
+    _v.project(this.world.camera);
+    return _v.z < 1 && Math.abs(_v.x) < margin && _v.y > -0.9;
+  }
+
   // ─── Paint / shoot ────────────────────────────────────────────────────────
 
   override paintPixels(f: PixelFigure): boolean {
@@ -790,12 +1201,12 @@ export class Civilian extends Entity {
       p.jaw = 0.9;
       p.bubble = -1;
     } else p.bubble = this.bubble;
-    p.speed = this.phase === 'flee' || this.phase === 'leave' || this.phase === 'stumble' ? this.speed : 0;
+    p.speed = this.phase === 'flee' || this.phase === 'leave' || this.phase === 'stumble' || this.phase === 'arrive' ? this.speed : 0;
     return paintHuman(f, this.rig, this.look, p);
   }
 
   override onShot(hit: ShotHit): ShotOutcome {
-    if (this.shot || this.rescued) return { kind: 'civilian', counts: false };
+    if (this.shot || this.rescued || this.escaped) return { kind: 'civilian', counts: false };
     this.shot = true;
     this.age = 0;
     this.bubble = -1;
@@ -810,7 +1221,7 @@ export class Civilian extends Entity {
 
   /** What it's doing now (tests, debug overlays). */
   get state(): string {
-    return this.shot ? 'shot' : this.phase;
+    return this.shot ? 'shot' : this.escaped ? 'escaped' : this.phase;
   }
 
   /** The zombie holding on, if any. */
@@ -826,27 +1237,39 @@ export class Civilian extends Entity {
   /**
    * Tests / look-dev: hold `phase` at `seconds` into it — no blending, no
    * moving — with peeking (cower / hide), a glance back (hide), a look back
-   * (flee) or the thumbs-up forced, and write the pose onto the rig.
+   * (flee), a yank (grabbed), a flinch or the thumbs-up forced, and write the
+   * pose onto the rig.
    */
-  debugPose(phase: CivPhase, seconds: number, o: { peek?: number; glance?: number; look?: number; thumb?: boolean; bubble?: number } = {}) {
+  debugPose(
+    phase: CivPhase,
+    seconds: number,
+    o: { peek?: number; glance?: number; look?: number; thumb?: boolean; bubble?: number; yank?: number; flinch?: boolean; far?: boolean; peekCam?: boolean } = {},
+  ) {
+    this.view();
     this.phase = phase;
     this.phaseT = seconds;
-    this.age = Math.max(this.age, seconds);
+    this.age = seconds;
     this.peek = o.peek ?? 0;
+    this.peekCam = o.peekCam ?? false;
     this.glance = this.glanceAmt = o.glance ?? 0;
     this.lookBack = this.lookAmt = o.look ?? 0;
-    this.stride = seconds * 11.5;
+    this.stride = seconds * 10.5;
+    this.flinchT = o.flinch ? FLINCH_TIME : 0;
     if (o.thumb !== undefined) this.thumb = o.thumb;
-    if (phase === 'grabbed') this.pull = Math.sin(seconds * 2.6) * 0.7 + 0.3 * Math.sin(seconds * 6.1);
-    this.writePose(0);
-    this.pose.set(this.target);
-    this.blendT = 1;
-    applyPose(this.rig, this.pose);
-    if (phase === 'grabbed' && this.grabber) this.reachForGrabber();
+    if (phase === 'grabbed') {
+      this.yankAmt = o.yank ?? 0;
+      this.yankT = this.yankAmt > 0.5 ? 0.2 : 1;
+    }
     if (o.bubble !== undefined) {
       this.bubble = o.bubble;
       this.bubbleT = 1e9;
     }
+    this.writePose(0);
+    if (o.far !== undefined && phase === 'plead') posePlead(this.target, this.age, this.waveSide, o.far, 0);
+    this.pose.set(this.target);
+    this.blendT = 1;
+    applyPose(this.rig, this.pose);
+    if (phase === 'grabbed' && this.grabber) this.reachForGrabber();
     this.updateBubble3d();
   }
 }

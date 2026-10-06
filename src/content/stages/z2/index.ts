@@ -476,7 +476,7 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'operating theatre',
     look: L(82, B + 1.7, -118.4),
-    civilians: [{ pos: [77.4, 0, -119.4], world: true, variant: 'scientist', t: 0.4, act: 'hide' }],
+    civilians: [{ pos: [77.4, 0, -119.4], world: true, variant: 'scientist', t: 0.4, act: 'cower' }],
     pickups: [P('health', 80.6, B + 1.6, -115.2, 1), P('shotgun', 80.6, B + 1.4, -117.5, 5)],
     onStart: (w) => {
       w.later(1.0, () => popup(w, "DON'T SHOOT THE DOCTOR!", 0.42, 0.26));

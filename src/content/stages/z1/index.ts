@@ -219,7 +219,8 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'rescue',
     look: { at: [0.5, 1.2, 12], blend: 1.2 },
-    civilians: [{ pos: [3.8, 0, 8.2], variant: 'cop', act: 'backaway' }],
+    // (Running for it back along the right-hand sidewalk, past the camera: not into the shopfronts.)
+    civilians: [{ pos: [3.8, 0, 8.2], variant: 'cop', act: 'backaway', to: [7, 0, 1.5] }],
     pickups: [{ kind: 'health', pos: [-2.5, 1.3, 7] }],
     onStart: (w) => w.later(0.8, () => popupCenter(w, "DON'T SHOOT THE COP!", 0.62, 0.28)),
     waves: [

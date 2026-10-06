@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Walker } from '../content/enemies/zombies';
 import { restPose } from '../content/enemies/zombieKit';
-import { angleDelta, clamp } from '../core/math';
+import { angleDelta } from '../core/math';
 import type { EnemySpawn } from './Enemy';
 import type { World } from './World';
 import type { Civilian } from './Civilian';
@@ -108,37 +108,44 @@ export class Grabber extends Walker {
     const t = this.age;
     const g = this.gripSide;
     // A tug of war: feet braced, leaning back AWAY from the civilian (dragging
-    // them in) — its head and chest stay clear of them on screen — the head
-    // snapping at them now and then.
+    // them in) — its head and chest stay clear of them on screen — throwing its
+    // weight back on each yank, the head snapping at them now and then.
     const lunge = this.bite;
-    r.legL.hip.rotation.x = g > 0 ? -0.35 : 0.2;
-    r.legR.hip.rotation.x = g > 0 ? 0.2 : -0.35;
-    r.legL.knee.rotation.x = g > 0 ? 0.45 : 0.2;
-    r.legR.knee.rotation.x = g > 0 ? 0.2 : 0.45;
+    const y = v.yank;
+    r.legL.hip.rotation.x = g > 0 ? -0.35 - 0.15 * y : 0.2 + 0.1 * y;
+    r.legR.hip.rotation.x = g > 0 ? 0.2 + 0.1 * y : -0.35 - 0.15 * y;
+    r.legL.knee.rotation.x = g > 0 ? 0.45 + 0.2 * y : 0.2;
+    r.legR.knee.rotation.x = g > 0 ? 0.2 : 0.45 + 0.2 * y;
     r.legL.hip.rotation.z = 0.12 + (g > 0 ? 0.08 : 0);
     r.legR.hip.rotation.z = -0.12 - (g < 0 ? 0.08 : 0);
-    r.hips.position.y = this.hipsY - 0.06;
+    r.hips.position.y = this.hipsY - 0.06 - 0.04 * y;
     // (z > 0 leans toward −X: away from a civilian at its left when g = +1.)
-    r.spine.rotation.z = g * (0.16 + 0.05 * Math.sin(t * 2.6));
-    r.spine.rotation.x = 0.1 + 0.08 * lunge;
+    r.spine.rotation.z = g * (0.16 + 0.18 * y + 0.03 * Math.sin(t * 2.6));
+    r.spine.rotation.x = 0.1 + 0.08 * lunge * (1 - y) - 0.12 * y;
     r.spine.rotation.y = g * 0.2;
     r.neck.rotation.x = -0.2 - 0.15 * lunge;
     r.head.rotation.x = -0.1 + 0.1 * lunge;
     r.head.rotation.y = g * 0.45;
-    r.head.rotation.z = this.headTilt - g * 0.1 + Math.sin(t * 7) * 0.06 * lunge;
-    // Gripping hand (straight arm) on the civilian's wrist; the other claws the air toward them.
+    r.head.rotation.z = this.headTilt - g * (0.1 + 0.15 * y) + Math.sin(t * 7) * 0.06 * lunge;
+    // Gripping hand (straight arm) on the civilian's wrist; the other claws
+    // toward them at shoulder height (never up over its head).
     const hold = g > 0 ? r.armL : r.armR;
     const claw = g > 0 ? r.armR : r.armL;
     hold.elbow.rotation.x = -0.08;
-    claw.elbow.rotation.x = -0.55 - 0.25 * Math.sin(t * 6);
+    claw.elbow.rotation.x = -0.6 - 0.3 * key(t);
     aimArm(hold, v.grabHand);
-    _q.copy(v.grabHand);
+    v.shoulderPoint(_q);
     r.chest.getWorldPosition(_p);
-    _q.lerp(_p, 0.35);
-    _q.y += 0.3 + 0.08 * Math.sin(t * 6.5);
+    _q.lerp(_p, 0.2);
+    _q.y += 0.04 * key(t + 0.2);
     aimArm(claw, _q);
     // (Tremor of effort in the holding arm.)
     hold.shoulder.rotation.z += Math.sin(t * 23) * 0.03;
-    claw.shoulder.rotation.x += clamp(Math.sin(t * 5.5), -0.4, 0.4) * 0.2;
   }
+}
+
+/** A clawing swipe, held at each end for a few sprite frames (0 / 1, 2.2 a second). */
+function key(t: number): number {
+  const u = t * 2.2 - Math.floor(t * 2.2);
+  return u < 0.5 ? 0 : 1;
 }

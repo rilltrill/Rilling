@@ -10,15 +10,19 @@ import { Grabber } from '../../src/gameplay/civGrab';
 import type { Enemy } from '../../src/gameplay/Enemy';
 import type { ShotHit } from '../../src/gameplay/Entity';
 import type { ShotTag } from '../../src/gameplay/Shootables';
+import type { HumanoidRig } from '../../src/content/kit/humanoid';
 import { CIV_STAMP } from '../../src/gameplay/pixel/stamps';
 import { nullHud } from './sim';
 
 /**
- * Civilian behaviour: the act repertoire (gameplay/Civilian.ts) — what each act
- * does, how they react to the zombies / dinos around them, and the gameplay
- * rules that stay as tuned: a hit costs a life (once), a rescue pays once, a
- * grabbed civilian's attacker stays a clear shot and never attacks while it
- * holds on, and running civilians only ever move outward on screen.
+ * Civilian behaviour: the act repertoire (gameplay/Civilian.ts) — how they come
+ * on (running in rather than popping up in plain sight), what each act does,
+ * how they react to the zombies / dinos around them, and the gameplay rules
+ * that stay as tuned: a hit costs a life (once); a rescue pays once — on the
+ * spot when the player shoots the zombie holding them, otherwise with the rest
+ * when the encounter is cleared (one who got away off screen too); a grabbed
+ * civilian's attacker stays a clear shot and never attacks while it holds on;
+ * running civilians only ever move outward on screen.
  */
 
 const DT = 1 / 60;
@@ -49,8 +53,15 @@ function step(world: World, seconds: number, each?: () => void) {
   }
 }
 
-function spawnCiv(world: World, x: number, z: number, act: CivAct, variant = 'worker', to?: THREE.Vector3): Civilian {
-  return world.add(new Civilian(world, new THREE.Vector3(x, 0, z), 'world', variant, { act, to }));
+function spawnCiv(world: World, x: number, z: number, act: CivAct, variant = 'worker', o: { to?: THREE.Vector3; from?: THREE.Vector3 } = {}): Civilian {
+  return world.add(new Civilian(world, new THREE.Vector3(x, 0, z), 'world', variant, { act, ...o }));
+}
+
+/** Spawn and let them run in to their spot (in view, they arrive from the edge). */
+function placeCiv(world: World, x: number, z: number, act: CivAct, variant = 'worker'): Civilian {
+  const c = spawnCiv(world, x, z, act, variant);
+  for (let i = 0; i < 240 && c.state === 'arrive'; i++) step(world, DT);
+  return c;
 }
 
 function spawnEnemy(world: World, id: string, x: number, z: number, opts: Record<string, unknown> = {}): Enemy {
@@ -59,6 +70,10 @@ function spawnEnemy(world: World, id: string, x: number, z: number, opts: Record
 
 function ndc(world: World, p: THREE.Vector3): THREE.Vector3 {
   return p.clone().project(world.camera);
+}
+
+function rigOf(c: Civilian): HumanoidRig {
+  return (c as unknown as { rig: HumanoidRig }).rig;
 }
 
 function hitOn(e: Enemy | Civilian, obj: THREE.Object3D, part: HitPart, damage: number): ShotHit {
@@ -71,47 +86,137 @@ function hitboxes(world: World, owner: unknown): THREE.Object3D[] {
   return world.shootables.objects.filter((o) => (o.userData.shot as ShotTag | undefined)?.owner === owner);
 }
 
+/** The hand (box centre) of an arm, world. */
+function handOf(arm: { elbow: THREE.Object3D }): THREE.Vector3 {
+  return arm.elbow.localToWorld(new THREE.Vector3(0, -0.31, 0));
+}
+
+describe('coming on', () => {
+  it('in plain view they run in from the nearer edge of the view (no popping up out of nowhere), calling for help', { timeout: 30_000 }, () => {
+    for (const side of [1, -1]) {
+      const { world } = makeWorld();
+      const c = spawnCiv(world, side * 4, -7, 'cower');
+      expect(c.state).toBe('arrive');
+      expect(c.speech).toBe(CIV_STAMP.bubble.help);
+      step(world, DT);
+      // Starts out of view on its own side.
+      expect(Math.abs(ndc(world, rigOf(c).chest.getWorldPosition(new THREE.Vector3())).x)).toBeGreaterThan(1);
+      expect(Math.sign(ndc(world, c.root.position).x)).toBe(side);
+      let frames = 0;
+      while (c.state === 'arrive' && frames++ < 300) step(world, DT);
+      expect(frames / 60, 'there within ~2.5 s').toBeLessThan(2.5);
+      expect(c.root.position.distanceTo(new THREE.Vector3(side * 4, 0, -7))).toBeLessThan(0.3);
+      expect(c.state).toBe('cower');
+    }
+  });
+
+  it('from a doorway when the stage says so; out of view or far in, they are simply there', { timeout: 30_000 }, () => {
+    const { world } = makeWorld();
+    const door = new THREE.Vector3(-1, 0, -16);
+    const c = spawnCiv(world, 1.5, -12, 'cower', 'scientist', { from: door });
+    expect(c.state).toBe('arrive');
+    expect(c.root.position.distanceTo(door)).toBeLessThan(0.01);
+    // Behind the camera: no run-in.
+    const b = spawnCiv(world, 0, 6, 'cower');
+    expect(b.state).toBe('cower');
+    // Runners and the grabbed don't run in.
+    expect(spawnCiv(world, 3, -9, 'flee').state).not.toBe('arrive');
+    expect(spawnCiv(world, 3, -12, 'grabbed', 'nurse').state).toBe('grabbed');
+  });
+});
+
 describe('civilian acts', () => {
-  it('each act opens as the stage asked (a HELP! first where it fits)', { timeout: 30_000 }, () => {
+  it('each act plays as the stage asked (HELP! from inside the act, or a short one first)', { timeout: 30_000 }, () => {
     const { world } = makeWorld();
     const expectOpen: [CivAct, string, string][] = [
-      ['cower', 'plead', 'cower'],
+      ['cower', 'cower', 'cower'],
       ['hide', 'hide', 'hide'],
-      ['flee', 'flee', 'flee'],
-      ['backaway', 'plead', 'backaway'],
+      // (Nothing threatening around: waits, cowering, for the danger to be real.)
+      ['flee', 'cower', 'cower'],
+      ['backaway', 'backaway', 'backaway'],
       ['plead', 'plead', 'cower'],
       ['auto', 'plead', 'cower'],
     ];
     for (const [act, first, then] of expectOpen) {
-      const c = spawnCiv(world, -3, -9, act);
+      const c = placeCiv(world, -3, -9, act);
       expect(c.state, act).toBe(first);
       if (first === 'plead') expect(c.speech, `${act} says HELP!`).toBe(CIV_STAMP.bubble.help);
       step(world, 2.4);
-      if (!c.removed) expect(c.state, `${act} after its HELP!`).toBe(then);
+      if (!c.removed && act !== 'backaway') expect(c.state, `${act} after its HELP!`).toBe(then);
       c.removed = true;
       step(world, DT);
     }
   });
 
-  it('cower: ducks while anything attacks or comes close, peeks up in between; trembles', { timeout: 30_000 }, () => {
+  it('HELP! without hands up: calling, a hand at the mouth, waving from the elbow beside the head', { timeout: 30_000 }, () => {
     const { world } = makeWorld();
-    const c = spawnCiv(world, 3.5, -8, 'cower');
-    const head = (c as unknown as { rig: { head: THREE.Object3D } }).rig.head;
+    const c = placeCiv(world, 3, -9, 'plead', 'nurse');
+    const r = rigOf(c);
+    let checks = 0;
+    let nearTop = -Infinity;
+    step(world, 2, () => {
+      if (c.state !== 'plead') return;
+      checks++;
+      const head = r.head.localToWorld(new THREE.Vector3(0, 0.26, 0));
+      // Neither hand over the top of the head (that's the old hands-up silhouette).
+      for (const arm of [r.armL, r.armR]) {
+        expect(handOf(arm).y).toBeLessThan(head.y + 0.05);
+        nearTop = Math.max(nearTop, handOf(arm).y - head.y);
+      }
+      // One hand at the mouth.
+      const mouth = r.head.localToWorld(new THREE.Vector3(0, 0.06, 0.13));
+      expect(Math.min(handOf(r.armL).distanceTo(mouth), handOf(r.armR).distanceTo(mouth))).toBeLessThan(0.16);
+    });
+    expect(checks).toBeGreaterThan(30);
+    // A far-off civilian (or one up on a truck) waves the whole arm, up high.
+    const far = placeCiv(world, -4, -22, 'plead', 'cop');
+    let farTop = -Infinity;
+    step(world, 1.5, () => {
+      const fr = rigOf(far);
+      const top = fr.head.localToWorld(new THREE.Vector3(0, 0.26, 0)).y;
+      if (far.state === 'plead') farTop = Math.max(farTop, handOf(fr.armL).y - top, handOf(fr.armR).y - top);
+    });
+    expect(farTop).toBeGreaterThan(nearTop + 0.1);
+  });
+
+  it('cower: down on one knee, peeks up between ducks (HELP! the first times), shakes visibly, flinches at a shot close by', { timeout: 30_000 }, () => {
+    const { world } = makeWorld();
+    const c = placeCiv(world, 3.5, -8, 'cower');
+    const head = rigOf(c).head;
     let lo = Infinity;
     let hi = -Infinity;
-    // (Past the opening HELP! and the blend down into the crouch.)
-    step(world, 2);
+    let helps = 0;
+    let was = -1;
+    const hx: number[] = [];
+    let k = 0;
     step(world, 8, () => {
-      const y = head.getWorldPosition(new THREE.Vector3()).y;
+      const p = head.getWorldPosition(new THREE.Vector3());
       if (c.state === 'cower') {
-        lo = Math.min(lo, y);
-        hi = Math.max(hi, y);
+        lo = Math.min(lo, p.y);
+        hi = Math.max(hi, p.y);
       }
+      if (c.speech === CIV_STAMP.bubble.help && was !== CIV_STAMP.bubble.help) helps++;
+      was = c.speech;
+      // Head on screen at the 12 fps sprite cadence.
+      if (k++ % 5 === 0) hx.push(ndc(world, head.localToWorld(new THREE.Vector3(0, 0.13, 0))).x * 422);
     });
     expect(c.state).toBe('cower');
-    // Crouched low (half a standing head height), and the head comes up to peek.
-    expect(hi).toBeLessThan(1.35);
-    expect(hi - lo, 'peeks up between ducks').toBeGreaterThan(0.12);
+    // Crouched low, and the head comes up to peek.
+    expect(hi).toBeLessThan(1.3);
+    expect(hi - lo, 'peeks up between ducks').toBeGreaterThan(0.08);
+    expect(helps, 'calls HELP! out of the cower').toBeGreaterThanOrEqual(1);
+    // The shiver shows on the sprite grid: the head jumps ≥ 1 px between most sprite frames.
+    let moves = 0;
+    for (let i = 1; i < hx.length; i++) if (Math.abs(hx[i] - hx[i - 1]) >= 1) moves++;
+    expect(moves / hx.length).toBeGreaterThan(0.5);
+    // A shot right by: a flinch (head down hard).
+    step(world, 0.3);
+    const y0 = head.getWorldPosition(new THREE.Vector3()).y;
+    const sp = ndc(world, head.getWorldPosition(new THREE.Vector3()));
+    world.events.emit('shot', { hit: false, x: (sp.x * 0.5 + 0.5) * 844 + 30, y: (-sp.y * 0.5 + 0.5) * 390 });
+    let low = Infinity;
+    step(world, 0.2, () => (low = Math.min(low, head.getWorldPosition(new THREE.Vector3()).y)));
+    expect(low).toBeLessThanOrEqual(y0 + 0.01);
     // A walker close by: stays ducked (no peeking) and doesn't run (a stage's COWER holds its spot).
     const z = spawnEnemy(world, 'walker', 2.2, -9);
     const at = c.root.position.clone();
@@ -124,51 +229,83 @@ describe('civilian acts', () => {
     if (peakWhileNear > -Infinity) expect(peakWhileNear).toBeLessThan(lo + 0.08);
   });
 
-  it('flee: runs outward on screen and toward the camera, trips at most once, and is rescued once safe off screen', { timeout: 30_000 }, () => {
+  it('flee: waits for real danger, then runs out across the view (outward only, on screen ~2–4 s), trips at most once and only on screen; safe off screen, paid at the clear', { timeout: 30_000 }, () => {
     for (const side of [1, -1]) {
       const { world, events } = makeWorld();
-      const c = spawnCiv(world, side * 3, -10, 'flee', 'default');
-      let lastX = ndc(world, c.root.position).x * side;
+      const c = spawnCiv(world, side * 2.2, -10, 'flee', 'default');
+      step(world, 1);
+      expect(c.state, 'nothing near: waiting').toBe('cower');
+      spawnEnemy(world, 'walker', -side * 0.5, -15);
+      let lastX = -Infinity;
       let back = 0;
       let stumbles = 0;
+      let offStumble = 0;
       let prev = c.state;
       let frames = 0;
-      while (!c.removed && frames++ < 600) {
+      let onScreen = 0;
+      while (!c.escaped && frames++ < 900) {
         step(world, DT);
-        if (c.removed) break;
-        const x = ndc(world, c.root.position.clone().setY(1)).x * side;
-        if (x < lastX - 0.005) back++;
-        lastX = Math.max(lastX, x);
-        if (c.state === 'stumble' && prev !== 'stumble') stumbles++;
+        if (c.escaped) break;
+        const p = ndc(world, c.root.position.clone().setY(1));
+        if (c.state === 'flee' || c.state === 'stumble') {
+          const x = p.x * side;
+          if (x < lastX - 0.005) back++;
+          lastX = Math.max(lastX, x);
+          if (Math.abs(p.x) < 1) onScreen += DT;
+        }
+        if (c.state === 'stumble' && prev !== 'stumble') {
+          stumbles++;
+          if (Math.abs(p.x) > 0.85) offStumble++;
+        }
         prev = c.state;
       }
-      expect(c.removed, 'got away').toBe(true);
+      expect(c.escaped, 'got away').toBe(true);
       expect(back, 'never heads back toward the middle of the view').toBe(0);
       expect(stumbles).toBeLessThanOrEqual(1);
-      expect(events.rescued, 'rescued once, safe off screen').toBe(1);
-      expect(frames / 60, 'gone within a few seconds').toBeLessThan(6);
+      expect(offStumble).toBe(0);
+      expect(onScreen, 'the run reads: a few seconds on screen').toBeGreaterThan(1.8);
+      expect(onScreen).toBeLessThan(4.5);
+      // Out of play: no target, nothing paid yet…
+      expect(hitboxes(world, c)).toEqual([]);
+      expect(c.root.visible).toBe(false);
+      expect(events.rescued).toBe(0);
+      // …until the encounter is cleared (the stage runner rescues everyone left).
+      c.rescue();
+      c.rescue();
+      expect(events.rescued).toBe(1);
+      expect(c.removed).toBe(true);
     }
   });
 
-  it('backaway: edges back with hands up facing the threat, then turns and runs', { timeout: 30_000 }, () => {
+  it('backaway: edges back, forearm over the face, kept three-quarters to the camera; then runs', { timeout: 30_000 }, () => {
     const { world, events } = makeWorld();
-    const c = spawnCiv(world, 3.2, -8, 'backaway', 'cop');
-    step(world, 1.2);
+    const c = placeCiv(world, 3.2, -8, 'backaway', 'cop');
     expect(c.state).toBe('backaway');
-    const z = spawnEnemy(world, 'walker', 1.0, -11);
+    const z = spawnEnemy(world, 'walker', -1.5, -9.5);
     const p0 = c.root.position.clone();
     const seen = new Set<string>();
-    step(world, 9, () => seen.add(c.state));
+    let maxYaw = 0;
+    step(world, 6, () => {
+      seen.add(c.state);
+      if (c.state === 'backaway') {
+        const cam = Math.atan2(-c.root.position.x, -c.root.position.z);
+        let d = c.root.rotation.y - cam;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        maxYaw = Math.max(maxYaw, Math.abs(d));
+      }
+    });
+    expect(maxYaw, 'never in profile').toBeLessThan(0.75);
     expect(seen.has('flee')).toBe(true);
     // Backed off away from the zombie (and outward), never toward it.
-    expect(c.removed || c.root.position.x > p0.x).toBe(true);
-    expect(events.rescued).toBe(1);
+    expect(c.escaped || c.root.position.x > p0.x).toBe(true);
+    // Escaped: paid at the clear, not before.
+    expect(events.rescued).toBe(0);
     void z;
   });
 
-  it('plead: waves for help again and again, cowering in between', { timeout: 30_000 }, () => {
+  it('plead: calls for help again and again, cowering in between', { timeout: 30_000 }, () => {
     const { world } = makeWorld();
-    const c = spawnCiv(world, -3.5, -9, 'plead', 'scientist');
+    const c = placeCiv(world, -3.5, -9, 'plead', 'scientist');
     let helps = 0;
     let was = -1;
     step(world, 14, () => {
@@ -179,20 +316,19 @@ describe('civilian acts', () => {
   });
 
   it('auto: a zombie comes close — backs off and runs for it (outward)', { timeout: 30_000 }, () => {
-    const { world, events } = makeWorld();
-    const c = spawnCiv(world, 2.5, -7, 'auto');
-    step(world, 2);
+    const { world } = makeWorld();
+    const c = placeCiv(world, 2.5, -7, 'auto');
+    step(world, 2.2);
     expect(c.state).toBe('cower');
     spawnEnemy(world, 'walker', 1.6, -9.0);
     const seen = new Set<string>();
     step(world, 8, () => seen.add(c.state));
     expect([...seen].some((s) => s === 'backaway' || s === 'flee')).toBe(true);
-    expect(events.rescued).toBe(1);
   });
 
-  it('rescued: thanks the player (THANKS!, a wave or thumbs-up), then jogs off screen', { timeout: 30_000 }, () => {
+  it('rescued: thanks the player (THANKS!, a thumbs-up or a wave — no hand over the head), then jogs off screen', { timeout: 30_000 }, () => {
     const { world, events } = makeWorld();
-    const c = spawnCiv(world, -3, -8, 'cower', 'nurse');
+    const c = placeCiv(world, -3, -8, 'cower', 'nurse');
     step(world, 2);
     c.rescue();
     c.rescue();
@@ -200,8 +336,19 @@ describe('civilian acts', () => {
     expect(c.state).toBe('thanks');
     expect(c.speech).toBe(CIV_STAMP.bubble.thanks);
     expect(hitboxes(world, c)).toEqual([]);
+    const r = rigOf(c);
     const seen = new Set<string>();
-    step(world, 8, () => !c.removed && seen.add(c.state));
+    let t = 0;
+    step(world, 8, () => {
+      t += DT;
+      if (c.removed) return;
+      seen.add(c.state);
+      // (Past the blend out of the crouch.)
+      if (c.state === 'thanks' && t > 0.35) {
+        const top = r.head.localToWorld(new THREE.Vector3(0, 0.26, 0)).y;
+        for (const arm of [r.armL, r.armR]) expect(handOf(arm).y).toBeLessThan(top);
+      }
+    });
     expect(seen.has('leave')).toBe(true);
     expect(c.removed).toBe(true);
   });
@@ -222,10 +369,11 @@ describe('civilian acts', () => {
     expect(c.removed).toBe(true);
   });
 
-  it('perched (on a truck bed): waves for help, never runs off', { timeout: 30_000 }, () => {
+  it('perched (on a truck bed): calls for help, never runs off', { timeout: 30_000 }, () => {
     const { world } = makeWorld();
     const c = world.add(new Civilian(world, new THREE.Vector3(-3, 1.4, -9), 'world', 'worker', { act: 'flee' }));
     const p0 = c.root.position.clone();
+    expect(c.state).toBe('plead');
     spawnEnemy(world, 'walker', -2.4, -10);
     step(world, 6);
     expect(c.act).toBe('plead');
@@ -238,8 +386,10 @@ describe('civilian acts', () => {
     world.rng.next();
     const s1 = world.rng.state;
     world.rng.state = s0;
-    new Civilian(world, new THREE.Vector3(0, 0, -6), 'world', 'cop', { act: 'flee' });
+    world.add(new Civilian(world, new THREE.Vector3(0, 0, -6), 'world', 'cop', { act: 'cower' }));
     expect(world.rng.state).toBe(s1);
+    step(world, 3);
+    expect(world.rng.state, 'and none after (the act runs on its own RNG)').toBe(s1);
   });
 });
 
@@ -251,7 +401,7 @@ describe('grabbed', () => {
     return { ...w, c, g };
   }
 
-  it('a zombie holds on, level with them and toward the middle of the view, hands meeting', { timeout: 30_000 }, () => {
+  it('a zombie holds on, level with them and toward the middle of the view; both their hands haul on the grip', { timeout: 30_000 }, () => {
     const { world, c, g } = grabScene();
     expect(g).toBeInstanceOf(Grabber);
     expect(g.hostile).toBe(true);
@@ -259,13 +409,38 @@ describe('grabbed', () => {
     expect(c.state).toBe('grabbed');
     const cp = c.root.position;
     const gp = g.root.position;
-    // ~GRAB_SEP apart, the zombie nearer the middle of the screen.
+    // ~GRAB_SEP apart (a yank pulls them in a little), the zombie nearer the middle of the screen.
     expect(Math.hypot(cp.x - gp.x, cp.z - gp.z)).toBeGreaterThan(GRAB_SEP - 0.2);
     expect(Math.abs(ndc(world, gp.clone().setY(1)).x)).toBeLessThan(Math.abs(ndc(world, cp.clone().setY(1)).x));
-    // Its gripping hand and the civilian's near hand meet.
+    // Its gripping hand and theirs meet; their other hand is on the held wrist.
     const gr = g.rig!;
-    const hold = (g.gripSide > 0 ? gr.armL : gr.armR).elbow.localToWorld(new THREE.Vector3(0, -0.31, 0));
-    expect(hold.distanceTo(c.grabHand)).toBeLessThan(0.25);
+    expect(handOf(g.gripSide > 0 ? gr.armL : gr.armR).distanceTo(c.grabHand)).toBeLessThan(0.25);
+    const r = rigOf(c);
+    const d = [handOf(r.armL).distanceTo(c.grabHand), handOf(r.armR).distanceTo(c.grabHand)].sort((a, b) => a - b);
+    expect(d[0]).toBeLessThan(0.08);
+    // (The free hand reaches across for the held forearm.)
+    expect(d[1]).toBeLessThan(0.45);
+  });
+
+  it('the tug of war is keyed: it yanks them in (a lurch toward it) every 1.1–1.6 s, they drag back', { timeout: 30_000 }, () => {
+    const { world, c, g } = grabScene();
+    step(world, 0.3);
+    const home = c.root.position.clone();
+    const toward = g.root.position.clone().sub(home).setY(0).normalize();
+    let yanks = 0;
+    let max = 0;
+    let wasOut = false;
+    step(world, 6, () => {
+      const lurch = c.root.position.clone().sub(home).dot(toward);
+      max = Math.max(max, lurch);
+      const out = lurch > 0.15;
+      if (out && !wasOut) yanks++;
+      wasOut = out;
+    });
+    expect(max).toBeGreaterThan(0.18);
+    expect(max).toBeLessThan(0.3);
+    expect(yanks).toBeGreaterThanOrEqual(4);
+    expect(yanks).toBeLessThanOrEqual(6);
   });
 
   it('the attacker stays a clear shot: its head and chest are never behind the civilian, and it never attacks while holding on', { timeout: 30_000 }, () => {
@@ -273,6 +448,7 @@ describe('grabbed', () => {
     const ray = new THREE.Raycaster();
     let checks = 0;
     let blocked = 0;
+    let minApart = Infinity;
     step(world, 6, () => {
       expect(g.telegraph).toBeNull();
       expect(g.holdsSlot).toBe(false);
@@ -290,13 +466,14 @@ describe('grabbed', () => {
         checks++;
         if ((hit?.object.userData.shot as ShotTag | undefined)?.owner === c) blocked++;
       }
-      // And with a margin: the heads are far apart on screen.
+      // And with a margin, on a yank too: the heads are far apart on screen.
       const gh = ndc(world, g.headAnchor!.getWorldPosition(new THREE.Vector3()));
-      const ch = ndc(world, (c as unknown as { rig: { head: THREE.Object3D } }).rig.head.getWorldPosition(new THREE.Vector3()));
-      expect(Math.abs(gh.x - ch.x) * 422, 'heads apart on screen (px)').toBeGreaterThan(40);
+      const ch = ndc(world, rigOf(c).head.getWorldPosition(new THREE.Vector3()));
+      minApart = Math.min(minApart, Math.abs(gh.x - ch.x) * 422);
     });
     expect(checks).toBeGreaterThan(100);
     expect(blocked).toBe(0);
+    expect(minApart, 'heads apart on screen (px)').toBeGreaterThan(40);
   });
 
   it('shoot the zombie and they are free on the spot: rescued (once), THANKS!, off they go', { timeout: 30_000 }, () => {
@@ -312,8 +489,8 @@ describe('grabbed', () => {
     expect(events.rescued).toBe(1);
   });
 
-  it('a body shot makes it flinch but not let go; shooting its gripping arm off frees them', { timeout: 30_000 }, () => {
-    const { world, c, g } = grabScene();
+  it('a body shot makes it flinch but not let go; shooting its gripping arm off saves them on the spot (they run, THANKS!)', { timeout: 30_000 }, () => {
+    const { world, events, c, g } = grabScene();
     step(world, 1);
     const torso = hitboxes(world, g).find((o) => (o.userData.shot as ShotTag).part === 'torso')!;
     g.onShot(hitOn(g, torso, 'torso', 1));
@@ -331,16 +508,19 @@ describe('grabbed', () => {
     g.onShot(hitOn(g, fore, 'limb', 2));
     step(world, 0.3);
     expect(g.state).not.toBe('grab');
-    expect(['flee', 'stumble']).toContain(c.state);
+    expect(events.rescued).toBe(1);
+    expect(c.state).toBe('leave');
+    expect(c.speech).toBe(CIV_STAMP.bubble.thanks);
   });
 
-  it('left too long, they wrench free and run; the zombie walks on at the player as a plain walker', { timeout: 30_000 }, () => {
-    const { world, c, g } = grabScene();
+  it('left too long, they wrench free and run — no rescue on the spot (paid at the clear like anyone who got away); the zombie walks on', { timeout: 30_000 }, () => {
+    const { world, events, c, g } = grabScene();
     step(world, 9.5);
-    expect(c.state === 'flee' || c.state === 'stumble' || c.removed).toBe(true);
+    expect(['flee', 'stumble', 'escaped']).toContain(c.state);
     expect(g.state === 'grab').toBe(false);
     step(world, 6);
     expect(['advance', 'windup', 'recover']).toContain(g.state);
+    expect(events.rescued).toBe(0);
   });
 
   it('a civilian hit while grabbed: the penalty as ever, and the zombie lets go', { timeout: 30_000 }, () => {

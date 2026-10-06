@@ -147,56 +147,92 @@ id from the stage folder (e.g. `registerEnemy('butcher', …)`).
 ## Civilians (see `gameplay/Civilian.ts`, `civPoses.ts`, `civGrab.ts`)
 
 Innocent bystanders: shooting one costs a life (and 1000 points), a rescue pays
-1500 (sometimes +1 life). They are rescued when the encounter is cleared, when
-the zombie holding them is shot, or the moment they get away off screen.
+1500 (sometimes +1 life). Everyone still on the field (and anyone who got away
+off screen) is rescued when the encounter is cleared, as ever; the only
+instant rescue is a save the player makes — shooting the zombie holding them,
+or its holding arm off. A civilian who runs off screen is out of play (hidden,
+no target) and paid with the rest at the clear, at the edge they ran out of
+(`escaped`): no mid-fight bonus or +1 life for doing nothing.
+
+**Coming on.** A civilian the stage spawns in plain view doesn't pop up out of
+nowhere: they run in from just past the nearer edge of the view, level with
+their spot (the run stays in the outer part of the screen on their side),
+calling HELP! (`arrive`, up to 7.5 m), or in from where the stage says
+(`from`: the d2 gift-shop scientist in through the atrium doorway, the z3
+pile-up's worker from among the wrecks ahead, the z3 tunnel's nurse in past the
+camera along the wall). A run-in can't see walls: where the edge of the view is
+behind scenery (a tunnel wall, a wreck), give the stage a `from` —
+`civilian-fairness.test.ts` catches a run that passes behind something. Spots
+too far in, runners and the grabbed are simply there; each is already turned the
+way its act faces.
 
 **Acts.** A beat's `civilians` entry picks what they do with `act` (default
 `auto`); the arcade light-gun games are the reference (House of the Dead,
-Time Crisis, Virtua Cop, Operation Wolf, Jurassic Park):
+Time Crisis, Virtua Cop, Operation Wolf, Jurassic Park). Gestures are keyed —
+each extreme held for a few sprite frames — so they read at 12 fps, and the
+only hand that ever goes over a head is a far-off (> 15 m) or perched
+civilian's big wave.
 
 | act | what they do |
 |---|---|
-| `cower` | squats low, hands clasped on the back of the head, trembling; between attacks the hands come down onto the knees and the head comes up to peek (toward the threat); ducks again whenever anything winds up an attack or comes within 4 m |
-| `hide` | crouched with the back three-quarters to the camera, hands on the cover's edge, peeking up and out toward the middle of the view; glances back over the shoulder for help (HELP! the first times); drops down when a threat is near |
-| `flee` | runs for it — toward the camera and out past the nearer side of the screen (or to `to`), looking back over the shoulder, tripping once (¾ of the time) onto hands and knees and scrambling up; safe off screen = rescued |
-| `backaway` | edges back from the nearest threat, facing it with the palms up, then turns and runs (when it's within ~3 m, or after 4.5–6.5 s) |
-| `grabbed` | spawns with a zombie (`attacker`: its outfit) holding their wrist — a tug of war; shoot the zombie and they're free on the spot (THANKS!, a rescue); left ~7–8.5 s they wrench free and run, and the zombie walks on at you; shooting its holding arm off frees them too |
-| `plead` | waves for help (HELP!), pointing at the threat, then cowers, and waves again when it's calm |
+| `cower` | down on one knee, folded over the other, three-quarters to the camera, hands clasped over the back of the head, shaking (a body hop of about a retro pixel every ~0.1 s, off the 12 fps beat); every couple of seconds the head alone comes up for 0.4–0.8 s to look out between the forearms (every other peek at the player, a hand cupped at the mouth: HELP! the first times) and ducks back in 0.1 s; never peeks while anything is within 4 m or winding up; flinches (0.2 s harder tuck, head jerk) at a shot landing near them on screen, a kill within 4 m or an attack starting within 6 m |
+| `hide` | only where the stage puts cover right in front (the d1 ranger in the ferns): crouched with the back to the camera, hands on the cover, peeking up and out, glancing back over the shoulder for help — never in the open |
+| `flee` | cowers until the danger is real (a threat within 7 m — 12 m for dinos — an attack winding up, or 8 s), then runs out across the view at 2.8 m/s on the heading (from straight across to a little toward or away from the camera) that keeps them on screen ~3 s, Operation Wolf style — or to the stage's `to` where straight across would run into the shopfronts (the z1 cop) — looks back over the shoulder; trips at most once, 0.35–0.6 s in and only well inside the view; off screen they have escaped |
+| `backaway` | HELP! over the shoulder, then 1.5–2.5 s edging back from the nearest threat (kept within 0.7 rad of facing the camera: in profile with arms out it would read as a zombie), forearm up shielding the face, the other hand reaching back; steps sized to the ground covered (no skating); then turns and runs — half the time tripping onto the seat first, scooting back on hands and heels, rolling over and scrambling off (`fall`) |
+| `grabbed` | spawns with a zombie (`attacker`: its outfit) holding their wrist — a tug of war, keyed: every 1.1–1.6 s it yanks (a 0.22 m lurch toward it in 0.08 s, a stumbling step, the head snapping; held 0.22 s), they drag back over 0.5 s and brace, leaning hard away with both hands hauling on the held wrist; shoot the zombie (or its holding arm off) and they're free on the spot (THANKS!, a rescue); left ~7–8.5 s they wrench free and run (paid at the clear), the zombie walks on at you |
+| `plead` | calls HELP! — leaning in toward the player, knees bent, a hand cupped at the mouth, the other waving from the elbow beside the head (two held positions, 2.5 a second) — then cowers (after a startled jolt), and calls again when it's calm |
 | `auto` | a short HELP!, then cowers; a zombie within 2.6 m (a dino within 4.2 m) and they back off and run |
 
-`help` (seconds) puts a HELP! wave before the act (defaults per act). Rescued
-civilians give a relieved thumbs-up or wave (THANKS!) and jog off screen.
-Civilians standing on something raised (the d3 truck bed: `PerchedCivilian`)
-only plead or cower. Each civilian takes ONE draw from the world RNG (as
-before) and seeds its own: adding acts never shifts a stage's random stream.
+`help` (seconds) puts a HELP! before the act (by default only `plead` and `auto`
+open with one; cowering and backing off call from inside the act). Rescued
+civilians sigh, then give a thumbs-up at chest height with two nods or a wave
+from a bent elbow at shoulder height (THANKS!), and jog off screen. Civilians
+standing on something raised (the d3 truck bed: `PerchedCivilian`) only plead
+or cower. Each civilian takes ONE draw from the world RNG (as before) and seeds
+its own: adding acts never shifts a stage's random stream.
 
 **Fairness (hard rules).** Civilians never stand in an enemy's attack lane:
 they stay where the stage put them — out at the side of the frame, away from
-where the attacks come in — or move only *outward* (a running civilian's screen
-x only grows: away from the middle of the view, toward the near screen edge).
-Which side is "outward" is tracked while they stand their ground, so a camera
-still turning to the scene doesn't send them across it. A grabbing zombie
-stands level with its victim, `GRAB_SEP` (1.55 m: both arms straight) toward
-the middle of the view, turned to the camera and leaning back (dragging them
-in): its head and chest are clear shots well away from the civilian on screen,
-and while it holds on it never attacks (no ring, no attack slot); a hit makes
-it flinch but not let go. Stage a grab near the camera (the z2 ER's is ~6 m
-out): the bigger on screen, the less a near miss can land on the victim. `civilian-fairness.test.ts`
-plays every stage and checks, every other frame, that a ray through the centre
-of any hostile's head / torso / weak point never hits a civilian first;
-`civilian.test.ts` covers each act (outward runs, the grab, rescues paying once,
-the hit penalty once, perched civilians, the RNG draw). Measure changes with
-the human-like bot (`humanbot.test.ts`: civilian shots and damage per stage).
+where the attacks come in — or run only *outward* (a running civilian's screen
+x only grows, also on deeper headings: those stay under the angle that would
+turn them back in). Which side is "outward" is tracked while they stand their
+ground, so a camera still turning to the scene doesn't send them across it. A
+grabbing zombie stands level with its victim, `GRAB_SEP` (1.25 m: arm's length,
+the hands meeting on the wrist) toward the middle of the view, turned to the
+camera and leaning back, throwing its weight back on each yank, its free claw
+at shoulder height: with the victim leaning away, the heads are ~1.7 m apart
+and its head and chest are clear shots well away from the civilian on screen
+(> 40 px at the z2 ER, civilian 7.0 m and zombie 6.3 m out, on a yank too);
+while it holds on it never attacks (no ring, no attack slot); a hit makes it
+flinch but not let go. Never put a civilian behind visible scenery that doesn't
+stop bullets (a shot at the counter would carry on into someone you can't see):
+in the open, or behind a registered occluder. `civilian-fairness.test.ts` plays
+every stage and checks, every other frame, that a ray through the centre of any
+hostile's head / torso / weak point — and rings 8, 12 and 16 px round it —
+never hits a civilian first (hostiles out past 120 m are left out), and that no
+civilian hitbox sits behind solid non-occluder scenery (foliage, ground layers
+and the d3 truck's perched driver — whose truck belongs to the environment —
+aside); `civilian.test.ts` covers each act (the run-in, outward
+runs, the grab and its yank, rescues paying once and when, the hit penalty once,
+perched civilians, the RNG draw). Measure changes with the human-like bot
+(`humanbot.test.ts`: civilian shots and damage per stage).
 
 **Poses.** Each act writes joint values into a flat pose buffer
-(`civPoses.ts`: `poseCower`, `poseHide`, `poseFlee`, `poseStumble`,
-`poseGrabbed`, `poseThanks`, …, plus `tremble`); the civilian blends from the
-pose it is leaving over 0.1–0.3 s and `applyPose` writes it onto the rig, so
-ART: 3D (baked meshes) and ART: SPRITES (PixelCast paints from the joints) show
-the same thing. Crouches keep the shoes on the floor (`legsHeight`); the
-cowering arms were fitted to the rig (hands on the back of the head / on the
-knees). `aimArm` points an arm at a world point (the tug of war's meeting hands).
-`Civilian.debugPose(phase, t, …)` holds a pose for tests and look-dev.
+(`civPoses.ts`: `posePlead`, `poseCower`, `poseStartle`, `poseHide`,
+`poseBackAway`, `poseFall`, `poseFlee`, `poseStumble`, `poseGrabbed`,
+`poseThanks`, …, plus `shiver` and `tremble`); the civilian blends from the pose
+it is leaving over 0.1–0.45 s and `applyPose` writes it onto the rig, so ART: 3D
+(baked meshes) and ART: SPRITES (PixelCast paints from the joints) show the same
+thing. `ikArm` is a two-bone IK that puts a hand on a point of the body
+(`headPoint`, `rootToChest`: the mouth, the face, the chest, the floor) or on
+the zombie's grip, with a pole for the elbow; it writes into the pose buffer, so
+whatever comes next blends from exactly what was drawn. Poses near the head
+were checked against the painter: the cowering and hiding arms are fitted
+(forward-kinematics values that keep painted arms and hitboxes agreeing from
+every view they're seen in), the HELP! waving hand is the one on the side the
+camera sees (swapped smoothly). Crouches keep the shoes on the floor
+(`legsHeight`; a kneeling knee: `kneelY`). `aimArm` points the zombie's straight
+arms. `Civilian.debugPose(phase, t, …)` holds a pose for tests and look-dev.
 
 **Pixel art.** The human painter (`content/pixel/human.ts`) has three more
 living expressions — `terror` (brows up, whites round a small pupil, a gasp),
@@ -205,10 +241,11 @@ shut, gritted teeth) — per-hand poses (`handL` / `handR`, the `HAND.THUMB`
 thumbs-up), a swinging `ponytail` (`hairSwing` jolts it) and a pixel speech
 bubble (`bubble`: `CIV_STAMP.bubble.help` / `.thanks`) — a solid stamp two retro
 pixels a cell over the head, on a layer of its own, never a target. ART: 3D
-shows the same bubble as a camera-facing sprite (`civBubble.ts`). Stamps may
-now reach further than 8 cells from their anchor (`stampReach`; everything
-older lays out exactly as before). `civilian-align.test.ts` checks every pose
-(and the grabbing zombie) against the hitboxes in the views it is seen in.
+shows the same bubble as a camera-facing sprite (`civBubble.ts`) but keeps the
+baked screaming face. Stamps may reach further than 8 cells from their anchor
+(`stampReach`; everything older lays out exactly as before).
+`civilian-align.test.ts` checks every pose (and the grabbing zombie, mid-tug
+and on a yank) against the hitboxes in the views it is seen in.
 
 ## Model kit rules (see `content/kit/ModelKit.ts`)
 

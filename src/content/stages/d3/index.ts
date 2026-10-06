@@ -51,7 +51,7 @@ const DOOR = rel(D.HOLD_VISITOR, D.VISITOR, D.VISITOR_SIDE + 2.5);
 // them — and every leap / approach in their hold comes from the other side, so
 // shots at an attacker never pass through them. Attackers enter through the
 // middle of the view, clear of the HUD corners.
-const SCIENTIST = rel(D.HOLD_VISITOR, 180, -1.2);
+const SCIENTIST = rel(D.HOLD_VISITOR, 174, -8.5);
 const RANGER = rel(D.HOLD_ROADBLOCK, 246.5, 6.5);
 
 /** The mud hold's worker, perched on his truck (spawned by hand: the runner grounds its civilians). */
@@ -161,7 +161,7 @@ const beats: Beat[] = [
         // AMBUSH: the alpha and its pack spring out of the ferns ahead and pounce as
         // they land (the leaps carry them to ~8–9 m, in the middle of the view).
         // Early enough to be over before the visitor-centre hold (whose scientist
-        // stands at the right edge of the frame) — so these two keep the pack's base
+        // stands out on the plaza) — so these two keep the pack's base
         // health: a tougher straggler would follow the jeep onto the plaza.
         start: { atD: 128 },
         spawns: [
@@ -177,7 +177,8 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'visitor centre',
     look: { at: rel(D.HOLD_VISITOR, 180, -11, 2.2), blend: 0.9 },
-    // Out on the road at the right edge of the frame; the pack comes across the plaza on the left.
+    // Out on the plaza left of the view's middle (the pan reveals them); everything comes in right of
+    // the middle, from the plaza's far side and down the road (a straggler from the chase too).
     civilians: [{ pos: SCIENTIST, variant: 'scientist', act: 'flee', help: 0.8 }],
     pickups: [{ kind: 'health', pos: rel(D.HOLD_VISITOR, 174, -2.6, 2.4), t: 2 }],
     onStart: (w) => w.later(0.5, () => park()?.strike(w)),

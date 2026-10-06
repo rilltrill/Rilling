@@ -178,7 +178,10 @@ const beats: Beat[] = [
     kind: 'hold',
     label: 'gift shop',
     look: { at: W(0, 1.6, -71), world: true, blend: 1.2 },
-    civilians: [{ pos: W(5.0, 0, -76.4), world: true, variant: 'scientist', t: 0.3, act: 'hide' }],
+    // (In through the atrium doorway to cower by the giant plush T-rex, in the open at the back on the
+    // left: clear of the vents' drop lanes down the middle, the stock-room raptor's run comes out in
+    // front of her and the tan pair come in on the right and through the doorway after she's down.)
+    civilians: [{ pos: W(-3.25, 0, -76.0), from: W(1.2, 0, -80.6), world: true, variant: 'scientist', t: 0.3, act: 'cower' }],
     pickups: [{ kind: 'bomb', pos: W(-3.7, 1.35, -66.5), world: true, t: 1 }],
     onStart: (w) => w.later(1.0, () => popup(w, "DON'T SHOOT THE SCIENTIST!", 0.6, 0.26)),
     waves: [
