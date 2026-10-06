@@ -192,7 +192,10 @@ export function oilyConcreteTile(atlas: PwAtlas, hex: number): PwTile {
         for (let y = -ry; y <= ry; y++) for (let x = -rx; x <= rx; x++) {
           const d = (x / rx) ** 2 + (y / ry) ** 2 + (hash2(cx + x, cy + y, 3) - 0.5) * 0.4;
           if (d > 1) continue;
-          c.set(wrapI(cx + x, 128), wrapI(cy + y, 128), oil, d > 0.6 ? 2 : d < 0.1 ? 4 : 1);
+          // Solid dark pool, a dithered rim, one small off-centre sheen (a centred one reads as a ring / a letter O).
+          const rim = d > 0.72;
+          const sheen = !rim && Math.abs(x / rx + 0.35) < 0.12 && y < 0 && y > -ry * 0.7;
+          c.set(wrapI(cx + x, 128), wrapI(cy + y, 128), oil, rim ? (bayer(cx + x, cy + y) < 0.5 ? 1.75 : 2.25) : sheen ? 2.5 : 1);
         }
       }
       crack(c, rng, 30, 90, 26, 0.3, { dt: -1.5, lip: 0.75, branch: 0.1 });

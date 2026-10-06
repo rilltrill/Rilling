@@ -61,8 +61,17 @@ export function d2SignTile(atlas: PwAtlas, s: SignSpec): PwTile {
   const style = s.glow ? 'lit' : isYellow(s.board) ? 'hazard' : isGreen(s.board) ? 'park' : 'enamel';
   return atlas.tile(`d2sign|${s.text}|${h6(s.board)}|${h6(s.ink)}|${style}|${W}x${H}`, W, H, (c, k) => {
     const rng = k.rng;
-    const f = style === 'lit' || style === 'park' ? FONT_BOLD : FONT_5x7;
-    const scale = fitScale(s.text, f, s.px, W - 6);
+    // Bold letters for park / lit boards unless they would have to shrink below the classic size (long names).
+    const want = Math.max(1, Math.round(s.px * 32));
+    let f: PixelFont = style === 'lit' || style === 'park' ? FONT_BOLD : FONT_5x7;
+    let scale = fitScale(s.text, f, s.px, W - 6);
+    if (f === FONT_BOLD && scale < want) {
+      const s2 = fitScale(s.text, FONT_5x7, s.px, W - 6);
+      if (s2 > scale) {
+        f = FONT_5x7;
+        scale = s2;
+      }
+    }
     const tw = textWidth(s.text, f, { scale });
     const th = f.base * scale;
     const tx = Math.round((W - tw) / 2);
