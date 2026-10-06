@@ -1,4 +1,4 @@
-import { bayer, type PwCanvas } from './canvas';
+import { bayer, PWF, type PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { hash2, smooth } from './surfaces';
 
@@ -136,6 +136,35 @@ export function d1SplashModule(atlas: PwAtlas, o: { hex: number }): PwTile {
       const lump = smooth(x + f * 3, vt + f * 4, 64, 32, 4, 13);
       const edge = crest - vt < 2;
       c.set(x, y, fm, edge ? 4.8 : lump > 0.6 ? 4.2 : lump < 0.3 ? 2.6 : 3.4);
+    });
+  });
+}
+
+/**
+ * A torch flame (module 16 × 24 a frame, cut out, unlit GLOW): a licking tongue
+ * of fire — white-yellow core, orange body, red tips — its tips flickering
+ * frame to frame, a spark or two. Shares the water's frame count and clock.
+ */
+export function d1FlameModule(atlas: PwAtlas): PwTile {
+  const F = D1_WATER_FRAMES;
+  return atlas.tile(`d1flame|${F}`, 16, 24 * F, (c, k) => {
+    const fire = k.ramp(0xff7a1a, { light: 0.6, sat: 1.1 });
+    const core = k.ramp(0xffd860, { light: 0.6, sat: 1.0 });
+    const red = k.ramp(0xd8301a, { light: 0.5, sat: 1.1 });
+    frames(c, F, (x, vt, f, y) => {
+      const u = (x + 0.5 - 8) / 8;
+      const h = vt / 24;
+      // Width narrows upward; the tongue sways and its tip length flickers.
+      const sway = Math.sin(h * 5 + f * 1.3) * 0.18 * h;
+      const half = (1 - h) * (0.85 + Math.sin(f * 2.1 + h * 3) * 0.08);
+      const top = 0.78 + Math.sin(f * 1.7) * 0.12 + hash2(x, f, 3) * 0.08;
+      if (h > top || Math.abs(u - sway) > half) {
+        if (h > top && h < top + 0.15 && hash2(x, vt + f * 7, 5) > 0.93) c.set(x, y, core, 5, PWF.GLOW);
+        return;
+      }
+      const d = Math.abs(u - sway) / Math.max(0.05, half);
+      const r = d < 0.4 && h < 0.6 ? core : h > top - 0.18 ? red : fire;
+      c.set(x, y, r, r === core ? 5 : d > 0.75 ? 3 : 4, PWF.GLOW);
     });
   });
 }

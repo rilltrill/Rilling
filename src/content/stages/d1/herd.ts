@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Kit } from '../../kit/ModelKit';
 import type { World } from '../../../gameplay/World';
 import { bake } from './props';
+import type { D1HerdSprites } from './herdPixel';
 
 /**
  * Harmless herbivore scenery: a duck-billed stampede that thunders across the
@@ -74,6 +75,9 @@ export class Herd {
   private done = false;
   /** Long-necks are shown while the rig is between these rail distances. */
   giantsRange: [number, number] = [0, 0];
+  /** ART: PIXEL WORLD: the animals drawn as pixel sprites (the 3D meshes stay hidden). */
+  private px: D1HerdSprites | null = null;
+  private pxGiants = true;
 
   constructor(hadros: { from: THREE.Vector3; to: THREE.Vector3; delay: number; speed: number; scale: number }[], giants: { from: THREE.Vector3; to: THREE.Vector3; speed: number }[]) {
     // Instance colours tint a shared bumpy hide (projected in model space, so it rides along).
@@ -108,6 +112,12 @@ export class Herd {
     }
   }
 
+  /** ART: PIXEL WORLD: pose these sprites instead of showing the 3D herd (same paths, timing and RNG draws). */
+  usePixel(px: D1HerdSprites) {
+    this.px = px;
+    this.root.add(px.mesh);
+  }
+
   dispose() {
     for (const m of [this.hBody, this.hLegs, this.sBody, this.sLegs]) m.dispose();
   }
@@ -122,6 +132,7 @@ export class Herd {
 
   update(dt: number, world: World) {
     this.time += dt;
+    this.px?.view(world.camera);
     // ── Stampede ──
     if (this.startT >= 0) {
       const t = world.time - this.startT;
@@ -134,6 +145,7 @@ export class Herd {
         any ||= vis;
         const ph = tt * r.speed * 0.42 + r.phase;
         _p.lerpVectors(r.from, r.to, Math.min(1, Math.max(0, k)));
+        this.px?.set(i, false, _p, vis, ph, r.to.x - r.from.x, r.to.z - r.from.z);
         const bob = Math.abs(Math.sin(ph)) * 0.35 * r.scale;
         _p.y += bob - (vis ? 0 : 200);
         _e.set(0.08 + Math.sin(ph * 2) * 0.05, r.yaw, Math.sin(ph) * 0.04);
@@ -150,8 +162,8 @@ export class Herd {
           this.hLegs.setMatrixAt(i * 2 + s, _m);
         }
       }
-      this.hBody.visible = any;
-      this.hLegs.visible = any;
+      this.hBody.visible = any && !this.px;
+      this.hLegs.visible = any && !this.px;
       this.hBody.instanceMatrix.needsUpdate = true;
       this.hLegs.instanceMatrix.needsUpdate = true;
       if (any) {
@@ -185,14 +197,23 @@ export class Herd {
     // ── Long-necks ──
     const d = world.rig.d;
     const show = d >= this.giantsRange[0] && d <= this.giantsRange[1];
-    this.sBody.visible = show;
-    this.sLegs.visible = show;
-    if (!show) return;
+    this.sBody.visible = show && !this.px;
+    this.sLegs.visible = show && !this.px;
+    if (!show) {
+      if (this.px && this.pxGiants) {
+        this.pxGiants = false;
+        for (let i = 0; i < this.giants.length; i++) this.px.set(i, true, this.giants[i].from, false, 0, 1, 0);
+        this.px.flush();
+      }
+      return;
+    }
+    this.pxGiants = true;
     for (let i = 0; i < this.giants.length; i++) {
       const g = this.giants[i];
       const k = Math.min(1, ((this.time * g.speed) % g.len) / g.len);
       _p.lerpVectors(g.from, g.to, k);
       const ph = this.time * g.speed * 0.5 + g.phase;
+      this.px?.set(i, true, _p, true, ph, g.to.x - g.from.x, g.to.z - g.from.z);
       _p.y += Math.sin(ph * 2) * 0.12;
       _e.set(0, g.yaw, Math.sin(ph) * 0.02);
       _qb.setFromEuler(_e);
@@ -212,5 +233,6 @@ export class Herd {
     }
     this.sBody.instanceMatrix.needsUpdate = true;
     this.sLegs.instanceMatrix.needsUpdate = true;
+    this.px?.flush();
   }
 }

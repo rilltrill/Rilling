@@ -310,7 +310,7 @@ export const CLIFF_SPIRE: FloraSpecies = {
   w: 64,
   h: 176,
   heightM: 16,
-  variants: 3,
+  variants: 2,
   paint(c, m, rng, v) {
     paintSpire(c, m, rng, v, this.w, this.h, false);
   },

@@ -29,6 +29,12 @@ export interface CylOpts {
   v0?: number;
   /** Start angle (rad) of the first facet. */
   phase?: number;
+  /**
+   * Draw only an arc (radians) of the side, centred on the basis' "up" (for an
+   * axis across the ground: the top of the log) — a module tile spans it exactly
+   * (moss drapes, bands of growth). No caps.
+   */
+  arc?: number;
 }
 
 /** A (tapered) cylinder from `a` (radius r0) to `b` (radius r1), `sides` facets, `tile` wrapped round it. r1 = 0 makes a cone. */
@@ -52,8 +58,10 @@ export function pwCylinder(batch: PwBatch, a: THREE.Vector3, b: THREE.Vector3, r
   const v0 = o.v0 ?? 0;
   const ph = o.phase ?? 0;
   const tint = o.tint ?? 0xffffff;
+  const arc = o.arc ?? Math.PI * 2;
+  const a0 = o.arc ? -arc / 2 : ph;
   const pts = (i: number, r: number, base: THREE.Vector3, out: THREE.Vector3) => {
-    const t = ph + (i / sides) * Math.PI * 2;
+    const t = a0 + (i / sides) * arc;
     return out.copy(base).addScaledVector(_p1, Math.cos(t) * r).addScaledVector(_p2, Math.sin(t) * r);
   };
   for (let i = 0; i < sides; i++) {
@@ -71,6 +79,7 @@ export function pwCylinder(batch: PwBatch, a: THREE.Vector3, b: THREE.Vector3, r
     if (_n.dot(_d0) >= 0) batch.quad(A0, A1, B1, B0, tile, [uA, v0, uB, v0, uB, v0 + vLen, uA, v0 + vLen], tint);
     else batch.quad(A1, A0, B0, B1, tile, [uB, v0, uA, v0, uA, v0 + vLen, uB, v0 + vLen], tint);
   }
+  if (o.arc) return;
   if (o.capA) disc(batch, a, r0, -1, sides, o.capA, ph, tint);
   if (o.capB && r1 > 0) disc(batch, b, r1, 1, sides, o.capB, ph, tint);
 }

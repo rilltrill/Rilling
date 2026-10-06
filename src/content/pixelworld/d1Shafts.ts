@@ -28,7 +28,7 @@ const FRAG = /* glsl */ `
 `;
 
 /** The dithered shaft material (one per stage; `strength` = how much light a full ray adds). */
-export function d1ShaftMaterial(color = 0xfff1c0, strength = 0.16): THREE.MeshBasicMaterial {
+export function d1ShaftMaterial(color = 0xfff1c0, strength = 0.12): THREE.MeshBasicMaterial {
   const m = new THREE.MeshBasicMaterial({
     color,
     transparent: true,
@@ -56,7 +56,7 @@ export function d1ShaftMaterial(color = 0xfff1c0, strength = 0.16): THREE.MeshBa
         // Strong up in the canopy, fading toward the ground (in three stepped bands).
         float fall = floor(clamp(vShUv.y * 1.15, 0.0, 1.0) * 3.0 + 0.5) / 3.0;
         float a = ray * edge * fall;
-        if (a <= 0.0 || shBayer(gl_FragCoord.xy) > a * 0.6) discard;
+        if (a <= 0.0 || shBayer(gl_FragCoord.xy) > a * 0.3) discard;
         gl_FragColor = vec4(outgoingLight * uShK, 1.0);
       }
       #include <opaque_fragment>`,

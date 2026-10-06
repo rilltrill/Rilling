@@ -725,6 +725,189 @@ export function d1PuddleDecal(atlas: PwAtlas, o: { mud: number; sky: number; tre
   });
 }
 
+/**
+ * The meadow (wrap 256 × 256 = 8 m): sward with darker clumps, cooler drifts
+ * (hue, not value: the field stays one plane), bare trodden earth, tufts with
+ * lit tips and dark roots, clover, flowers, a few pebbles. Noise fields are
+ * sampled once per 4 × 4 texels (dithered between) — fast to paint.
+ */
+export function d1MeadowTile(atlas: PwAtlas, o: { hex: number; cool: number; dirt: number; stone: number; flowers: number[] }): PwTile {
+  return atlas.tile(`d1meadow|${h6(o.hex)}|${h6(o.cool)}|${h6(o.dirt)}`, 256, 256, (c, k) => {
+    const rng = k.rng;
+    const W = 256;
+    const g = k.ramp(o.hex, { light: 0.42, sat: 1.05 });
+    const gd = k.ramp(o.cool, { light: 0.38 });
+    const dirt = k.ramp(o.dirt, { light: 0.4 });
+    const stone = k.ramp(o.stone, { light: 0.45, sat: 0.6 });
+    const G = W >> 2;
+    const clump = new Float32Array(G * G);
+    const drift = new Float32Array(G * G);
+    const bare = new Float32Array(G * G);
+    for (let y = 0; y < G; y++) {
+      for (let x = 0; x < G; x++) {
+        clump[y * G + x] = smooth(x * 4, y * 4, W, W, 32, 4);
+        drift[y * G + x] = smooth(x * 4, y * 4, W, W, 3, 7);
+        bare[y * G + x] = smooth(x * 4, y * 4, W, W, 4, 11);
+      }
+    }
+    const R = c.ramp;
+    const T = c.tone;
+    for (let y = 0; y < W; y++) {
+      for (let x = 0; x < W; x++) {
+        const gi = (y >> 2) * G + (x >> 2);
+        const b = bayer(x, y);
+        const i = y * W + x;
+        const n = bare[gi];
+        if (n < 0.2 || (n < 0.23 && b > 0.5)) {
+          R[i] = dirt;
+          T[i] = n < 0.14 ? 3 : 2.5;
+          continue;
+        }
+        R[i] = drift[gi] > 0.66 && b > 0.25 ? gd : g;
+        T[i] = clump[gi] < 0.22 ? 2 : 3;
+      }
+    }
+    const wrapW = (v: number) => v & (W - 1);
+    // Tufts: 2–4 blades, lit tips, a dark root.
+    for (let i = 0; i < 1100; i++) {
+      const x = rng.int(0, W - 1);
+      const y = rng.int(0, W - 1);
+      const r = rng.chance(0.3) ? gd : g;
+      const n = rng.int(2, 4);
+      for (let bl = 0; bl < n; bl++) {
+        const dx = bl - (n >> 1);
+        const len = rng.int(2, 4);
+        for (let j = 0; j < len; j++) {
+          const px = wrapW(x + dx + (j === len - 1 ? Math.sign(dx) : 0));
+          const py = wrapW(y - j);
+          const ii = py * W + px;
+          R[ii] = r;
+          T[ii] = j === len - 1 ? 4.25 : j === 0 ? 2 : 3.25;
+        }
+      }
+      const ri = wrapW(y + 1) * W + x;
+      R[ri] = r;
+      T[ri] = 1.5;
+    }
+    for (const hex of o.flowers) {
+      const f = k.ramp(hex, { light: 0.4, sat: 1.1 });
+      for (let i = 0; i < 16; i++) {
+        const x = rng.int(0, W - 2);
+        const y = rng.int(0, W - 2);
+        c.set(x, y, f, 4);
+        c.set(x + 1, y, f, 3);
+        c.set(x, y + 1, f, 2.5);
+      }
+    }
+    for (let i = 0; i < 10; i++) {
+      const x = rng.int(0, W - 3);
+      const y = rng.int(0, W - 3);
+      c.set(x, y, stone, 4.4);
+      c.set(x + 1, y, stone, 3.2);
+      c.set(x + 1, y + 1, stone, 1.8);
+    }
+  }, { wrap: true });
+}
+
+/**
+ * Trampled ground where the herd crosses (wrap 128 × 128 = 4 m, cut out round
+ * ragged tufts so the meadow shows through): churned mud in furrows, torn sod
+ * clumps flipped over, crushed grass, three-toed prints pressed in.
+ */
+export function d1TrampleTile(atlas: PwAtlas, o: { mud: number; grass: number }): PwTile {
+  return atlas.tile(`d1trample|${h6(o.mud)}|${h6(o.grass)}`, 128, 128, (c, k) => {
+    const rng = k.rng;
+    const W = 128;
+    const mud = k.ramp(o.mud, { light: 0.4 });
+    const gr = k.ramp(o.grass, { light: 0.42, sat: 1.0 });
+    for (let y = 0; y < W; y++) {
+      for (let x = 0; x < W; x++) {
+        const n = smooth(x, y, W, W, 8, 21);
+        if (n > 0.62 && bayer(x, y) < (n - 0.62) * 6) continue; // meadow showing through
+        // Furrows along the herd's line (x): darker troughs, lit ridges.
+        const f = Math.sin(y * 0.55 + Math.sin(x * 0.07) * 2);
+        c.set(x, y, mud, f > 0.6 ? 3.6 : f < -0.5 ? 2 : 2.8);
+      }
+    }
+    // Torn sod clumps (grass on top, a dark earth lip under).
+    for (let i = 0; i < 40; i++) {
+      const x = rng.int(0, W - 4);
+      const y = rng.int(0, W - 3);
+      for (let j = 0; j < 4; j++) c.set(x + j, y, gr, j === 0 ? 4 : 3);
+      for (let j = 0; j < 4; j++) c.set(x + j, (y + 1) & (W - 1), mud, 1.4);
+    }
+    // Crushed grass blades lying flat.
+    for (let i = 0; i < 70; i++) {
+      const x = rng.int(0, W - 4);
+      const y = rng.int(0, W - 1);
+      const len = rng.int(2, 4);
+      for (let j = 0; j < len; j++) c.set(x + j, y, gr, j === len - 1 ? 3.6 : 2.6);
+    }
+    // Prints: three toes pressed in (dark), the heel, a lit rim behind.
+    for (let i = 0; i < 9; i++) {
+      const x = rng.int(6, W - 7);
+      const y = rng.int(6, W - 7);
+      for (const [tx, ty] of [[5, 0], [4, -3], [4, 3]]) {
+        for (let s2 = 0; s2 <= 4; s2++) c.set(x + Math.round((tx * s2) / 4), y + Math.round((ty * s2) / 4), mud, 0.8);
+      }
+      c.set(x - 1, y, mud, 0.8);
+      c.set(x - 2, y, mud, 4);
+    }
+  }, { wrap: true });
+}
+
+/**
+ * A drape of moss over the top of a log (module 64 × 64, cut out round a ragged
+ * edge on every side, laid over a half-cylinder): cushions with lit crowns,
+ * strands hanging at the lower edges, a few sprigs and a fern frond.
+ */
+export function d1MossDrapeModule(atlas: PwAtlas, o: { hex: number; light: number }): PwTile {
+  return atlas.tile(`d1mossdrape|${h6(o.hex)}|${h6(o.light)}`, 128, 64, (c, k) => {
+    const rng = k.rng;
+    const m = k.ramp(o.hex, { light: 0.45, sat: 1.05 });
+    const ml = k.ramp(o.light, { light: 0.45, sat: 1.05 });
+    for (let y = 0; y < 64; y++) {
+      for (let x = 0; x < 128; x++) {
+        // Ragged rim: lobed distance from the centre in both axes (x round the log, y along it).
+        const ex = Math.abs(x + 0.5 - 64) / 64 + Math.sin(y * 0.4 + 1) * 0.05 + hash2(x >> 1, y >> 2, 3) * 0.07;
+        const ey = Math.abs(y + 0.5 - 32) / 32 + Math.sin(x * 0.35) * 0.08 + hash2(x >> 2, y >> 1, 4) * 0.1;
+        if (ex > 0.93 || ey > 0.9) continue;
+        c.set(x, y, m, smooth(x, y, 128, 64, 8, 5) > 0.55 ? 3.4 : 2.6);
+      }
+    }
+    for (let i = 0; i < 110; i++) {
+      const x = rng.int(4, 123);
+      const y = rng.int(4, 59);
+      if (!c.at(x, y)) continue;
+      const r = rng.int(1, 3);
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (dx * dx + dy * dy <= r * r && c.at(x + dx, y + dy)) c.set(x + dx, y + dy, m, dx + dy < 0 ? 4 : 2.6);
+    }
+    for (let i = 0; i < 55; i++) {
+      const x = rng.int(2, 125);
+      const y = rng.int(2, 61);
+      if (c.at(x, y)) c.cluster(x, y, i, ml, 4.3);
+    }
+    // Strands hanging off both long edges (the log's flanks: x near 0 and 63).
+    for (let i = 0; i < 14; i++) {
+      const y = rng.int(8, 56);
+      const left = i % 2 === 0;
+      const len = rng.int(3, 7);
+      for (let j = 0; j < len; j++) c.set(left ? 4 - Math.min(4, j) : 123 + Math.min(4, j), y, m, j === len - 1 ? 2 : 3);
+    }
+    c.outline(1);
+  });
+}
+
+/** A small flat painted colour (insulators, lamp caps, little parts): two tones, a chip. 16 × 16 wrap. */
+export function d1SmallTile(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`d1small|${h6(o.hex)}`, 16, 16, (c, k) => {
+    const r = k.ramp(o.hex, { light: 0.45, sat: 0.9 });
+    c.rect(0, 0, 16, 16, r, (x, y) => (x + y < 6 ? 3.6 : x + y > 24 ? 2.4 : 3));
+    c.set(9, 5, r, 1.6);
+    c.set(10, 5, r, 4.4);
+  }, { wrap: true });
+}
+
 /** Tiny caps text helper for small plates. */
 export function tinyText(c: PwCanvas, text: string, x: number, y: number, ramp: number, tone: number) {
   return drawText(c, text, x, y, FONT_3x5, ramp, tone);

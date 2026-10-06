@@ -79,7 +79,7 @@ export class D1JeepPixel {
     const a = this.atlas;
     const m = new THREE.Matrix4().makeRotationX(0.04);
     this.body.withMatrix(new THREE.Matrix4().makeTranslation(0.42, 0.937, -1.95).multiply(m), () => pwDecal(this.body, 0, 0, 0, 0.42, 0.42, 0, d1EmblemDecal(a)));
-    this.body.withMatrix(new THREE.Matrix4().makeTranslation(-0.32, 0.937, -1.9).multiply(m), () => pwDecal(this.body, 0, 0, 0, 0.84, 0.14, 0, d1HoodStencil(a, { ink: 0xd8cca0 })));
+    this.body.withMatrix(new THREE.Matrix4().makeTranslation(-0.45, 0.937, -1.62).multiply(m), () => pwDecal(this.body, 0, 0, 0, 0.6, 0.1, 0, d1HoodStencil(a, { ink: 0x3a4a2a })));
   }
 
   /** Re-paint the gun (the kick group's parts in its own frame, the pedestal in the mount's); `keep` stays classic. */

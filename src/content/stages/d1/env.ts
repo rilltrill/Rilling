@@ -11,6 +11,7 @@ import { pixelWorld } from '../../../core/art';
 import { D1PixelWorld } from './pixel';
 import { d1ShaftMaterial, mergeShafts } from '../../pixelworld/d1Shafts';
 import { Herd } from './herd';
+import { D1HerdSprites } from './herdPixel';
 import {
   buildBarricade,
   buildFallenTree,
@@ -919,6 +920,13 @@ export class JungleEnv {
     ];
     this.herd = new Herd(hadros, giants);
     this.herd.giantsRange = [210, 395];
+    // PIXEL WORLD: the herd as hand-pixelled run / walk-cycle sprites, and the ground they churned crossing the road.
+    if (this.pw) {
+      this.herd.usePixel(new D1HerdSprites(hadros, giants.length));
+      const pts: THREE.Vector3[] = [];
+      for (let l = -64; l <= 68; l += 4) pts.push(this.P(D.STAMPEDE_CROSS + Math.sin(l * 0.05) * 1.5, l));
+      this.pw.trample(pts, 16);
+    }
     this.root.add(this.herd.root);
   }
 
@@ -981,10 +989,15 @@ export class JungleEnv {
     const rng = new Rng(4);
     const b = buildBarricade(this.flora, rng);
     if (this.pw) {
-      // PIXEL WORLD: the ROAD CLOSED boards as one painted module, the landslide as stone billboards.
+      // PIXEL WORLD: the ROAD CLOSED boards as one painted module, the landslide as stone billboards;
+      // the river-tours landing and an old wreck dress the boss chase.
       this.place(b, D.END + 6, 0);
       this.pw.barricade(b);
       merged(b);
+      this.pw.bossDressing((d, lat, yaw = 0) => {
+        const f = this.F(d);
+        return new THREE.Matrix4().compose(f.pos.addScaledVector(f.right, lat).setY(0), _q.setFromEuler(_e.set(0, f.heading + yaw, 0)), _s.set(1, 1, 1));
+      });
       return;
     }
     merged(b);

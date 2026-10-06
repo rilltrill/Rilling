@@ -531,6 +531,79 @@ export function d1TinTile(atlas: PwAtlas, o: { hex: number }): PwTile {
   }, { wrap: true });
 }
 
+/**
+ * A capsized river-tour raft (module 96 × 24 = 3 × 0.75 m, seen from the side, cut
+ * out): fat orange rubber tubes with a lit crest and a dark underside, grab-line
+ * loops, a patched puncture, PRIMAL stencilled, mud and weed.
+ */
+export function d1RaftModule(atlas: PwAtlas): PwTile {
+  const W = 96;
+  const H = 24;
+  return atlas.tile(`d1raft`, W, H, (c, k) => {
+    const rng = k.rng;
+    const rub = k.ramp(0xe0601a, { light: 0.45, sat: 1.05 });
+    const rope = k.ramp(0xe8d8a0, { light: 0.35 });
+    const ink = k.ramp(0x1a1612, { light: 0.4 });
+    const weed = k.ramp(0x4a6a2a, { light: 0.42 });
+    // Two stacked tubes (the raft lies tilted: the top tube shows its curve), rounded ends.
+    for (const [y0, h] of [[3, 10], [12, 11]] as [number, number][]) {
+      for (let y = 0; y < h; y++) {
+        const v = y / (h - 1);
+        const t = v < 0.2 ? 4.4 : v < 0.45 ? 3.6 : v < 0.8 ? 3 : 2;
+        const inset = Math.round(Math.max(0, 1 - Math.sin(v * Math.PI)) * 4);
+        for (let x = inset + 2; x < W - inset - 2; x++) c.set(x, y0 + y, rub, t);
+      }
+    }
+    // Grab-line loops along the top tube.
+    for (let x = 8; x < W - 8; x++) c.set(x, 4 + Math.round(Math.abs(Math.sin(x * 0.2)) * 3), rope, 3.6);
+    drawText(c, 'PRIMAL', 36, 15, FONT_3x5, ink, 1.4);
+    // A patch, mud and weed along the bottom.
+    c.rect(70, 14, 6, 5, rub, 2.4);
+    c.frame(70, 14, 6, 5, ink, 2);
+    c.scatter(rng, 2, 18, W - 4, 6, 30, weed, 3, { shapes: 6 });
+    c.outline(1);
+  });
+}
+
+/**
+ * NO SWIMMING warning board (module 48 × 40 = 1.5 × 1.25 m): white enamel, a red
+ * band, a swimmer silhouette crossed out over toothy jaws breaking the water,
+ * bullet holes and rust.
+ */
+export function d1NoSwimModule(atlas: PwAtlas): PwTile {
+  const W = 48;
+  const H = 40;
+  return atlas.tile(`d1noswim`, W, H, (c, k) => {
+    const rng = k.rng;
+    const wh = k.ramp(0xeeeae0, { light: 0.3, sat: 0.6 });
+    const red = k.ramp(0xd0201a, { light: 0.42 });
+    const ink = k.ramp(0x161412, { light: 0.4 });
+    const water = k.ramp(0x2a8098, { light: 0.45 });
+    const rust = k.ramp(0x7a3a1c, { light: 0.42 });
+    c.rect(0, 0, W, H, wh, 3.4);
+    c.rect(0, 0, W, 9, red, 3);
+    drawText(c, 'DANGER', 12, 2, FONT_3x5, wh, 4.4);
+    // Icon: water, jaws breaking it, a swimmer, the red slash.
+    c.rect(6, 26, 36, 4, water, 3);
+    c.poly([10, 26, 18, 18, 26, 26], ink, 1.2);
+    c.poly([14, 26, 22, 21, 30, 26], ink, 1.2);
+    for (let x = 12; x < 28; x += 3) c.set(x, 25, wh, 4.4);
+    c.ellipse(34, 18, 2, 2, ink, 1.2);
+    c.rect(30, 21, 9, 2, ink, 1.2);
+    c.line(8, 32, 40, 12, red, 3);
+    c.line(9, 32, 41, 12, red, 3);
+    drawText(c, 'NO SWIMMING', 2, 33, FONT_3x5, ink, 1.4);
+    c.frame(0, 0, W, H, ink, 1.6);
+    for (let i = 0; i < 9; i++) c.cluster(rng.int(1, W - 3), rng.int(10, H - 3), i, rust, 2.4);
+    for (let i = 0; i < 2; i++) {
+      const x = rng.int(6, W - 6);
+      const y = rng.int(12, H - 6);
+      c.set(x, y, ink, 0);
+      c.set(x - 1, y - 1, wh, 5);
+    }
+  });
+}
+
 /** Palm-thatch roof (wrap 64 × 32, v down the slope): overlapping frond layers, lit leading edges, dark under each layer, ragged ends. */
 export function d1ThatchTile(atlas: PwAtlas, o: { hex: number }): PwTile {
   return atlas.tile(`d1thatch|${h6(o.hex)}`, 64, 32, (c, k) => {
@@ -666,6 +739,9 @@ function paintRoad(c: PwCanvas, k: PwKit, o: { hex: number; rut: number; grass: 
     edgeL[y] = Math.round(18 + (smooth(0, y, 8, H, 6, 41) - 0.5) * 16 + Math.sin((y / H) * Math.PI * 8) * 2);
     edgeR[y] = Math.round(W - 18 + (smooth(4, y, 8, H, 6, 42) - 0.5) * 16 + Math.sin((y / H) * Math.PI * 6 + 1) * 2);
   }
+  // Drift field sampled once per 2 × 2 texels (the dither still runs per texel).
+  const drift = new Float32Array((W >> 1) * (H >> 1));
+  for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) drift[(y >> 1) * (W >> 1) + (x >> 1)] = smooth(x, y, W, H, 4, 13) * 0.7 + smooth(x, y, W, H, 16, 14) * 0.3;
   for (let y = 0; y < H; y++) {
     const rwob = Math.sin((y / H) * Math.PI * 4) * 2.5;
     for (let x = 0; x < W; x++) {
@@ -683,7 +759,7 @@ function paintRoad(c: PwCanvas, k: PwKit, o: { hex: number; rut: number; grass: 
         continue;
       }
       // Packed earth in broad drifts: drier (paler) and damper (darker), dithered seams.
-      const n = smooth(x, y, W, H, 4, 13) * 0.7 + smooth(x, y, W, H, 16, 14) * 0.3;
+      const n = drift[(y >> 1) * (W >> 1) + (x >> 1)];
       let t = 3;
       if (n > 0.66) t = bayer(x, y) < (n - 0.66) * 8 ? 4 : 3;
       else if (n < 0.34) t = bayer(x, y) < (0.34 - n) * 8 ? 2 : 3;
@@ -722,8 +798,10 @@ function paintRoad(c: PwCanvas, k: PwKit, o: { hex: number; rut: number; grass: 
   // Crown: tufts of grass and weeds between the ruts.
   for (let i = 0; i < 70; i++) tuft(c, Math.round(W / 2 + rng.spread(13)), rng.int(0, H - 1), grass, rng);
   // Stones: half-buried pebbles to cobbles, lit top-left, a dark lower-right and a shadow on the earth.
+  const xMin = eLmin(edgeL) + 2;
+  const xMax = eRmax(edgeR) - 3;
   for (let i = 0; i < 170; i++) {
-    const x = rng.int(eLmin(edgeL) + 2, eRmax(edgeR) - 3);
+    const x = rng.int(xMin, xMax);
     const y = rng.int(0, H - 1);
     const sz = rng.chance(0.08) ? 3 : rng.chance(0.3) ? 2 : 1;
     if (!c.at(x, y)) continue;

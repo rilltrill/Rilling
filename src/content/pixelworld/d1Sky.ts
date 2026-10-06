@@ -172,6 +172,7 @@ export function d1RangeTile(atlas: PwAtlas, o: D1RangeOpts): PwTile {
     const fogFoot = o.fogFoot ?? 0;
     const R = c.ramp;
     const T = c.tone;
+    const F = c.flag;
     for (let x = 0; x < TW; x++) {
       const top = Math.max(0, Math.round(ridge[x]));
       const flank = Math.round(bare[x]);
@@ -194,9 +195,15 @@ export function d1RangeTile(atlas: PwAtlas, o: D1RangeOpts): PwTile {
         // Haze thickening toward the foot; the lowest `fogFoot` of the band is the fog itself.
         const yb = (y + 0.5) / H;
         const hzK = fogFoot > 0 ? Math.max(0, (yb - (1 - fogFoot * 2)) / fogFoot) : depth > 0.62 ? (depth - 0.62) * 2 : 0;
-        if (hzK > 0 && BAYER[(y & 3) * 4 + (x & 3)] < hzK) {
+        // (Two zones, so the dither only ever mixes neighbouring values: rock ↔ a dark haze, then the haze climbing to the fog.)
+        const b = BAYER[(y & 3) * 4 + (x & 3)];
+        if (hzK >= 0.5) {
           R[i] = haze;
-          T[i] = 3;
+          T[i] = Math.min(3, 1.6 + (hzK - 0.5) * 2.8);
+          F[i] = PWF.DITHER;
+        } else if (hzK > 0 && b < hzK * 2) {
+          R[i] = haze;
+          T[i] = 1.6;
         } else {
           R[i] = rock;
           T[i] = t;

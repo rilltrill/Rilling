@@ -8,16 +8,17 @@ import { pwMaterial, pwTick } from '../../pixelworld/material';
 import { kitTile, neutral, NEUTRAL_HEX, retexture, type TileRule } from '../../pixelworld/retexture';
 import { volcanoSpan, volcanoTile } from '../../pixelworld/sky';
 import { d1RangeTile, d1SkyTile } from '../../pixelworld/d1Sky';
-import { fabricTile, flatTile, grassTile, grateTile, hazardTile, planksTile, rockTile } from '../../pixelworld/surfaces';
-import { d1BarkTile, d1FlagModule, d1GateDoorModule, d1GateSignModule, d1HewnTile, d1IronTile, d1LogEndModule, d1PalisadeTile, d1PatchDecal, d1PuddleDecal } from '../../pixelworld/d1Tiles';
+import { fabricTile, grateTile, hazardTile, planksTile, rockTile } from '../../pixelworld/surfaces';
+import { d1BarkTile, d1FlagModule, d1MeadowTile, d1MossDrapeModule, d1SmallTile, d1TrampleTile, d1GateDoorModule, d1GateSignModule, d1HewnTile, d1IronTile, d1LogEndModule, d1PalisadeTile, d1PatchDecal, d1PuddleDecal } from '../../pixelworld/d1Tiles';
 import {
   d1ArrowSignModule, d1BarricadeModule, d1CarBackModule, d1CarCabinModule, d1CarFrontModule, d1CarPaintTile, d1CarSideModule, d1CarUnderModule, d1CrateModule,
-  d1DangerSignModule, d1GalvTile, d1TinTile, d1KioskWindowModule, d1MapBoardModule, d1MossTile, d1RoadTile, d1ThatchTile, d1TreadTile, d1WheelModule, d1WireSpanModule, type CarPaint,
+  d1DangerSignModule, d1GalvTile, d1NoSwimModule, d1RaftModule, d1TinTile, d1KioskWindowModule, d1MapBoardModule, d1MossTile, d1RoadTile, d1ThatchTile, d1TreadTile, d1WheelModule, d1WireSpanModule, type CarPaint,
 } from '../../pixelworld/d1Props';
-import { D1_WATER_FRAMES, d1BankTile, d1FallTile, d1FoamEdgeTile, d1SplashModule, d1WaterTile } from '../../pixelworld/d1Water';
+import { D1_WATER_FRAMES, d1BankTile, d1FallTile, d1FlameModule, d1FoamEdgeTile, d1SplashModule, d1WaterTile } from '../../pixelworld/d1Water';
 import { D1_STONE_BIOME, D1_STONES } from '../../pixelworld/d1Species';
 import { FloraField, floraAtlas, floraReach } from '../../pixel/floraField';
 import { pwCylinder, pwDecal, pwPanel } from './pwShapes';
+import { paintedSign } from '../../pixelworld/signs';
 import { COL } from './flora';
 import { RIVER_WIDTH } from './layout';
 import type { FallenTree, GateParts } from './props';
@@ -127,8 +128,13 @@ export class D1PixelWorld {
 
   /** The meadow under everything (a painted grass field, world-projected). */
   ground(y: number) {
-    const t = grassTile(this.atlas, { hex: COL.ground, flowers: [COL.flowerY, COL.flowerP], dirt: COL.litter });
+    const t = d1MeadowTile(this.atlas, { hex: COL.ground, cool: 0x3c5c2a, dirt: COL.litter, stone: 0x8a8478, flowers: [COL.flowerY, COL.flowerP] });
     this.world.rect(new THREE.Vector3(-800, y, 460), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), 1600, 1600, t, { u0: 0, v0: 0 });
+  }
+
+  /** Trampled, churned ground where the stampede crosses (a band across the meadow and the road's verges), `pts` along the crossing. */
+  trample(pts: THREE.Vector3[], width: number) {
+    this.world.ribbon(pts, width, d1TrampleTile(this.atlas, { mud: 0x5a4632, grass: COL.verge }), { y: -0.045 });
   }
 
   /** The road along the rail: one painted ribbon (ruts, tread prints, verges) 8 m across. */
@@ -319,6 +325,16 @@ export class D1PixelWorld {
       pwPanel(db, V(cx, 4, 0.2), X, Y, w, 8, door, { flipU: side > 0 });
       pwPanel(db, V(cx, 4, -0.12), NX, Y, w, 8, door, { flipU: side < 0 });
     }
+    // Torch flames: painted, flickering fire (two crossed cards each, unlit); the classic glow cones hide.
+    for (const f of parts.flames) f.visible = false;
+    const flame = d1FlameModule(a);
+    this.anim.withMatrix(root.matrixWorld, () => {
+      for (const side of [-1, 1]) {
+        const c = V(side * (W + 0.75) - side * 0.2, 6.55, 1.45);
+        pwPanel(this.anim, c, X, Y, 0.62, 0.93, flame, { back: true });
+        pwPanel(this.anim, c, Z, Y, 0.62, 0.93, flame, { back: true });
+      }
+    });
     this.kiosk(kiosk);
   }
 
@@ -372,8 +388,8 @@ export class D1PixelWorld {
     const galv = d1GalvTile(a, { hex: 0x9a9a92 });
     const cap = d1GalvTile(a, { hex: 0x6e6c66 });
     const haz = hazardTile(a, {});
-    const ins = flatTile(a, { hex: 0x3a2a22, wear: 0.3 });
-    const amber = flatTile(a, { hex: 0xe8a81c, wear: 0.2 });
+    const ins = d1SmallTile(a, { hex: 0x3a2a22 });
+    const amber = d1SmallTile(a, { hex: 0xe8a81c });
     const danger = d1DangerSignModule(a);
     const back = d1GalvTile(a, { hex: 0x8a8a84 });
     const WIRE_Y = [0.9, 1.7, 2.5, 3.3, 4.1];
@@ -421,15 +437,15 @@ export class D1PixelWorld {
     for (const half of [t.left, t.right]) for (const c of half.children) if ((c as THREE.Mesh).isMesh) c.visible = false;
     const bark = d1BarkTile(a, { hex: COL.trunk, lichen: 0x8a9a6a });
     const barkDark = d1BarkTile(a, { hex: 0x4a382a });
-    const moss = d1MossTile(a, { hex: 0x5a8a2c, light: 0x8aaa3c });
+    const drape = d1MossDrapeModule(a, { hex: 0x4e7a2a, light: 0x8aaa3c });
     const end = d1LogEndModule(a, { wood: 0xc0965e, bark: 0x4a382a, broken: true });
     const L = this.part(t.left);
     // Left half (local to `left`): trunk from the break (x = 0, r 1.15) to the root end (x = −10, r 0.95), a moss band.
     pwCylinder(L, V(0.05, 1, 0), V(-10, 1, 0), 1.15, 0.95, 10, bark, { capA: end, phase: 0.2 });
-    pwCylinder(L, V(-2.4, 1.08, 0), V(-4.6, 1.08, 0), 1.0, 1.0, 10, moss, { phase: 0.2 });
+    pwCylinder(L, V(-2.5, 1.0, 0), V(-4.5, 1.0, 0), 1.12, 1.1, 8, drape, { arc: 3.7 });
     const R = this.part(t.right);
     pwCylinder(R, V(-0.05, 0.95, 0), V(9, 0.95, 0), 0.8, 0.95, 10, bark, { capA: end, phase: 0.5 });
-    pwCylinder(R, V(2.4, 1.0, 0), V(4.0, 1.0, 0), 0.86, 0.86, 10, moss, { phase: 0.5 });
+    pwCylinder(R, V(2.2, 0.95, 0), V(4.2, 0.95, 0), 0.9, 0.91, 8, drape, { arc: 3.5 });
     // Branch stubs (each recorded transform: a tapering limb 3.2 m up its own +y).
     for (const bm of t.branches) R.withMatrix(bm, () => pwCylinder(R, V(0, 0, 0), V(0, 3.2, 0), 0.25, 0.14, 6, barkDark));
     // Ranger supplies: a canvas kit bag, a crate, a toppled signal pole.
@@ -449,20 +465,25 @@ export class D1PixelWorld {
 
   /** Paint the toppled tour car (`body`: the classic body, hidden but kept as the occluder; the painted one follows it). */
   tourCar(body: THREE.Object3D) {
-    const a = this.atlas;
     hideMeshes(body, (m) => (m.material as THREE.Material).type === 'MeshBasicMaterial');
     const b = new PwBatch(this.atlas);
     this.car = { batch: b, body, mesh: null };
+    this.paintCar(b, false);
+  }
+
+  /** The tour car painted into `b` in the classic car body's frame (2 × 1 × 4.6 body, front = +z); `wreck` = burnt-out, glass gone. */
+  private paintCar(b: PwBatch, wreck: boolean) {
+    const a = this.atlas;
     const side = d1CarSideModule(a, CAR, true);
-    const sideClean = d1CarSideModule(a, CAR, false);
+    const sideClean = d1CarSideModule(a, CAR, wreck);
     const cabin = d1CarCabinModule(a, CAR, true);
-    const cabin2 = d1CarCabinModule(a, CAR, false);
+    const cabin2 = d1CarCabinModule(a, CAR, wreck);
     const paint = d1CarPaintTile(a, CAR);
     const tread = d1TreadTile(a, { hex: CAR.tyre, mud: CAR.mud });
     const wheel = d1WheelModule(a, { tyre: CAR.tyre, rim: CAR.steel, mud: CAR.mud });
     const grate = grateTile(a, { hex: 0x34383c });
     const haz = hazardTile(a, {});
-    // Body (2 × 1 × 4.6, y 0.55…1.55; front = +z).
+    // Body (y 0.55…1.55).
     pwPanel(b, V(1.0, 1.05, 0), NZ, Y, 4.6, 1.0, side);
     pwPanel(b, V(-1.0, 1.05, 0), Z, Y, 4.6, 1.0, sideClean, { flipU: true });
     pwPanel(b, V(0, 1.05, 2.3), X, Y, 2.0, 1.0, d1CarFrontModule(a, CAR));
@@ -481,6 +502,59 @@ export class D1PixelWorld {
     b.box(0, 0.66, -2.32, 2.1, 0.26, 0.2, haz);
     for (const sx of [-1, 1]) for (const sz of [-1.45, 1.45]) pwCylinder(b, V(sx * 0.84, 0.44, sz), V(sx * 1.16, 0.44, sz), 0.44, 0.44, 10, tread, { capB: wheel });
     pwCylinder(b, V(0, 1.2, -2.28), V(0, 1.2, -2.56), 0.42, 0.42, 10, tread, { capB: wheel });
+  }
+
+  // ─── The boss stretch: the riverside road ──────────────────────────────────
+
+  /**
+   * Set dressing along the boss chase (seen for longest): on the far bank a
+   * river-tours landing — a plank jetty on posts over the water, the ticket hut
+   * with its RIVER TOURS board and tin roof, a capsized rubber raft, driftwood
+   * at the waterline, a NO SWIMMING plate — and at the left treeline the wreck
+   * of an earlier tour car on its roof. Purely painted: nothing here is an
+   * occluder, a collider or a raycast target, and all of it stays clear of the
+   * boss's lane (the road and the near bank). `at(d, lat, yaw)` = the rail
+   * frame there (+x right of the rail, −z forward).
+   */
+  bossDressing(at: (d: number, lat: number, yaw?: number) => THREE.Matrix4) {
+    const a = this.atlas;
+    const b = this.world;
+    const plank = planksTile(a, { hex: 0x7a5a38, horizontal: true });
+    const post = d1BarkTile(a, { hex: 0x5a4632 });
+    const bark = d1BarkTile(a, { hex: COL.trunk, lichen: 0x8a9a6a });
+    const end = d1LogEndModule(a, { wood: 0xc0965e, bark: 0x4a382a, broken: true });
+    // The jetty: a deck from the far bank out over the water, on four posts.
+    b.withMatrix(at(556, 25.6), () => {
+      b.box(-1.6, 0.55, 0, 4.4, 0.12, 1.7, plank);
+      for (const x of [-3.5, -1.6, 0.3]) for (const z of [-0.75, 0.75]) pwCylinder(b, V(x, -0.4, z), V(x, 0.85, z), 0.1, 0.1, 6, post);
+    });
+    // The ticket hut (facing the river and the road: −x), its board and tin roof.
+    const wall = planksTile(a, { hex: 0x8a6a44, horizontal: true });
+    const tin = d1TinTile(a, { hex: 0x5a6a5a });
+    const sign = paintedSign(a, 'RIVER TOURS', { ground: 0x2f5a2a, ink: 0xe8d8a0, planks: true, cap: 0.3 });
+    b.withMatrix(at(562, 31.5), () => {
+      b.box(0, 1.25, 0, 2.6, 2.5, 3.2, wall);
+      pwPanel(b, V(-1.31, 1.35, 0), Z, Y, 2.0, 1.5, d1KioskWindowModule(a, { wood: 0x8a6a44, shutter: 0x6a7a6a }));
+      pwPanel(b, V(-1.33, 2.85, 0), Z, Y, sign.wM, sign.hM, sign.tile);
+      _m.makeRotationZ(-0.12).setPosition(0, 2.65, 0);
+      b.withMatrix(at(562, 31.5).multiply(_m), () => b.box(0, 0, 0, 3.4, 0.2, 3.8, tin));
+    });
+    // The raft, capsized on the bank.
+    b.withMatrix(at(567, 26.4, 0.25), () => {
+      pwPanel(b, V(-0.46, 0.38, 0), Z, Y, 3.0, 0.75, d1RaftModule(a), { back: true });
+    });
+    // NO SWIMMING on two posts at the water's edge.
+    b.withMatrix(at(586, 26.2), () => {
+      for (const z of [-0.6, 0.6]) pwCylinder(b, V(0, 0, z), V(0, 2.4, z), 0.07, 0.06, 6, d1GalvTile(a, { hex: 0x8a8a84 }));
+      pwPanel(b, V(-0.08, 1.85, 0), Z, Y, 1.5, 1.25, d1NoSwimModule(a), { backTile: d1GalvTile(a, { hex: 0x8a8a84 }) });
+    });
+    // Driftwood at the waterline: bleached, broken logs.
+    for (const [d, lat, yaw, len, r] of [[541, 25.2, 0.3, 4.2, 0.32], [603, 25.6, -0.4, 5.5, 0.4], [631, 25.0, 0.15, 3.2, 0.26]] as [number, number, number, number, number][]) {
+      b.withMatrix(at(d, lat, yaw), () => pwCylinder(b, V(0, r * 0.8, -len / 2), V(0, r * 0.8, len / 2), r, r * 0.8, 8, bark, { capA: end, capB: end, tint: 0xd8d0c0 }));
+    }
+    // An earlier tour car: on its roof at the left treeline (wheels up), its glass gone.
+    _m.makeRotationZ(Math.PI).setPosition(0, 2.55, 0);
+    b.withMatrix(at(596, -16.5, 0.9).multiply(_m), () => this.paintCar(b, true));
   }
 
   // ─── The barricade (end of the road) ──────────────────────────────────────
