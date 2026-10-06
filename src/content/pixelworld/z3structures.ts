@@ -1,6 +1,6 @@
 import type { PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
-import { drawText, FONT_3x5, FONT_BOLD, rasterText, textWidth, type PixelFont } from './font';
+import { boldFont, drawText, FONT_3x5, FONT_BOLD, rasterText, textWidth, type PixelFont } from './font';
 import { hash2 } from './surfaces';
 import { dith, fill, G, h6, rivet, rustRun, sootBloom, wscatter, wset, wshift } from './z3kit';
 
@@ -17,6 +17,14 @@ import { dith, fill, G, h6, rivet, rustRun, sootBloom, wscatter, wset, wshift } 
  */
 
 // ─── Signs ───────────────────────────────────────────────────────────────────
+
+/** The sign font: the bold caps plus `^`, the up arrow the classic signs use. */
+const SIGN_FONT: PixelFont = (() => {
+  const g = new Map(FONT_BOLD.glyphs);
+  const arrow = ['..#..', '.###.', '#####', '..#..', '..#..', '..#..', '..#..', '.....', '.....'];
+  g.set('^', boldFont({ w: 5, h: 9, base: 7, glyphs: new Map([['^', arrow]]), gap: 1, space: 3 }).glyphs.get('^')!);
+  return { ...FONT_BOLD, glyphs: g };
+})();
 
 /** A highway sign face (`wM` × `hM` m): reflective letters in rows, white border, bolts, dirt, bullet holes. */
 export function z3HighwaySign(atlas: PwAtlas, lines: string[], wM: number, hM: number, hex: number): PwTile {
@@ -40,15 +48,15 @@ export function z3HighwaySign(atlas: PwAtlas, lines: string[], wM: number, hM: n
     }
     for (const [x, y] of [[0, 0], [W - 1, 0], [0, H - 1], [W - 1, H - 1]]) c.set(x, y, 0, 0);
     // Letters: the biggest whole scale of the bold font that fits rows and width.
-    const longest = Math.max(...lines.map((l) => textWidth(l, FONT_BOLD)));
-    const rowH = FONT_BOLD.base + 3;
+    const longest = Math.max(...lines.map((l) => textWidth(l, SIGN_FONT)));
+    const rowH = SIGN_FONT.base + 3;
     let scale = 1;
     while ((scale + 1) * longest <= W - 18 && (scale + 1) * rowH * lines.length <= H - 12) scale++;
     const total = lines.length * rowH * scale - 3 * scale;
     let y = Math.round((H - total) / 2) - 2 * scale;
     for (const line of lines) {
-      const tw = textWidth(line, FONT_BOLD, { scale });
-      drawText(c, line, Math.round((W - tw) / 2), y, FONT_BOLD, white, 3.6, { scale, shadeFn: (_u, v) => (v < 0.3 ? 0.6 : 0) });
+      const tw = textWidth(line, SIGN_FONT, { scale });
+      drawText(c, line, Math.round((W - tw) / 2), y, SIGN_FONT, white, 3.6, { scale, shadeFn: (_u, v) => (v < 0.3 ? 0.6 : 0) });
       y += rowH * scale;
     }
     // Bolts along the top / bottom, dirt running down from the top edge, a scrape.
@@ -328,7 +336,8 @@ export function z3GraffitiWords(atlas: PwAtlas, text: string, hex: number): { ti
       for (let j = 1; j < rng.int(3, 8); j++) c.set(dx, base + j, col, 2.6);
     }
   });
-  return { tile, wM: W / 32, hM: H / 32 };
+  // Sized like the classic tag (0.12 m a font pixel): 0.06 m a texel at scale 2.
+  return { tile, wM: (W * 0.12) / scale, hM: (H * 0.12) / scale };
 }
 
 // ─── Tunnel ──────────────────────────────────────────────────────────────────
@@ -506,7 +515,8 @@ export function z3CastLetters(atlas: PwAtlas, text: string): { tile: PwTile; wM:
     const m = k.ramp(0xc8c0b0, { light: 0.45 });
     drawText(c, text, 2, 0, f, m, 3, { scale, spacing: 1, shadow: { ramp: k.ramp(0x2a2622, { light: 0.4 }), tone: 1 }, shadowD: 2, shadeFn: (_u, v) => (v < 0.2 ? 1.2 : v > 0.8 ? -0.6 : 0) });
   });
-  return { tile, wM: W / 32, hM: H / 32 };
+  // The classic letters' size (0.16 m a font pixel).
+  return { tile, wM: (W * 0.16) / scale, hM: (H * 0.16) / scale };
 }
 
 /** Jet fan (wrap 64 × 32 round it): steel drum, stiffener rings, a maker's plate. */
@@ -554,24 +564,28 @@ export function z3BridgeSteel(atlas: PwAtlas, hex = 0xb8442a): PwTile {
     const rust = k.ramp(0x5a2412, { light: 0.4 });
     fill(c, s, 3);
     const T = c.tone;
-    // Cells 32 wide: stiffener (6 texels, raised), recess (26 texels, shaded toward its right).
+    // Cells 32 wide: stiffener (6 texels, raised, a lit bevel), recess (26 texels) in its shadow on
+    // the left, warming toward its right; a batten plate across the cells every 2 m, riveted.
     for (let y = 0; y < 128; y++) {
       for (let x = 0; x < 64; x++) {
         const u = x & 31;
         const i = y * 64 + x;
-        if (u === 0) T[i] = 4.2;
-        else if (u < 5) T[i] = 3.4;
-        else if (u === 5) T[i] = 1.8;
-        else T[i] = u < 9 ? 2.4 : u > 28 ? 3.2 : 2.8;
+        if (u === 0) T[i] = 4.4;
+        else if (u < 5) T[i] = 3.6;
+        else if (u === 5) T[i] = 1.4;
+        else if (u < 8) T[i] = 2.0;
+        else T[i] = u > 29 ? 3.4 : u > 24 ? 3.0 : u < 12 ? 2.4 : 2.7;
       }
     }
     for (let y = 3; y < 128; y += 5) for (const x of [2, 34]) rivet(c, x, y, s, 3);
-    // Horizontal batten (a plate across the cells) once per tile.
-    c.rect(0, 60, 64, 6, s, 3.4);
-    c.hline(0, 60, 64, s, 4.4);
-    c.hline(0, 65, 64, s, 1.8);
-    for (let x = 3; x < 64; x += 5) rivet(c, x, 62, s, 3.4);
-    for (let i = 0; i < 10; i++) rustRun(c, rng, rng.int(0, 63), rng.int(0, 120), rng.int(6, 20), rust);
+    for (const by of [28, 92]) {
+      c.rect(0, by, 64, 6, s, 3.5);
+      c.hline(0, by, 64, s, 4.4);
+      c.hline(0, by + 6, 64, s, 1.6);
+      c.hline(0, by + 7, 64, s, 2.2);
+      for (let x = 3; x < 64; x += 5) rivet(c, x, by + 2, s, 3.5);
+    }
+    for (let i = 0; i < 6; i++) rustRun(c, rng, rng.int(0, 63), rng.int(0, 120), rng.int(6, 16), rust);
     wscatter(c, rng, 0, 0, 64, 128, 50, 0, -0.8, { shapes: 3 });
     wscatter(c, rng, 0, 0, 64, 128, 16, 0, 0.8, { shapes: 2 });
   }, { wrap: true });

@@ -3,7 +3,7 @@ import type { PwAtlas, PwTile } from '../../pixelworld/atlas';
 import { tintFor, type PwBatch, type PwRectOpts } from '../../pixelworld/batch';
 import { z3BumperTile, z3BurntShell, z3CarPaintTop, z3CarScreen, z3TyreTile, z3WheelFace } from '../../pixelworld/z3cars';
 import {
-  z3ArmyCabSide, z3BusWindows, z3CanvasCover, z3ChromeTile, z3FlammableBand, z3OliveTile, z3Placard, z3SemiCabSide, z3SemiGrille, z3SemiHoodSide, z3TankShell, z3TrackTile,
+  z3ArmyCabSide, z3BusWindows, z3CanvasCover, z3ChromeTile, z3FlammableBand, z3OliveTile, z3Placard, z3SemiCabBack, z3SemiCabSide, z3SemiGrille, z3SemiHoodSide, z3TankShell, z3TrackTile,
   z3TrailerBack, z3TrailerSide,
 } from '../../pixelworld/z3trucks';
 import { box, cylinder, type Face, type FaceTiles } from './pwShapes';
@@ -111,6 +111,7 @@ export class Z3Trucks {
     const side = z3SemiCabSide(a, rec.color, burnt);
     const hood = z3SemiHoodSide(a, rec.color, burnt);
     const grille = z3SemiGrille(a, burnt);
+    const back = z3SemiCabBack(a, rec.color, burnt);
     const paint = burnt ? this.t.burnt : this.t.top;
     const tint: PwRectOpts = burnt ? {} : { tintRGB: tintFor(paint, rec.color) };
     g.updateMatrixWorld(true);
@@ -120,7 +121,7 @@ export class Z3Trucks {
       const m = p.mesh;
       if (isBox(m)) {
         const d = bp(m);
-        if (near(d.width, 2.5) && near(d.height, 2.6)) this.box(b, p, { px: side, nx: side, pz: paint, nz: paint, py: paint }, { nx: { flipU: true }, pz: tint, nz: tint, py: tint });
+        if (near(d.width, 2.5) && near(d.height, 2.6)) this.box(b, p, { px: side, nx: side, pz: paint, nz: back, py: back }, { nx: { flipU: true }, pz: tint });
         else if (near(d.width, 2.4) && near(d.height, 1.2)) this.box(b, p, { px: hood, nx: hood, pz: paint, py: paint }, { nx: { flipU: true }, pz: tint, py: tint });
         else if (near(d.height, 0.9) && near(d.depth, 0.06)) this.box(b, p, { pz: this.t.screen[burnt ? 1 : 0] });
         else if (near(d.width, 1.6) && near(d.height, 1.0)) this.box(b, p, { pz: grille, px: this.t.chrome, nx: this.t.chrome, py: this.t.chrome });

@@ -232,7 +232,7 @@ export class Plumes {
 
   /** ART: PIXEL WORLD: the columns as painted pixel puffs (same instances, cut-out sprites). Returns the new mesh. */
   pixelArt(fx: Z3FxAtlas): THREE.InstancedMesh {
-    const m = new THREE.InstancedMesh(spriteGeometry(false), pwSpriteMaterial(fx.atlas, fx.puff, { cells: 3, gain: 0.95, fog: false }), this.mesh.count || this.bases.length * this.per);
+    const m = new THREE.InstancedMesh(spriteGeometry(false), pwSpriteMaterial(fx.atlas, fx.puff, { cells: 3, gain: 0.75, fog: false }), this.mesh.count || this.bases.length * this.per);
     m.frustumCulled = false;
     m.renderOrder = -1;
     m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -255,7 +255,15 @@ export class Plumes {
         const h = ph * 110 * s;
         _p.set(base.x + ph * ph * 70 * s, base.y + h, base.z + ph * ph * 20 * s);
         const fade = ph < 0.08 ? ph / 0.08 : ph > 0.8 ? (1 - ph) / 0.2 : 1;
-        _s.setScalar(Math.max(0.01, (7 + ph * 30) * s * fade * (this.sprites ? 2.3 : 1)));
+        const size = (7 + ph * 30) * s * fade;
+        if (this.sprites) {
+          // Painted puffs: each billow pushed off the column's centre line and a touch lighter or
+          // darker than its neighbours, so the column reads lumpy (not one smooth dark blade).
+          const hj = fract(Math.sin(j * 12.9898 + b * 78.233) * 43758.5453);
+          _p.x += (hj - 0.5) * size * 0.9;
+          _p.y += (fract(hj * 7.31) - 0.5) * size * 0.35;
+          _s.setScalar(Math.max(0.01, size * (1.05 + hj * 0.35)));
+        } else _s.setScalar(Math.max(0.01, size));
         _s.y *= 0.8;
         _e.set(j, b + j * 0.5, 0);
         _q.setFromEuler(_e);
@@ -263,6 +271,7 @@ export class Plumes {
         this.mesh.setMatrixAt(n, _m);
         // Fire-lit underside, cooler purple tops.
         _c.copy(SMOKE_FIRE).lerp(SMOKE_PURPLE, Math.min(1, ph * 1.6));
+        if (this.sprites) _c.multiplyScalar(0.8 + fract(Math.sin(j * 4.1 + b * 9.7) * 9631.7) * 0.45);
         this.mesh.setColorAt(n, _c);
         n++;
       }

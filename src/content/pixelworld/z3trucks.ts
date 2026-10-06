@@ -76,6 +76,29 @@ export function z3SemiCabSide(atlas: PwAtlas, hex: number, burnt: boolean): PwTi
   });
 }
 
+/** Cab back / roof (2.5 × 2.6 m → 80 × 84): the rear window, panel seams, grab rails, a roof vent, grime. */
+export function z3SemiCabBack(atlas: PwAtlas, hex: number, burnt: boolean): PwTile {
+  return atlas.tile(`z3semiback|${h6(hex)}|${burnt ? 1 : 0}`, 80, 84, (c, k) => {
+    const rng = k.rng;
+    const p = k.ramp(burnt ? 0x2a2226 : hex, { light: 0.5, sat: 0.95 });
+    const black = k.ramp(0x18181c, { light: 0.4 });
+    const chrome = k.ramp(burnt ? 0x5a3a2a : 0xb8bac2, { light: 0.6, sat: 0.4 });
+    const rust = k.ramp(0x7a3c1c, { light: 0.45 });
+    fill(c, p, 3);
+    c.frame(0, 0, 80, 84, p, 2);
+    c.hline(1, 1, 78, p, 4.2);
+    for (const x of [26, 54]) c.vline(x, 2, 80, p, 2.2);
+    windowPane(c, k, 28, 12, 24, 14, burnt);
+    for (const x of [10, 66]) {
+      c.vline(x, 30, 40, chrome, 4.4);
+      c.vline(x + 1, 30, 40, chrome, 2.2);
+    }
+    for (let y = 50; y < 60; y += 3) c.hline(32, y, 16, black, 1.6);
+    for (let i = 0; i < 8; i++) rustRun(c, rng, rng.int(2, 78), rng.int(30, 70), rng.int(6, 14), rust);
+    if (burnt) sootBloom(c, 40, 84, 44, 80, 2.4);
+  });
+}
+
 /** Hood side (1.6 × 1.2 m → 52 × 40): louvres, a fender over the front wheel. */
 export function z3SemiHoodSide(atlas: PwAtlas, hex: number, burnt: boolean): PwTile {
   return atlas.tile(`z3semihood|${h6(hex)}|${burnt ? 1 : 0}`, 52, 40, (c, k) => {
@@ -229,21 +252,30 @@ export function z3FlammableBand(atlas: PwAtlas): PwTile {
     fill(c, red, 3);
     c.hline(0, 0, 192, red, 4.2);
     c.hline(0, 15, 192, red, 1.8);
-    const tw = textWidth('FLAMMABLE', FONT_BOLD, { scale: 1, spacing: 2 });
-    drawText(c, 'FLAMMABLE', Math.round((192 - tw) / 2), 0, FONT_BOLD, white, 4, { spacing: 2 });
+    // Letters filling the band (legible from the road at a distance).
+    const tw = textWidth('FLAMMABLE', FONT_BOLD, { scale: 2, spacing: 2 });
+    drawText(c, 'FLAMMABLE', Math.round((192 - tw) / 2), 1, FONT_BOLD, white, 4, { scale: 2, spacing: 2 });
     wscatter(c, k.rng, 0, 0, 192, 16, 30, 0, -1, { shapes: 2 });
   });
 }
 
 /** Hazmat placard diamond (cut out, 24 × 24): red with a flame and "3". */
 export function z3Placard(atlas: PwAtlas): PwTile {
+  // Laid on the classic placard box, which is already turned 45° (the diamond): the tile fills the
+  // whole square — white rim, red field, a white flame mark at the centre, a scuff.
   return atlas.tile('z3placard', 24, 24, (c, k) => {
     const red = k.ramp(0xe02a1a, { light: 0.5 });
     const white = k.ramp(0xf4f0e8, { light: 0.4 });
-    c.poly([12, 0, 24, 12, 12, 24, 0, 12], white, 4);
-    c.poly([12, 2, 22, 12, 12, 22, 2, 12], red, 3);
-    for (let y = 5; y < 12; y++) for (let x = 9; x < 15; x++) if (Math.abs(x - 12) < (y - 4) * 0.5 + 0.5 && hash2(x, y, 3) > 0.2) c.set(x, y, white, 4);
-    drawText(c, '3', 10, 12, FONT_3x5, white, 4);
+    fill(c, white, 4);
+    c.rect(2, 2, 20, 20, red, 3);
+    c.hline(2, 2, 20, red, 3.6);
+    for (let y = 0; y < 24; y++) {
+      for (let x = 0; x < 24; x++) {
+        const d = Math.abs(x - 11.5) + Math.abs(y - 11.5);
+        if (Math.hypot(x - 11.5, y - 11.5) < 4.2 + hash2(x, y, 3) * 0.8) c.set(x, y, white, d < 3 ? 4.4 : 4);
+      }
+    }
+    for (let i = 0; i < 6; i++) c.set(4 + i, 18 - (i >> 1), red, 2.2);
   });
 }
 

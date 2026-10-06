@@ -336,7 +336,16 @@ export class Z3Structures {
         if (m.position.y > 45) box(b, 0, 0, 0, d.width, d.height, d.depth, all(t.bsteel));
         else this.trussBox(b, 0, 0, 0, d.width, d.height, d.depth, t.trussRed);
       } else if (near(d.height, 0.25) || near(d.height, 2)) box(b, 0, 0, 0, d.width, d.height, d.depth, all(t.bsteelDark));
-      else box(b, 0, 0, 0, d.width, d.height, d.depth, all(t.bsteel));
+      else {
+        box(b, 0, 0, 0, d.width, d.height, d.depth, all(t.bsteel));
+        if (d.height > 30) {
+          // Corner angles running up the leg: relief that catches the dusk on one side.
+          for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(b, sx * (d.width / 2 - 0.12), 0, sz * (d.depth / 2 - 0.12), 0.42, d.height, 0.42, all(t.bsteelDark));
+          // Mid-face pilasters.
+          for (const sz of [-1, 1]) box(b, 0, 0, sz * (d.depth / 2 + 0.08), 0.6, d.height, 0.2, all(t.bsteel));
+          for (const sx of [-1, 1]) box(b, sx * (d.width / 2 + 0.08), 0, 0, 0.2, d.height, 0.6, all(t.bsteel));
+        }
+      }
       out.push(m);
     }
     b.setMatrix(null);

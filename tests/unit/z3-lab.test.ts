@@ -31,9 +31,12 @@ describe.skipIf(!OUT)('z3 PIXEL WORLD look-dev', () => {
       const w = new World(new THREE.PerspectiveCamera(60, 844 / 390, 0.05, 400), new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS }, 7);
       w.art = 'pixel';
       const t0 = performance.now();
+      const c0 = process.cpuUsage();
       new StageRunner(w, ALL_STAGES.find((s) => s.id === 'z3')!).start();
       const ms = performance.now() - t0;
+      const cpu = process.cpuUsage(c0);
       best.set('stage build', Math.min(best.get('stage build') ?? Infinity, ms));
+      best.set('stage build (cpu)', Math.min(best.get('stage build (cpu)') ?? Infinity, (cpu.user + cpu.system) / 1000));
       for (const [n, a] of PW_STATS) best.set(n, Math.min(best.get(n) ?? Infinity, a.ms));
       if (r === runs - 1) {
         console.log([...PW_STATS].map(([n, a]) => `${n} ${a.w}×${a.h} ${(a.bytes / 1048576).toFixed(2)} MB ${a.tiles} tiles ${a.texels} texels`).join('\n'));
@@ -70,15 +73,19 @@ describe.skipIf(!OUT)('z3 PIXEL WORLD look-dev', () => {
         for (const atlas of [pw.atlas, pw.skyAtlas]) {
           const defs = (atlas as unknown as { tiles: Map<string, { tile: { key: string; w: number; h: number; wrap: boolean; density: number }; paint: Parameters<typeof paintTile>[3] }> }).tiles;
           let best = Infinity;
+          let bestCpu = Infinity;
           for (let i = 0; i < 3; i++) {
             clearPwCache();
             const a2 = new PwAtlas(atlas.name + '-rebuild', { levels: atlas.levels });
             for (const { tile, paint } of defs.values()) a2.tile(tile.key, tile.w, tile.h, paint, { wrap: tile.wrap, density: tile.density });
             const t0 = performance.now();
+            const c0 = process.cpuUsage();
             a2.build();
+            const cpu = process.cpuUsage(c0);
             best = Math.min(best, performance.now() - t0);
+            bestCpu = Math.min(bestCpu, (cpu.user + cpu.system) / 1000);
           }
-          console.log(`${atlas.name} rebuild (min of 3): ${best.toFixed(1)} ms`);
+          console.log(`${atlas.name} rebuild (min of 3): ${best.toFixed(1)} ms wall, ${bestCpu.toFixed(1)} ms cpu`);
         }
         // The atlases (scene textures named pw:<atlas>).
         const seen = new Set<THREE.Texture>();

@@ -184,6 +184,15 @@ function paintSky(c: PwCanvas, k: PwKit, o: Z3SkyOpts) {
       }
     }
   }
+  // Two or three towering cumulus out to the sides, their sun-facing flanks glowing.
+  const cuBody = k.ramp(0x6a4a6e, { light: 0.45, sat: 0.9 });
+  const cuLit = k.ramp(0xf0a070, { light: 0.6, sat: 1.05 });
+  for (const az of [o.sunAz + 62, o.sunAz - 75, o.sunAz + 128]) {
+    const cx = colOf(az + (rng.next() - 0.5) * 12);
+    const base = rowOfEl(2.2 + rng.next() * 1.5);
+    const side = ((colOf(o.sunAz) - cx + TW) % TW) < TW / 2 ? 1 : -1;
+    towerCloud(c, rng, cx, base, 90 + rng.int(0, 60), 30 + rng.int(0, 18), side, cuBody, cuLit);
+  }
   // The sun: a white-gold disc, two bars of cloud sliding across it.
   const sun = k.ramp(0xffe8a0, { light: 0.7, sat: 1 });
   const sunR = 11;
@@ -320,6 +329,69 @@ function puff(c: PwCanvas, cx: number, cy: number, r: number, ramp: number, t: n
 }
 
 /**
+ * A towering cumulus (puffs piled into a cone with a lumpy crown, `w` wide, `h` tall from `base`):
+ * shaded per texel by the best light over the puffs covering it — the flank toward the sun (`side`)
+ * glowing in `lit`, the rest stepped down through `body`; a flat, dark base.
+ */
+function towerCloud(c: PwCanvas, rng: { next(): number; int(a: number, b: number): number }, cx: number, base: number, w: number, h: number, side: number, body: number, lit: number) {
+  const W = c.w;
+  // Many small puffs filling a rounded cone (wide flat base, lumpy crown): the silhouette.
+  const puffs: [number, number, number][] = [];
+  for (let i = 0; i < 90; i++) {
+    const t = Math.pow(rng.next(), 0.9);
+    const half = (w / 2) * (1 - t * 0.6);
+    const r = 7 + rng.next() * 8 * (1 - t * 0.45);
+    puffs.push([cx + (rng.next() * 2 - 1) * Math.max(0, half - r * 0.7), base - r * 0.8 - t * h, r]);
+  }
+  const x0 = Math.floor(cx - w);
+  const x1 = Math.ceil(cx + w);
+  const y0 = Math.max(0, Math.floor(base - h * 1.4));
+  const y1 = Math.min(c.h - 1, base);
+  const bw = x1 - x0 + 1;
+  // Each puff stamped into the cloud's box, keeping the best local light per texel (the lumps);
+  // -9 = no puff covers it.
+  const loc = new Float32Array(bw * (y1 - y0 + 1)).fill(-9);
+  for (const [px, py, r] of puffs) {
+    const ry = r / Math.sqrt(1.2);
+    for (let y = Math.max(y0, Math.ceil(py - ry)); y <= Math.min(y1, Math.floor(py + ry)); y++) {
+      const dy = y - py;
+      for (let x = Math.max(x0, Math.ceil(px - r)); x <= Math.min(x1, Math.floor(px + r)); x++) {
+        const dx = x - px;
+        if (dx * dx + dy * dy * 1.2 > r * r) continue;
+        const l = (dx / r) * side * 0.5 - (dy / r) * 0.5;
+        const j = (y - y0) * bw + (x - x0);
+        if (l > loc[j]) loc[j] = l;
+      }
+    }
+  }
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const local = loc[(y - y0) * bw + (x - x0)];
+      if (local < -5) continue;
+      // The whole cloud's light: its sun-facing flank and its upper part, the lumps on top.
+      const flank = ((x - cx) / (w / 2)) * side;
+      const up = (base - y) / h;
+      const l = flank * 0.55 + up * 0.45 + local * 0.3;
+      const i = y * W + (((x % W) + W) % W);
+      if (y >= base - 1) {
+        c.ramp[i] = body;
+        c.tone[i] = 1.8;
+      } else if (l > 0.62) {
+        c.ramp[i] = lit;
+        c.tone[i] = l > 0.85 ? 4 : 3;
+      } else if (l > 0.45) {
+        c.ramp[i] = lit;
+        c.tone[i] = 2;
+      } else {
+        c.ramp[i] = body;
+        c.tone[i] = l > 0.2 ? 3.4 : l > -0.1 ? 2.8 : 2.2;
+      }
+      c.flag[i] = 0;
+    }
+  }
+}
+
+/**
  * A cloud bank: overlapping puffs along a flat base `L` texels either side of `cx`, up to `hMax`
  * rows tall in the middle; a dark body, the sky's light on the crowns, a lit belly.
  */
@@ -451,50 +523,24 @@ export function z3HillsTile(atlas: PwAtlas, o: Z3HillsOpts): PwTile {
         }
       }
     }
-    // Pylons along the far ridge (lattice towers with drooping lines between), masts with red beacons.
-    let prev = -1;
-    let prevY = 0;
-    for (let x = 30; x < TW; x += 54 + rng.int(0, 20)) {
+    // Radio masts with red beacons on the far ridge, a water tower or two (no wires: they read as lanterns at this size).
+    for (let x = 60; x < TW; x += 140 + rng.int(0, 120)) {
       const dc = Math.min(Math.abs(x - cityX), TW - Math.abs(x - cityX));
-      if (dc < 300) {
-        prev = -1;
-        continue;
-      }
-      const base = nearTop[x] < farTop[x] ? nearTop[x] : farTop[x];
-      const top = base - 13;
-      for (let y = top; y < base; y++) {
-        const half = Math.round(((y - top) / 13) * 3) + 1;
-        R[y * TW + x - half] = near;
-        T[y * TW + x - half] = 1;
-        R[y * TW + x + half] = near;
-        T[y * TW + x + half] = 1;
-        if ((y - top) % 3 === 0) for (let j = -half; j <= half; j++) ((R[y * TW + x + j] = near), (T[y * TW + x + j] = 1));
-      }
-      for (let j = -4; j <= 4; j++) ((R[(top + 2) * TW + x + j] = near), (T[(top + 2) * TW + x + j] = 1));
-      R[(top - 1) * TW + x] = near;
-      T[(top - 1) * TW + x] = 1;
-      if (prev >= 0) {
-        // The line sagging between the two arms.
-        const span = x - prev;
-        for (let s = 1; s < span; s++) {
-          const u = s / span;
-          const y = Math.round(prevY + (top + 2 - prevY) * u + Math.sin(u * Math.PI) * 4);
-          if (!R[y * TW + prev + s]) {
-            R[y * TW + prev + s] = near;
-            T[y * TW + prev + s] = 1;
-          }
+      if (dc < 300) continue;
+      const mb = farTop[x % TW];
+      if (rng.chance(0.6)) {
+        const mh = rng.int(12, 22);
+        for (let y = Math.max(0, mb - mh); y < mb; y++) ((R[y * TW + x] = far), (T[y * TW + x] = 2));
+        if (mb - mh - 1 >= 0) {
+          R[(mb - mh - 1) * TW + x] = red;
+          T[(mb - mh - 1) * TW + x] = 5;
+          F[(mb - mh - 1) * TW + x] = PWF.GLOW;
         }
-      }
-      prev = x;
-      prevY = top + 2;
-      if (rng.chance(0.18)) {
-        // A radio mast with a blinking-red top (painted on).
-        const mx = x + 22;
-        const mb = farTop[mx % TW];
-        for (let y = mb - 22; y < mb; y++) ((R[y * TW + mx] = far), (T[y * TW + mx] = 2));
-        R[(mb - 23) * TW + mx] = red;
-        T[(mb - 23) * TW + mx] = 5;
-        F[(mb - 23) * TW + mx] = PWF.GLOW;
+      } else {
+        // Water tower: a tank on four legs.
+        const top = mb - 12;
+        for (let y = top; y < top + 5; y++) for (let j = -3; j <= 3; j++) if (y >= 0) ((R[y * TW + x + j] = near), (T[y * TW + x + j] = y === top ? 3 : 2));
+        for (let y = top + 5; y < mb; y++) for (const j of [-3, 3]) if (y >= 0) ((R[y * TW + x + j] = near), (T[y * TW + x + j] = 1.6));
       }
     }
     void bayer;

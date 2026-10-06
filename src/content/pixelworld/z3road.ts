@@ -533,10 +533,10 @@ export function z3ScrubTile(atlas: PwAtlas, o: { hex: number; grass: number }): 
 /** The tanker's fuel spill (module 160 × 96 = 5 × 3 m): an oily sheet with a rainbow rim, the dusk in it, runnels. */
 export function z3SpillDecal(atlas: PwAtlas): PwTile {
   return atlas.tile('z3spill', 160, 96, (c, k) => {
-    const oil = k.ramp(0x2c2734, { light: 0.6, sat: 1.3 });
-    const rim = k.ramp(0x5a3a7a, { light: 0.6, sat: 1.4 });
-    const gold = k.ramp(0x8a7a3a, { light: 0.6, sat: 1.3 });
-    const sky = k.ramp(0xb06a6a, { light: 0.5 });
+    const oil = k.ramp(0x3a3446, { light: 0.6, sat: 1.2 });
+    const rim = k.ramp(0x6a4a8a, { light: 0.6, sat: 1.4 });
+    const gold = k.ramp(0x9a8a4a, { light: 0.6, sat: 1.3 });
+    const sky = k.ramp(0xb07a78, { light: 0.55, sat: 0.8 });
     for (let y = 0; y < 96; y += 1) {
       for (let x = 0; x < 160; x++) {
         const u = (x - 80) / 76;
@@ -544,10 +544,15 @@ export function z3SpillDecal(atlas: PwAtlas): PwTile {
         const n = hash2(x >> 3, y >> 3, 91) * 0.35 + hash2(x >> 4, y >> 4, 92) * 0.3;
         const d = u * u + v * v + n - 0.32;
         if (d > 1) continue;
-        if (d > 0.86) c.set(x, y, rim, 3);
-        else if (d > 0.76) c.set(x, y, gold, (x + y) & 1 ? 3 : 2.4);
-        else if ((x * 3 + y * 7) % 41 < 3 && d < 0.6) c.set(x, y, sky, 2.4);
-        else c.set(x, y, oil, d < 0.4 ? 1.4 : 2);
+        // A dark wet slick: the dusk sky caught in smeared, broken patches (not bands), a thin
+        // petrol rainbow only where the film thins at the edge, the tarmac grain showing through.
+        const g = hash2(x, y, 93);
+        const smear = hash2((x + (y >> 1)) >> 4, y >> 2, 94) * 0.6 + hash2(x >> 3, y >> 1, 95) * 0.4;
+        if (d > 0.9) {
+          if (hash2(x >> 2, y >> 2, 96) > 0.45) c.set(x, y, (x >> 2) & 1 ? rim : gold, 2.4 + g * 0.6);
+          else c.set(x, y, oil, 2.2);
+        } else if (smear > 0.72 && d < 0.8) c.set(x, y, sky, smear > 0.84 ? 3.1 : (x + y) & 1 ? 2.6 : 2.2);
+        else c.set(x, y, oil, g > 0.93 ? 2.6 : g < 0.12 ? 1.2 : d > 0.6 ? 1.9 : 1.6);
       }
     }
   });

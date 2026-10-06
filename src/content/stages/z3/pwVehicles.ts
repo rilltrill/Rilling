@@ -76,7 +76,8 @@ export class Z3Vehicles {
     box(b, 0, (y0 + y1) / 2, 0, r.w, r.bodyH, r.len, { px: pSide, nx: pSide, pz: burnt ? this.burnt : this.top, nz: burnt ? this.burnt : this.top, py: burnt ? this.burnt : this.top }, {}, burnt ? {} : tint(pSide));
     // ── Detail layer just outside it.
     const det = z3CarSideDetail(a, kind, d, burnt ? 1 : r.police ? 2 : hv > 0.45 ? 1 : 0);
-    box(b, 0, (y0 + y1) / 2, 0, r.w + OFF * 2, r.bodyH, r.len, { px: det, nx: det }, { px: {}, nx: { flipU: true } });
+    const detL = r.police && !burnt ? z3CarSideDetail(a, kind, d, 3) : det;
+    box(b, 0, (y0 + y1) / 2, 0, r.w + OFF * 2, r.bodyH, r.len, { px: det, nx: detL }, { px: {}, nx: { flipU: true } });
     // Nose / tail (the van's nose module covers its lower front).
     const nose = z3CarNose(a, kind, d, r.lit, burnt);
     const tail = z3CarTail(a, kind, d, r.lit, burnt);

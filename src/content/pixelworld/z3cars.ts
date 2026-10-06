@@ -148,20 +148,22 @@ export function z3CarSideDetail(atlas: PwAtlas, kind: number, d: CarDims, v: num
       const dx = rng.int(20, W - 20);
       for (let y = 4; y < H - 4; y++) for (let x = dx - 3; x <= dx + 3; x++) if (!c.at(x, y) && hash2(x, y, 9) > 0.55) c.set(x, y, black, 2.4);
     }
-    if (v === 2) {
-      // Police: black door panels with the shield and POLICE lettering.
+    if (v === 2 || v === 3) {
+      // Police: black door panels with the shield and POLICE lettering (v 3: drawn mirrored for the
+      // side laid with flipU, so it reads the right way round there too).
       const x0 = Math.round(1.25 * TPM);
       const x1 = Math.round(3.3 * TPM);
       for (let y = 4; y < H - 3; y++) for (let x = x0; x < x1; x++) if (!c.at(x, y)) c.set(x, y, black, 2.2);
       const letters = 'POLICE';
       const lx = x0 + 10;
+      const mir = (x: number) => (v === 3 ? x0 + x1 - 1 - x : x);
       for (let i = 0; i < letters.length; i++) {
         const gx = lx + i * 5;
-        for (let y = 0; y < 5; y++) for (let x = 0; x < 3; x++) if (glyph35(letters[i], x, y)) c.set(gx + x, 8 + y, white, 4);
+        for (let y = 0; y < 5; y++) for (let x = 0; x < 3; x++) if (glyph35(letters[i], x, y)) c.set(mir(gx + x), 8 + y, white, 4);
       }
-      // Star shield.
+      // Star shield (after the lettering, mirrored with it).
       const sxx = x1 - 12;
-      for (let y = 0; y < 7; y++) for (let x = -3; x <= 3; x++) if (Math.abs(x) <= 3 - Math.abs(y - 3) * 0.6) c.set(sxx + x, 7 + y, k.ramp(0xd8b040, { light: 0.5 }), y < 3 ? 4 : 3);
+      for (let y = 0; y < 7; y++) for (let x = -3; x <= 3; x++) if (Math.abs(x) <= 3 - Math.abs(y - 3) * 0.6) c.set(mir(sxx + x), 7 + y, k.ramp(0xd8b040, { light: 0.5 }), y < 3 ? 4 : 3);
     }
   });
 }

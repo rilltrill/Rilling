@@ -14,9 +14,9 @@ import { z1FlameTile, Z1_FLAME_FRAMES, Z1_FLAME_H, Z1_FLAME_W } from './z1fire';
  * sorting: cut-out texels), tinted per instance (fire-lit to grey).
  */
 
-export const PUFF = 32;
+export const PUFF = 48;
 
-/** Smoke puff sprites (3 variants side by side, 96 × 32, neutral grey: tinted per instance). */
+/** Smoke puff sprites (3 variants side by side, 144 × 48, neutral grey: tinted per instance). */
 export function z3PuffTile(atlas: PwAtlas): PwTile {
   return atlas.tile('z3puffs', PUFF * 3, PUFF, (c, k) => {
     const g = k.ramp(0xb0aaa8, { light: 0.45, dark: 0.35, sat: 0 });
@@ -26,12 +26,15 @@ export function z3PuffTile(atlas: PwAtlas): PwTile {
 
 function paintPuff(c: PwCanvas, ramp: number, x0: number, v: number) {
   const B = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-  // Three overlapping lobes (a cauliflower), lit upper-left.
+  const S = PUFF / 32;
+  // Five overlapping lobes (a cauliflower billow), lit from the upper left, a flatter shadowed base.
   const lobes = [
-    [16, 18, 11],
-    [10 + v, 13, 8 - (v & 1)],
-    [22 - v, 12 + v, 8],
-  ];
+    [16, 19, 10.5],
+    [9 + v, 16, 7 - (v & 1)],
+    [23 - v, 15 + v, 7.5],
+    [13 + v * 2, 10, 6.5],
+    [20 - v, 9 + (v & 1) * 2, 5.5],
+  ].map(([x, y, r]) => [x * S, y * S, r * S]);
   for (let y = 0; y < PUFF; y++) {
     for (let x = 0; x < PUFF; x++) {
       let best = 9;
@@ -40,15 +43,18 @@ function paintPuff(c: PwCanvas, ramp: number, x0: number, v: number) {
         const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / r;
         if (d < best) {
           best = d;
-          lit = ((cx - x) + (cy - y)) / r;
+          lit = (cx - x) * 0.8 / r + (cy - y) / r;
         }
       }
-      const rag = hash2(x >> 1, y >> 1, 9 + v) * 0.22;
+      const rag = hash2(x, y, 9 + v) * 0.1 + hash2(x >> 2, y >> 2, 19 + v) * 0.14;
       const d = best + rag;
       if (d > 1) continue;
       // Ragged rim: an ordered-dither falloff over the outer fifth.
       if (d > 0.8 && (B[(y & 3) * 4 + (x & 3)] + 0.5) / 16 > (1 - d) * 5) continue;
-      const t = lit > 0.55 ? 4.2 : lit > 0.1 ? 3.4 : lit > -0.4 ? 2.6 : 1.8;
+      // Lit cap, a bright rim where the light grazes the lobe, mid body, the shadowed belly.
+      const low = y > PUFF * 0.72 ? 0.35 : 0;
+      const l = lit - low + (hash2(x >> 1, y >> 1, 29 + v) - 0.5) * 0.25;
+      const t = l > 0.75 ? (d > 0.62 ? 4.6 : 4.1) : l > 0.3 ? 3.5 : l > -0.15 ? 2.9 : l > -0.6 ? 2.3 : 1.7;
       c.set(x0 + x, y, ramp, t);
     }
   }
