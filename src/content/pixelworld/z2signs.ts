@@ -127,9 +127,12 @@ export function z2LitSign(atlas: PwAtlas, text: string, color: number, o: LitSig
             const ret = s >= 3 ? 2 : 1;
             for (let my = 0; my < m.h; my++) for (let mx = 0; mx < m.w; mx++) if (m.data[my * m.w + mx]) for (let d = 1; d <= ret; d++) c.set(x + mx + d, y + my + d, dead, 0);
             if (!isDead) {
-              for (let my = -1; my <= m.h; my++) {
-                for (let mx = -1; mx <= m.w; mx++) {
-                  const on = (a: number, b: number) => a >= 0 && b >= 0 && a < m.w && b < m.h && m.data[b * m.w + a] === 1;
+              const mw = m.w;
+              const mh = m.h;
+              const md = m.data;
+              const on = (a: number, b: number) => a >= 0 && b >= 0 && a < mw && b < mh && md[b * mw + a] === 1;
+              for (let my = -1; my <= mh; my++) {
+                for (let mx = -1; mx <= mw; mx++) {
                   if (on(mx, my)) continue;
                   if ((on(mx + 1, my) || on(mx - 1, my) || on(mx, my + 1) || on(mx, my - 1)) && c.at(x + mx, y + my) !== dead) c.set(x + mx, y + my, lit, 1, PWF.GLOW);
                 }

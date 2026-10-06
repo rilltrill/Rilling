@@ -76,8 +76,8 @@ export function buildStair(ctx: ZoneCtx): THREE.Group {
   for (let i = 0; i < n - 1; i++) {
     const t = -(i + 1) * rise;
     const z0 = STAIR_TOP - i * 0.3;
-    box(g, w, t - B, 0.3, conc, cx, (t + B) / 2, z0 - 0.15);
-    box(g, w - 0.3, 0.025, 0.05, M(0x1c1e1c), cx, t + 0.012, z0 - 0.03);
+    pwTag(box(g, w, t - B, 0.3, conc, cx, (t + B) / 2, z0 - 0.15), 'step', { w, h: t - B });
+    pwTag(box(g, w - 0.3, 0.025, 0.05, M(0x1c1e1c), cx, t + 0.012, z0 - 0.03), 'nosing');
   }
   // Lower landing + soffit (underside of the ground floor) + ceiling.
   box(g, w, 0.2, STAIR_BOT - r.z0, T(0x4e524c, TX.concrete), cx, B - 0.1, (STAIR_BOT + r.z0) / 2);
@@ -280,8 +280,8 @@ export function buildCorrB(ctx: ZoneCtx): THREE.Group {
   sideRoom(g, r.x1 + 0.15, r.x1 + 3.4, dz - 2.2, dz + 1.7, B, 2.9, 0x2a2018, (s) => {
     // Hazard store: drums and a crate stack in the dark.
     for (const [x, z] of [[r.x1 + 2.6, dz - 1.4], [r.x1 + 2.9, dz - 0.7], [r.x1 + 2.5, dz + 1.0]] as [number, number][]) {
-      cyl(s, 0.3, 0.3, 0.9, T(0x8a6a1a, TX.paint), x, B + 0.45, z, 8);
-      box(s, 0.62, 0.08, 0.06, M(0x1a1a1a), x, B + 0.62, z + 0.29);
+      pwTag(cyl(s, 0.3, 0.3, 0.9, T(0x8a6a1a, TX.paint), x, B + 0.45, z, 8), 'drum', { foot: 0.45 });
+      pwTag(box(s, 0.62, 0.08, 0.06, M(0x1a1a1a), x, B + 0.62, z + 0.29), 'coneBase');
     }
     box(s, 0.9, 0.7, 0.8, T(0x5a4a34, TX.wood), r.x1 + 2.8, B + 0.35, dz + 0.2);
     box(s, 0.7, 0.5, 0.6, T(0x6a5a40, TX.wood), r.x1 + 2.85, B + 0.95, dz + 0.15);
@@ -535,21 +535,21 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
       const mz = (az + bz) / 2;
       if (along) {
         box(g, len + 0.1, 0.5, 0.12, fascia, mx, ly - 0.25, mz);
-        box(g, len, 1.0, 0.03, glass, mx, ly + 0.5, mz);
+        pwTag(box(g, len, 1.0, 0.03, glass, mx, ly + 0.5, mz), 'glassRail', { len, along: true });
         box(g, len, 0.06, 0.1, railM, mx, ly + 1.03, mz);
         for (let x = ax; x <= bx + 0.01; x += 2.5) box(g, 0.06, 1.05, 0.06, railM, x, ly + 0.52, mz);
       } else {
         box(g, 0.12, 0.5, len + 0.1, fascia, mx, ly - 0.25, mz);
-        box(g, 0.03, 1.0, len, glass, mx, ly + 0.5, mz);
+        pwTag(box(g, 0.03, 1.0, len, glass, mx, ly + 0.5, mz), 'glassRail', { len, along: false });
         box(g, 0.1, 0.06, len, railM, mx, ly + 1.03, mz);
         for (let z = az; z <= bz + 0.01; z += 2.5) box(g, 0.06, 1.05, 0.06, railM, mx, ly + 0.52, z);
       }
     }
     // Dark doorways + exit signs on the balcony walls.
     for (let x = r.x0 + 4; x < r.x1 - 3; x += 6.5) {
-      box(g, 1.6, 2.4, 0.05, M(0x0c1010), x, ly + 1.2, r.z1 - 0.17);
-      box(g, 1.6, 2.4, 0.05, M(0x0c1010), x + 2, ly + 1.2, r.z0 + 0.17);
-      if (rng.chance(0.4)) box(g, 1.4, 0.8, 0.04, G(rng.pick([0x9fc8b0, 0xd8c890]), 0.4), x + 3.3, ly + 1.8, r.z1 - 0.16);
+      pwTag(box(g, 1.6, 2.4, 0.05, M(0x0c1010), x, ly + 1.2, r.z1 - 0.17), 'doorway', { face: -1 });
+      pwTag(box(g, 1.6, 2.4, 0.05, M(0x0c1010), x + 2, ly + 1.2, r.z0 + 0.17), 'doorway', { face: 1 });
+      if (rng.chance(0.4)) pwTag(box(g, 1.4, 0.8, 0.04, G(rng.pick([0x9fc8b0, 0xd8c890]), 0.4), x + 3.3, ly + 1.8, r.z1 - 0.16), 'officeWin');
     }
   }
   // Columns at the balcony corners and mid-spans (none on the rail).
@@ -568,7 +568,7 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
   // Skylight: beams + moonlit glass.
   for (let x = r.x0; x <= r.x1; x += 3) box(g, 0.25, 0.4, r.z1 - r.z0, T(0x1c2024, TX.paint), x, topY, (r.z0 + r.z1) / 2);
   for (let z = r.z0; z <= r.z1; z += 3) box(g, r.x1 - r.x0, 0.4, 0.25, T(0x1c2024, TX.paint), (r.x0 + r.x1) / 2, topY, z);
-  box(g, r.x1 - r.x0, 0.05, r.z1 - r.z0, G(0x1a2a48, 1.0), (r.x0 + r.x1) / 2, topY + 0.3, (r.z0 + r.z1) / 2);
+  pwTag(box(g, r.x1 - r.x0, 0.05, r.z1 - r.z0, G(0x1a2a48, 1.0), (r.x0 + r.x1) / 2, topY + 0.3, (r.z0 + r.z1) / 2), 'skylight');
   for (let k = 0; k < 7; k++) box(g, 2.6, 0.06, 2.6, G(0x0c1018, 1), r.x0 + 1.5 + rng.int(0, 9) * 3, topY + 0.25, r.z0 + 1.5 + rng.int(0, 9) * 3);
   // Fountain basin (the pool grows in it).
   const ring = new THREE.Mesh(Kit.track(new THREE.TorusGeometry(5.2, 0.35, 6, 28)), T(0x8a867a, TX.concrete));
@@ -594,9 +594,9 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
       // Keep the approach to the camera mostly clean.
       if (nx > 44 && Math.abs(nz - -121) < 3) break;
       const w = Math.max(0.08, 0.32 - k * 0.04);
-      box(g, w, 0.08, len + 0.1, k % 2 ? vein : veinDark, (x + nx) / 2, B + 0.04, (z + nz) / 2, Math.atan2(nx - x, nz - z));
+      pwTag(box(g, w, 0.08, len + 0.1, k % 2 ? vein : veinDark, (x + nx) / 2, B + 0.04, (z + nz) / 2, Math.atan2(nx - x, nz - z)), 'vein', { w, len: len + 0.1 });
       if (rng.chance(0.35)) {
-        const s = cyl(g, w * 0.9, w * 0.9, 0.1, node, nx, B + 0.06, nz, 6);
+        const s = pwTag(cyl(g, w * 0.9, w * 0.9, 0.1, node, nx, B + 0.06, nz, 6), 'veinNode', { r: w * 0.9 });
         s.scale.y = 0.6;
       }
       x = nx;
@@ -615,8 +615,8 @@ export function buildAtrium(ctx: ZoneCtx): THREE.Group {
     else if (side === 2) [x, z] = [r.x0 + D, rng.range(-131, -111)];
     else continue;
     const len = rng.range(1.0, 3.5);
-    box(g, 0.12, len, 0.12, rng.chance(0.5) ? vein : veinDark, x, ly - 0.45 - len / 2, z, 0, rng.spread(0.1), rng.spread(0.1));
-    box(g, rng.range(0.8, 2.2), 0.5, 0.2, veinDark, x, ly - 0.2, z + (side === 0 ? -0.05 : 0.05));
+    pwTag(box(g, 0.12, len, 0.12, rng.chance(0.5) ? vein : veinDark, x, ly - 0.45 - len / 2, z, 0, rng.spread(0.1), rng.spread(0.1)), 'drip', { len });
+    pwTag(box(g, rng.range(0.8, 2.2), 0.5, 0.2, veinDark, x, ly - 0.2, z + (side === 0 ? -0.05 : 0.05)), 'membrane');
   }
   // Furniture: information desk, benches, planters, dead piano of a lobby.
   const desk = grp(g, 29.5, B, -112.5, 0.4);

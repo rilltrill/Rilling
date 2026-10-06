@@ -228,6 +228,8 @@ export function buildCrashAmbulance(ctx: ZoneCtx) {
   const amb = ambulance();
   amb.doorL.userData.noMerge = true;
   amb.doorR.userData.noMerge = true;
+  // (PIXEL WORLD paints the body and both doors first, in their own frames.)
+  ctx.pw?.paintAmbulance(amb);
   // Bake the body (lights + doors stay separate).
   bake(amb.body);
   bake(amb.doorL);
@@ -317,7 +319,7 @@ export function buildER(ctx: ZoneCtx): THREE.Group {
   wallSmear(g, -6.5, 1.0, -34.85, 0, rng, true);
   smear(g, -6, 1.16, -35.2, 1.4, 0.4, 1.4, C.bloodFresh);
   // Behind the desk: filing cabinets, chairs.
-  for (let i = 0; i < 4; i++) blk(g, 0.5, 1.3, 0.6, T(0x7a807c, TX.paint), -9.6 + i * 0.55, 0, -38.3);
+  for (let i = 0; i < 4; i++) pwTag(blk(g, 0.5, 1.3, 0.6, T(0x7a807c, TX.paint), -9.6 + i * 0.55, 0, -38.3), 'filing', { foot: 0.65 });
   papers(g, -6, -37, 2.5, 1.2, 18, 0, rng);
   // Waiting area (right): chair rows facing the desk.
   chairRow(g, 4.4, 0, -33.5, -Math.PI / 2, 5, 0x2f5a8a, [2]);
@@ -590,7 +592,7 @@ export function buildWard(ctx: ZoneCtx): THREE.Group {
   dragTrail(g, 53, -44, 66, -40.2, 0, rng);
   bloodPool(g, 66.2, 0, -40.6, 0.7, rng);
   // Food trays on the floor.
-  for (let k = 0; k < 3; k++) box(g, 0.4, 0.03, 0.3, M(0xc8b8a0), 60 + k * 3.3 + rng.spread(0.5), 0.015, -44 + rng.spread(2), rng.next() * 3);
+  for (let k = 0; k < 3; k++) pwTag(box(g, 0.4, 0.03, 0.3, M(0xc8b8a0), 60 + k * 3.3 + rng.spread(0.5), 0.015, -44 + rng.spread(2), rng.next() * 3), 'tray');
   return g;
 }
 

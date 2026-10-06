@@ -661,3 +661,159 @@ export function extinguisherMod(atlas: PwAtlas): PwTile {
     c.hline(2, 28, 8, blk, 3);
   });
 }
+
+/** Hospital bed head / foot board (1.0 m wide → 32 × 25 head, 32 × 14 foot): moulded beige panel, a recess, the foot one with a chart clipboard. */
+export function bedBoard(atlas: PwAtlas, foot: boolean): PwTile {
+  return atlas.tile(`z2bedboard|${foot ? 'f' : 'h'}`, 32, foot ? 14 : 25, (c, k) => {
+    const p = k.ramp(0xb8beb8, { light: 0.45, sat: 0.6 });
+    const H = c.h;
+    c.rect(0, 0, 32, H, p, 3);
+    c.hline(0, 0, 32, p, 5);
+    c.hline(0, 1, 32, p, 4);
+    c.hline(0, H - 1, 32, p, 1);
+    c.frame(3, 3, 26, H - 6, p, 2);
+    c.hline(4, H - 4, 24, p, 4);
+    if (foot) {
+      // Chart clipboard hung over the board.
+      const board = k.ramp(0x8a6a40, { light: 0.45 });
+      const paper = k.ramp(0xe0ded0, { light: 0.3 });
+      c.rect(11, 1, 10, 12, board, 3);
+      c.rect(12, 3, 8, 9, paper, 3);
+      for (let y = 5; y < 11; y += 2) c.hline(13, y, 5 + (y % 3), k.ramp(0x2a3040, { light: 0.4 }), 2);
+      c.rect(14, 0, 4, 2, k.ramp(0xa8b0b4, { light: 0.5 }), 4);
+    } else {
+      // Two call / light buttons and a scuffed corner.
+      c.set(26, 5, k.ramp(0xc82020, { light: 0.4 }), 4, G);
+      c.set(24, 5, k.ramp(0x3aff8a, { light: 0.4 }), 3, G);
+      c.cluster(4, H - 5, 5, 0, -1);
+    }
+  });
+}
+
+/** Parapet coping (wrap along u, 64 × 16; laid 8 rows tall from v = 0: the top row lit, a shadow lip under it, joints, drips). */
+export function copingTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('z2coping', 64, 16, (c, k) => {
+    const s = k.ramp(0x7a766c, { light: 0.45, sat: 0.6 });
+    for (let r = 0; r < 16; r++) {
+      const y = r % 8;
+      c.rect(0, r, 64, 1, s, y === 0 ? 5 : y === 1 ? 4 : y === 7 ? 1 : 3);
+    }
+    for (let x = 0; x < 64; x += 16) {
+      c.vline(x, 0, 7, s, 2);
+      c.vline(x, 8, 7, s, 2);
+    }
+    for (let i = 0; i < 6; i++) c.set(k.rng.int(0, 63), 14, s, 1);
+  }, { wrap: true });
+}
+
+export type RoofKind = 'ac' | 'stack' | 'tank' | 'mast' | 'stairhouse' | 'dish';
+const ROOF_SIZE: Record<RoofKind, [number, number]> = { ac: [48, 28], stack: [12, 40], tank: [40, 56], mast: [16, 96], stairhouse: [64, 48], dish: [28, 28] };
+
+/** Rooftop clutter seen over the parapet (cut out): breaking the roofline against the storm. */
+export function roofUnit(atlas: PwAtlas, kind: RoofKind): PwTile {
+  const [W, H] = ROOF_SIZE[kind];
+  return atlas.tile(`z2roof|${kind}`, W, H, (c, k) => {
+    const m = k.ramp(0x6a6e70, { light: 0.45, sat: 0.4 });
+    const d = k.ramp(0x3a3e42, { light: 0.4 });
+    const red = k.ramp(0xff3020, { light: 0.4 });
+    switch (kind) {
+      case 'ac':
+        c.rect(0, 4, W, H - 4, m, 3);
+        c.hline(0, 4, W, m, 5);
+        c.vline(W - 1, 4, H - 4, m, 1);
+        for (let x = 3; x < 22; x += 2) c.vline(x, 8, H - 12, d, 2);
+        c.ellipse(34, 15, 9, 9, d, 1);
+        for (let a = 0; a < 6; a++) c.line(34, 15, 34 + Math.cos(a) * 8, 15 + Math.sin(a) * 8, m, 3);
+        c.rect(2, 0, 10, 4, m, 2);
+        break;
+      case 'stack':
+        c.rect(3, 6, 6, H - 6, m, 3);
+        c.vline(3, 6, H - 6, m, 4);
+        c.vline(8, 6, H - 6, m, 1);
+        c.rect(0, 2, 12, 4, d, 3);
+        c.hline(0, 2, 12, d, 4);
+        for (let y = 10; y < H; y += 9) c.hline(3, y, 6, d, 2);
+        break;
+      case 'tank': {
+        c.rect(4, 6, 32, 30, d, 3);
+        c.vline(4, 6, 30, d, 4);
+        for (let y = 10; y < 36; y += 6) c.hline(4, y, 32, d, 2);
+        c.poly([2, 6, 20, 0, 38, 6], d, 3);
+        for (const x of [7, 32]) c.vline(x, 36, H - 36, m, 3);
+        c.line(7, 40, 32, 52, m, 2);
+        c.line(32, 40, 7, 52, m, 2);
+        break;
+      }
+      case 'mast':
+        c.vline(7, 4, H - 4, m, 4);
+        c.vline(8, 4, H - 4, m, 2);
+        for (let y = 12; y < H; y += 10) c.line(4, y, 11, y + 6, m, 2);
+        c.rect(5, 0, 6, 4, red, 4, G);
+        c.set(7, 1, red, 5, G);
+        break;
+      case 'stairhouse':
+        c.rect(0, 6, W, H - 6, m, 3);
+        c.rect(0, 2, W, 4, d, 3);
+        c.hline(0, 2, W, d, 4);
+        c.rect(40, 18, 14, 30, d, 2);
+        c.rect(42, 14, 8, 2, k.ramp(0xffd890, { light: 0.4 }), 4, G);
+        c.rect(6, 14, 10, 8, d, 1);
+        break;
+      case 'dish':
+        c.ellipse(14, 12, 12, 10, m, 3);
+        c.ellipse(16, 13, 8, 7, m, 2);
+        c.line(14, 12, 6, 4, d, 3);
+        c.vline(14, 20, 8, d, 3);
+        break;
+    }
+  });
+}
+
+/**
+ * A ward / store-room door leaf (1.3 × 2.2 m → 42 × 70), painted once and
+ * projected through every face of the classic door's boxes (slab, kick plate,
+ * window, handle line up with it): stiles, a wired-glass vision panel, the
+ * push plate and handle, a steel kick plate, a room plate, scuffs and a bloody
+ * hand. Per colour.
+ */
+export function doorLeaf(atlas: PwAtlas, hex: number): PwTile {
+  return atlas.tile(`z2leaf|${h6(hex)}`, 42, 70, (c, k) => {
+    const rng = k.rng;
+    const d = k.ramp(hex, { light: 0.45, sat: 0.9 });
+    const steel = k.ramp(0x8d9696, { light: 0.55, sat: 0.4 });
+    const glass = k.ramp(0x0d1414, { light: 0.45 });
+    const plate = k.ramp(0xe8e4d0, { light: 0.25 });
+    const blood = k.ramp(0x6a0c0c, { light: 0.45, sat: 1.1 });
+    const W = 42;
+    const H = 70;
+    c.rect(0, 0, W, H, d, 3);
+    // Leaf edges + a faint stile line, the top lit.
+    c.hline(0, 0, W, d, 5);
+    c.vline(0, 0, H, d, 4);
+    c.vline(W - 1, 0, H, d, 1);
+    c.vline(3, 2, H - 4, d, 2);
+    c.vline(W - 4, 2, H - 4, d, 2);
+    // Vision panel (classic: 0.28 × 0.5 m at 70 % height → centred), wired glass with a reflection.
+    const vx = 21 - 5;
+    const vy = H - Math.round(0.7 * H) - 8;
+    c.rect(vx - 1, vy - 1, 11, 18, steel, 2);
+    c.rect(vx, vy, 9, 16, glass, 2);
+    for (let y = vy; y < vy + 16; y += 3) c.hline(vx, y, 9, glass, 1);
+    for (let x = vx; x < vx + 9; x += 3) c.vline(x, vy, 16, glass, 1);
+    c.line(vx + 1, vy + 10, vx + 6, vy + 2, glass, 4);
+    // Room plate under the panel, handle (right), push plate.
+    c.rect(17, H - Math.round(0.55 * H) - 2, 8, 3, plate, 3);
+    c.rect(36, H - Math.round(0.48 * H) - 4, 2, 7, steel, 4);
+    c.vline(37, H - Math.round(0.48 * H) - 4, 7, steel, 2);
+    // Kick plate (0.3 m), scuffed.
+    c.rect(1, H - 10, W - 2, 9, steel, 3);
+    c.hline(1, H - 10, W - 2, steel, 4);
+    for (let i = 0; i < 6; i++) {
+      const x = rng.int(2, W - 6);
+      c.lineShade(x, H - rng.int(3, 8), x + rng.int(2, 5), H - rng.int(3, 8), -1);
+    }
+    // Scuffs on the paint, a smeared hand by the edge.
+    c.scatter(rng, 2, 10, W - 4, H - 22, 10, 0, -1, { shapes: 4 });
+    for (let j = 0; j < 9; j++) for (let i = 0; i < 4; i++) if ((i + j) % 4 !== 3) c.set(32 + i, 26 + j, blood, j < 2 ? 4 : 3);
+  });
+}

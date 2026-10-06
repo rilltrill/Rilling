@@ -3,11 +3,11 @@ import type { TexName } from '../../kit/Textures';
 import { PwAtlas, type PwTile } from '../../pixelworld/atlas';
 import { PwBatch, planarUv } from '../../pixelworld/batch';
 import { NEUTRAL_BRICK, NEUTRAL_HEX } from '../../pixelworld/retexture';
-import { asphaltTile, brickTile, corrugatedTile, curbTile, grateTile, hazardTile, roadPaintTile, sidewalkTile } from '../../pixelworld/surfaces';
+import { asphaltTile, brickTile, curbTile, grateTile, hazardTile, roadPaintTile } from '../../pixelworld/surfaces';
 import { chainFenceTile } from '../../pixelworld/props';
 import {
-  z2BlockTile, z2CeilingTile, z2ConcreteTile, z2CurtainTile, z2EnamelTile, z2FleshTile, z2FloorTileTile, z2GlazedTile, z2LinenTile, z2MarbleTile, z2PaintTile,
-  z2PlainTile, z2RailTile, z2SheetVinylTile, z2SkirtingTile, z2SteelTile, z2StonePanelTile, z2TerrazzoTile, z2VeneerTile, z2VinylTile, z2WallpaperTile,
+  z2BlockTile, z2BloodTile, z2CeilingTile, z2ConcreteTile, z2CurtainTile, z2EnamelTile, z2FleshTile, z2FloorTileTile, z2GlazedTile, z2LinenTile, z2MarbleTile, z2PaintTile,
+  z2PlainTile, z2RailTile, z2SheetVinylTile, z2SkirtingTile, z2SteelTile, z2StonePanelTile, z2TerrazzoTile, z2TreadTile, z2VeneerTile, z2VinylTile, z2WallpaperTile,
 } from '../../pixelworld/z2surfaces';
 import { B } from './layout';
 import { PW_TPM } from '../../pixelworld/canvas';
@@ -15,17 +15,20 @@ import { pwMaterial } from '../../pixelworld/material';
 import { hash2 } from '../../pixelworld/surfaces';
 import { ventModule } from '../../pixelworld/interior';
 import {
-  bloodPoolDecal, bloodWipeDecal, bloodWordsDecal, ceilingHoleDecal, ceilingStainDecal, dragTrailTile, drainDecal, floorCrackDecal, floorStainDecal, handprintDecal,
-  papersDecal, pictureGhostDecal, pillsDecal, puddleDecal, spatterDecal, wallCrackDecal, waterStainDecal,
+  bloodPoolDecal, bloodWipeDecal, brokenTilesDecal, bloodWordsDecal, ceilingHoleDecal, ceilingStainDecal, dragTrailTile, drainDecal, floorCrackDecal, floorStainDecal, handprintDecal,
+  papersDecal, pictureGhostDecal, pillsDecal, puddleDecal, spatterDecal, trayDecal, wallCrackDecal, waterStainDecal,
 } from '../../pixelworld/z2decals';
 import {
-  clockFace, emergencyLampFace, extinguisherMod, fixture, hospitalWindow, monitorFace, nightWindow, redCross, troffer, tvBroadcast, vendingFront,
-  whiteboardFace, xrayFace, type FixtureKind, type HospWindowKind,
+  bedBoard, clockFace, drawerFace, emergencyLampFace, extinguisherMod, fixture, hospitalWindow, monitorFace, nightWindow, redCross, troffer, tvBroadcast, vendingFront,
+  whiteboardFace, xrayFace, copingTile, doorLeaf, roofUnit, type FixtureKind, type HospWindowKind, type RoofKind,
 } from '../../pixelworld/z2modules';
 import { Z2Billboards } from '../../pixelworld/z2billboard';
+import { columnTile, doorwayModule, dripTile, glassRailTile, membraneTile, officeWindow, pustuleDecal, skylightTile, veinTile } from '../../pixelworld/z2atrium';
+import { ambulanceCabSide, ambulanceDoor, ambulanceFront, ambulanceSide, carCabin, carEnd, carSide } from '../../pixelworld/z2vehicles';
+import type { Ambulance } from './props';
 import { PwBackdrop } from '../../pixelworld/backdrop';
 import { z2CityTile, z2StormSkyTile } from '../../pixelworld/z2sky';
-import { binSprite, bodyBagSprite, coneSprite, corpseSprite, crashCartSprite, ivSprite, laundrySprite, potSprite, trolleySprite, wheelchairSprite } from '../../pixelworld/z2props';
+import { bedsideSprite, binSprite, bodyBagSprite, coneSprite, drumSprite, filingSprite, corpseSprite, crashCartSprite, ivSprite, laundrySprite, potSprite, trolleySprite, wheelchairSprite } from '../../pixelworld/z2props';
 import { z2ExitSign, z2LitSign, z2PlateSign, z2Poster, z2Stencil, type PosterKind } from '../../pixelworld/z2signs';
 
 /**
@@ -121,7 +124,9 @@ export class Z2PixelWorld {
     const pieces: Piece[] = [];
     this.handleTagged(g, b);
     this.emitAll(g, b, floor, true, pieces);
-    this.scatter(b, pieces, g.name);
+    this.scatter(b, pieces, g.name, floor);
+    if (g.name === 'bay') this.roofline(b, -34, 34, 16, -25.85, 'z');
+    if (g.name === 'bayField') this.roofline(b, -26, 12, 12, -18, 'x');
   }
 
   /** `bakeInto` hook: re-paint a set piece's meshes into a batch in its parent's frame (call before its bake). */
@@ -134,8 +139,10 @@ export class Z2PixelWorld {
     this.emitAll(g, b, 0, false, null);
   }
 
-  /** Register the dynamic panels / grates (their painted look is set in `finish`). */
-  registerDynamic(flickers: { mesh: THREE.Mesh }[], grates: THREE.Object3D[]) {
+  /** Register the dynamic panels / grates (their painted look is set in `finish`) and the breakable doors' leaves. */
+  registerDynamic(flickers: { mesh: THREE.Mesh }[], grates: THREE.Object3D[], doorColors: number[] = []) {
+    for (const c of doorColors) doorLeaf(this.atlas, c);
+    z2EnamelTile(this.atlas, { hex: NEUTRAL_HEX }).neutral = NEUTRAL_HEX;
     // Registers the tiles now (before the atlas is built).
     troffer(this.atlas, 'on');
     troffer(this.atlas, 'warm');
@@ -190,6 +197,100 @@ export class Z2PixelWorld {
     }
   }
 
+  // ─── Breakable doors (Destructibles: re-painted in place, hit boxes untouched) ──
+
+  /**
+   * Re-paint a baked door model in place: every Lambert mesh keeps its
+   * triangles (the Destructible's hit boxes stay exactly the classic ones) and
+   * gets PixelWorld attributes — the faces looking along ±z show the painted
+   * leaf projected through them (slab, kick plate, window and handle all line
+   * up with it), the edges a tinted enamel. (`ox`, `oy`: the leaf's origin in
+   * the model's frame — 0, 0 for the classic hinge frame.)
+   */
+  paintDoor(root: THREE.Object3D, w: number, h: number, color: number, ox = 0, oy = 0) {
+    if (!this.atlas.built) return;
+    const leaf = doorLeaf(this.atlas, color);
+    const edge = z2EnamelTile(this.atlas, { hex: NEUTRAL_HEX });
+    const edgeTint = new THREE.Color(tintHex(color, NEUTRAL_HEX));
+    const mat = pwMaterial(this.atlas);
+    root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || (m.material as THREE.Material).userData.pixelWorld || !(m.material as THREE.MeshLambertMaterial).isMeshLambertMaterial) return;
+      const g = m.geometry;
+      if (g.index) return;
+      const pos = g.getAttribute('position');
+      const n = pos.count;
+      const uv = new Float32Array(n * 2);
+      const rect = new Int16Array(n * 4);
+      const col = new Uint8Array(n * 3);
+      for (let i = 0; i + 2 < n; i += 3) {
+        _a.fromBufferAttribute(pos, i);
+        _b.fromBufferAttribute(pos, i + 1);
+        _c.fromBufferAttribute(pos, i + 2);
+        _e1.subVectors(_b, _a);
+        _e2.subVectors(_c, _a);
+        _n.crossVectors(_e1, _e2).normalize();
+        const front = Math.abs(_n.z) > 0.7;
+        for (let k = 0; k < 3; k++) {
+          const v = i + k;
+          const p = k === 0 ? _a : k === 1 ? _b : _c;
+          if (front) {
+            // Leaf texels across the face (the back face mirrored so the hinge side matches).
+            const u = ((p.x - ox) / w) * leaf.w;
+            uv[v * 2] = _n.z > 0 ? u : leaf.w - u;
+            uv[v * 2 + 1] = ((p.y - oy) / h) * leaf.h;
+            rect.set([leaf.x, leaf.y, -leaf.w, leaf.h], v * 4);
+            col.set([255, 255, 255], v * 3);
+          } else {
+            const [pu, pv] = planarUv(p, _n, PW_TPM);
+            uv[v * 2] = pu;
+            uv[v * 2 + 1] = pv;
+            rect.set([edge.x, edge.y, edge.w, edge.h], v * 4);
+            col.set([Math.round(edgeTint.r * 255), Math.round(edgeTint.g * 255), Math.round(edgeTint.b * 255)], v * 3);
+          }
+        }
+      }
+      g.setAttribute('pwUv', new THREE.BufferAttribute(uv, 2));
+      g.setAttribute('pwRect', new THREE.BufferAttribute(rect, 4));
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
+      m.material = mat;
+    });
+  }
+
+  // ─── Vehicles ─────────────────────────────────────────────────────────────
+
+  /** The crashing ambulance (dynamic): body and doors painted into batches that ride with them. */
+  paintAmbulance(amb: Ambulance) {
+    const body = new PwBatch(this.atlas);
+    this.bills = new Z2Billboards();
+    this.jobs.push({ parent: amb.body, batch: body, bills: this.bills });
+    amb.body.updateMatrixWorld(true);
+    for (const c of [...amb.body.children]) if (c.userData.pw?.kind === 'ambGrille') amb.body.remove(c);
+    this.layAmbulanceBody(body, new THREE.Matrix4());
+    this.emitAll(amb.body, body, 0, false, null);
+    for (const [door, side] of [[amb.doorL, 1], [amb.doorR, -1]] as [THREE.Group, number][]) {
+      const b = new PwBatch(this.atlas);
+      this.jobs.push({ parent: door, batch: b, bills: new Z2Billboards() });
+      this.layAmbulanceDoor(b, new THREE.Matrix4(), side);
+      this.emitAll(door, b, 0, false, null);
+    }
+  }
+
+  private layAmbulanceBody(b: PwBatch, m: THREE.Matrix4) {
+    const a = this.atlas;
+    this.lay(b, m, _o.set(-1.165, 0.45, -2.95), Z, Y, 4.0, 2.3, ambulanceSide(a, true));
+    this.lay(b, m, _o.set(1.165, 0.45, 1.05), NZ, Y, 4.0, 2.3, ambulanceSide(a, false));
+    this.lay(b, m, _o.set(-1.1, 0.45, 2.956), X, Y, 2.2, 1.35, ambulanceFront(a));
+    this.lay(b, m, _o.set(-1.115, 0.45, 1.05), Z, Y, 1.9, 1.35, ambulanceCabSide(a, false));
+    this.lay(b, m, _o.set(1.115, 0.45, 2.95), NZ, Y, 1.9, 1.35, ambulanceCabSide(a, true));
+  }
+
+  /** A rear door's outer face (door frame: hinge at 0, panel toward −side·x, outer face −z). */
+  private layAmbulanceDoor(b: PwBatch, m: THREE.Matrix4, side: number) {
+    const x0 = side > 0 ? 0 : 1.1;
+    this.lay(b, m, _o.set(x0, 0, -0.036), NX, Y, 1.1, 2.2, ambulanceDoor(this.atlas), { flipU: side < 0 });
+  }
+
   // ─── Sky ──────────────────────────────────────────────────────────────────
 
   backdrop: PwBackdrop | null = null;
@@ -197,11 +298,11 @@ export class Z2PixelWorld {
   /** The painted storm night over the bay (sky band dissolving into `top`, the city beyond the fence). */
   buildBackdrop(fog: number, top: number): THREE.Group {
     const s = this.skyAtlas;
-    const sky = z2StormSkyTile(s, { fog, top, glow: 0x8a4a22, el0: -3, el1: 27 });
-    const city = z2CityTile(s, { hex: 0x161c26, fog, fire: 0xff7a2a, el0: -2, el1: 9 });
+    const sky = z2StormSkyTile(s, { fog, top, glow: 0x8a4a22, el0: -3, el1: 24 });
+    const city = z2CityTile(s, { hex: 0x161c26, fog, fire: 0xff7a2a, el0: -2, el1: 8 });
     this.backdrop = new PwBackdrop(s, null, [
-      { tile: sky, radius: 330, el0: -3, el1: 27, repeat: 2, follow: 1 },
-      { tile: city, radius: 290, el0: -2, el1: 9, repeat: 2, yaw: 40, follow: 0.97 },
+      { tile: sky, radius: 330, el0: -3, el1: 24, repeat: 2, follow: 1 },
+      { tile: city, radius: 290, el0: -2, el1: 8, repeat: 2, yaw: 40, follow: 0.97 },
     ]);
     this.backdrop.anchor.set(0, 0, 0);
     return this.backdrop.build();
@@ -345,8 +446,9 @@ export class Z2PixelWorld {
         const on = info.on as boolean;
         const fl = info.fl as number;
         const kind: HospWindowKind = on ? (hsh > 0.66 ? 'blinds' : hsh > 0.33 ? 'curtain' : hsh > 0.18 ? 'figure' : 'lit') : hsh > 0.9 ? 'broken' : hsh > 0.82 && fl === 0 ? 'boarded' : hsh > 0.5 ? 'blinds' : 'dark';
-        const lit = on ? [0x9fc8b0, 0xd8c890, 0x8ab0d8][Math.floor(hsh * 3)] : 0x1a2434;
-        const t = hospitalWindow(a, kind, lit, Math.floor(hsh * 7) % 2);
+        // A few painted variants only (each is a 56 × 68 module): the room colour follows the kind.
+        const lit = !on ? 0x1a2434 : kind === 'figure' ? 0x9fc8b0 : kind === 'blinds' ? 0x8ab0d8 : 0xd8c890;
+        const t = hospitalWindow(a, kind, lit, kind === 'dark' || kind === 'blinds' ? Math.floor(hsh * 7) % 2 : 0);
         // Window box front is at +0.05; the module covers the opening, its reveal, head and sill.
         this.lay(b, m, _o.set(-28 / PW_TPM, -1.06, -0.02), X, Y, 56 / PW_TPM, 68 / PW_TPM, t);
         return true;
@@ -354,7 +456,7 @@ export class Z2PixelWorld {
       case 'wingWin': {
         const on = info.on as boolean;
         const kind: HospWindowKind = on ? 'lit' : hsh > 0.85 ? 'broken' : hsh > 0.5 ? 'blinds' : 'dark';
-        const t = hospitalWindow(a, kind, on ? 0xd8c890 : 0x1a2434, 1);
+        const t = hospitalWindow(a, kind, on ? 0xd8c890 : 0x1a2434, kind === 'dark' || kind === 'blinds' ? 1 : 0);
         // Box faces +X (the wing's side): lay in the box frame on its +x face.
         this.lay(b, m, _o.set(0.055, -1.06, 28 / PW_TPM), NZ, Y, 56 / PW_TPM, 68 / PW_TPM, t);
         return true;
@@ -456,6 +558,9 @@ export class Z2PixelWorld {
       case 'laundryCart':
       case 'trolley':
       case 'plant':
+      case 'bedside':
+      case 'filing':
+      case 'drum':
       case 'cone': {
         const t =
           info.kind === 'wheelchair' ? wheelchairSprite(a, info.tipped as boolean)
@@ -465,6 +570,9 @@ export class Z2PixelWorld {
           : info.kind === 'laundryCart' ? laundrySprite(a)
           : info.kind === 'trolley' ? trolleySprite(a)
           : info.kind === 'plant' ? potSprite(a)
+          : info.kind === 'bedside' ? bedsideSprite(a)
+          : info.kind === 'filing' ? filingSprite(a)
+          : info.kind === 'drum' ? drumSprite(a)
           : coneSprite(a);
         _p.setFromMatrixPosition(m);
         _p.y -= (info.foot as number | undefined) ?? 0;
@@ -473,9 +581,15 @@ export class Z2PixelWorld {
       }
       case 'coneBase':
         return true;
+      case 'tray': {
+        b.setMatrix(m);
+        b.rect(_o.set(-0.25, 0.006, 0.19), X, NZ, 0.5, 0.375, trayDecal(a));
+        b.setMatrix(null);
+        return true;
+      }
       case 'puddle': {
         _p.setFromMatrixPosition(m);
-        const t = puddleDecal(a, hsh > 0.5 ? 1 : 0);
+        const t = puddleDecal(a, info.indoor ? 2 : hsh > 0.5 ? 1 : 0);
         b.rect(_o.set(_p.x - 1, _p.y + 0.004 + (this.nDecal++ % 3) * 0.001, _p.z + 0.625), X, NZ, 2, 1.25, t);
         return true;
       }
@@ -486,6 +600,130 @@ export class Z2PixelWorld {
         b.rect(_o.set(_p.x + 0.02, 1.0, 25), NZ, Y, 50, 1.5, t, { u0: 0, v0: 16 });
         return true;
       }
+      case 'ambulance': {
+        // The parked ambulance: modules on the body's faces and the doors (meshes re-painted generically).
+        this.layAmbulanceBody(b, m);
+        o.updateMatrixWorld(true);
+        const amb = o as THREE.Group;
+        amb.traverse((c) => {
+          if (c.userData.pw?.kind === 'ambGrille') c.userData.pwDrop = true;
+        });
+        for (const c of [...amb.children[0].children]) {
+          if (c.userData.pwDrop) amb.children[0].remove(c);
+          if (c.type === 'Group' && c.children.length === 3) {
+            const side = c.position.x > 0 ? 1 : -1;
+            const dm = new THREE.Matrix4().multiplyMatrices(m, c.matrix);
+            // (The door's frame is relative to the body, which sits at the root's origin.)
+            this.layAmbulanceDoor(b, dm, side);
+          }
+        }
+        return false;
+      }
+      case 'car': {
+        const col = info.color as number;
+        this.lay(b, m, _o.set(-0.905, 0.3, -2.15), Z, Y, 4.3, 0.7, carSide(a, col));
+        this.lay(b, m, _o.set(0.905, 0.3, 2.15), NZ, Y, 4.3, 0.7, carSide(a, col));
+        this.lay(b, m, _o.set(-0.805, 1.0, -1.4), Z, Y, 2.2, 0.6, carCabin(a, col));
+        this.lay(b, m, _o.set(0.805, 1.0, 0.8), NZ, Y, 2.2, 0.6, carCabin(a, col));
+        this.lay(b, m, _o.set(-0.9, 0.3, 2.155), X, Y, 1.8, 0.7, carEnd(a, col, true));
+        this.lay(b, m, _o.set(0.9, 0.3, -2.155), NX, Y, 1.8, 0.7, carEnd(a, col, false));
+        return false;
+      }
+      case 'bed': {
+        this.lay(b, m, _o.set(-0.5, 0.42, 1.047), X, Y, 1.0, 0.45, bedBoard(a, true));
+        this.lay(b, m, _o.set(-0.5, 0.4, -0.988), X, Y, 1.0, 0.78, bedBoard(a, false));
+        return false;
+      }
+      case 'morgueWall': {
+        const cols = info.cols as number;
+        const rows = info.rows as number;
+        const skip = new Set(info.skip as string[]);
+        const w = cols * 0.78;
+        // Drop the classic door boxes, handles and cards (the big cabinet box and the open slots stay).
+        for (const c of [...o.children]) {
+          const mt = (c as THREE.Mesh).material as THREE.MeshLambertMaterial | undefined;
+          if (c === o.children[0]) continue;
+          if (mt?.color?.getHex() === 0x0b0f10) continue;
+          o.remove(c);
+        }
+        for (let cc = 0; cc < cols; cc++) {
+          for (let r = 0; r < rows; r++) {
+            if (skip.has(`${cc},${r}`)) continue;
+            const cx = -w / 2 + 0.39 + cc * 0.78;
+            const cy = 0.61 + r * 0.72;
+            this.lay(b, m, _o.set(cx - 0.34, cy - 0.31, 0.012), X, Y, 0.68, 0.62, drawerFace(a, Math.floor(hash2(cc, r, 7) * 3)));
+          }
+        }
+        return false;
+      }
+      case 'glassRail': {
+        const len = info.len as number;
+        const t = glassRailTile(a);
+        const u0 = Math.floor(hsh * 64);
+        if (info.along) {
+          this.lay(b, m, _o.set(-len / 2, -0.5, 0.017), X, Y, len, 1.0, t);
+          this.lay(b, m, _o.set(len / 2, -0.5, -0.017), NX, Y, len, 1.0, t);
+        } else {
+          this.lay(b, m, _o.set(0.017, -0.5, len / 2), NZ, Y, len, 1.0, t);
+          this.lay(b, m, _o.set(-0.017, -0.5, -len / 2), Z, Y, len, 1.0, t);
+        }
+        void u0;
+        return true;
+      }
+      case 'doorway': {
+        const t = doorwayModule(a, hsh > 0.7 ? 1 : 0);
+        if ((info.face as number) < 0) this.lay(b, m, _o.set(0.8, -1.2, -0.026), NX, Y, 1.6, 2.4, t);
+        else this.lay(b, m, _o.set(-0.8, -1.2, 0.026), X, Y, 1.6, 2.4, t);
+        return true;
+      }
+      case 'officeWin': {
+        const col = ((o as THREE.Mesh).material as THREE.MeshBasicMaterial).color.getHex();
+        this.lay(b, m, _o.set(0.7, -0.4, -0.021), NX, Y, 1.4, 0.8, officeWindow(a, col, hsh > 0.6 ? 1 : 0));
+        return true;
+      }
+      case 'skylight': {
+        const p = ((o as THREE.Mesh).geometry as THREE.BoxGeometry).parameters;
+        this.lay(b, m, _o.set(-p.width / 2, -0.026, -p.depth / 2), X, Z, p.width, p.depth, skylightTile(a));
+        return true;
+      }
+      case 'vein': {
+        const len = info.len as number;
+        const w = Math.max(0.35, (info.w as number) * 2.2);
+        const hexV = ((o as THREE.Mesh).material as THREE.MeshLambertMaterial).color.getHex();
+        b.setMatrix(m);
+        b.rect(_o.set(-w / 2, 0.041, len / 2), X, NZ, w, len, veinTile(a, hexV), { u0: 0, v0: Math.floor(hsh * 64) });
+        b.setMatrix(null);
+        return true;
+      }
+      case 'veinNode': {
+        _p.setFromMatrixPosition(m);
+        const r = (info.r as number) * 1.1;
+        b.rect(_o.set(_p.x - r, _p.y + 0.035, _p.z + r), X, NZ, r * 2, r * 2, pustuleDecal(a));
+        return true;
+      }
+      case 'drip': {
+        const len = info.len as number;
+        const hexV = ((o as THREE.Mesh).material as THREE.MeshLambertMaterial).color.getHex();
+        const t = dripTile(a, hexV);
+        this.lay(b, m, _o.set(-0.18, -len / 2, 0.062), X, Y, 0.36, len, t);
+        this.lay(b, m, _o.set(0.18, -len / 2, -0.062), NX, Y, 0.36, len, t);
+        return true;
+      }
+      case 'membrane': {
+        const p = ((o as THREE.Mesh).geometry as THREE.BoxGeometry).parameters;
+        const t = membraneTile(a, 0x4a1212);
+        this.lay(b, m, _o.set(-p.width / 2, -0.85, 0.102), X, Y, p.width, 1.1, t);
+        this.lay(b, m, _o.set(p.width / 2, -0.85, -0.102), NX, Y, p.width, 1.1, t);
+        return false;
+      }
+      case 'step': {
+        const w = info.w as number;
+        const h = info.h as number;
+        this.lay(b, m, _o.set(-w / 2, h / 2 + 0.003, 0.15), X, NZ, w, 0.3, z2TreadTile(a, { hex: 0x6a6c66 }));
+        return false;
+      }
+      case 'nosing':
+        return true;
       case 'corpse':
       case 'bodyBag': {
         _p.setFromMatrixPosition(m);
@@ -544,7 +782,7 @@ export class Z2PixelWorld {
 
   // ─── Decal scatter (stains, ghosts, blood, notices, holes) ────────────────
 
-  private scatter(b: PwBatch, pieces: Piece[], zone: string) {
+  private scatter(b: PwBatch, pieces: Piece[], zone: string, floorY: number) {
     const a = this.atlas;
     const ext = zone === 'bay' || zone === 'bayField';
     for (const p of pieces) {
@@ -585,6 +823,7 @@ export class Z2PixelWorld {
       const alongX = sx >= sz;
       const len = alongX ? sx : sz;
       if (len < 1.0 || sy < 0.5) continue;
+      if (p.kind === 'wallLo' && !ext) this.brokenTiles(b, p, alongX, len, floorY);
       for (const side of [1, -1]) {
         const fc = alongX ? (side > 0 ? bx.max.z : bx.min.z) : side > 0 ? bx.max.x : bx.min.x;
         // ux runs left → right seen from the face's side.
@@ -605,6 +844,74 @@ export class Z2PixelWorld {
           if (alongX) _o.set(start + (side > 0 ? along - w / 2 : -(along - w / 2)), y0, fc + side * off);
           else _o.set(fc + side * off, y0, start + (side > 0 ? -(along - w / 2) : along - w / 2));
           b.rect(_o, ux, Y, w, hh, t, { tint: decalTint(t, p.hex) });
+        }
+      }
+    }
+  }
+
+  /**
+   * A roofline that breaks the box against the sky: a brick parapet over the
+   * wall's top, a lit coping, and rooftop clutter (AC units, vent stacks, a
+   * water tank, a mast with a beacon, a stair house, a dish) standing behind it.
+   * `axis` z: a facade at z = `face` facing +z, from a0 to a1 along x; x: a side
+   * face at x = `face` facing +x, from a0 to a1 along z.
+   */
+  private roofline(b: PwBatch, a0: number, a1: number, top: number, face: number, axis: 'x' | 'z') {
+    const a = this.atlas;
+    const brick = neutral0(brickTile(a, { hex: NEUTRAL_BRICK, grime: 0.7 }), NEUTRAL_BRICK);
+    const tint = tintHex(axis === 'z' ? 0x8a5442 : 0x7a5446, NEUTRAL_BRICK);
+    const len = a1 - a0;
+    const ux = axis === 'z' ? X : NZ;
+    const at = (u: number, y: number, off: number) => (axis === 'z' ? _o.set(a0 + u, y, face + off) : _o.set(face + off, y, a1 - u));
+    // (Bricks continue the wall's own world-mapped courses: u from the wall's planar mapping.)
+    const u0 = axis === 'z' ? a0 * PW_TPM : -a1 * PW_TPM;
+    b.rect(at(0, top - 0.02, 0.012), ux, Y, len, 0.47, brick, { tint, u0: ((u0 % brick.w) + brick.w) % brick.w, v0: Math.round((top - 0.02) * PW_TPM) % brick.h });
+    b.rect(at(0, top + 0.45, 0.02), ux, Y, len, 0.25, copingTile(a));
+    // Clutter behind the parapet, spaced by hand-written hashes.
+    const kinds: RoofKind[] = ['ac', 'stack', 'ac', 'tank', 'stack', 'mast', 'stairhouse', 'dish', 'ac', 'stack'];
+    let u = 1.5;
+    let i = 0;
+    while (u < len - 2) {
+      const kind = kinds[(i * 7 + Math.floor(hash2(i, Math.round(face), 3) * 5)) % kinds.length];
+      const t = roofUnit(a, kind);
+      const w = t.w / PW_TPM;
+      const h = t.h / PW_TPM;
+      if (u + w > len - 1) break;
+      b.rect(at(u, top + 0.2, -0.6 - hash2(i, 2, 9) * 1.5), ux, Y, w, h, t);
+      u += w + 1.5 + hash2(i, 7, 5) * 5;
+      i++;
+    }
+  }
+
+  /** Knocked-off / cracked glazed tiles, snapped to the wall's tile grid (world-mapped from the floor). */
+  private brokenTiles(b: PwBatch, p: Piece, alongX: boolean, len: number, floorY: number) {
+    const spec = GLAZED[p.hex] ?? {};
+    const tw = (spec.tw ?? 8) / PW_TPM;
+    const th = (spec.th ?? 8) / PW_TPM;
+    const bx = p.box;
+    const n = Math.floor(len / 5);
+    for (let i = 0; i < n; i++) {
+      const h = hash2(Math.round(bx.min.x * 3) + i * 13, Math.round(bx.min.z * 3), 61);
+      if (h > 0.35) continue;
+      const t = brokenTilesDecal(this.atlas, Math.round(tw * PW_TPM), Math.round(th * PW_TPM), i & 1);
+      const w = t.w / PW_TPM;
+      const hh = t.h / PW_TPM;
+      // Rows from the floor, columns on the world grid.
+      const row = 1 + Math.floor(hash2(i, 3, 63) * Math.max(1, Math.floor((bx.max.y - bx.min.y - hh) / th) - 1));
+      const y0 = floorY + row * th;
+      if (y0 + hh > bx.max.y - 0.05 || y0 < bx.min.y) continue;
+      const a0 = (alongX ? bx.min.x : bx.min.z) + 0.4 + h * (len - w - 0.8);
+      for (const side of [1, -1]) {
+        const tint = decalTint(t, p.hex);
+        if (alongX) {
+          const fc = side > 0 ? bx.max.z + 0.005 : bx.min.z - 0.005;
+          // u = ±x·32: snap the rect's start corner (left as seen) to whole tiles.
+          if (side > 0) b.rect(_o.set(Math.round(a0 / tw) * tw, y0, fc), X, Y, w, hh, t, { tint });
+          else b.rect(_o.set(Math.round((a0 + w) / tw) * tw, y0, fc), NX, Y, w, hh, t, { tint });
+        } else {
+          const fc = side > 0 ? bx.max.x + 0.005 : bx.min.x - 0.005;
+          if (side > 0) b.rect(_o.set(fc, y0, Math.round((a0 + w) / tw) * tw), NZ, Y, w, hh, t, { tint });
+          else b.rect(_o.set(fc, y0, Math.round(a0 / tw) * tw), Z, Y, w, hh, t, { tint });
         }
       }
     }
@@ -681,7 +988,8 @@ export class Z2PixelWorld {
         return neutral(z2PaintTile(a, { hex: NEUTRAL_HEX }));
       case 'wallpaper|1|0.4':
         if (hex === 0x8e8670) return own(z2WallpaperTile(a, { hex }));
-        return neutral(z2WallpaperTile(a, { hex: NEUTRAL_HEX }));
+        // (The dark side rooms behind doors: the painted plaster reads the same in there.)
+        return neutral(z2PaintTile(a, { hex: NEUTRAL_HEX }));
       case 'wallpaper|0.7|0.55':
         return neutral(z2CurtainTile(a, { hex: NEUTRAL_HEX }));
       case 'brick|1.25|0.5':
@@ -691,9 +999,10 @@ export class Z2PixelWorld {
         return neutral(brickTile(a, { hex: NEUTRAL_BRICK, grime: 0.7 }), NEUTRAL_BRICK);
       case 'concrete|1|0.8':
         if (hex === 0x4e4a44 && face === 'side') return own(z2StonePanelTile(a, { hex }));
-        if (hex === 0x66665e && face === 'up') return own(sidewalkTile(a, { hex }));
+        if (hex === 0x66665e && face === 'up') return neutral(z2ConcreteTile(a, { hex: NEUTRAL_HEX, joints: true }));
+        if (hex === 0xa8a89e && face === 'side') return own(columnTile(a, hex));
         if (hex === 0x8a8a80) return own(curbTile(a, { hex }));
-        return neutral(z2ConcreteTile(a, { hex: NEUTRAL_HEX, joints: face !== 'side' }));
+        return neutral(z2ConcreteTile(a, { hex: NEUTRAL_HEX, joints: true }));
       // ── Floors / ceilings ──
       case 'checker|0.55|0.34':
         if (hex === 0x5d6a63) return own(z2VinylTile(a, { a: 0x5d6a63, b: 0x46524c }));
@@ -723,7 +1032,7 @@ export class Z2PixelWorld {
       case 'hazard|1|0.7':
         return own(hazardTile(a, {}));
       case 'corrugated|1.2|0.5':
-        return neutral(corrugatedTile(a, { hex: NEUTRAL_HEX, rust: 0.6 }));
+        return neutral(z2EnamelTile(a, { hex: NEUTRAL_HEX }));
       case 'hide|1.3|0.75':
       case 'hide|2.2|0.45':
         return own(z2FleshTile(a, { hex }));
@@ -737,6 +1046,7 @@ export class Z2PixelWorld {
       if (SKIRTING.has(hex)) return own(z2SkirtingTile(a, { hex }));
       if (hex === 0xc9cdbf || hex === 0xb9a07a) return own(z2RailTile(a, { hex }));
       if (hex === 0xb8962a) return own(roadPaintTile(a, { hex, wear: 0.6 }));
+      if (BLOOD_HEX.has(hex)) return own(z2BloodTile(a, { hex }));
       return neutral(z2PlainTile(a, { hex: NEUTRAL_HEX }));
     }
     if (tex === 'water') return own(z2PlainTile(a, { hex }));
@@ -767,6 +1077,12 @@ function pieceKind(m: THREE.MeshLambertMaterial): Piece['kind'] | null {
   }
 }
 
+/** Mark a tile NEUTRAL (painted round `base`) and return it. */
+function neutral0(t: PwTile, base: number): PwTile {
+  t.neutral = base;
+  return t;
+}
+
 /** Vertex tint for a decal on a surface of colour `hex` (NEUTRAL decals take the surface's colour). */
 function decalTint(t: PwTile, hex: number): number {
   return t.neutral === undefined ? 0xffffff : tintHex(hex, t.neutral);
@@ -779,7 +1095,7 @@ function isGlow(o: THREE.Object3D): boolean {
 
 const POSTERS: PosterKind[] = ['handwash', 'quarantine', 'nosmoking', 'evac', 'flu', 'visiting', 'cork', 'painting', 'chart', 'missing'];
 const FIXTURES: FixtureKind[] = ['switch', 'alarm', 'sanitizer', 'phone', 'sharps', 'gloves', 'thermostat', 'hoseReel'];
-const WORDS = ['HELP US', 'GOD IS DEAD', 'NO ROOM', 'IT HUNGERS', 'RUN', 'DONT LET IT OUT'];
+const WORDS = ['HELP US', 'IT HUNGERS', 'RUN'];
 
 /** Floor height per zone (wall tiles are laid with v from the floor). */
 const ZONE_FLOOR: Record<string, number> = {
@@ -805,6 +1121,9 @@ const GLAZED: Record<number, { tw?: number; th?: number; bond?: boolean; grime?:
   0x2a6a56: { tw: 16, th: 16, grime: 0.5 },
   0x3a7462: { tw: 16, th: 16, grime: 0.3 },
 };
+
+/** Blood colours (C.blood, C.bloodFresh, C.bloodDark, the flesh-dark smears). */
+const BLOOD_HEX = new Set([0x5c0909, 0x7e0d0d, 0x3a0505]);
 
 /** Skirting colours (the shells' base boards). */
 const SKIRTING = new Set([0x232826, 0x1e2220, 0x2a3436, 0x1e2a26, 0x1e1e1c]);

@@ -301,3 +301,62 @@ export function bodyBagSprite(atlas: PwAtlas): PwTile {
     c.ellipse(31, 11, 28, 1, k.ramp(0x101010, { light: 0.2 }), 1);
   });
 }
+
+/** Bedside cabinet with a drawer, a water jug and a cup on top (0.45 × 0.85 m). */
+export function bedsideSprite(atlas: PwAtlas): PwTile {
+  return sprite(atlas, 'bedside', 16, 28, (c, k) => {
+    const p = k.ramp(0xa8b0aa, { light: 0.5, sat: 0.6 });
+    const steel = k.ramp(0xb8c0c4, { light: 0.55 });
+    const jug = k.ramp(0xc8d8e0, { light: 0.35 });
+    c.rect(1, 4, 14, 24, p, 3);
+    c.vline(1, 4, 24, p, 4);
+    c.vline(14, 4, 24, p, 2);
+    c.hline(1, 4, 14, p, 4);
+    c.hline(2, 10, 12, p, 1);
+    c.hline(6, 7, 4, steel, 4);
+    c.hline(2, 18, 12, p, 2);
+    c.rect(3, 0, 4, 4, jug, 3);
+    c.vline(3, 0, 4, jug, 4);
+    c.rect(10, 2, 3, 2, k.ramp(0xe8e4d8, { light: 0.3 }), 4);
+  });
+}
+
+/** Four-drawer filing cabinet, the top drawer pulled out with files sticking up (0.5 × 1.3 m). */
+export function filingSprite(atlas: PwAtlas): PwTile {
+  return sprite(atlas, 'filing', 18, 44, (c, k) => {
+    const p = k.ramp(0x7a807c, { light: 0.5, sat: 0.6 });
+    const steel = k.ramp(0xb8c0c4, { light: 0.55 });
+    const paper = k.ramp(0xd8d0a8, { light: 0.3 });
+    c.rect(1, 3, 16, 41, p, 3);
+    c.vline(1, 3, 41, p, 4);
+    c.vline(16, 3, 41, p, 2);
+    for (let d = 0; d < 4; d++) {
+      const y = 4 + d * 10;
+      c.hline(2, y + 9, 14, p, 1);
+      c.rect(6, y + 3, 6, 2, steel, 4);
+      c.rect(7, y + 1, 4, 1, paper, 3);
+    }
+    // Top drawer open: a lip and folders.
+    c.rect(0, 1, 18, 4, p, 4);
+    for (let x = 2; x < 16; x += 3) c.rect(x, 0, 2, 2, paper, 3 + (x % 2));
+  });
+}
+
+/** Steel drum (hazard store): ochre paint, rolling hoops, a hazard diamond, rust runs (0.6 × 0.9 m). */
+export function drumSprite(atlas: PwAtlas): PwTile {
+  return sprite(atlas, 'drum', 20, 30, (c, k) => {
+    const d = k.ramp(0x8a6a1a, { light: 0.5, sat: 1 });
+    const rust = k.ramp(0x6a3a1c, { light: 0.4 });
+    const blk = k.ramp(0x1a1a1a, { light: 0.4 });
+    cyl(c, 1, 2, 19, 30, d);
+    c.rect(1, 0, 18, 3, d, 4);
+    c.hline(2, 1, 16, d, 2);
+    for (const y of [11, 21]) {
+      c.hline(1, y, 18, d, 1);
+      c.hline(1, y + 1, 18, d, 4);
+    }
+    c.poly([10, 13, 14, 16, 10, 19, 6, 16], k.ramp(0xe8c020, { light: 0.4 }), 3);
+    c.poly([10, 14, 13, 16, 10, 18, 7, 16], blk, 2);
+    for (let i = 0; i < 3; i++) for (let j = 3; j < 8 + i * 3; j++) c.set(4 + i * 5, j, rust, 3);
+  });
+}

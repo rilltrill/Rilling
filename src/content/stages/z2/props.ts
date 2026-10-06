@@ -653,7 +653,7 @@ export function ambulance(): Ambulance {
   // Bumpers, grille, wheels.
   blk(body, 2.3, 0.3, 0.2, dark, 0, 0.35, 3.0);
   blk(body, 2.3, 0.25, 0.15, dark, 0, 0.35, -3.0);
-  box(body, 1.4, 0.4, 0.05, M(0x2a2e30), 0, 0.95, 2.97);
+  pwTag(box(body, 1.4, 0.4, 0.05, M(0x2a2e30), 0, 0.95, 2.97), 'ambGrille');
   const tyre = M(0x141414);
   const rim = M(0x8a8e90);
   for (const sx of [-1.05, 1.05]) {

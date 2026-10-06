@@ -25,12 +25,12 @@ const wrap = (v: number, n: number) => ((v % n) + n) % n;
  * edge of an area, thick in its middle (reads as old paint / damp / wear, never
  * as a checkerboard).
  */
-export function mottle(c: PwCanvas, cells: number, seed: number, lo: number, dt: number, only = 0) {
+export function mottle(c: PwCanvas, cells: number, seed: number, lo: number, dt: number, only = 0, density = 1) {
   for (let y = 0; y < c.h; y += 2) {
     for (let x = 0; x < c.w; x += 2) {
       const n = smooth(x, y, c.w, c.h, cells, seed);
       if (n >= lo) continue;
-      const p = Math.min(1, ((lo - n) / lo) * 2.2);
+      const p = Math.min(1, ((lo - n) / lo) * 2.2) * density;
       const h = hash2(x >> 1, y >> 1, seed);
       if (h > p) continue;
       const cl = CL[Math.floor(hash2(x, y, seed + 1) * CL.length)];
@@ -86,7 +86,7 @@ function paintGlazed(c: PwCanvas, k: PwKit, o: GlazedOpts) {
   const t2 = k.ramp(shiftHue(o.hex, 0.015, 1.06), { light: 0.52, sat: 0.95 });
   // Grout: pale cement on coloured tiles, a grey a little darker than white tiles.
   const light = (((o.hex >> 16) & 255) + ((o.hex >> 8) & 255) + (o.hex & 255)) / 3 > 140;
-  const grout = k.ramp(o.grout ?? (light ? darken(o.hex, 0.72) : mixHex(o.hex, 0xb8b8ac, 0.7)), { light: 0.3, sat: 0.5 });
+  const grout = k.ramp(o.grout ?? (light ? darken(o.hex, 0.72) : mixHex(o.hex, 0xb8b8ac, (o.tw ?? 8) > 8 ? 0.4 : 0.7)), { light: 0.3, sat: 0.5 });
   const W = c.w;
   const H = c.h;
   const cols = Math.ceil(W / TW);
@@ -106,9 +106,9 @@ function paintGlazed(c: PwCanvas, k: PwKit, o: GlazedOpts) {
       const hsh = hash2(col, row, 11);
       const r = hsh < 0.14 ? t1 : hsh > 0.9 ? t2 : t0;
       let t = 3;
-      // Glaze: a lit top lip over most of the tile, the grout's shadow under it; glints on a few.
-      if (ly === TH - 2 && lx < TW - 2) t = 4;
-      else if (ly === 0) t = 2;
+      // Glaze: a lit top lip on about half the tiles (set a hair proud), glints on a few.
+      if (ly === TH - 2 && lx < TW - 2 && hash2(col, row, 23) > 0.45) t = 4;
+      else if (ly === 0 && hash2(col, row, 29) > 0.6) t = 2;
       if (hash2(col, row, 17) > 0.78 && ly === TH - 3 && lx === 2) t = 5;
       c.set(x, y, r, t);
     }
@@ -160,7 +160,7 @@ function paintPaint(c: PwCanvas, k: PwKit, o: PaintOpts) {
   const H = c.h;
   // Old paint: broad areas mottled a step darker (clusters, no dither), a touched-up rectangle or two (hard edge).
   c.rect(0, 0, W, H, p, 3);
-  mottle(c, 4, 31, 0.3, -1);
+  mottle(c, 4, 31, 0.24, -1, 0, 0.45);
   for (let i = 0; i < 2; i++) {
     const x0 = rng.int(0, W - 40);
     const y0 = rng.int(0, H - 30);
@@ -212,12 +212,12 @@ export function z2BlockTile(atlas: PwAtlas, o: { hex: number; grime?: number }):
         const bx = Math.floor(xx / BW);
         const lx = xx % BW;
         const r = hash2(bx, row, 4) < 0.22 ? b2 : b;
+        const litLen = 4 + Math.floor(hash2(bx, row, 6) * 9);
         let t = 3;
-        if (ly === BH - 1) t = 1; // joint above the block, in shadow
+        if (ly === BH - 1) t = 2; // joint above the block, in shadow
         else if (lx === 0) t = 2;
-        else if (ly === BH - 2) t = 4; // block's lit top arris
-        else if (lx === 1) t = 4;
-        else if (ly === 0 || lx === BW - 1) t = 2;
+        else if (ly === BH - 2 && lx < litLen) t = 4; // part of the block's top arris catches the light
+        else if (ly === 0 && lx > BW - 5) t = 2;
         // Pores the paint didn't fill: sparse dark pits.
         if (t === 3 && hash2(x, y, 9) > 0.965) t = 2;
         c.set(x, y, r, t);
@@ -829,3 +829,54 @@ export function mixHex(a: number, b: number, t: number): number {
 
 /** A glow flag shorthand for painters in the z2 files. */
 export const G = PWF.GLOW;
+
+/**
+ * Wet blood (any leftover blood-coloured box: sheets, trays, tables): dark
+ * clotted base, fresher red runs, glossy highlights where the light catches
+ * the wet surface. Per colour. 32 × 32.
+ */
+export function z2BloodTile(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`z2blood|${h6(o.hex)}`, 32, 32, (c, k) => {
+    const rng = k.rng;
+    const b = k.ramp(o.hex, { light: 0.45, sat: 1.15 });
+    c.rect(0, 0, c.w, c.h, b, 3);
+    mottle(c, 4, 91, 0.35, -1);
+    for (let i = 0; i < 6; i++) {
+      const x = rng.int(0, c.w - 4);
+      const y = rng.int(0, c.h - 2);
+      c.set(x, y, b, 5);
+      c.set(x + 1, y, b, 4);
+    }
+    for (let i = 0; i < 5; i++) c.cluster(rng.int(0, c.w - 3), rng.int(0, c.h - 3), rng.int(4, 9), b, 1);
+  }, { wrap: true });
+}
+
+/**
+ * Stair tread (wrap along u, 64 × 16; v = 0 at the tread's back, 9–10 at its
+ * front edge): worn concrete with a darker trodden middle, then the
+ * anti-slip nosing — a grooved strip with chipped yellow paint.
+ */
+export function z2TreadTile(atlas: PwAtlas, o: { hex: number }): PwTile {
+  return atlas.tile(`z2tread|${h6(o.hex)}`, 64, 16, (c, k) => {
+    const rng = k.rng;
+    const s = k.ramp(o.hex, { light: 0.4, sat: 0.8 });
+    const metal = k.ramp(0x5a5c58, { light: 0.5, sat: 0.4 });
+    const yel = k.ramp(0xa88a2a, { light: 0.35, sat: 0.8 });
+    for (let v = 0; v < 16; v++) {
+      const y = c.h - 1 - v;
+      for (let x = 0; x < c.w; x++) {
+        if (v < 7) {
+          // Trodden middle a step darker (feet keep to the centre of each 1 m), pits.
+          const mid = Math.abs(((x + 16) % 32) - 16) < 9;
+          c.set(x, y, s, v === 0 ? 2 : mid && hash2(x >> 1, v, 3) > 0.35 ? 2 : 3);
+        } else if (v < 10) {
+          // Nosing: grooves along the edge, the front lip lit; yellow paint mostly worn off.
+          const groove = v === 8;
+          const paint = !groove && v === 9 && hash2(x >> 2, v, 9) > 0.55;
+          c.set(x, y, paint ? yel : metal, groove ? 1 : v === 9 ? 4 : 3);
+        } else c.set(x, y, s, 3);
+      }
+    }
+    c.scatter(rng, 0, 9, c.w, 7, 14, 0, -1, { shapes: 3 });
+  }, { wrap: true });
+}

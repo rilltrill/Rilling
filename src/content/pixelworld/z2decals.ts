@@ -492,14 +492,15 @@ export function puddleDecal(atlas: PwAtlas, variant = 0): PwTile {
         c.set(x, y, w, edge ? 3 : y < 14 ? 2 : 1);
       }
     }
-    // Reflected sky glow (the lamps / the city) as broken horizontal glints, and ripple rings.
-    for (let i = 0; i < 10; i++) {
+    // Reflected sky glow (the lamps / the city) as broken horizontal glints, and ripple rings (outdoors).
+    const indoor = variant >= 2;
+    for (let i = 0; i < (indoor ? 4 : 10); i++) {
       const x = rng.int(10, 50);
       const y = rng.int(8, 32);
       const len = rng.int(2, 6);
-      for (let j = 0; j < len; j++) if (c.at(x + j, y)) c.set(x + j, y, sky, j % 3 === 0 ? 4 : 3, PWF.GLOW);
+      for (let j = 0; j < len; j++) if (c.at(x + j, y)) c.set(x + j, y, indoor ? w : sky, indoor ? 4 : j % 3 === 0 ? 4 : 3, indoor ? 0 : PWF.GLOW);
     }
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < (indoor ? 0 : 4); i++) {
       const cx = rng.int(14, 50);
       const cy = rng.int(10, 30);
       const r = rng.range(2, 4);
@@ -512,3 +513,59 @@ export function puddleDecal(atlas: PwAtlas, variant = 0): PwTile {
   });
 }
 
+
+/**
+ * Broken wall tiles (NEUTRAL: tinted to the wall's glaze; laid snapped to the
+ * tile grid): two or three tiles knocked off showing the mortar bed with its
+ * comb ridges, a cracked tile, chipped edges. 3 × 2 tiles of `tw` × `th`.
+ */
+export function brokenTilesDecal(atlas: PwAtlas, tw: number, th: number, variant = 0): PwTile {
+  const W = tw * 3;
+  const H = th * 2;
+  const t = atlas.tile(`z2broken|${tw}x${th}|${variant}`, W, H, (c, k) => {
+    const rng = k.rng;
+    const tile = k.ramp(STAIN_BASE, { light: 0.5, sat: 0.95 });
+    const bed = k.ramp(0x8a8478, { light: 0.35, sat: 0.6 });
+    const cells: [number, number, 'gone' | 'crack'][] = variant
+      ? [[0, 1, 'gone'], [1, 1, 'gone'], [1, 0, 'crack'], [2, 1, 'crack']]
+      : [[1, 0, 'gone'], [2, 0, 'gone'], [2, 1, 'gone'], [0, 0, 'crack']];
+    for (const [cx, cy, kind] of cells) {
+      const x0 = cx * tw;
+      const y0 = cy * th;
+      if (kind === 'gone') {
+        for (let y = y0; y < y0 + th; y++) for (let x = x0; x < x0 + tw; x++) c.set(x, y, bed, (y - y0) % 3 === 0 ? 2 : 3);
+        // Shadow under the upper edge of the hole (the tile above stands proud), chipped rim.
+        c.hline(x0, y0, tw, bed, 1);
+        c.vline(x0, y0, th, bed, 1);
+        for (let i = 0; i < 3; i++) c.set(x0 + rng.int(1, tw - 2), y0 + th - 1, tile, 4);
+      } else {
+        for (let y = y0 + 1; y < y0 + th; y++) for (let x = x0 + 1; x < x0 + tw; x++) c.set(x, y, tile, 3);
+        let x = x0 + 1;
+        let y = y0 + 1 + rng.int(0, th - 3);
+        for (let i = 0; i < tw + th; i++) {
+          if (x >= x0 + tw || y >= y0 + th || y <= y0) break;
+          c.set(x, y, tile, 1);
+          if (rng.chance(0.6)) x++;
+          else y += rng.chance(0.5) ? 1 : -1;
+        }
+      }
+    }
+  });
+  t.neutral = STAIN_BASE;
+  return t;
+}
+
+/** A dropped meal tray (top view): the tray, an upturned plate, spilled peas and a cup. 16 × 12. */
+export function trayDecal(atlas: PwAtlas): PwTile {
+  return atlas.tile('z2tray', 16, 12, (c, k) => {
+    const tray = k.ramp(0xc8b8a0, { light: 0.35 });
+    const plate = k.ramp(0xe8e8e0, { light: 0.25 });
+    const pea = k.ramp(0x6a8a2a, { light: 0.4 });
+    c.rect(0, 1, 13, 10, tray, 3);
+    c.hline(0, 1, 13, tray, 4);
+    c.ellipse(5, 6, 3.5, 3, plate, 3);
+    c.set(4, 5, plate, 5);
+    for (const [x, y] of [[10, 3], [11, 7], [13, 9], [14, 4], [9, 9]]) c.set(x, y, pea, 3);
+    c.ellipse(11, 4, 1.6, 1.6, k.ramp(0x9a6a3a, { light: 0.4 }), 3);
+  });
+}

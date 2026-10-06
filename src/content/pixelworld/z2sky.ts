@@ -48,8 +48,8 @@ function paintStorm(c: PwCanvas, k: PwKit, o: StormOpts) {
   const sky = k.ramp(o.top, { light: 0.25, dark: 0.6, shift: 0.6 });
   const fog = k.ramp(o.fog, { light: 0.3, dark: 0.6 });
   const glow = k.ramp(mixHex(o.fog, o.glow, 0.55), { light: 0.35, sat: 0.9 });
-  const cloud = k.ramp(mixHex(o.top, 0x3a4458, 0.55), { light: 0.35, sat: 0.8 });
-  const under = k.ramp(mixHex(o.fog, o.glow, 0.3), { light: 0.35, sat: 0.9 });
+  const cloud = k.ramp(mixHex(o.top, 0x4a5470, 0.6), { light: 0.4, sat: 0.8 });
+  const under = k.ramp(mixHex(o.fog, o.glow, 0.5), { light: 0.45, sat: 1 });
   // Base: background colour high up, fog colour toward the horizon, a warm band just above it (dithered seams).
   for (let y = 0; y < H; y++) {
     const e = el(y);
@@ -71,28 +71,46 @@ function paintStorm(c: PwCanvas, k: PwKit, o: StormOpts) {
       }
     }
   }
-  // Cloud bands: ragged-bottomed decks drifting across, lit (warm) undersides, dark tops into the sky.
-  const bands = 9;
-  for (let i = 0; i < bands; i++) {
-    const e0 = 3 + i * ((o.el1 - 6) / bands) + rng.range(-1, 1);
-    const yb = Math.round(((o.el1 - e0) / (o.el1 - o.el0)) * H);
-    const thick = rng.int(6, 14);
-    const seed = 90 + i;
-    const warm = e0 < 10;
+  // Cloud masses in layers, far (high, dark, cool) to near (low, lit warm from the fires below):
+  // a puffy top silhouette (two noise octaves), a dark body, a ragged underside with a lit rim.
+  const layers = [
+    { e: 21, thick: 20, cells: 6, warm: 0 },
+    { e: 15, thick: 24, cells: 8, warm: 0 },
+    { e: 10, thick: 22, cells: 10, warm: 1 },
+    { e: 5.5, thick: 18, cells: 14, warm: 2 },
+  ];
+  const deep = k.ramp(mixHex(o.top, 0x1a1e2a, 0.5), { light: 0.3, sat: 0.8 });
+  layers.forEach((L, li) => {
+    const base = Math.round(((o.el1 - L.e) / (o.el1 - o.el0)) * H);
+    const seed = 120 + li * 7;
     for (let x = 0; x < W; x++) {
-      const n = smooth(x, i * 7, W, 64, 10 + i * 2, seed);
-      if (n < 0.35) continue;
-      const bottom = yb + Math.round((n - 0.35) * 10 + Math.sin(x * 0.11 + i) * 1.5);
-      const top = bottom - Math.round(thick * (n - 0.2));
+      const n = smooth(x, 0, W, 8, L.cells, seed) * 0.75 + smooth(x, 0, W, 8, L.cells * 4, seed + 1) * 0.25;
+      if (n < 0.3) continue;
+      const top = base - Math.round(L.thick * (n - 0.15) * 1.2);
+      const bottom = base + Math.round((smooth(x, 3, W, 8, L.cells * 3, seed + 2) - 0.5) * 6);
       for (let y = Math.max(0, top); y <= Math.min(H - 1, bottom); y++) {
-        const d = bottom - y;
-        if (d === 0) c.set(x, y, warm ? under : cloud, 4);
-        else if (d === 1) c.set(x, y, warm ? under : cloud, 3);
-        else if (y === top && bayer(x, y) < 0.5) continue;
-        else c.set(x, y, cloud, d > thick * 0.6 ? 1.5 : 2, PWF.DITHER);
+        const fromBottom = bottom - y;
+        const fromTop = y - top;
+        let r = li < 2 ? deep : cloud;
+        let t = 2;
+        if (fromBottom === 0) {
+          r = L.warm ? under : cloud;
+          t = L.warm === 2 ? 4 : 3;
+        } else if (fromBottom === 1 && L.warm) {
+          r = under;
+          t = 3;
+        } else if (fromTop === 0) {
+          // The silhouette's top catches the sky light a little (cool rim), broken.
+          if (bayer(x, y) < 0.35) continue;
+          t = 3;
+        } else if (fromBottom < 5 && L.warm) {
+          r = under;
+          t = 2;
+        } else t = fromTop < 3 ? 2.5 : 2;
+        c.set(x, y, r, t, t % 1 ? PWF.DITHER : 0);
       }
     }
-  }
+  });
   // The moon smothered behind cloud: a pale smudge, a brighter rim on a cloud edge.
   const mx = 300;
   const my = Math.round(((o.el1 - (o.el1 - 6)) / (o.el1 - o.el0)) * H);

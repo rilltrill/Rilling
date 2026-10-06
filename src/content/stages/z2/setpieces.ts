@@ -22,6 +22,8 @@ function spawnDoor(world: World, slot: DoorSlot): Destructible {
   const sc = z2Scene(world)!;
   const model = doorPanel(slot.w, slot.h, slot.color);
   bake(model);
+  // PIXEL WORLD: the same triangles (same hit boxes), a painted door leaf projected through them.
+  sc.pw?.paintDoor(model, slot.w, slot.h, slot.color);
   model.rotation.y = slot.ry;
   const d = new Destructible(world, {
     model,
@@ -39,6 +41,7 @@ function spawnDoor(world: World, slot: DoorSlot): Destructible {
         p.position.set(-slot.w / 2, -slot.h / 2, 0);
         g.add(p);
       });
+      sc.pw?.paintDoor(slab, slot.w, slot.h, slot.color, -slot.w / 2, -slot.h / 2);
       slab.position.copy(slot.centre).setY(slot.centre.y + slot.h / 2);
       slab.rotation.y = slot.ry;
       sc.root.add(slab);

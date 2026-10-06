@@ -167,6 +167,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   const occluders: THREE.Object3D[] = [];
   // ART: PIXEL WORLD (z2/pixel.ts): painted walls, floors, ceilings, props, signs, sky — null otherwise.
   const pw = pixelWorld(world) ? new Z2PixelWorld() : null;
+  sc.pw = pw;
   const ctx: ZoneCtx = { rng, sc, dyn, occluders, pw };
   setBakeHook(pw ? (g, parent) => pw.convertInto(g, parent) : null);
 
@@ -242,7 +243,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   buildCocoon(ctx);
   if (pw) {
     setBakeHook(null);
-    pw.registerDynamic(sc.flickers, sc.vents.map((v) => v.grate));
+    pw.registerDynamic(sc.flickers, sc.vents.map((v) => v.grate), sc.doorSlots.map((d) => d.color));
     pw.finish(1, sc.flickers);
   }
   const vegPx = new THREE.Group();

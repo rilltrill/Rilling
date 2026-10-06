@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { World } from '../../../gameplay/World';
 import type { Destructible } from '../../../gameplay/Props';
 import type { Ambulance } from './props';
+import type { Z2PixelWorld } from './pixel';
 
 /** Fluorescent panel that buzzes / blinks / dies. */
 export interface Flicker {
@@ -153,6 +154,8 @@ export interface Z2Scene {
   /** Pulsing flesh cocoon in the atrium fountain (hidden when the boss emerges). */
   cocoon: THREE.Object3D | null;
   root: THREE.Group;
+  /** ART: PIXEL WORLD painter (re-paints the breakable doors in place when they spawn); null otherwise. */
+  pw?: Z2PixelWorld | null;
 }
 
 const SCENES = new WeakMap<World, Z2Scene>();
