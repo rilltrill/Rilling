@@ -75,6 +75,8 @@ export function pixelText(
   g.position.set(x, y, z);
   g.rotation.y = ry;
   parent.add(g);
+  // (PIXEL WORLD records: painted lettering replaces the block letters.)
+  g.userData.pwText = { str, px, color: (material as THREE.MeshBasicMaterial).color.getHex(), glow: (material as THREE.MeshBasicMaterial).isMeshBasicMaterial === true };
   const w = textWidth(str, px);
   const geo = Kit.box(px * 1.02, px * 1.02, depth);
   let cx = -w / 2 + px / 2;

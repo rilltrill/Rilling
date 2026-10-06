@@ -39,9 +39,9 @@ export function buildKitchen(ctx: Ctx): KitchenOut {
   wallZ(shellG, upper, R.z1, R.x0, R.x1, R.h, [{ c: exitX, w: 3.4, h: 2.8 }]);
   slab(shellG, mat(0xa4a8a6, 'tiles', 0.7, 0.55), R.x0, R.x1, R.h, R.h + 0.3, R.z1, R.z0);
   // Tiled lower walls.
-  for (const x of [R.x0 + 0.22, R.x1 - 0.22]) slab(stat, tile, x - 0.03, x + 0.03, 0, 2.0, R.z1, R.z0);
-  slab(stat, tile, R.x0, exitX - 1.9, 0, 2.0, R.z1 + 0.19, R.z1 + 0.24);
-  slab(stat, tile, exitX + 1.9, R.x1, 0, 2.0, R.z1 + 0.19, R.z1 + 0.24);
+  for (const x of [R.x0 + 0.22, R.x1 - 0.22]) slab(stat, tile, x - 0.03, x + 0.03, 0, 2.0, R.z1, R.z0).userData.pw = 'tiling';
+  slab(stat, tile, R.x0, exitX - 1.9, 0, 2.0, R.z1 + 0.19, R.z1 + 0.24).userData.pw = 'tiling';
+  slab(stat, tile, exitX + 1.9, R.x1, 0, 2.0, R.z1 + 0.19, R.z1 + 0.24).userData.pw = 'tiling';
   frameZ(stat, steelDark, R.z1 + 0.1, exitX, 3.4, 2.8);
   frameX(stat, steelDark, R.x1, freezerZ, 2.0, 2.6);
 
@@ -70,12 +70,12 @@ export function buildKitchen(ctx: Ctx): KitchenOut {
   for (const [xa, xb, z0, z1] of islands) {
     const x0 = Math.min(xa, xb);
     const x1 = Math.max(xa, xb);
-    slab(stat, steelDark, x0 + 0.05, x1 - 0.05, 0.1, 0.88, z1 + 0.05, z0 - 0.05);
+    slab(stat, steelDark, x0 + 0.05, x1 - 0.05, 0.1, 0.88, z1 + 0.05, z0 - 0.05).userData.pw = 'island';
     slab(stat, steel, x0, x1, 0.88, 0.95, z1, z0);
     slab(stat, black, x0 + 0.1, x1 - 0.1, 0, 0.1, z1 + 0.1, z0 - 0.1);
     for (let z = z0 - 1.1; z > z1 + 0.5; z -= 2.2) {
-      box(stat, steelDark, (x0 + x1) / 2 + (x0 < 0 ? 0.81 : -0.81), 0.5, z, 0.02, 0.62, 1.8);
-      box(stat, steel, (x0 + x1) / 2 + (x0 < 0 ? 0.83 : -0.83), 0.7, z, 0.03, 0.05, 0.5);
+      box(stat, steelDark, (x0 + x1) / 2 + (x0 < 0 ? 0.81 : -0.81), 0.5, z, 0.02, 0.62, 1.8).userData.pw = 'cabDoor';
+      box(stat, steel, (x0 + x1) / 2 + (x0 < 0 ? 0.83 : -0.83), 0.7, z, 0.03, 0.05, 0.5).userData.pw = 'cabDoor';
     }
     // Clutter on the counter tops.
     const cx = (x0 + x1) / 2;
@@ -115,7 +115,7 @@ export function buildKitchen(ctx: Ctx): KitchenOut {
     const x1 = Math.max(xa, xb);
     const runs: [number, number][] = s > 0 ? [[-162.4, freezerZ + 1.3], [freezerZ - 1.3, -193.6]] : [[-162.4, -193.6]];
     for (const [z0, z1] of runs) {
-      slab(stat, steelDark, x0, x1, 0, 0.9, z1, z0);
+      slab(stat, steelDark, x0, x1, 0, 0.9, z1, z0).userData.pw = 'counterBase';
       slab(stat, steel, x0 - 0.05, x1 + 0.05, 0.9, 0.96, z1, z0);
     }
     const front = s * 7.88;
@@ -130,19 +130,19 @@ export function buildKitchen(ctx: Ctx): KitchenOut {
             Kit.add(stat, Kit.cone(0.1, 0.12, 8), am.flame, (x0 + x1) / 2 + dx, 1.05, z + dz);
           }
         }
-        box(stat, black, front - s * 0.01, 0.48, z, 0.02, 0.62, 1.4);
-        box(stat, S.plain(0xd04020), front - s * 0.02, 0.85, z - 0.5, 0.02, 0.05, 0.05);
+        box(stat, black, front - s * 0.01, 0.48, z, 0.02, 0.62, 1.4).userData.pw = 'rangeFront';
+        box(stat, S.plain(0xd04020), front - s * 0.02, 0.85, z - 0.5, 0.02, 0.05, 0.05).userData.pw = 'knob';
       } else if (kind === 1) {
-        box(stat, black, front - s * 0.01, 0.5, z, 0.02, 0.55, 1.2);
-        box(stat, steel, front - s * 0.03, 0.82, z, 0.03, 0.04, 0.9);
+        box(stat, black, front - s * 0.01, 0.5, z, 0.02, 0.55, 1.2).userData.pw = 'ovenFront';
+        box(stat, steel, front - s * 0.03, 0.82, z, 0.03, 0.04, 0.9).userData.pw = 'knob';
       } else {
-        slab(stat, S.steel(0x7a8088), (x0 + x1) / 2 - 0.35, (x0 + x1) / 2 + 0.35, 0.8, 0.96, z - 0.5, z + 0.5);
+        slab(stat, S.steel(0x7a8088), (x0 + x1) / 2 - 0.35, (x0 + x1) / 2 + 0.35, 0.8, 0.96, z - 0.5, z + 0.5).userData.pw = 'sink';
         pipe(stat, steel, new THREE.Vector3(s * 8.8, 0.96, z), new THREE.Vector3(s * 8.8, 1.4, z), 0.025, 5);
         pipe(stat, steel, new THREE.Vector3(s * 8.8, 1.4, z), new THREE.Vector3(s * 8.5, 1.35, z), 0.02, 5);
       }
     }
     // Hood + duct + wall shelves with plates.
-    slab(stat, steel, Math.min(s * 9, s * 7.6), Math.max(s * 9, s * 7.6), 2.4, 3.1, -192, -164);
+    slab(stat, steel, Math.min(s * 9, s * 7.6), Math.max(s * 9, s * 7.6), 2.4, 3.1, -192, -164).userData.pw = 'hood';
     slab(stat, steelDark, Math.min(s * 8.9, s * 8.3), Math.max(s * 8.9, s * 8.3), 3.1, R.h, -180, -176);
     for (let z = -166; z > -192; z -= 4) {
       if (s > 0 && Math.abs(z - freezerZ) < 2) continue;
@@ -162,8 +162,8 @@ export function buildKitchen(ctx: Ctx): KitchenOut {
 
   // Floor mess: dropped pans, spilled sauce, a blood trail into the freezer.
   for (let i = 0; i < 5; i++) Kit.add(stat, Kit.cyl(0.22, 0.22, 0.03, 10), black, -2 + rnd() * 4, 0.015, -168 - rnd() * 20);
-  decal(stat, S.plain(0x8a2a10), -1.5, 0.006, -172, 1.2, 0.8, 0.5);
-  for (let i = 0; i < 6; i++) decal(stat, S.plain(0x3a0806), 3 + i * 0.95, 0.006, -181 - i * 0.4, 0.5, 0.3, rnd());
+  decal(stat, S.plain(0x8a2a10), -1.5, 0.006, -172, 1.2, 0.8, 0.5).userData.pw = 'sauce';
+  for (let i = 0; i < 6; i++) decal(stat, S.plain(0x3a0806), 3 + i * 0.95, 0.006, -181 - i * 0.4, 0.5, 0.3, rnd()).userData.pw = 'bloodSpot';
   // Trolley.
   slab(stat, steel, -2.6, -1.8, 0.7, 0.75, -189.5, -188.4);
   slab(stat, steel, -2.6, -1.8, 0.2, 0.25, -189.5, -188.4);
@@ -178,6 +178,7 @@ export function buildKitchen(ctx: Ctx): KitchenOut {
   sign(stat, 'SERVER ROOM', exitX, 3.35, R.z1 + 0.3, 0, 0.055, 0x2a2a2e, S.plain(0xd8e8ff));
   pixelText(stat, 'KITCHEN', S.plain(0x5a6068), R.x0 + 0.24, 3.4, -177, 0.12, Math.PI / 2, 0.03);
 
+  ctx.pw?.room('kitchen', { root, stat, shell: shellG, freezer });
   bake(stat);
   bake(shellG);
   root.add(stat, shellG);
@@ -225,22 +226,22 @@ export function buildServers(ctx: Ctx): ServersOut {
       const xb = s * 7.4;
       const x0 = Math.min(xa, xb);
       const x1 = Math.max(xa, xb);
-      slab(stat, rack, x0, x1, 0, 2.3, z - 0.45, z + 0.45);
+      slab(stat, rack, x0, x1, 0, 2.3, z - 0.45, z + 0.45).userData.pw = 'rack';
       const n = 5;
       for (let i = 0; i < n; i++) {
         const cx = x0 + (i + 0.5) * ((x1 - x0) / n);
         for (let k = 0; k < 6; k++) {
           const y = 0.3 + k * 0.33;
-          box(stat, unit, cx, y, z + 0.47, 0.86, 0.26, 0.04);
+          box(stat, unit, cx, y, z + 0.47, 0.86, 0.26, 0.04).userData.pw = 'unit';
           for (let l = 0; l < 4; l++) {
             if ((i * 7 + k * 3 + l + (s > 0 ? 1 : 0)) % 3 === 0) continue;
             box(stat, am.leds[(i + k + l) % 3], cx - 0.3 + l * 0.06, y + 0.06, z + 0.5, 0.03, 0.03, 0.02);
           }
-          box(stat, rack, cx + 0.2, y - 0.02, z + 0.5, 0.3, 0.12, 0.02);
+          box(stat, rack, cx + 0.2, y - 0.02, z + 0.5, 0.3, 0.12, 0.02).userData.pw = 'unit';
         }
       }
       // End panel facing the aisle with a status screen + label.
-      box(stat, S.metal(0x4a505a), xa, 1.15, z, 0.06, 2.3, 0.95);
+      box(stat, S.metal(0x4a505a), xa, 1.15, z, 0.06, 2.3, 0.95).userData.pw = 'rackEnd';
       box(stat, am.screen, xa - s * 0.04, 1.6, z, 0.02, 0.3, 0.5);
       pixelText(stat, `${s < 0 ? 'A' : 'B'}${rows.indexOf(z) + 1}`, glow(0xa0c8ff, 0.8), xa - s * 0.04, 2.05, z, 0.04, -s * Math.PI / 2, 0.02);
     }
@@ -292,6 +293,7 @@ export function buildServers(ctx: Ctx): ServersOut {
   });
   root.add(bulkhead);
 
+  ctx.pw?.room('servers', { root, stat, shell: shellG, bulkhead });
   bake(stat);
   bake(shellG);
   root.add(stat, shellG);

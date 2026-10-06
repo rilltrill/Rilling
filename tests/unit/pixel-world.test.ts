@@ -305,3 +305,65 @@ describe('PixelWorld stages (budgets, gameplay unchanged)', () => {
     expect({ ...b, errors: [] }).toEqual({ ...a, errors: [] });
   });
 });
+
+describe('d2 RESEARCH LABS in PIXEL WORLD (budgets, gameplay unchanged)', () => {
+  function buildD2(art: 'sprites' | 'pixel' | '3d') {
+    const w = new World(new THREE.PerspectiveCamera(60, 844 / 390, 0.05, 400), new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS }, 7);
+    w.art = art;
+    new StageRunner(w, stage('d2')).start();
+    w.scene.updateMatrixWorld(true);
+    return w;
+  }
+  const pwOf = (w: World) => {
+    const out: THREE.Mesh[] = [];
+    w.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && m.userData.pixelWorld) out.push(m);
+    });
+    return out;
+  };
+  const occOf = (w: World) =>
+    (w.env!.occluders ?? []).map((o) => {
+      o.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(o);
+      return [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].map((v) => Math.round(v * 1000));
+    });
+
+  it('painted scenery within budget; occluders, ground and the RNG identical to PIXEL CAST; shells still stop bullets', { timeout: 180_000 }, () => {
+    clearPwCache();
+    PW_STATS.clear();
+    const px = buildD2('pixel');
+    const meshes = pwOf(px);
+    expect(meshes.length).toBeGreaterThan(20);
+    const stats = [...PW_STATS.values()];
+    const bytes = stats.reduce((s, a) => s + a.bytes, 0);
+    console.log(`d2 PIXEL WORLD: ${[...PW_STATS].map(([n, a]) => `${n} ${a.w}×${a.h} ${(a.bytes / 1048576).toFixed(2)} MB ${a.ms.toFixed(0)} ms`).join(', ')}, ${meshes.length} PW meshes`);
+    expect(bytes).toBeLessThanOrEqual(24 * 1048576);
+    // PixelWorld meshes are scenery: never occluders, never raycast.
+    const occ = new Set(px.env!.occluders ?? []);
+    for (const m of meshes) expect(occ.has(m)).toBe(false);
+    const sp = buildD2('sprites');
+    expect(pwOf(sp)).toEqual([]);
+    // Same occluders in the same order and place (the classic shells, hidden but still there), same ground.
+    expect(occOf(px)).toEqual(occOf(sp));
+    for (const [x, z] of [[2.5, 0], [0, -60], [0, -100], [0, -140], [0, -180], [0, -205], [6, -250], [11, -285], [11, -310], [11, -355]]) {
+      expect(px.env!.groundAt?.(x, z) ?? 0).toBe(sp.env!.groundAt?.(x, z) ?? 0);
+    }
+    expect(px.rng.state).toBe(sp.rng.state);
+    // A ray down the lobby still stops on the (invisible) far wall shell.
+    const ray = new THREE.Raycaster(new THREE.Vector3(2.5, 1.6, -10), new THREE.Vector3(0, 0, -1), 0, 200);
+    const hits = (w: World) => ray.intersectObjects(w.env!.occluders ?? [], true).map((h) => Math.round(h.distance * 100));
+    expect(hits(px)).toEqual(hits(sp));
+    expect(hits(px).length).toBeGreaterThan(0);
+    px.dispose();
+    sp.dispose();
+    Kit.disposeAll();
+  });
+
+  it('d2 in PIXEL WORLD plays exactly like PIXEL CAST (stage simulator)', { timeout: 600_000 }, () => {
+    const a = simulateStage(stage('d2'), { art: 'sprites', maxTime: 240 });
+    const b = simulateStage(stage('d2'), { art: 'pixel', maxTime: 240 });
+    expect(b.errors).toEqual([]);
+    expect({ ...b, errors: [] }).toEqual({ ...a, errors: [] });
+  });
+});

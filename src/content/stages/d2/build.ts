@@ -82,22 +82,22 @@ export function wallX(g: THREE.Object3D, m: THREE.Material, x: number, z0: numbe
 
 /** Door frame (jambs + header) around an opening in a transverse wall. */
 export function frameZ(g: THREE.Object3D, m: THREE.Material, z: number, cx: number, w: number, h: number, t = 0.55) {
-  slab(g, m, cx - w / 2 - 0.22, cx - w / 2, 0, h, z - t / 2, z + t / 2);
-  slab(g, m, cx + w / 2, cx + w / 2 + 0.22, 0, h, z - t / 2, z + t / 2);
-  slab(g, m, cx - w / 2 - 0.22, cx + w / 2 + 0.22, h, h + 0.22, z - t / 2, z + t / 2);
+  slab(g, m, cx - w / 2 - 0.22, cx - w / 2, 0, h, z - t / 2, z + t / 2).userData.pw = 'jamb';
+  slab(g, m, cx + w / 2, cx + w / 2 + 0.22, 0, h, z - t / 2, z + t / 2).userData.pw = 'jamb';
+  slab(g, m, cx - w / 2 - 0.22, cx + w / 2 + 0.22, h, h + 0.22, z - t / 2, z + t / 2).userData.pw = 'header';
 }
 
 /** Door frame in a side wall at x around z = cz. */
 export function frameX(g: THREE.Object3D, m: THREE.Material, x: number, cz: number, w: number, h: number, t = 0.55) {
-  slab(g, m, x - t / 2, x + t / 2, 0, h, cz + w / 2, cz + w / 2 + 0.22);
-  slab(g, m, x - t / 2, x + t / 2, 0, h, cz - w / 2 - 0.22, cz - w / 2);
-  slab(g, m, x - t / 2, x + t / 2, h, h + 0.22, cz - w / 2 - 0.22, cz + w / 2 + 0.22);
+  slab(g, m, x - t / 2, x + t / 2, 0, h, cz + w / 2, cz + w / 2 + 0.22).userData.pw = 'jamb';
+  slab(g, m, x - t / 2, x + t / 2, 0, h, cz - w / 2 - 0.22, cz - w / 2).userData.pw = 'jamb';
+  slab(g, m, x - t / 2, x + t / 2, h, h + 0.22, cz - w / 2 - 0.22, cz + w / 2 + 0.22).userData.pw = 'header';
 }
 
 /** Recessed fluorescent ceiling panel (glow) with a metal rim. */
 export function lightPanel(g: THREE.Object3D, x: number, y: number, z: number, w = 1.2, d = 0.6, m: THREE.Material = glow(0xe8f0ff, 1.15), ry = 0) {
-  box(g, S.metal(0x5a6068), x, y + 0.02, z, w + 0.16, 0.08, d + 0.16, ry);
-  box(g, m, x, y - 0.03, z, w, 0.04, d, ry);
+  box(g, S.metal(0x5a6068), x, y + 0.02, z, w + 0.16, 0.08, d + 0.16, ry).userData.pw = 'troffer';
+  box(g, m, x, y - 0.03, z, w, 0.04, d, ry).userData.pw = 'tube';
 }
 
 /** Wall-mounted emergency beacon (red dome uses the shared, animated strobe material). */
@@ -106,15 +106,15 @@ export function beacon(g: THREE.Object3D, strobe: THREE.Material, x: number, y: 
   p.position.set(x, y, z);
   p.rotation.y = ry;
   g.add(p);
-  box(p, S.metal(0x3a3a40), 0, 0, 0.06, 0.26, 0.16, 0.12);
+  box(p, S.metal(0x3a3a40), 0, 0, 0.06, 0.26, 0.16, 0.12).userData.pw = 'beacon';
   Kit.add(p, Kit.sphere(0.13, 8, 5), strobe, 0, 0.08, 0.12, 0, 0, 0, 1, 0.9, 1);
 }
 
 /** Ceiling air vent (dark slatted grate). */
 export function vent(g: THREE.Object3D, x: number, y: number, z: number, w = 0.9, d = 0.9) {
-  box(g, S.metal(0x8a8e94), x, y, z, w + 0.12, 0.06, d + 0.12);
-  box(g, S.plain(0x0c0d10), x, y - 0.02, z, w, 0.04, d);
-  for (let i = 0; i < 5; i++) box(g, S.metal(0x6a6e74), x, y - 0.05, z - d / 2 + (i + 0.5) * (d / 5), w, 0.04, 0.05);
+  box(g, S.metal(0x8a8e94), x, y, z, w + 0.12, 0.06, d + 0.12).userData.pw = 'ventFrame';
+  box(g, S.plain(0x0c0d10), x, y - 0.02, z, w, 0.04, d).userData.pw = 'vent';
+  for (let i = 0; i < 5; i++) box(g, S.metal(0x6a6e74), x, y - 0.05, z - d / 2 + (i + 0.5) * (d / 5), w, 0.04, 0.05).userData.pw = 'ventSlat';
 }
 
 /** Pixel-text sign on a backing board. Text faces +Z rotated by ry. */
@@ -136,7 +136,10 @@ export function sign(
   p.position.set(x, y, z);
   p.rotation.y = ry;
   g.add(p);
-  box(p, S.plain(board), 0, 0, 0, w, h, 0.06);
+  // (PIXEL WORLD records: the painted sign replaces the board's face and the block letters.)
+  p.userData.pw = 'sign';
+  p.userData.pwSign = { text, px, board, ink: (ink as THREE.MeshBasicMaterial).color.getHex(), glow: (ink as THREE.MeshBasicMaterial).isMeshBasicMaterial === true, w, h };
+  box(p, S.plain(board), 0, 0, 0, w, h, 0.06).userData.pw = 'signBoard';
   pixelText(p, text, ink, 0, 0, 0.04, px, 0, px * 0.5);
   return p;
 }
@@ -153,15 +156,21 @@ export function pipe(g: THREE.Object3D, m: THREE.Material, a: THREE.Vector3, b: 
 
 /** Metal railing from (x0, z0) to (x1, z1) at base height y. */
 export function railing(g: THREE.Object3D, x0: number, z0: number, x1: number, z1: number, y: number, m: THREE.Material = S.metal(0x7a7e86)) {
+  // (PIXEL WORLD records: a painted cut-out railing replaces the bars along this line.)
+  const rec = { x0, z0, x1, z1, y, hex: (m as THREE.MeshLambertMaterial).color.getHex() };
+  const tag = (mesh: THREE.Mesh) => {
+    mesh.userData.pw = 'railing';
+    mesh.userData.pwRail = rec;
+  };
   const a = new THREE.Vector3(x0, y + 1.0, z0);
   const b = new THREE.Vector3(x1, y + 1.0, z1);
-  pipe(g, m, a, b, 0.04, 6);
-  pipe(g, m, a.clone().setY(y + 0.5), b.clone().setY(y + 0.5), 0.025, 5);
+  tag(pipe(g, m, a, b, 0.04, 6));
+  tag(pipe(g, m, a.clone().setY(y + 0.5), b.clone().setY(y + 0.5), 0.025, 5));
   const len = a.distanceTo(b);
   const n = Math.max(1, Math.round(len / 1.6));
   for (let i = 0; i <= n; i++) {
     const t = i / n;
-    box(g, m, x0 + (x1 - x0) * t, y + 0.5, z0 + (z1 - z0) * t, 0.06, 1.0, 0.06);
+    tag(box(g, m, x0 + (x1 - x0) * t, y + 0.5, z0 + (z1 - z0) * t, 0.06, 1.0, 0.06));
   }
 }
 

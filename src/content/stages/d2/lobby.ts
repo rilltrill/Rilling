@@ -51,13 +51,15 @@ export function buildLobby(ctx: Ctx): LobbyOut {
   floorQuad(stat, floor, R.x0, R.x1, R.z1, R.z0, 0);
   // Park emblem inlaid in the same tiles (a mosaic, one draw call with the floor).
   const em = new THREE.Vector3(1.4, 0, -19);
-  Kit.add(stat, Kit.cyl(3.5, 3.5, 0.02, 28), mat(0xd08420, 'tiles', 0.6, 0.85), em.x, 0.008, em.z);
-  Kit.add(stat, Kit.cyl(3.1, 3.1, 0.02, 28), mat(0x24563a, 'tiles', 0.6, 0.85), em.x, 0.014, em.z);
+  // (PIXEL WORLD: `userData.pw` tags name what a painted module replaces.)
+  const tagE = (m: THREE.Mesh) => (m.userData.pw = 'emblem');
+  tagE(Kit.add(stat, Kit.cyl(3.5, 3.5, 0.02, 28), mat(0xd08420, 'tiles', 0.6, 0.85), em.x, 0.008, em.z));
+  tagE(Kit.add(stat, Kit.cyl(3.1, 3.1, 0.02, 28), mat(0x24563a, 'tiles', 0.6, 0.85), em.x, 0.014, em.z));
   const print = mat(0xe0bc68, 'tiles', 0.6, 0.85);
-  Kit.add(stat, Kit.cyl(0.7, 0.8, 0.02, 10), print, em.x, 0.02, em.z + 0.6);
+  tagE(Kit.add(stat, Kit.cyl(0.7, 0.8, 0.02, 10), print, em.x, 0.02, em.z + 0.6));
   for (const a of [-0.45, 0, 0.45]) {
-    Kit.add(stat, Kit.box(0.34, 0.02, 1.5), print, em.x + Math.sin(a) * 1.1, 0.02, em.z - 0.4 - Math.cos(a) * 0.7, 0, a, 0);
-    Kit.add(stat, Kit.cone(0.17, 0.5, 4), print, em.x + Math.sin(a) * 1.85, 0.02, em.z - 0.4 - Math.cos(a) * 1.45, -Math.PI / 2, 0, -a);
+    tagE(Kit.add(stat, Kit.box(0.34, 0.02, 1.5), print, em.x + Math.sin(a) * 1.1, 0.02, em.z - 0.4 - Math.cos(a) * 0.7, 0, a, 0));
+    tagE(Kit.add(stat, Kit.cone(0.17, 0.5, 4), print, em.x + Math.sin(a) * 1.85, 0.02, em.z - 0.4 - Math.cos(a) * 1.45, -Math.PI / 2, 0, -a));
   }
 
   // Walls (shell = bullet stoppers).
@@ -74,26 +76,26 @@ export function buildLobby(ctx: Ctx): LobbyOut {
 
   // Wainscot + cornice.
   for (const x of [R.x0 + 0.25, R.x1 - 0.25]) {
-    slab(stat, wood, x - 0.06, x + 0.06, 0, 1.3, R.z1, R.z0);
-    slab(stat, trim, x - 0.09, x + 0.09, 1.28, 1.4, R.z1, R.z0);
+    slab(stat, wood, x - 0.06, x + 0.06, 0, 1.3, R.z1, R.z0).userData.pw = 'wainscot';
+    slab(stat, trim, x - 0.09, x + 0.09, 1.28, 1.4, R.z1, R.z0).userData.pw = 'dado';
   }
-  slab(stat, wood, R.x0, shopX - 2.0, 0, 1.3, R.z1 + 0.2, R.z1 + 0.32);
-  slab(stat, wood, shopX + 2.0, R.x1, 0, 1.3, R.z1 + 0.2, R.z1 + 0.32);
-  for (const z of [R.z1 + 0.25]) slab(stat, trim, R.x0, R.x1, R.h - 0.5, R.h - 0.3, z - 0.1, z + 0.1);
+  slab(stat, wood, R.x0, shopX - 2.0, 0, 1.3, R.z1 + 0.2, R.z1 + 0.32).userData.pw = 'wainscot';
+  slab(stat, wood, shopX + 2.0, R.x1, 0, 1.3, R.z1 + 0.2, R.z1 + 0.32).userData.pw = 'wainscot';
+  for (const z of [R.z1 + 0.25]) slab(stat, trim, R.x0, R.x1, R.h - 0.5, R.h - 0.3, z - 0.1, z + 0.1).userData.pw = 'cornice';
   frameZ(stat, trim, R.z1 + 0.1, shopX, 3.6, doorH);
 
   // Mural on the far wall: jungle ridge + volcano silhouette.
   const muralZ = R.z1 + 0.24;
-  slab(stat, S.stucco(0x2e4860), -11, 11, 5.6, 12.5, muralZ - 0.02, muralZ + 0.02);
+  slab(stat, S.stucco(0x2e4860), -11, 11, 5.6, 12.5, muralZ - 0.02, muralZ + 0.02).userData.pw = 'mural';
   const ridge = S.stucco(0x1c3424);
   for (let i = 0; i < 9; i++) {
     const x = -10 + i * 2.5;
     const h = 1.2 + Math.abs(Math.sin(i * 1.7)) * 1.6;
-    Kit.add(stat, Kit.cone(1.9, h, 3), ridge, x, 5.6 + h / 2, muralZ + 0.05, 0, 0, 0, 1, 1, 0.05);
+    Kit.add(stat, Kit.cone(1.9, h, 3), ridge, x, 5.6 + h / 2, muralZ + 0.05, 0, 0, 0, 1, 1, 0.05).userData.pw = 'muralBit';
   }
-  Kit.add(stat, Kit.cone(4.2, 4.6, 4), S.stucco(0x3c3640), 3.5, 5.6 + 2.3, muralZ + 0.04, 0, Math.PI / 4, 0, 1, 1, 0.04);
-  Kit.add(stat, Kit.box(1.2, 0.4, 0.05), glow(0xff6a20, 0.8), 3.5, 10.0, muralZ + 0.09);
-  Kit.add(stat, Kit.sphere(0.9, 12, 6), glow(0xf0e0b0, 0.7), -6.5, 9.4, muralZ + 0.05, 0, 0, 0, 1, 1, 0.05);
+  Kit.add(stat, Kit.cone(4.2, 4.6, 4), S.stucco(0x3c3640), 3.5, 5.6 + 2.3, muralZ + 0.04, 0, Math.PI / 4, 0, 1, 1, 0.04).userData.pw = 'muralBit';
+  Kit.add(stat, Kit.box(1.2, 0.4, 0.05), glow(0xff6a20, 0.8), 3.5, 10.0, muralZ + 0.09).userData.pw = 'muralBit';
+  Kit.add(stat, Kit.sphere(0.9, 12, 6), glow(0xf0e0b0, 0.7), -6.5, 9.4, muralZ + 0.05, 0, 0, 0, 1, 1, 0.05).userData.pw = 'muralBit';
 
   // Gift shop sign over the doorway.
   sign(stat, 'GIFT SHOP', shopX, doorH + 0.75, R.z1 + 0.32, 0, 0.1, 0x1c3a24, glow(0xffc840, 0.95));
@@ -102,34 +104,34 @@ export function buildLobby(ctx: Ctx): LobbyOut {
   for (const side of [-1, 1]) {
     const xe = side * 11;
     const xw = side * 15;
-    slab(stat, stone, Math.min(xe, xw), Math.max(xe, xw), 4.8, 5.2, -52, 6);
-    slab(stat, wood, xe - 0.12, xe + 0.12, 4.55, 5.35, -52, 6);
+    slab(stat, stone, Math.min(xe, xw), Math.max(xe, xw), 4.8, 5.2, -52, 6).userData.pw = 'balcony';
+    slab(stat, wood, xe - 0.12, xe + 0.12, 4.55, 5.35, -52, 6).userData.pw = 'fascia';
     slab(stat, glow(0xdde8ff, 0.9), xe - side * 0.35 - 0.06, xe - side * 0.35 + 0.06, 4.74, 4.78, -51, 5);
     railing(stat, xe - side * 0.05, 6, xe - side * 0.05, -52, 5.2);
     for (const z of [2, -10, -22, -34, -46]) {
-      cyl(stat, stone, xe, R.h / 2, z, 0.48, R.h, 12);
-      box(stat, trim, xe, 0.2, z, 1.25, 0.4, 1.25);
-      box(stat, stone, xe, R.h - 0.3, z, 1.3, 0.6, 1.3);
+      cyl(stat, stone, xe, R.h / 2, z, 0.48, R.h, 12).userData.pw = 'pillar';
+      box(stat, trim, xe, 0.2, z, 1.25, 0.4, 1.25).userData.pw = 'pillarBase';
+      box(stat, stone, xe, R.h - 0.3, z, 1.3, 0.6, 1.3).userData.pw = 'pillarCap';
       beacon(stat, am.strobe, xe - side * 0.5, 3.5, z, side > 0 ? -Math.PI / 2 : Math.PI / 2);
       // Hanging fabric banners on the pillars.
       const col = (z / 12) % 2 === 0 ? 0xd06a1c : 0x2a7040;
-      box(stat, S.cloth(col), xe - side * 0.52, 8.2, z, 0.04, 3.4, 1.0);
-      box(stat, S.cloth(0xe8d8a0), xe - side * 0.54, 8.4, z, 0.03, 0.7, 0.6);
+      box(stat, S.cloth(col), xe - side * 0.52, 8.2, z, 0.04, 3.4, 1.0).userData.pw = 'pillarBanner';
+      box(stat, S.cloth(0xe8d8a0), xe - side * 0.54, 8.4, z, 0.03, 0.7, 0.6).userData.pw = 'pillarBanner';
     }
     // Dark gallery doorways upstairs.
-    for (const z of [-4, -16, -28, -40]) slab(stat, S.plain(0x0c0c10), xw - side * 0.22, xw - side * 0.18, 5.2, 7.6, z - 0.9, z + 0.9);
+    for (const z of [-4, -16, -28, -40]) slab(stat, S.plain(0x0c0c10), xw - side * 0.22, xw - side * 0.18, 5.2, 7.6, z - 0.9, z + 0.9).userData.pw = 'gallery';
   }
 
   // Skylight: glass, steel grid, a moonlit sky and a soft moon shaft.
   const skyGlass = glassMat(0x8ab0d0, 0.12);
   slab(stat, skyGlass, sky.x0, sky.x1, R.h + 0.3, R.h + 0.34, sky.z1, sky.z0);
-  for (let x = sky.x0; x <= sky.x1 + 0.01; x += 3) slab(stat, metal, x - 0.08, x + 0.08, R.h + 0.1, R.h + 0.4, sky.z1, sky.z0);
-  for (let z = sky.z1; z <= sky.z0 + 0.01; z += 4.25) slab(stat, metal, sky.x0, sky.x1, R.h + 0.1, R.h + 0.4, z - 0.08, z + 0.08);
-  slab(stat, glow(0x0e1a34, 1), sky.x0 - 2, sky.x1 + 2, R.h + 2.4, R.h + 2.5, sky.z1 - 2, sky.z0 + 2);
+  for (let x = sky.x0; x <= sky.x1 + 0.01; x += 3) slab(stat, metal, x - 0.08, x + 0.08, R.h + 0.1, R.h + 0.4, sky.z1, sky.z0).userData.pw = 'skyGrid';
+  for (let z = sky.z1; z <= sky.z0 + 0.01; z += 4.25) slab(stat, metal, sky.x0, sky.x1, R.h + 0.1, R.h + 0.4, z - 0.08, z + 0.08).userData.pw = 'skyGrid';
+  slab(stat, glow(0x0e1a34, 1), sky.x0 - 2, sky.x1 + 2, R.h + 2.4, R.h + 2.5, sky.z1 - 2, sky.z0 + 2).userData.pw = 'sky';
   for (let i = 0; i < 26; i++) {
     const x = sky.x0 + rnd() * (sky.x1 - sky.x0);
     const z = sky.z1 + rnd() * (sky.z0 - sky.z1);
-    box(stat, glow(0xc8d8ff, 0.6 + rnd() * 0.6), x, R.h + 2.35, z, 0.07, 0.02, 0.07);
+    box(stat, glow(0xc8d8ff, 0.6 + rnd() * 0.6), x, R.h + 2.35, z, 0.07, 0.02, 0.07).userData.pw = 'sky';
   }
   const shaft = Kit.add(root, Kit.box(9, 16, 5), Kit.glow(0x7a9ad8, 1, true, 0.05), -4.2, 7.5, -27, 0, 0, -0.18);
   shaft.renderOrder = 3;
@@ -149,11 +151,11 @@ export function buildLobby(ctx: Ctx): LobbyOut {
 
   // Reception desk (right).
   const desk = { x: 6.8, z0: -11, z1: -19 };
-  slab(stat, wood, desk.x, desk.x + 0.7, 0, 1.1, desk.z1, desk.z0);
-  slab(stat, terrazzo, desk.x - 0.1, desk.x + 0.9, 1.1, 1.18, desk.z1 - 0.1, desk.z0 + 0.1);
-  slab(stat, wood, desk.x, desk.x + 3.2, 0, 1.1, desk.z1 - 0.7, desk.z1);
-  slab(stat, terrazzo, desk.x - 0.1, desk.x + 3.3, 1.1, 1.18, desk.z1 - 0.8, desk.z1 + 0.1);
-  box(stat, S.plain(0xc87a1a), desk.x - 0.02, 0.62, (desk.z0 + desk.z1) / 2, 0.04, 0.5, 5.4);
+  slab(stat, wood, desk.x, desk.x + 0.7, 0, 1.1, desk.z1, desk.z0).userData.pw = 'desk';
+  slab(stat, terrazzo, desk.x - 0.1, desk.x + 0.9, 1.1, 1.18, desk.z1 - 0.1, desk.z0 + 0.1).userData.pw = 'deskTop';
+  slab(stat, wood, desk.x, desk.x + 3.2, 0, 1.1, desk.z1 - 0.7, desk.z1).userData.pw = 'deskReturn';
+  slab(stat, terrazzo, desk.x - 0.1, desk.x + 3.3, 1.1, 1.18, desk.z1 - 0.8, desk.z1 + 0.1).userData.pw = 'deskTop';
+  box(stat, S.plain(0xc87a1a), desk.x - 0.02, 0.62, (desk.z0 + desk.z1) / 2, 0.04, 0.5, 5.4).userData.pw = 'deskSign';
   pixelText(stat, 'INFORMATION', S.plain(0xf0e0b0), desk.x - 0.05, 0.62, (desk.z0 + desk.z1) / 2, 0.055, -Math.PI / 2, 0.03);
   for (const z of [-13, -16.5]) {
     box(stat, S.plain(0x1a1a1e), desk.x + 0.45, 1.42, z, 0.08, 0.42, 0.62, 0.3);
@@ -161,12 +163,12 @@ export function buildLobby(ctx: Ctx): LobbyOut {
     box(stat, S.plain(0x1a1a1e), desk.x + 0.5, 1.2, z, 0.2, 0.04, 0.3);
   }
   // Papers and a knocked-over chair.
-  for (let i = 0; i < 12; i++) decal(stat, S.plain(0xe8e4dc), 4 + rnd() * 4, 0.006, -12 - rnd() * 12, 0.22, 0.3, rnd() * 3);
+  for (let i = 0; i < 12; i++) decal(stat, S.plain(0xe8e4dc), 4 + rnd() * 4, 0.006, -12 - rnd() * 12, 0.22, 0.3, rnd() * 3).userData.pw = 'paper';
   box(stat, S.metal(0x3a3a44), 5.6, 0.25, -21, 0.5, 0.08, 0.5, 0.4, 1.2);
   box(stat, S.metal(0x3a3a44), 5.9, 0.45, -21.3, 0.5, 0.5, 0.08, 0.4, 1.2);
   // Drag marks… something happened at the desk.
-  decal(stat, S.plain(0x3a0806), 6.2, 0.006, -20.4, 0.9, 2.2, 0.35);
-  for (let i = 0; i < 3; i++) box(stat, S.plain(0x1e1c1a), 7.6, 1.6 + i * 0.12, -20.2 - i * 0.08, 0.03, 0.04, 1.1, 0, 0, 0.5);
+  decal(stat, S.plain(0x3a0806), 6.2, 0.006, -20.4, 0.9, 2.2, 0.35).userData.pw = 'bloodDrag';
+  for (let i = 0; i < 3; i++) box(stat, S.plain(0x1e1c1a), 7.6, 1.6 + i * 0.12, -20.2 - i * 0.08, 0.03, 0.04, 1.1, 0, 0, 0.5).userData.pw = 'smear';
 
   // Info kiosk + directory board.
   box(stat, S.metal(0x3a4048), 6.0, 0.8, -31, 0.6, 1.6, 0.5);
@@ -179,6 +181,8 @@ export function buildLobby(ctx: Ctx): LobbyOut {
     const p = new THREE.Group();
     p.position.set(x, 2.6, z);
     p.rotation.y = ry;
+    p.userData.pw = 'poster';
+    p.userData.pwPoster = col;
     stat.add(p);
     box(p, trim, 0, 0, 0, 1.6, 2.1, 0.06);
     box(p, S.plain(col), 0, 0, 0.04, 1.4, 1.9, 0.02);
@@ -251,10 +255,11 @@ export function buildLobby(ctx: Ctx): LobbyOut {
   const staffDoor = new BurstDoor({ hinge: new THREE.Vector3(R.x1 - 0.05, 0, -36.1), w: 1.8, h: 2.45, yaw: Math.PI / 2, swing: 1, kind: 'swing', style: 'wood' });
   root.add(staffDoor.root);
   // Dark corridor behind it.
-  slab(stat, S.plain(0x0a0a0c), R.x1 + 0.2, R.x1 + 3, 0, 2.6, -39, -35);
-  slab(stat, S.plain(0x0a0a0c), R.x1 + 0.2, R.x1 + 3, 2.6, 2.7, -39, -35);
+  slab(stat, S.plain(0x0a0a0c), R.x1 + 0.2, R.x1 + 3, 0, 2.6, -39, -35).userData.pw = 'void';
+  slab(stat, S.plain(0x0a0a0c), R.x1 + 0.2, R.x1 + 3, 2.6, 2.7, -39, -35).userData.pw = 'void';
   sign(stat, 'STAFF ONLY', R.x1 - 0.25, 2.85, -37, -Math.PI / 2, 0.05, 0x5a1010, S.plain(0xf0f0f0));
 
+  ctx.pw?.room('lobby', { root, stat, shell: shellG, skeleton, banner, staffDoor });
   bake(stat);
   bake(shellG);
   bake(veg);
@@ -291,7 +296,7 @@ export function buildShop(ctx: Ctx): ShopOut {
   slab(shellG, mat(0xb4b0a4, 'tiles', 0.7, 0.7), R.x0, R.x1, R.h, R.h + 0.3, R.z1, R.z0);
   // Shop-side skin of the shared lobby wall.
   wallZ(stat, paint, R.z0 - 0.25, R.x0, R.x1, R.h, [{ c: railXAtZ(R.z0), w: 3.6, h: 3.3 }], 0.08);
-  for (const x of [R.x0 + 0.22, R.x1 - 0.22]) slab(stat, S.planks(0x2a5a3a), x - 0.04, x + 0.04, 2.6, 2.9, R.z1, R.z0);
+  for (const x of [R.x0 + 0.22, R.x1 - 0.22]) slab(stat, S.planks(0x2a5a3a), x - 0.04, x + 0.04, 2.6, 2.9, R.z1, R.z0).userData.pw = 'trim';
 
   // Ceiling panels (one flickering) + vents the compys use.
   for (const z of [-60, -66, -72, -78]) {
@@ -309,6 +314,8 @@ export function buildShop(ctx: Ctx): ShopOut {
     const t = new THREE.Group();
     t.position.set(x, y, z);
     t.rotation.y = ry;
+    t.userData.pw = 'toy';
+    t.userData.pwToy = { hex: c.color.getHex(), s };
     stat.add(t);
     Kit.add(t, Kit.sphere(0.13 * s, 7, 5), c, 0, 0.12 * s, 0, 0, 0, 0, 1, 0.9, 1.25);
     Kit.add(t, Kit.sphere(0.09 * s, 7, 5), c, 0, 0.26 * s, 0.12 * s);
@@ -321,13 +328,13 @@ export function buildShop(ctx: Ctx): ShopOut {
     const x = side * 7.4;
     const runs: [number, number][] = side < 0 ? [[-57.5, -72.8], [-75.8, -79.5]] : [[-57.5, -79.5]];
     for (const [z0, z1] of runs) {
-      slab(stat, shelfWood, x - 0.4, x + 0.4, 0, 2.4, z1, z0).scale.set(1, 1, 1);
+      slab(stat, shelfWood, x - 0.4, x + 0.4, 0, 2.4, z1, z0).userData.pw = 'shelf';
       for (let k = 0; k < 4; k++) {
         const y = 0.35 + k * 0.55;
-        slab(stat, S.planks(0xc8a878), x - side * 0.42, x - side * 0.4, y - 0.02, y + 0.03, z1, z0);
+        slab(stat, S.planks(0xc8a878), x - side * 0.42, x - side * 0.4, y - 0.02, y + 0.03, z1, z0).userData.pw = 'shelfBoard';
         for (let z = z0 - 0.35; z > z1 + 0.2; z -= 0.42 + rnd() * 0.3) {
           if (rnd() < 0.55) toy(x - side * 0.25, y + 0.03, z, 1 + rnd() * 0.5, side > 0 ? -Math.PI / 2 : Math.PI / 2);
-          else box(stat, S.cloth(toyCols[Math.floor(rnd() * toyCols.length)]), x - side * 0.25, y + 0.03 + 0.17, z, 0.3, 0.34, 0.24);
+          else box(stat, S.cloth(toyCols[Math.floor(rnd() * toyCols.length)]), x - side * 0.25, y + 0.03 + 0.17, z, 0.3, 0.34, 0.24).userData.pw = 'shelfBox';
         }
       }
     }
@@ -340,12 +347,12 @@ export function buildShop(ctx: Ctx): ShopOut {
     ]) {
       const xa = side * 2.9;
       const xb = side * 4.6;
-      slab(stat, shelfWood, Math.min(xa, xb), Math.max(xa, xb), 0, 0.82, z1, z0);
-      slab(stat, S.cloth(0xe8dcc0), Math.min(xa, xb) - 0.05, Math.max(xa, xb) + 0.05, 0.82, 0.86, z1 - 0.05, z0 + 0.05);
+      slab(stat, shelfWood, Math.min(xa, xb), Math.max(xa, xb), 0, 0.82, z1, z0).userData.pw = 'table';
+      slab(stat, S.cloth(0xe8dcc0), Math.min(xa, xb) - 0.05, Math.max(xa, xb) + 0.05, 0.82, 0.86, z1 - 0.05, z0 + 0.05).userData.pw = 'tablecloth';
       for (let i = 0; i < 5; i++) {
         const z = z0 - 0.5 - i * 0.75;
         if (i % 2) toy((xa + xb) / 2 + rnd() * 0.4 - 0.2, 0.86, z, 1.4, rnd() * 6);
-        else for (let k = 0; k < 3; k++) box(stat, S.cloth(toyCols[(i + k) % toyCols.length]), (xa + xb) / 2, 0.9 + k * 0.08, z, 0.55, 0.07, 0.45);
+        else for (let k = 0; k < 3; k++) box(stat, S.cloth(toyCols[(i + k) % toyCols.length]), (xa + xb) / 2, 0.9 + k * 0.08, z, 0.55, 0.07, 0.45).userData.pw = 'shirts';
       }
     }
   }
@@ -353,19 +360,20 @@ export function buildShop(ctx: Ctx): ShopOut {
   for (let i = 0; i < 6; i++) toy((i % 2 ? 1 : -1) * (5.2 + rnd() * 1.0), 0, -60 - rnd() * 16, 1.2, rnd() * 6);
 
   // Register counter (a scientist hides behind it).
-  slab(stat, shelfWood, 2.6, 7.0, 0, 1.0, -75.3, -74.3);
-  slab(stat, S.terrazzo(0xd8d0c0), 2.5, 7.1, 1.0, 1.06, -75.4, -74.2);
+  slab(stat, shelfWood, 2.6, 7.0, 0, 1.0, -75.3, -74.3).userData.pw = 'counter';
+  slab(stat, S.terrazzo(0xd8d0c0), 2.5, 7.1, 1.0, 1.06, -75.4, -74.2).userData.pw = 'counterTop';
   box(stat, S.metal(0x3a3a44), 4.2, 1.18, -74.8, 0.45, 0.24, 0.4);
   box(stat, am.screen, 4.2, 1.42, -74.68, 0.32, 0.2, 0.02, -0.2);
   box(stat, S.cloth(0xc04020), 5.6, 1.2, -74.7, 0.5, 0.28, 0.3);
   // Back shelf behind the counter.
-  slab(stat, shelfWood, 2.6, 6.8, 0, 2.2, -79.6, -79.0);
+  slab(stat, shelfWood, 2.6, 6.8, 0, 2.2, -79.6, -79.0).userData.pw = 'backShelf';
 
   // Giant plush T-rex mascot (left-back corner).
   {
     const t = new THREE.Group();
     t.position.set(-5.0, 0, -77.4);
     t.rotation.y = 0.5;
+    t.userData.pw = 'mascot';
     stat.add(t);
     const g = S.cloth(0x4aa03a);
     const belly = S.cloth(0xe8d890);
@@ -384,20 +392,21 @@ export function buildShop(ctx: Ctx): ShopOut {
 
   // Spinner rack + exit framing.
   cyl(stat, metal, -2.4, 0.9, -78.2, 0.04, 1.8, 6);
-  for (let k = 0; k < 4; k++) for (let a = 0; a < 4; a++) box(stat, S.cloth(toyCols[(k + a) % 6]), -2.4 + Math.sin(a * 1.57) * 0.22, 0.6 + k * 0.32, -78.2 + Math.cos(a * 1.57) * 0.22, 0.2, 0.28, 0.02, a * 1.57);
+  for (let k = 0; k < 4; k++) for (let a = 0; a < 4; a++) box(stat, S.cloth(toyCols[(k + a) % 6]), -2.4 + Math.sin(a * 1.57) * 0.22, 0.6 + k * 0.32, -78.2 + Math.cos(a * 1.57) * 0.22, 0.2, 0.28, 0.02, a * 1.57).userData.pw = 'postcard';
   frameZ(stat, metal, R.z1 + 0.1, exitX, 3.6, 3.1);
   sign(stat, 'BOTANICAL ATRIUM', exitX, 3.6, R.z1 + 0.3, 0, 0.055, 0x1c3a24, S.plain(0xe8f0d0));
   beacon(stat, am.strobe, exitX - 2.6, 3.2, R.z1 + 0.25, 0);
   beacon(stat, am.strobe, exitX + 2.6, 3.2, R.z1 + 0.25, 0);
 
   // Stockroom behind the burst door.
-  slab(stat, S.plain(0x16161a), -11.5, R.x0 - 0.2, 0, 2.6, -77.5, -71.5);
-  slab(stat, S.plain(0x0e0e10), -11.5, R.x0 - 0.2, 2.5, 2.6, -77.5, -71.5);
-  for (let i = 0; i < 4; i++) box(stat, S.planks(0x5a4a34), -10.2 + (i % 2) * 0.7, 0.3 + Math.floor(i / 2) * 0.6, -76.5, 0.6, 0.6, 0.6, i * 0.3);
+  slab(stat, S.plain(0x16161a), -11.5, R.x0 - 0.2, 0, 2.6, -77.5, -71.5).userData.pw = 'void';
+  slab(stat, S.plain(0x0e0e10), -11.5, R.x0 - 0.2, 2.5, 2.6, -77.5, -71.5).userData.pw = 'void';
+  for (let i = 0; i < 4; i++) box(stat, S.planks(0x5a4a34), -10.2 + (i % 2) * 0.7, 0.3 + Math.floor(i / 2) * 0.6, -76.5, 0.6, 0.6, 0.6, i * 0.3).userData.pw = 'crate';
   const stockDoor = new BurstDoor({ hinge: new THREE.Vector3(R.x0 + 0.05, 0, -73.5), w: 1.6, h: 2.3, yaw: Math.PI / 2, swing: -1, kind: 'swing', style: 'wood' });
   root.add(stockDoor.root);
   sign(stat, 'STOCK', R.x0 + 0.25, 2.6, -74.3, Math.PI / 2, 0.045, 0x2a2a2a, S.plain(0xe0e0e0));
 
+  ctx.pw?.room('shop', { root, stat, shell: shellG, stockDoor });
   bake(stat);
   bake(shellG);
   root.add(stat, shellG);

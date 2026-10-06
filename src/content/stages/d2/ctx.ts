@@ -1,6 +1,7 @@
 import type * as THREE from 'three';
 import type { World } from '../../../gameplay/World';
 import type { Rng } from '../../../core/Rng';
+import type { D2PixelWorld } from './pixel';
 
 /**
  * Shared, animated materials. They are owned by the stage (tracked custom
@@ -65,4 +66,6 @@ export interface Ctx {
   am: AnimMats;
   animators: Animator[];
   rng: Rng;
+  /** ART: PIXEL WORLD painter (null in CLASSIC / PIXEL CAST): each room calls `pw.room(...)` right before its bake. */
+  pw?: D2PixelWorld | null;
 }

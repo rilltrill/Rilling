@@ -70,8 +70,14 @@ export function buildTunnel(ctx: Ctx): RoomOut & { alcove: THREE.Vector3 } {
   const ceilMat = mat(0x4a4c52, 'corrugated', 1, 0.8);
   const step = 1.0;
 
-  stat.add(EnvKit.ribbon(curve, half * 2, S.grate(0x565a60), { from: dA, to: dB, step, y: 0.01 }));
-  for (const s of [-1, 1]) stat.add(EnvKit.ribbon(curve, 0.3, S.hazard(), { from: dA, to: dB, step, y: 0.02, offset: s * (half - 0.3) }));
+  const deck = EnvKit.ribbon(curve, half * 2, S.grate(0x565a60), { from: dA, to: dB, step, y: 0.01 });
+  deck.userData.pw = 'deck';
+  stat.add(deck);
+  for (const s of [-1, 1]) {
+    const edge = EnvKit.ribbon(curve, 0.3, S.hazard(), { from: dA, to: dB, step, y: 0.02, offset: s * (half - 0.3) });
+    edge.userData.pw = 'deck';
+    stat.add(edge);
+  }
 
   const pipeRuns: { side: number; y: number; r: number; m: THREE.Material; inset: number }[] = [
     { side: -1, y: 2.65, r: 0.17, m: S.metal(0x9a3e2a), inset: 0.32 },
@@ -98,9 +104,9 @@ export function buildTunnel(ctx: Ctx): RoomOut & { alcove: THREE.Vector3 } {
         const ia = f0.pos.clone().addScaledVector(f0.right, s * (half - 0.01));
         const ib = f1.pos.clone().addScaledVector(f1.right, s * (half - 0.01));
         const im = ia.add(ib).multiplyScalar(0.5);
-        Kit.add(stat, Kit.box(0.04, 1.2, len), paint, im.x, 0.6, im.z, 0, yaw, 0);
+        Kit.add(stat, Kit.box(0.04, 1.2, len), paint, im.x, 0.6, im.z, 0, yaw, 0).userData.pw = 'clad';
       } else {
-        Kit.add(stat, Kit.box(0.3, H - 2.6, len), concrete, mid.x, 2.6 + (H - 2.6) / 2, mid.z, 0, yaw, 0);
+        Kit.add(stat, Kit.box(0.3, H - 2.6, len), concrete, mid.x, 2.6 + (H - 2.6) / 2, mid.z, 0, yaw, 0).userData.pw = 'alcoveTop';
       }
     }
     // Ceiling.
@@ -190,7 +196,7 @@ export function buildTunnel(ctx: Ctx): RoomOut & { alcove: THREE.Vector3 } {
     box(g, concrete, sx * 1.1, 1.3, 1.15, 2.4, 2.6, 0.2);
     box(g, concrete, sx * 1.1, 1.3, -1.15, 2.4, 2.6, 0.2);
     box(g, S.grate(0x3a3c40), sx * 1.1, 0.01, 0, 2.4, 0.02, 2.4);
-    for (let i = 0; i < 3; i++) box(g, S.planks(0x6a5236), sx * (1.6 + (i % 2) * 0.3), 0.3 + Math.floor(i / 2) * 0.55, -0.6 + i * 0.5, 0.5, 0.5, 0.5);
+    for (let i = 0; i < 3; i++) box(g, S.planks(0x6a5236), sx * (1.6 + (i % 2) * 0.3), 0.3 + Math.floor(i / 2) * 0.55, -0.6 + i * 0.5, 0.5, 0.5, 0.5).userData.pw = 'crate';
   }
   const alcove = EnvKit.besideRail(curve, alcoveD, alcoveSide * (half + 1.3));
   for (const vd of TUNNEL_SPOTS.vents) {
@@ -212,6 +218,7 @@ export function buildTunnel(ctx: Ctx): RoomOut & { alcove: THREE.Vector3 } {
   }
   steamVents(ctx, root, vents);
 
+  ctx.pw?.room('tunnel', { root, stat, shell: shellG });
   bake(stat);
   bake(shellG);
   root.add(stat, shellG);
@@ -245,11 +252,11 @@ export function buildPump(ctx: Ctx): RoomOut {
   wallX(shellG, concrete, R.x0, R.z0, R.z1, R.h, [{ c: sideZ, w: 3.2, h: 3.0 }]);
   wallX(shellG, concrete, R.x1, R.z0, R.z1, R.h, [{ c: sideZ, w: 3.2, h: 3.0 }]);
   slab(shellG, mat(0x4a4c52, 'corrugated', 1, 0.8), R.x0, R.x1, R.h, R.h + 0.3, R.z1, R.z0);
-  for (const x of [R.x0 + 0.21, R.x1 - 0.21]) slab(stat, band, x - 0.03, x + 0.03, 0, 1.4, R.z1, R.z0);
+  for (const x of [R.x0 + 0.21, R.x1 - 0.21]) slab(stat, band, x - 0.03, x + 0.03, 0, 1.4, R.z1, R.z0).userData.pw = 'band';
   // Side tunnels (dark) behind the openings.
   for (const s of [-1, 1]) {
     const x = s < 0 ? R.x0 : R.x1;
-    slab(stat, S.plain(0x0c0d10), Math.min(x + s * 0.2, x + s * 7), Math.max(x + s * 0.2, x + s * 7), 0, 3.2, sideZ - 1.7, sideZ + 1.7);
+    slab(stat, S.plain(0x0c0d10), Math.min(x + s * 0.2, x + s * 7), Math.max(x + s * 0.2, x + s * 7), 0, 3.2, sideZ - 1.7, sideZ + 1.7).userData.pw = 'void';
     hazardBand(stat, x - 0.2, x + 0.2, sideZ, 3.2);
     beacon(stat, am.strobe, x - s * 0.25, 3.3, sideZ + 2.0, s < 0 ? Math.PI / 2 : -Math.PI / 2);
   }
@@ -268,7 +275,7 @@ export function buildPump(ctx: Ctx): RoomOut {
   for (const s of [-1, 1]) {
     for (const z of [-279.5, -291]) {
       const mx = s < 0 ? R.x0 + 1.3 : R.x1 - 1.3;
-      box(stat, steel, mx, 0.6, z, 1.4, 1.2, 1.6);
+      box(stat, steel, mx, 0.6, z, 1.4, 1.2, 1.6).userData.pw = 'pumpBox';
       Kit.add(stat, Kit.cyl(0.45, 0.45, 1.2, 12), S.metal(0x2e6098), mx, 1.55, z, 0, 0, Math.PI / 2);
       pipe(stat, rust, new THREE.Vector3(mx, 1.2, z), new THREE.Vector3(mx, R.h - 0.6, z), 0.16, 8);
     }
@@ -291,13 +298,14 @@ export function buildPump(ctx: Ctx): RoomOut {
     box(stat, S.metal(0x34363c), cx, R.h - 0.1, z, 0.6, 0.08, 0.3);
     box(stat, glow(0xffe6c0, 1.0), cx, R.h - 0.16, z, 0.5, 0.06, 0.2);
   }
-  cyl(stat, S.metal(0x24262a), cx - 1.5, 0.01, -288, 0.5, 0.02, 10);
+  cyl(stat, S.metal(0x24262a), cx - 1.5, 0.01, -288, 0.5, 0.02, 10).userData.pw = 'drain';
 
   steamVents(ctx, root, [
     { pos: new THREE.Vector3(cx - 5.2, 2.7, R.z1 + 3.2), dir: new THREE.Vector3(0.3, 1, 0.2).normalize(), power: 1.0 },
     { pos: new THREE.Vector3(R.x1 - 1.3, 3.2, -291), dir: new THREE.Vector3(-1, 0.4, 0.3).normalize(), power: 0.8 },
   ]);
 
+  ctx.pw?.room('pump', { root, stat, shell: shellG });
   bake(stat);
   bake(shellG);
   root.add(stat, shellG);

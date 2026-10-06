@@ -94,7 +94,7 @@ export function buildWing(ctx: Ctx): WingOut {
       for (let h = 0; h < 4; h++) {
         const hx = xa + 0.8 + rnd() * (xb - xa - 1.6);
         const hz = zc + (rnd() - 0.5) * 7;
-        box(stat, mat(0xc0a050, 'sand', 1.5, 0.8), hx, 0.3, hz, 1.1, 0.6, 0.7, rnd());
+        box(stat, mat(0xc0a050, 'sand', 1.5, 0.8), hx, 0.3, hz, 1.1, 0.6, 0.7, rnd()).userData.pw = 'bale';
       }
       slab(stat, steel, bx - side * 0.2 - 0.5, bx - side * 0.2 + 0.5, 0.3, 0.8, zc - 1.6, zc + 1.6);
       for (let c = 0; c < 3; c++) {
@@ -106,7 +106,7 @@ export function buildWing(ctx: Ctx): WingOut {
       }
       pixelText(stat, `C-${num}`, S.plain(0xd8d0b8), bx - side * 0.22, 4.2, zc, 0.18, side < 0 ? Math.PI / 2 : -Math.PI / 2, 0.03);
       box(stat, glow(0x6a8ab0, 0.55), (xa + xb) / 2, R.h - 0.1, zc, xb - xa - 1, 0.06, 0.3);
-      for (let m = 0; m < 4; m++) box(stat, S.plain(0x2a2420), bx - side * 0.22, 2 + m * 0.15, zc - 2 + m * 0.2, 0.02, 0.06, 1.4, 0, 0, 0.7 * side);
+      for (let m = 0; m < 4; m++) box(stat, S.plain(0x2a2420), bx - side * 0.22, 2 + m * 0.15, zc - 2 + m * 0.2, 0.02, 0.06, 1.4, 0, 0, 0.7 * side).userData.pw = 'claw';
       // Front glass.
       const st = states[ci++];
       const g = new GlassWall({ center: new THREE.Vector3(gx, 0, zc), w: z0 - z1 - 0.8, h: 6, yaw: Math.PI / 2, proximity: st === 'trike' }, glass);
@@ -129,14 +129,15 @@ export function buildWing(ctx: Ctx): WingOut {
   sign(stat, 'DO NOT TAP ON GLASS', CELLS.rightGlassX - 0.45, 1.5, -310.5, -Math.PI / 2, 0.035, 0xd0d0c8, S.plain(0x8a1010));
   sign(stat, 'DANGER', CELLS.leftGlassX + 0.45, 1.6, -321.8, Math.PI / 2, 0.06, 0xe0b020, S.plain(0x101010));
   // Huge blast doors into the hall, slid open (one buckled).
-  slab(stat, S.metal(0x5e646c), cx - 6.6, cx - 3.0, 0, 6.2, R.z1 + 0.25, R.z1 + 0.85);
+  slab(stat, S.metal(0x5e646c), cx - 6.6, cx - 3.0, 0, 6.2, R.z1 + 0.25, R.z1 + 0.85).userData.pw = 'blastDoor';
   const bent = box(stat, S.metal(0x5e646c), cx + 4.6, 3.1, R.z1 + 0.6, 3.4, 6.2, 0.6, -0.12, 0, 0.04);
-  void bent;
+  bent.userData.pw = 'blastDoor';
   hazardBand(stat, cx - 3.1, cx + 3.1, R.z1 + 0.5, 0.6);
   sign(stat, 'HOLDING HALL X', cx, 6.75, R.z1 + 0.32, 0, 0.08, 0x3a0a0a, glow(0xff4030, 0.95));
   beacon(stat, am.strobe, cx - 3.6, 5.6, R.z1 + 0.3, 0);
   beacon(stat, am.strobe, cx + 3.6, 5.6, R.z1 + 0.3, 0);
 
+  ctx.pw?.room('wing', { root, stat, shell: shellG, cells });
   bake(stat);
   bake(shellG);
   root.add(stat, shellG);
@@ -172,13 +173,13 @@ export function buildHall(ctx: Ctx): HallOut {
   slab(shellG, mat(0x34363c, 'concrete', 0.8, 0.8), R.x0, R.x1, R.h, R.h + 0.3, R.z1, R.z0);
   // Buttresses + ceiling trusses.
   for (let z = R.z0 - 3; z > H.tankZ; z -= 6) {
-    for (const x of [R.x0 + 0.5, R.x1 - 0.5]) box(stat, dark, x, R.h / 2, z, 1.0, R.h, 1.0);
-    slab(stat, steel, R.x0, R.x1, R.h - 0.6, R.h - 0.3, z - 0.15, z + 0.15);
+    for (const x of [R.x0 + 0.5, R.x1 - 0.5]) box(stat, dark, x, R.h / 2, z, 1.0, R.h, 1.0).userData.pw = 'buttress';
+    slab(stat, steel, R.x0, R.x1, R.h - 0.6, R.h - 0.3, z - 0.15, z + 0.15).userData.pw = 'truss';
   }
   // Floor markings: hazard ring, drains, puddles.
   for (let i = 0; i < 40; i++) {
     const a = (i / 40) * Math.PI * 2;
-    box(stat, S.hazard(), H.center.x + Math.cos(a) * 7.5, 0.008, H.center.z + Math.sin(a) * 7.5, 0.35, 0.01, 1.2, -a);
+    box(stat, S.hazard(), H.center.x + Math.cos(a) * 7.5, 0.008, H.center.z + Math.sin(a) * 7.5, 0.35, 0.01, 1.2, -a).userData.pw = 'ring';
   }
   for (const [x, z, r] of [
     [7, -350, 1.6],
@@ -186,20 +187,20 @@ export function buildHall(ctx: Ctx): HallOut {
     [10, -366, 1.4],
     [1, -341, 1.2],
   ]) Kit.add(stat, Kit.cyl(r, r, 0.01, 12), S.water(0x22343e), x, 0.006, z, 0, 0, 0, 1, 1, 0.6 + (x % 3) * 0.1);
-  Kit.add(stat, Kit.cyl(0.6, 0.6, 0.02, 10), S.grate(0x2a2c30), H.center.x, 0.006, H.center.z);
+  Kit.add(stat, Kit.cyl(0.6, 0.6, 0.02, 10), S.grate(0x2a2c30), H.center.x, 0.006, H.center.z).userData.pw = 'drain';
   // Pillars.
   for (const p of H.pillars) {
-    cyl(stat, concrete, p.x, R.h / 2, p.z, 1.1, R.h, 14);
+    cyl(stat, concrete, p.x, R.h / 2, p.z, 1.1, R.h, 14).userData.pw = 'column';
     Kit.add(stat, Kit.cyl(1.16, 1.16, 0.6, 14), S.hazard(), p.x, 0.5, p.z);
     box(stat, steel, p.x, R.h - 0.6, p.z, 2.6, 0.5, 2.6);
     beacon(stat, am.strobe, p.x, 4.2, p.z + 1.1, 0);
-    for (let m = 0; m < 4; m++) box(stat, S.plain(0x2a2420), p.x + 1.05, 1.6 + m * 0.14, p.z + 0.2 - m * 0.15, 0.02, 0.06, 0.9, 0, 0, 0.6);
+    for (let m = 0; m < 4; m++) box(stat, S.plain(0x2a2420), p.x + 1.05, 1.6 + m * 0.14, p.z + 0.2 - m * 0.15, 0.02, 0.06, 0.9, 0, 0, 0.6).userData.pw = 'claw';
   }
   // Catwalks along the side walls.
   for (const s of [-1, 1]) {
     const xw = s < 0 ? R.x0 : R.x1;
     const xe = xw - s * 2.6;
-    slab(stat, S.grate(0x464c54), Math.min(xw, xe), Math.max(xw, xe), 5.9, 6.0, H.tankZ + 1, R.z0 - 1);
+    slab(stat, S.grate(0x464c54), Math.min(xw, xe), Math.max(xw, xe), 5.9, 6.0, H.tankZ + 1, R.z0 - 1).userData.pw = 'catwalk';
     railing(stat, xe, R.z0 - 1, xe, H.tankZ + 1, 6.0);
     for (let z = R.z0 - 4; z > H.tankZ + 2; z -= 8) box(stat, steel, xe, 3.0, z, 0.15, 6.0, 0.15);
   }
@@ -217,7 +218,7 @@ export function buildHall(ctx: Ctx): HallOut {
   // Minion gates (raised) + dark corridors.
   for (const s of [-1, 1]) {
     const x = s < 0 ? R.x0 : R.x1;
-    slab(stat, S.plain(0x0c0d10), Math.min(x + s * 0.2, x + s * 6), Math.max(x + s * 0.2, x + s * 6), 0, 3.9, H.gateZ - 1.9, H.gateZ + 1.9);
+    slab(stat, S.plain(0x0c0d10), Math.min(x + s * 0.2, x + s * 6), Math.max(x + s * 0.2, x + s * 6), 0, 3.9, H.gateZ - 1.9, H.gateZ + 1.9).userData.pw = 'void';
     box(stat, steel, x - s * 0.1, 3.6, H.gateZ, 0.25, 0.5, 3.6);
     for (let k = 0; k < 7; k++) box(stat, steel, x - s * 0.05, 3.55, H.gateZ - 1.5 + k * 0.5, 0.1, 0.5, 0.08);
     hazardBand(stat, x - 0.3, x + 0.3, H.gateZ, 3.6);
@@ -252,8 +253,8 @@ export function buildHall(ctx: Ctx): HallOut {
     pipe(stat, S.metal(0x3e3e42), new THREE.Vector3(x, R.h, -377), new THREE.Vector3(x + rnd() - 0.5, R.h - l, -377 + rnd() - 0.5), 0.05, 4);
   }
   Kit.add(stat, Kit.cyl(1.6, 1.6, 0.25, 16), S.metal(0x6a6e74), 12, 4.5, -378, 0.3, 0, Math.PI / 2 + 0.4, 1, 1, 1);
-  Kit.add(stat, Kit.cyl(1.25, 1.25, 0.3, 16), S.grate(0x1a2a34), 12, 4.5, -378, 0.3, 0, Math.PI / 2 + 0.4, 1, 1, 1);
-  for (let i = 0; i < 14; i++) box(stat, S.plain(0x2a2420), -0.5 + rnd() * 8, 0.6 + rnd() * 6, H.tankZ - 0.05, 0.03, 0.06, 1.2 + rnd(), 0, rnd() * 3, rnd() * 3);
+  Kit.add(stat, Kit.cyl(1.25, 1.25, 0.3, 16), S.grate(0x1a2a34), 12, 4.5, -378, 0.3, 0, Math.PI / 2 + 0.4, 1, 1, 1).userData.pw = 'drain';
+  for (let i = 0; i < 14; i++) box(stat, S.plain(0x2a2420), -0.5 + rnd() * 8, 0.6 + rnd() * 6, H.tankZ - 0.05, 0.03, 0.06, 1.2 + rnd(), 0, rnd() * 3, rnd() * 3).userData.pw = 'claw';
   // Glass shards from the escape.
   for (let i = 0; i < 18; i++) box(stat, glass, 0 + rnd() * 6, 0.02, H.tankZ + 0.6 + rnd() * 6, 0.3 + rnd() * 0.5, 0.02, 0.2 + rnd() * 0.4, rnd() * 3);
   // Sign above the tank.
@@ -266,16 +267,17 @@ export function buildHall(ctx: Ctx): HallOut {
     [25, -344, 1.0, 0.1],
     [26, -366, 1.2, 0.5],
     [-4, -368, 1.0, 0.2],
-  ]) box(stat, S.planks(0x6a5236), x, s / 2, z, s, s, s, r);
+  ]) box(stat, S.planks(0x6a5236), x, s / 2, z, s, s, s, r).userData.pw = 'crate';
   box(stat, S.metal(0x1a1a1a), 6.5, 0.05, -339, 1.1, 0.06, 0.08, 0.8);
   box(stat, S.planks(0x5a3a1a), 6.0, 0.06, -339.3, 0.4, 0.08, 0.1, 0.8);
-  decal(stat, S.plain(0x3a0806), 9, 0.006, -344, 2.2, 1.0, 0.6);
+  decal(stat, S.plain(0x3a0806), 9, 0.006, -344, 2.2, 1.0, 0.6).userData.pw = 'bloodDrag';
 
   steamVents(ctx, root, [
     { pos: new THREE.Vector3(-1, 7.2, H.tankZ + 0.6), dir: new THREE.Vector3(0.3, -0.2, 1).normalize(), power: 1.1 },
     { pos: new THREE.Vector3(23, 7.2, H.tankZ + 0.6), dir: new THREE.Vector3(-0.3, -0.2, 1).normalize(), power: 1.1 },
   ]);
 
+  ctx.pw?.room('hall', { root, stat, shell: shellG, panes });
   bake(stat);
   bake(shellG);
   root.add(stat, shellG);

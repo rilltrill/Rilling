@@ -37,12 +37,14 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
   floorQuad(stat, soil, R.x0, R.x1, R.z1, R.z0, 0);
   const pathFrom = dAtZ(R.z0) - 0.5;
   const pathTo = dAtZ(R.z1) + 0.5;
-  stat.add(EnvKit.ribbon(ctx.curve, 3.6, S.rock(0x958c7a), { from: pathFrom, to: pathTo, step: 1, y: 0.02 }));
+  const pathMesh = EnvKit.ribbon(ctx.curve, 3.6, S.rock(0x958c7a), { from: pathFrom, to: pathTo, step: 1, y: 0.02 });
+  pathMesh.userData.pw = 'path';
+  stat.add(pathMesh);
   for (let d = pathFrom; d < pathTo; d += 1.1) {
     for (const s of [-1, 1]) {
       const p = EnvKit.besideRail(ctx.curve, d, s * 1.95, 0.08);
       const f = EnvKit.frameAt(ctx.curve, d);
-      box(stat, S.rock(0x6a6458), p.x, 0.08, p.z, 0.25, 0.2, 1.0, f.heading);
+      box(stat, S.rock(0x6a6458), p.x, 0.08, p.z, 0.25, 0.2, 1.0, f.heading).userData.pw = 'kerb';
     }
   }
 
@@ -66,7 +68,7 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
     for (let i = 0; i < 8; i++) {
       const y0 = wallTop + (i / 8) * (ridge - wallTop);
       const hw = R.x1 * (1 - i / 8);
-      slab(stat, z === R.z1 ? labWall : stone, -hw, hw, y0, y0 + (ridge - wallTop) / 8 + 0.02, z - 0.2, z + 0.2);
+      slab(stat, z === R.z1 ? labWall : stone, -hw, hw, y0, y0 + (ridge - wallTop) / 8 + 0.02, z - 0.2, z + 0.2).userData.pw = 'gable';
     }
   }
 
@@ -81,9 +83,9 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
     }
   }
   slab(stat, steel, -0.15, 0.15, ridge - 0.1, ridge + 0.15, R.z1, R.z0);
-  slab(stat, am.sky, R.x0 - 6, R.x1 + 6, ridge + 1.6, ridge + 1.7, R.z1 - 6, R.z0 + 6);
-  for (let i = 0; i < 40; i++) box(stat, glow(0xc8d8ff, 0.5 + rnd() * 0.7), R.x0 - 4 + rnd() * (R.x1 - R.x0 + 8), ridge + 1.55, R.z1 - 4 + rnd() * (len + 8), 0.08, 0.02, 0.08);
-  Kit.add(stat, Kit.cyl(1.4, 1.4, 0.05, 16), glow(0xeef2ff, 1.2), -7, ridge + 1.5, R.z1 + 6);
+  slab(stat, am.sky, R.x0 - 6, R.x1 + 6, ridge + 1.6, ridge + 1.7, R.z1 - 6, R.z0 + 6).userData.pw = 'sky';
+  for (let i = 0; i < 40; i++) box(stat, glow(0xc8d8ff, 0.5 + rnd() * 0.7), R.x0 - 4 + rnd() * (R.x1 - R.x0 + 8), ridge + 1.55, R.z1 - 4 + rnd() * (len + 8), 0.08, 0.02, 0.08).userData.pw = 'sky';
+  Kit.add(stat, Kit.cyl(1.4, 1.4, 0.05, 16), glow(0xeef2ff, 1.2), -7, ridge + 1.5, R.z1 + 6).userData.pw = 'sky';
 
   // Jungle silhouettes outside the glass.
   // Own recipe (not S.leaves): keeps the in-room foliage mesh compact so it
@@ -216,6 +218,7 @@ export function buildGreenhouse(ctx: Ctx): RoomOut {
   beacon(stat, am.strobe, hatchX - 2.6, 3.4, R.z1 + 0.25, 0);
   beacon(stat, am.strobe, hatchX + 2.6, 3.4, R.z1 + 0.25, 0);
 
+  ctx.pw?.room('green', { root, stat, shell: shellG });
   bake(stat);
   bake(shellG);
   bake(veg);
@@ -259,9 +262,9 @@ export function buildHatchery(ctx: Ctx): HatchOut {
   wallZ(shellG, white, R.z1, R.x0, R.x1, R.h, [{ c: exitX, w: 3.2, h: 2.9 }]);
   // Mid-grey ceiling tiles: the green lab glow tints them without blowing out.
   slab(shellG, mat(0x8a9692, 'tiles', 0.7, 0.6), R.x0, R.x1, R.h, R.h + 0.3, R.z1, R.z0);
-  for (const x of [R.x0 + 0.21, R.x1 - 0.21]) slab(stat, stripe, x - 0.02, x + 0.02, 1.1, 1.3, R.z1, R.z0);
-  slab(stat, stripe, R.x0, exitX - 1.8, 1.1, 1.3, R.z1 + 0.19, R.z1 + 0.23);
-  slab(stat, stripe, exitX + 1.8, R.x1, 1.1, 1.3, R.z1 + 0.19, R.z1 + 0.23);
+  for (const x of [R.x0 + 0.21, R.x1 - 0.21]) slab(stat, stripe, x - 0.02, x + 0.02, 1.1, 1.3, R.z1, R.z0).userData.pw = 'stripe';
+  slab(stat, stripe, R.x0, exitX - 1.8, 1.1, 1.3, R.z1 + 0.19, R.z1 + 0.23).userData.pw = 'stripe';
+  slab(stat, stripe, exitX + 1.8, R.x1, 1.1, 1.3, R.z1 + 0.19, R.z1 + 0.23).userData.pw = 'stripe';
   frameX(stat, steelDark, R.x0, doorLZ, 2.2, 2.6);
   frameX(stat, steelDark, R.x1, doorRZ, 2.2, 2.6);
   frameZ(stat, steelDark, R.z1 + 0.1, exitX, 3.2, 2.9);
@@ -364,7 +367,7 @@ export function buildHatchery(ctx: Ctx): HatchOut {
     pipe(stat, S.plain(0x2a2e34), new THREE.Vector3(x, 0.4, z), new THREE.Vector3(x, 1.4, z), 0.02, 4);
     pipe(stat, S.metal(0x2e4a32), new THREE.Vector3(x + 0.3, 3.3, z), new THREE.Vector3(x + 0.3, R.h, z), 0.06, 6);
     pipe(stat, S.metal(0x7a2e2a), new THREE.Vector3(x - 0.3, 3.3, z), new THREE.Vector3(x - 0.3, R.h, z), 0.05, 6);
-    box(stat, S.hazard(0xf0d020), x + (x < 0 ? 0.8 : -0.8), 0.25, z, 0.02, 0.3, 0.9);
+    box(stat, S.hazard(0xf0d020), x + (x < 0 ? 0.8 : -0.8), 0.25, z, 0.02, 0.3, 0.9).userData.pw = 'bioplate';
     bubbleSpots.push(new THREE.Vector3(x, 0.45, z));
   }
   // Rising bubbles (one instanced draw call).
@@ -402,6 +405,7 @@ export function buildHatchery(ctx: Ctx): HatchOut {
     cyl(stat, jointMat, bx, 1.0, bz, 0.2, 0.2, 10);
     const yawP = new THREE.Group();
     yawP.position.set(bx, 1.1, bz);
+    yawP.userData.pw = 'arm';
     root.add(yawP);
     const shoulder = new THREE.Group();
     shoulder.position.set(0, 0.12, 0);
@@ -433,7 +437,7 @@ export function buildHatchery(ctx: Ctx): HatchOut {
   // Consoles + genome wall display by the exit.
   for (const s of [-1, 1]) {
     const cx = exitX + s * 5.5;
-    slab(stat, steelLight, cx - 2, cx + 2, 0, 0.85, R.z1 + 0.3, R.z1 + 1.1);
+    slab(stat, steelLight, cx - 2, cx + 2, 0, 0.85, R.z1 + 0.3, R.z1 + 1.1).userData.pw = 'console';
     slab(stat, steelDark, cx - 2.05, cx + 2.05, 0.85, 0.9, R.z1 + 0.25, R.z1 + 1.15);
     for (const dx of [-1.2, 0, 1.2]) {
       box(stat, S.plain(0x1a1c20), cx + dx, 1.25, R.z1 + 0.55, 0.8, 0.5, 0.06);
@@ -441,14 +445,14 @@ export function buildHatchery(ctx: Ctx): HatchOut {
       for (let k = 0; k < 6; k++) {
         const yy = 1.08 + k * 0.06;
         const off = Math.sin(k * 1.1 + dx) * 0.12;
-        box(stat, glow(0xff60a0, 1), cx + dx + off, yy, R.z1 + 0.61, 0.04, 0.03, 0.01);
-        box(stat, glow(0x60ffb0, 1), cx + dx - off, yy, R.z1 + 0.61, 0.04, 0.03, 0.01);
+        box(stat, glow(0xff60a0, 1), cx + dx + off, yy, R.z1 + 0.61, 0.04, 0.03, 0.01).userData.pw = 'helix';
+        box(stat, glow(0x60ffb0, 1), cx + dx - off, yy, R.z1 + 0.61, 0.04, 0.03, 0.01).userData.pw = 'helix';
       }
     }
     // Sequencer bars high on the wall.
     for (let k = 0; k < 14; k++) {
       const col = [0xff5050, 0x50ff80, 0x5090ff, 0xffd040][k % 4];
-      box(stat, glow(col, 0.8), cx - 1.8 + k * 0.28, 3.2 + Math.sin(k * 2.1) * 0.25, R.z1 + 0.24, 0.18, 0.5 + Math.abs(Math.cos(k * 1.3)) * 0.5, 0.02);
+      box(stat, glow(col, 0.8), cx - 1.8 + k * 0.28, 3.2 + Math.sin(k * 2.1) * 0.25, R.z1 + 0.24, 0.18, 0.5 + Math.abs(Math.cos(k * 1.3)) * 0.5, 0.02).userData.pw = 'seqBar';
     }
   }
   sign(stat, 'STAFF CAFETERIA', exitX, 3.45, R.z1 + 0.28, 0, 0.055, 0x2a2a2e, S.plain(0xf0f0f0));
@@ -456,9 +460,9 @@ export function buildHatchery(ctx: Ctx): HatchOut {
   sign(stat, 'LAB B', R.x0 + 0.25, 2.95, doorLZ, Math.PI / 2, 0.06, 0x1a4a3a, S.plain(0xe8fff0));
   sign(stat, 'LAB C', R.x1 - 0.25, 2.95, doorRZ, -Math.PI / 2, 0.06, 0x1a4a3a, S.plain(0xe8fff0));
   pixelText(stat, 'GENETICS DIV.', S.plain(0x2a8a5a), R.x0 + 0.22, 3.8, -136, 0.09, Math.PI / 2, 0.03);
-  for (let i = 0; i < 4; i++) box(stat, S.plain(0x2a2220), R.x0 + 0.23, 1.6 + i * 0.12, doorLZ + 1.6 + i * 0.1, 0.02, 0.05, 1.0, 0, 0, 0.6);
-  for (let i = 0; i < 14; i++) decal(stat, S.plain(0xf0eee8), -2 + rnd() * 4, 0.012, -127 - rnd() * 30, 0.22, 0.3, rnd() * 3);
-  decal(stat, S.plain(0x3a0806), -1.2, 0.012, -144, 0.8, 2.6, 0.3);
+  for (let i = 0; i < 4; i++) box(stat, S.plain(0x2a2220), R.x0 + 0.23, 1.6 + i * 0.12, doorLZ + 1.6 + i * 0.1, 0.02, 0.05, 1.0, 0, 0, 0.6).userData.pw = 'claw';
+  for (let i = 0; i < 14; i++) decal(stat, S.plain(0xf0eee8), -2 + rnd() * 4, 0.012, -127 - rnd() * 30, 0.22, 0.3, rnd() * 3).userData.pw = 'paper';
+  decal(stat, S.plain(0x3a0806), -1.2, 0.012, -144, 0.8, 2.6, 0.3).userData.pw = 'bloodDrag';
   box(stat, steelDark, 1.9, 0.3, -152, 0.4, 0.05, 0.4, 0, 0, 1.3);
   beacon(stat, am.strobe, R.x0 + 0.25, 3.5, -131, Math.PI / 2);
   beacon(stat, am.strobe, R.x1 - 0.25, 3.5, -137, -Math.PI / 2);
@@ -469,12 +473,13 @@ export function buildHatchery(ctx: Ctx): HatchOut {
     [R.x0, doorLZ, -1],
     [R.x1, doorRZ, 1],
   ] as [number, number, number][]) {
-    slab(stat, S.plain(0x101214), x + s * 0.2, x + s * 4, 0, 2.8, z - 1.6, z + 1.6);
+    slab(stat, S.plain(0x101214), x + s * 0.2, x + s * 4, 0, 2.8, z - 1.6, z + 1.6).userData.pw = 'void';
   }
   const doorL = new BurstDoor({ hinge: new THREE.Vector3(R.x0 + 0.05, 0, doorLZ + 1.1), w: 2.2, h: 2.6, yaw: Math.PI / 2, swing: -1, kind: 'blast', style: 'lab' });
   const doorR = new BurstDoor({ hinge: new THREE.Vector3(R.x1 - 0.05, 0, doorRZ + 1.1), w: 2.2, h: 2.6, yaw: Math.PI / 2, swing: 1, kind: 'blast', style: 'lab' });
   root.add(doorL.root, doorR.root);
 
+  ctx.pw?.room('hatch', { root, stat, shell: shellG, doorL, doorR });
   bake(stat);
   bake(shellG);
   root.add(stat, shellG);

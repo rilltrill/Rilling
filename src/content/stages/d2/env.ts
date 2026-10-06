@@ -17,6 +17,9 @@ import type { Enemy } from '../../../gameplay/Enemy';
 import { FloraField, floraArtToggle, floraAtlas } from '../../pixel/floraField';
 import { CANOPY_TREE, EAR, FERN, FERN_WIDE, BUSH, BUSH_WIDE, FLOWER, PALM, VINES } from '../../pixel/floraSpecies';
 import { D2_BIOME } from '../../pixel/floraBiomes';
+import { pixelWorld } from '../../../core/art';
+import { D2PixelWorld } from './pixel';
+import './pixelRooms';
 
 /** The labs' plants as pixel billboards (ART: SPRITES): greenhouse beds, the lobby palms, the jungle beyond the glass. */
 export const D2_FLORA = [CANOPY_TREE, PALM, FERN, FERN_WIDE, BUSH, BUSH_WIDE, EAR, VINES, FLOWER];
@@ -155,7 +158,9 @@ export class LabScene {
   }
 
   build() {
-    const ctx: Ctx = { world: this.world, curve: this.curve, am: this.am, animators: this.animators, rng: new Rng(2024), flora: [], veg3D: [] };
+    // ART: PIXEL WORLD paints every room right before its bake (null otherwise: CLASSIC / PIXEL CAST build as before).
+    const pw = pixelWorld(this.world) ? new D2PixelWorld() : null;
+    const ctx: Ctx = { world: this.world, curve: this.curve, am: this.am, animators: this.animators, rng: new Rng(2024), flora: [], veg3D: [], pw };
     const zone = (id: string, from: number, to: number, out: { root: THREE.Group; shell: THREE.Object3D[] }) => {
       this.zones.push({ id, from, to, root: out.root, shell: out.shell });
       this.root.add(out.root);
@@ -190,6 +195,13 @@ export class LabScene {
     const hall = buildHall(ctx);
     zone('hall', dAtZ(ROOMS.hall.z0), dAtZ(ROOMS.hall.z1) + 60, hall);
     this.panes = hall.panes;
+    if (pw) {
+      pw.finish();
+      for (const fn of pw.animators) this.animators.push((dt, t) => fn(dt, t));
+      // The painted skies flash with the greenhouse lightning (read back from the classic sky colour).
+      const base = this.skyBase.r + this.skyBase.g + this.skyBase.b;
+      this.animators.push(() => pw.skyFlash(Math.max(0, (this.am.sky.color.r + this.am.sky.color.g + this.am.sky.color.b - base) / 2.3)));
+    }
 
     const z = (zz: number) => dAtZ(zz);
     this.ambience = [
