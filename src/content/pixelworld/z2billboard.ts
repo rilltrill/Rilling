@@ -65,7 +65,7 @@ const FRAG_MAP = /* glsl */ `
     diffuseColor.rgb *= pc.rgb * (1.0 - glowK) * uPwGain;
     pwEmit = pc.rgb * glowK * uPwGlow;
     #ifdef PW_DEBUG
-      pwDbg = uPwDebug > 2.5 ? pwDbgTexel : pwDbgMag(pu, ps, lv);
+      pwDbg = uPwDebug > 2.5 ? pwDbgTexel : pwDbgMag(pu, ps, ivec2(lv));
     #endif
   }
 `;

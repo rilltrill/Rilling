@@ -10,6 +10,7 @@ import { CAMPAIGNS } from './content';
 import { initPlatform } from './platform';
 import { pwStoreEnable } from './content/pixelworld/store';
 import { pwUpscale } from './content/pixelworld/atlas';
+import { pwAxisLevels } from './content/pixelworld/material';
 import { pwDebugBoot, pwDebugSet } from './core/debugView';
 
 function parseFlags(q: URLSearchParams): DebugFlags {
@@ -59,6 +60,8 @@ function main() {
   if (store) pwStoreEnable(store === '0' ? '' : `dev-${store}`);
   // A/B and the parity check: `&pwup=0` stores every PixelWorld tile as painted (no 2× fallback).
   if (query.get('pwup') === '0') pwUpscale(false);
+  // … and `&pwaniso=0` picks one level for both texel axes, as the first pass drew.
+  if (query.get('pwaniso') === '0') pwAxisLevels(false);
   // Dev / audit: `&pwdebug=mag|lvl|tone|ramp` compiles the PixelWorld debug views in; tools switch them with `__pwDebug(view)`.
   pwDebugBoot(query.get('pwdebug'));
   (window as unknown as { __pwDebug: typeof pwDebugSet }).__pwDebug = pwDebugSet;

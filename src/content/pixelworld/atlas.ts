@@ -652,15 +652,19 @@ function* paintSteps(items: { t: { tile: PwTile; paint: PwPainter; frames: numbe
   const pal = new PwPalette();
   const out = d.levels;
   const tms: [string, number][] = [];
+  // Scratch for a tile's texels and its 2× copy (copied into the levels at once): the biggest tile's worth, once.
+  const most = items.reduce((m, it) => Math.max(m, it.t.tile.w * it.t.tile.h), 1);
+  const texels = new Uint16Array(most);
+  const doubled = new Uint16Array(items.some((it) => it.t.tile.scale === 2) ? most * 4 : 0);
   for (const it of items) {
     const { tile, paint, frames } = it.t;
     const tp = now();
     const c = paintTile(tile.key, tile.w, tile.h, paint, pal);
     tms.push([tile.key, now() - tp]);
-    const texels = c.index();
+    c.index(texels);
     if (tile.scale === 2) {
       // Level 0: the upscaler's copy; level 1: the texels exactly as painted.
-      putTile(out[0], it.x, it.y, pwUpscale2x(c, tile.wrap, frames, texels), tile.w * 2, tile.h * 2, it.aw, it.ah, tile.wrap);
+      putTile(out[0], it.x, it.y, pwUpscale2x(c, tile.wrap, frames, texels, doubled), tile.w * 2, tile.h * 2, it.aw, it.ah, tile.wrap);
       if (levels > 1) putTile(out[1], it.x >> 1, it.y >> 1, texels, tile.w, tile.h, it.aw >> 1, it.ah >> 1, tile.wrap);
     } else putTile(out[0], it.x, it.y, texels, tile.w, tile.h, it.aw, it.ah, tile.wrap);
     yield;

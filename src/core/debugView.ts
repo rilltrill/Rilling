@@ -66,12 +66,12 @@ export const PW_DEBUG_DECL = /* glsl */ `
     uniform float uPwDebugGain;
     vec3 pwDbg = vec3(0.0);
     // Frame pixels across the widest side of one stored texel (\`pu\`: texel coords, \`s\` stored texels
-    // per unit of it), on the density scale; in the \`lvl\` view, of the level texel that is drawn.
-    vec3 pwDbgMag(vec2 pu, float s, int lv) {
-      float gu = length(vec2(dFdx(pu.x), dFdy(pu.x)));
-      float gv = length(vec2(dFdx(pu.y), dFdy(pu.y)));
-      float px = 1.0 / max(min(gu, gv) * s, 1e-5);
-      if (uPwDebug > 1.5) px *= exp2(float(lv));
+    // per unit of it), on the density scale; in the \`lvl\` view, of the texel that is drawn (\`lv\`: its
+    // level along u and along v).
+    vec3 pwDbgMag(vec2 pu, float s, ivec2 lv) {
+      vec2 g = vec2(length(vec2(dFdx(pu.x), dFdy(pu.x))), length(vec2(dFdx(pu.y), dFdy(pu.y)))) * s;
+      vec2 side = (uPwDebug > 1.5 ? exp2(vec2(lv)) : vec2(1.0)) / max(g, vec2(1e-5));
+      float px = max(side.x, side.y);
       return px <= 1.25 ? vec3(0.0, 1.0, 0.0) : px <= 1.5 ? vec3(1.0, 1.0, 0.0) : px <= 2.0 ? vec3(1.0, 0.5, 0.0) : vec3(1.0, 0.0, 0.0);
     }
   #endif

@@ -117,7 +117,66 @@ export const PW_FETCH = /* glsl */ `
   vec4 pwFetch(vec2 org, vec2 t, float s, int lv) {
     return pwTexel((ivec2(org) + ivec2(floor(t * s))) >> lv, lv);
   }
+  #ifdef PW_ANISO
+    // The level picked per texel axis (\`rho\`: painted texels a pixel along u and along v), not once for
+    // the squeezed one: a plane seen at a grazing angle (a road, a corridor wall) keeps its texels at pixel
+    // size ACROSS the view instead of drawing a coarse level's texels wide. The fetch is the finer of the
+    // two levels (at most two apart); along the squeezed axis the 2 or 4 texels of the block a level that
+    // coarse would have made of them are read and reduced the way the levels are made (class by majority,
+    // glow winning ties, then the texel nearest their mean: a real texel, and the same one wherever the
+    // sample falls inside that block — nothing crawls). \`lv\` returns the level drawn along u and v.
+    vec4 pwFetchAxes(vec2 org, vec2 t, float s, vec2 rho, float bias, float maxLv, out ivec2 lv) {
+      vec2 l2 = clamp(floor(log2(max(rho * s, vec2(1e-3))) + bias), 0.0, maxLv);
+      int hi = int(max(l2.x, l2.y));
+      int lo = max(int(min(l2.x, l2.y)), hi - 2);
+      bool alongU = l2.x > l2.y;
+      lv = alongU ? ivec2(hi, lo) : ivec2(lo, hi);
+      ivec2 p = (ivec2(org) + ivec2(floor(t * s))) >> lo;
+      int sh = hi - lo;
+      if (sh == 0) return pwTexel(p, lo);
+      ivec2 ax = alongU ? ivec2(1, 0) : ivec2(0, 1);
+      int along = alongU ? p.x : p.y;
+      ivec2 p0 = p - ax * (along - ((along >> sh) << sh));
+      vec4 c0 = pwTexel(p0, lo);
+      vec4 c1 = pwTexel(p0 + ax, lo);
+      // (A block of two: the pair counted twice, so the votes below read the same.)
+      vec4 c2 = c0;
+      vec4 c3 = c1;
+      if (sh > 1) {
+        c2 = pwTexel(p0 + ax * 2, lo);
+        c3 = pwTexel(p0 + ax * 3, lo);
+      }
+      vec4 a = vec4(c0.a, c1.a, c2.a, c3.a);
+      vec4 isLit = step(0.85, a);
+      vec4 isGlow = step(0.25, a) - isLit;
+      float lit = dot(isLit, vec4(1.0));
+      float glow = dot(isGlow, vec4(1.0));
+      if (lit + glow <= 1.0 && glow == 0.0) return vec4(0.0);
+      vec4 w = glow > 0.0 && glow >= lit ? isGlow : isLit;
+      vec3 mean = (c0.rgb * w.x + c1.rgb * w.y + c2.rgb * w.z + c3.rgb * w.w) / dot(w, vec4(1.0));
+      vec3 e0 = c0.rgb - mean;
+      vec3 e1 = c1.rgb - mean;
+      vec3 e2 = c2.rgb - mean;
+      vec3 e3 = c3.rgb - mean;
+      vec4 d = vec4(dot(e0, e0), dot(e1, e1), dot(e2, e2), dot(e3, e3)) + (1.0 - w) * 1e6;
+      vec4 best = c0;
+      float bd = d.x;
+      if (d.y < bd) { best = c1; bd = d.y; }
+      if (d.z < bd) { best = c2; bd = d.z; }
+      if (d.w < bd) { best = c3; }
+      return best;
+    }
+  #endif
 `;
+
+/**
+ * The per-axis level pick (`pwFetchAxes`; on by default, `&pwaniso=0`: one level for both axes, as
+ * the first pass drew). Read when a material is MADE: set it before a stage builds.
+ */
+let axesOn = true;
+export function pwAxisLevels(on: boolean) {
+  axesOn = on;
+}
 
 /** The two textures of an atlas as the uniforms `PW_FETCH` declares. */
 export function pwAtlasUniforms(atlas: PwAtlas): { uPwAtlas: { value: THREE.Texture }; uPwPal: { value: THREE.Texture } } {
@@ -178,9 +237,7 @@ const FRAG_MAP = /* glsl */ `
       vec2 pu = vPwUv;
     #endif
     vec2 pg = max(abs(dFdx(pu)), abs(dFdy(pu)));
-    float rho = max(pg.x, pg.y);
     float ps = pwScale(vPwRect);
-    int lv = pwLevel(rho, ps, uPwBias, uPwMaxLv);
     vec2 rs = abs(vPwRect.zw);
     #ifdef PW_ANIM
       // Animated strip: wrap / clamp inside one frame, then step to the current frame.
@@ -190,7 +247,13 @@ const FRAG_MAP = /* glsl */ `
     #else
       vec2 t = vPwRect.z > 0.0 ? mod(pu, rs) : clamp(pu, vec2(0.0), rs - 0.001);
     #endif
-    vec4 pc = pwFetch(vPwRect.xy, t, ps, lv);
+    #ifdef PW_ANISO
+      ivec2 lv;
+      vec4 pc = pwFetchAxes(vPwRect.xy, t, ps, pg, uPwBias, uPwMaxLv, lv);
+    #else
+      ivec2 lv = ivec2(pwLevel(max(pg.x, pg.y), ps, uPwBias, uPwMaxLv));
+      vec4 pc = pwFetch(vPwRect.xy, t, ps, lv.x);
+    #endif
     if (pc.a < 0.25) discard;
     float glowK = pc.a < 0.85 ? 1.0 : 0.0;
     diffuseColor.rgb *= pc.rgb * (1.0 - glowK) * uPwGain;
@@ -207,7 +270,7 @@ const cacheByAtlas = new WeakMap<PwAtlas, Map<string, THREE.MeshLambertMaterial>
 export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.MeshLambertMaterial {
   let byKey = cacheByAtlas.get(atlas);
   if (!byKey) cacheByAtlas.set(atlas, (byKey = new Map()));
-  const key = `${o.planar ? 'p' : 'u'}|${o.side ?? 0}|${o.gain ?? 1}|${o.glow ?? 1}|${o.bias ?? PW_MIP_BIAS}|${o.fog ?? true}|${o.density ?? PW_TPM}|${o.tag ?? ''}|${o.anim ? `${o.anim.frames}x${o.anim.fps}` : ''}`;
+  const key = `${o.planar ? 'p' : 'u'}|${o.side ?? 0}|${o.gain ?? 1}|${o.glow ?? 1}|${o.bias ?? PW_MIP_BIAS}|${o.fog ?? true}|${o.density ?? PW_TPM}|${o.tag ?? ''}|${o.anim ? `${o.anim.frames}x${o.anim.fps}` : ''}|${axesOn ? 'x' : ''}`;
   const hit = byKey.get(key);
   if (hit) return hit;
   const uniforms: Record<string, { value: unknown }> = {
@@ -224,6 +287,8 @@ export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.Mes
   const defines: Record<string, string> = {};
   if (o.planar) defines.PW_PLANAR = '';
   if (o.anim) defines.PW_ANIM = '';
+  // (Backdrops, billboards and sprites face the camera: one level is right for them.)
+  if (axesOn) defines.PW_ANISO = '';
   pwDebugSetup(defines, uniforms);
   m.defines = defines;
   m.userData.pw = uniforms;

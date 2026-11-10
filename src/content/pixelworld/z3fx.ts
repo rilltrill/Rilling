@@ -261,7 +261,7 @@ export function pwSpriteMaterial(atlas: PwAtlas, tile: PwTile, o: { frames?: num
           if (pc.a < 0.25) discard;
           diffuseColor.rgb *= pc.rgb * uPwGain;
           #ifdef PW_DEBUG
-            pwDbg = uPwDebug > 2.5 ? pwDbgTexel : pwDbgMag(pu, uPwScale, lv);
+            pwDbg = uPwDebug > 2.5 ? pwDbgTexel : pwDbgMag(pu, uPwScale, ivec2(lv));
           #endif
         }`,
       );

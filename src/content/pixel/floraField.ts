@@ -356,7 +356,7 @@ const FRAG_MAP = /* glsl */ `
     fPaint = pc.rgb * vFMisc.y;
     fRim = pc.a < 0.99 ? 1.0 : 0.0;
     #ifdef PW_DEBUG
-      pwDbg = pwDbgMag(vFTex, 1.0, lv);
+      pwDbg = pwDbgMag(vFTex, 1.0, ivec2(lv));
     #endif
   }
 `;

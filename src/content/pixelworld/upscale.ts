@@ -22,12 +22,12 @@ import { PWF, PWI, type PwCanvas } from './canvas';
  *
  * `wrap`: the tile repeats (neighbours wrap round; else the edge repeats). `frames`: equal frames
  * stacked in the tile (an animated strip: each is smoothed on its own). `base`: the canvas as
- * stored texels (`c.index()`), when the caller has it. Returns stored texels (`PWI`), rows top-down.
+ * stored texels (`c.index()`), when the caller has it; `out`: where to write (at least 4 × the
+ * canvas). Returns stored texels (`PWI`), rows top-down.
  */
-export function pwUpscale2x(c: PwCanvas, wrap: boolean, frames = 1, base: Uint16Array = c.index()): Uint16Array {
+export function pwUpscale2x(c: PwCanvas, wrap: boolean, frames = 1, base: Uint16Array = c.index(), out = new Uint16Array(c.w * c.h * 4)): Uint16Array {
   const { w, h, ramp, tone, flag } = c;
   const W = w * 2;
-  const out = new Uint16Array(W * h * 2);
   const n = w * h;
   // What "the same texel" means: the stored texel, or — inside a dithered band — the band itself.
   if (keyBuf.length < n) keyBuf = new Int32Array(n);
