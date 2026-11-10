@@ -73,6 +73,11 @@ export class Z2PixelWorld {
   bills = new Z2Billboards();
   /** The job being converted. */
   job: Job | null = null;
+  /**
+   * Modules whose far levels are re-made calm with the tileable surfaces' (wall panels: a painted
+   * field of small tiles reduces to speckle otherwise). Whole levels only: sizes in multiples of 32.
+   */
+  readonly calm = new Set<PwTile>();
 
   // ─── Zones ────────────────────────────────────────────────────────────────
 
@@ -130,7 +135,8 @@ export class Z2PixelWorld {
     const tiles = this.atlasTiles();
     // Calm far levels on the tileable surfaces (grout, chequer, bricks collapse into their mid-tone
     // instead of crawling into dashes), and signs kept at level 0 a step longer (letters stay whole).
-    this.atlas.post((data) => d2CalmLevels(data, tiles));
+    const calm = [...tiles, ...[...this.calm].map((t) => ({ ...t, wrap: true }))];
+    this.atlas.post((data) => d2CalmLevels(data, calm));
     // Which draw group each tile's triangles join (by the tile's place in the atlas).
     const groups = new Map<number, number>();
     for (const t of tiles) groups.set(t.x * 65536 + t.y, z2TileGroup(t));

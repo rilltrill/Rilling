@@ -12,8 +12,12 @@ import {
 } from '../../pixelworld/z2decals';
 import { fixture, nightWindow, troffer, type FixtureKind } from '../../pixelworld/z2modules';
 import { z2BigSign, z2ExitSign, z2LitSign, z2PlateSign, z2Poster, z2Stencil, type PosterKind } from '../../pixelworld/z2signs';
+import { pwPanelCuts, type PwPanelSpan } from '../../pixelworld/brush2i';
+import { z2ClinicArchitrave, z2ClinicCeiling, z2ClinicFixture, z2ClinicPanel, z2ClinicTroffer, z2CorridorFloor, z2RoomFloor, Z2_PANEL_LEN, Z2_TROFFER_HALO, type ClinicFixture, type ClinicStyle } from '../../pixelworld/z2clinic';
+import { PW_TPM_MID, PW_TPM_NEAR } from '../../pixelworld/canvas';
+import { R } from './layout';
 import type { Z2PixelWorld } from './pixel';
-import { decalTint, GLAZED, isGlow, lay, neutral, NX, NZ, own, X, Y, Z, type Pick, type PickQuery, type Piece, type TagCtx, type Z2Registry } from './pwCore';
+import { decalTint, emitMesh, GLAZED, isGlow, lay, neutral, NX, NZ, own, X, Y, Z, type MeshCtx, type Pick, type PickQuery, type Piece, type TagCtx, type Z2Registry } from './pwCore';
 
 /**
  * ST. MERCY HOSPITAL in PIXEL WORLD — the CLINICAL SHELL of the ground floor
@@ -91,8 +95,15 @@ function handleShell(tc: TagCtx): boolean | undefined {
       return false;
     }
     case 'panel': {
-      const t = troffer(a, info.on ? (info.warm ? 'warm' : 'on') : 'off');
-      lay(b, m, _o.set(-0.345, -0.052, -0.625), X, Z, 22 / PW_TPM, 40 / PW_TPM, t);
+      if (PANEL_ZONES.includes(pw.job?.zone ?? '')) {
+        // The clinical floor's troffers: repainted at 64, with their halo on the ceiling grid round them.
+        const t = z2ClinicTroffer(a, info.on ? (info.warm ? 'warm' : 'on') : 'off', 0x7a827c);
+        const h = Z2_TROFFER_HALO / t.density;
+        lay(b, m, _o.set(-0.345 - h, -0.052, -0.625 - h), X, Z, t.w / t.density, t.h / t.density, t);
+      } else {
+        const t = troffer(a, info.on ? (info.warm ? 'warm' : 'on') : 'off');
+        lay(b, m, _o.set(-0.345, -0.052, -0.625), X, Z, 22 / PW_TPM, 40 / PW_TPM, t);
+      }
       // A lit panel's stepped pool on the floor below (the polish catches it).
       const fl = pw.job?.floor;
       if (info.on && fl !== undefined) {
@@ -238,9 +249,13 @@ function pickShell(pw: Z2PixelWorld, q: PickQuery): Pick | null | undefined {
       return neutral(z2PaintTile(a, { hex: NEUTRAL_HEX }), hex);
     // ── Floors / ceilings ──
     case 'checker|0.55|0.34':
+      // The clinical floor, repainted: the corridor's lane at 96, the rooms' vinyl at 64 (the ward's is sheet).
+      if (q.zone === 'corrA') return own(z2CorridorFloor(a));
+      if (PANEL_ZONES.includes(q.zone)) return own(z2RoomFloor(a, hex, q.zone === 'ward'));
       if (hex === 0x5d6a63) return own(z2VinylTile(a, { a: 0x5d6a63, b: 0x46524c }));
       return own(z2SheetVinylTile(a, { hex }));
     case 'tiles|0.5|0.8':
+      if (PANEL_ZONES.includes(q.zone)) return own(z2ClinicCeiling(a, hex));
       return neutral(z2CeilingTile(a, { hex: NEUTRAL_HEX }), hex);
     default:
       break;
@@ -253,7 +268,234 @@ function pickShell(pw: Z2PixelWorld, q: PickQuery): Pick | null | undefined {
   return undefined;
 }
 
+// ─── Panelled walls (PIXEL WORLD 2) ──────────────────────────────────────────
+
+/** The zones whose walls are painted panels (brush2i.ts) instead of wrap tiles with decals. */
+const PANEL_ZONES = ['er', 'corrA', 'ward', 'hub'];
+
+/**
+ * One face of a wall, as a run of panels. `axis`: the world axis the wall runs along; `face`:
+ * the face's coordinate on the other axis; `inward`: which way the face looks along it (+1 / −1);
+ * `a0`…`a1`: the wall's extent. Seen from the room the wall runs left → right, and the layout's
+ * metres are counted that way from its left end.
+ */
+interface PanelWall {
+  axis: 'x' | 'z';
+  face: number;
+  inward: 1 | -1;
+  a0: number;
+  a1: number;
+  layout: PwPanelSpan[];
+}
+
+/** The panelled walls of each zone, per converter (the panels are tiles of its atlas). */
+const WALLS = new WeakMap<Z2PixelWorld, Map<string, PanelWall[]>>();
+
+/** Thickness of the shells' walls (shell.ts `t`): a room's faces stand half of it inside its rect. */
+const HALF_T = 0.15;
+
+/**
+ * The layout tables. A wall is `seq` panels laid from its left end as the room sees it: a
+ * variant (0 and 1 tell the wall's story, 2 is quiet: behind enemies, round doors), `f` =
+ * mirrored. Neighbours never match; where a calm zone of a hold lies against a wall
+ * (docs/pixelworld2/plan-z2.md §1) the panels there are the quiet ones.
+ */
+function buildWalls(pw: Z2PixelWorld, zone: string): PanelWall[] {
+  const a = pw.atlas;
+  const wall = (axis: 'x' | 'z', face: number, inward: 1 | -1, a0: number, a1: number, style: ClinicStyle, H: number, density: number, seq: string[]): PanelWall => {
+    const layout: PwPanelSpan[] = seq.map((q, i) => {
+      const panel = z2ClinicPanel(a, style, Number(q[0]), H, density);
+      pw.calm.add(panel);
+      return { at: i * Z2_PANEL_LEN, panel, flip: q.endsWith('f') };
+    });
+    return { axis, face, inward, a0, a1, layout };
+  };
+  switch (zone) {
+    case 'corrA': {
+      // The showpiece: both walls pass at 2.2 m (96 texels a metre).
+      const r = R.corrA;
+      return [
+        wall('x', r.z0 + HALF_T, 1, r.x0, r.x1, 'clinic', r.h, PW_TPM_NEAR, ['1', '0', '2', '1f', '0f', '2f', '1']),
+        wall('x', r.z1 - HALF_T, -1, r.x0, r.x1, 'clinic', r.h, PW_TPM_NEAR, ['0', '2f', '1', '0f', '2', '1f', '0']),
+      ];
+    }
+    case 'er': {
+      const r = R.er;
+      return [
+        // Back wall (walkers come from it), west wall (doors), east wall (the grabbed nurse stands against its middle).
+        wall('x', r.z0 + HALF_T, 1, r.x0, r.x1, 'clinic', r.h, PW_TPM_MID, ['2', '1', '2f', '0']),
+        wall('z', r.x0 + HALF_T, 1, r.z0, r.z1, 'clinic', r.h, PW_TPM_MID, ['0', '2', '1f', '2f']),
+        wall('z', r.x1 - HALF_T, -1, r.z0, r.z1, 'clinic', r.h, PW_TPM_MID, ['1', '2', '2f', '0']),
+      ];
+    }
+    case 'ward': {
+      const r = R.ward;
+      return [
+        wall('z', r.x0 + HALF_T, 1, r.z0, r.z1, 'ward', r.h, PW_TPM_MID, ['2', '0', '2f']),
+        wall('z', r.x1 - HALF_T, -1, r.z0, r.z1, 'ward', r.h, PW_TPM_MID, ['2f', '1', '2']),
+        wall('x', r.z0 + HALF_T, 1, r.x0, r.x1, 'ward', r.h, PW_TPM_MID, ['0', '2', '1', '2f']),
+        wall('x', r.z1 - HALF_T, -1, r.x0, r.x1, 'ward', r.h, PW_TPM_MID, ['1', '2', '0f', '2f']),
+        // The other faces of its two shared walls: the corridor's end (clinic paint) and the hub's west side.
+        wall('z', r.x0 - HALF_T, -1, r.z0, r.z1, 'clinic', R.hub.h, PW_TPM_MID, ['2', '0', '2f']),
+        wall('z', r.x1 + HALF_T, 1, r.z0, r.z1, 'clinic', R.hub.h, PW_TPM_MID, ['1', '2', '0f']),
+      ];
+    }
+    case 'hub': {
+      const r = R.hub;
+      return [
+        // The back wall is the backdrop of the spitters' heads: quiet panels only.
+        wall('z', r.x1 - HALF_T, -1, r.z0, r.z1, 'clinic', r.h, PW_TPM_MID, ['2', '2f', '2']),
+        wall('x', r.z1 - HALF_T, -1, r.x0, r.x1, 'clinic', r.h, PW_TPM_MID, ['1', '2', '0f']),
+        wall('x', r.z0 + HALF_T, 1, r.x0, r.x1, 'clinic', r.h, PW_TPM_MID, ['2', '0', '1f']),
+      ];
+    }
+    default:
+      return [];
+  }
+}
+
+/** What a shell box is to a panelled wall: the wall itself, its bumper rail, its skirting, a door frame's trim. */
+function shellRole(mat: THREE.MeshLambertMaterial): 'wall' | 'rail' | 'skirt' | 'trim' | null {
+  if (mat.side !== THREE.FrontSide) return null;
+  const k = `${mat.userData.retroTex}|${mat.userData.retroScale}|${mat.userData.retroStrength}`;
+  const hex = mat.color.getHex();
+  if (k === 'tiles|1.2|0.62' || k === 'stucco|1|0.65') return 'wall';
+  if (k === 'metal|1.5|0.32' && hex === 0x9aa39c) return 'trim';
+  if (k === 'planks|1.2|0.35' && (hex === 0xc9cdbf || hex === 0xb9a07a)) return 'rail';
+  if (mat.userData.retroTex === 'grain' && hex === 0x232826) return 'skirt';
+  return null;
+}
+
+/**
+ * A shell box of a panelled wall: its room-side face shows the wall's panels (one module rect
+ * per panel it crosses), a rail / skirting box the same rows a little proud of the wall, with
+ * its lit edge on top; every other face is re-textured as before.
+ */
+function emitPanelled(mc: MeshCtx): boolean {
+  const walls = WALLS.get(mc.pw)?.get(mc.zone);
+  if (!walls || !mc.world || mc.mesh.geometry.type !== 'BoxGeometry') return false;
+  const role = shellRole(mc.mat);
+  if (!role) return false;
+  const g = mc.mesh.geometry;
+  if (!g.boundingBox) g.computeBoundingBox();
+  const bx = _box.copy(g.boundingBox!).applyMatrix4(mc.rel);
+  // (A wall shared by two rooms shows a run of panels on each of its faces.)
+  const done: PanelWall[] = [];
+  for (const w of walls) {
+    const lo = w.axis === 'x' ? bx.min.z : bx.min.x;
+    const hi = w.axis === 'x' ? bx.max.z : bx.max.x;
+    // Thin across the wall, and standing in its plane: a wall box ends on the face, a rail / skirting straddles it.
+    if (hi - lo > 0.4 || w.face < lo - 1e-3 || w.face > hi + 1e-3) continue;
+    // (A wall box belongs to the face it ENDS on; the one on its other side is another wall's.)
+    if (role === 'wall' && Math.abs((w.inward > 0 ? hi : lo) - w.face) > 1e-3) continue;
+    const front = w.inward > 0 ? hi : lo;
+    const s0 = w.axis === 'x' ? bx.min.x : bx.min.z;
+    const s1 = w.axis === 'x' ? bx.max.x : bx.max.z;
+    // Left → right as the room sees it: +x for a face looking +z, −x for −z; −z for +x, +z for −x.
+    const fwd = w.axis === 'x' ? w.inward > 0 : w.inward < 0;
+    const ux = w.axis === 'x' ? (fwd ? X : NX) : fwd ? Z : NZ;
+    const piece = { a0: fwd ? s0 - w.a0 : w.a1 - s1, a1: fwd ? s1 - w.a0 : w.a1 - s0, y0: bx.min.y - mc.floorY, y1: bx.max.y - mc.floorY };
+    const at = (along: number, y: number, off: number) => {
+      const s = fwd ? w.a0 + along : w.a1 - along;
+      return w.axis === 'x' ? _o.set(s, y, front + off) : _o.set(front + off, y, s);
+    };
+    const back = w.axis === 'x' ? (w.inward > 0 ? NZ : Z) : w.inward > 0 ? NX : X;
+    if (role === 'trim') {
+      // A door frame's trim (it stands proud on both sides of the wall: each face takes its own):
+      // the architrave along a jamb, turned along a head or a sill.
+      if (Math.abs(front - w.face) > 0.06) continue;
+      const t = z2ClinicArchitrave(mc.pw.atlas);
+      const len = piece.a1 - piece.a0;
+      const h = piece.y1 - piece.y0;
+      if (h >= len) mc.b.rect(at(piece.a0, bx.min.y, 0), ux, Y, len, h, t, { sub: { x: 0, y: Math.round(piece.y0 * t.density), w: t.w, h: Math.min(t.h, h * t.density) } });
+      else mc.b.rect(at(piece.a1, bx.min.y, 0), Y, _u.copy(ux).negate(), h, len, t, { sub: { x: 0, y: 0, w: t.w, h: Math.min(t.h, len * t.density) }, flipU: true });
+      done.push(w);
+      continue;
+    }
+    for (const c of pwPanelCuts(w.layout, piece)) {
+      mc.b.rect(at(c.a0, mc.floorY + c.y0, 0), ux, Y, c.a1 - c.a0, c.y1 - c.y0, c.tile, { sub: c.sub, flipU: c.flipU });
+      if (role === 'wall') continue;
+      // The top of a rail / skirting: its lit edge, drawn out over its depth.
+      const d = c.tile.density;
+      mc.b.rect(at(c.a0, bx.max.y, 0), ux, back, c.a1 - c.a0, hi - lo, c.tile, { sub: { x: c.sub.x, y: Math.round(piece.y1 * d) - 1, w: c.sub.w, h: 1 }, flipU: c.flipU });
+    }
+    done.push(w);
+  }
+  if (!done.length) return false;
+  // The other faces (ends at openings, a far side no room looks at, the underside): the generic paint.
+  const panelled = (x: number, z: number) => done.some((w) => (w.axis === 'x' ? z : x) * w.inward > 0.7);
+  emitMesh(mc.b, g, mc.rel, (x, y, z) => (panelled(x, z) || (role !== 'wall' && y > 0.7) ? null : mc.pick(x, y, z)), { world: true, flip: false, floorY: mc.floorY });
+  return true;
+}
+
+/**
+ * What hangs on the panelled walls, each thing in a place of its own: [fixture, wall (index in
+ * `buildWalls`), world coordinate along the wall, height of its foot]. Placed by hand between the
+ * doors, the classic signs and clocks, and clear of the holds' calm zones (nothing by door 324,
+ * nothing on the walls enemies and the civilian stand against).
+ */
+const WALL_FIXTURES: Record<string, [ClinicFixture, number, number, number][]> = {
+  corrA: [
+    // Left wall (0), from the ER end.
+    ['board', 0, 18.3, 1.62],
+    ['gel', 0, 21.9, 1.6],
+    ['switch', 0, 25.4, 1.62],
+    ['callpoint', 0, 27.6, 1.62],
+    ['boardB', 0, 34.2, 1.66],
+    ['phone', 0, 41.6, 1.02],
+    ['gel', 0, 45.8, 1.6],
+    ['board', 0, 49.4, 1.62],
+    // Right wall (1).
+    ['callpoint', 1, 13.6, 1.62],
+    ['gel', 1, 21.3, 1.6],
+    ['boardB', 1, 23.7, 1.66],
+    ['clipboard', 1, 28.5, 1.52],
+    ['switch', 1, 30.95, 1.62],
+    ['board', 1, 39.6, 1.62],
+    ['clipboard', 1, 43.5, 1.52],
+    ['gel', 1, 47.6, 1.6],
+  ],
+  er: [
+    ['board', 1, -38, 1.62],
+    ['callpoint', 1, -28.2, 1.62],
+    ['gel', 1, -41.6, 1.6],
+    ['gel', 2, -31.6, 1.6],
+    ['boardB', 0, 3.4, 1.66],
+  ],
+  hub: [
+    ['board', 1, 79.2, 1.62],
+    ['gel', 1, 86.4, 1.6],
+    ['callpoint', 2, 83.2, 1.62],
+    ['clipboard', 2, 75.9, 1.52],
+  ],
+};
+
+/** Lay the zone's fixtures on its panelled walls (a hair proud of the paint, facing the room). */
+function layFixtures(pw: Z2PixelWorld, b: PwBatch, zone: string) {
+  const walls = WALLS.get(pw)?.get(zone);
+  if (!walls) return;
+  for (const [kind, wi, s, y] of WALL_FIXTURES[zone] ?? []) {
+    const w = walls[wi];
+    const d = w.layout[0].panel.density;
+    const t = z2ClinicFixture(pw.atlas, kind, 'clinic', d);
+    const tw = t.w / d;
+    const off = w.inward * (0.011 + (pw.nDecal++ % 3) * 0.001);
+    const fwd = w.axis === 'x' ? w.inward > 0 : w.inward < 0;
+    const s0 = fwd ? s - tw / 2 : s + tw / 2;
+    if (w.axis === 'x') _o.set(s0, y, w.face + off);
+    else _o.set(w.face + off, y, s0);
+    b.rect(_o, w.axis === 'x' ? (fwd ? X : NX) : fwd ? Z : NZ, Y, tw, t.h / d, t);
+  }
+}
+
 export function registerShell(reg: Z2Registry) {
+  reg.dress(PANEL_ZONES, (pw, b, g) => layFixtures(pw, b, g.name));
+  reg.prep(PANEL_ZONES, (pw, _b, g) => {
+    let m = WALLS.get(pw);
+    if (!m) WALLS.set(pw, (m = new Map()));
+    m.set(g.name, buildWalls(pw, g.name));
+  });
+  reg.mesh(emitPanelled);
   reg.tag(['lit', 'plate', 'text', 'exit', 'panel', 'flickerFrame', 'panelHole', 'ventHole', 'blind', 'sill', 'moonWin', 'smear', 'trail', 'pool', 'wallSmear', 'paper', 'tray'], handleShell);
   reg.pick(pickShell);
   // The flickering diffusers and the vent grates (painted after the build).
