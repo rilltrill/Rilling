@@ -1,6 +1,6 @@
 import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { PWF, type PwCanvas } from './canvas';
-import { PwField, pwAoBand, pwBloom, pwCast, pwCeramic, pwLampPool, pwMoulding, pwPaintedLine, pwPeel, pwRepair, pwScrapes, pwShadowUnder, pwSmudge, pwWaterStain } from './brush2i';
+import { PwField, pwAoBand, pwBloom, pwCast, pwCeramic, pwChips, pwLampPool, pwMoulding, pwPaintedLine, pwPeel, pwRepair, pwScrapes, pwShadowUnder, pwSmudge, pwWaterStain, pwWeep } from './brush2i';
 import { crack, darken, hash2, shiftHue } from './surfaces';
 
 /**
@@ -71,7 +71,8 @@ function paintPanel(c: PwCanvas, k: PwKit, st: StyleDef, variant: number, H: num
 
   const soft = { dark: 0.5, light: 0.4, sat: 1 };
   const P = k.ramp(st.plaster, soft);
-  const P2 = k.ramp(shiftHue(darken(st.plaster, 0.9), -0.02, 1.1), soft);
+  const P2 = k.ramp(shiftHue(darken(st.plaster, 0.86), -0.02, 1.1), soft);
+  const rust = k.ramp(mix(st.plaster, 0x7a5236, 0.5), { dark: 0.55, light: 0.3 });
   const mould = k.ramp(mix(st.plaster, 0x3a4a40, 0.55), { dark: 0.6, light: 0.3 });
   const filler = k.ramp(mix(st.plaster, 0xb4b0a4, 0.55), { dark: 0.55, light: 0.3 });
   const under = k.ramp(0xa39a7c, { dark: 0.55, light: 0.3 });
@@ -97,7 +98,8 @@ function paintPanel(c: PwCanvas, k: PwKit, st: StyleDef, variant: number, H: num
   // ── (a) Base: plaster above, the tiled wainscot below ──
   c.rect(0, 0, W, railTop, P, 3);
   c.rect(0, 0, W, Y0, P, 1);
-  const tp = S >= 96 ? 10 : 8;
+  // (10 cm tiles: 13 texels at 128, 10 at 96; 12.5 cm at 64, where 6 texels would not carry an edge and a glint.)
+  const tp = S >= 96 ? Math.round(S * 0.104) : 8;
   const fieldTop = railTop + railH;
   pwCeramic(c, { x: 0, y: fieldTop, w: W, h: skTop - fieldTop, tw: tp, th: tp, glaze: T, batches: [T2, T3], grout, bed, seed, wear: variant === 2 ? 0.018 : 0.036, cap: Math.ceil((skTop - fieldTop) / tp) - 1 });
 
@@ -174,6 +176,19 @@ function paintPanel(c: PwCanvas, k: PwKit, st: StyleDef, variant: number, H: num
     crackDown(2.4, 0.35);
     pwRepair(c, at(1.6), top(2.5), m(0.3), m(0.22), filler, seed + 33);
   }
+  // Paint flaked off in groups: along the rail where trolleys knock it, round the damp at the top, a few loose.
+  const quiet = variant === 2 ? 0.5 : 1;
+  for (let i = 0; i < Math.round(5 * quiet); i++) pwChips(c, rng, rng.int(0, W), top(st.lowH + 0.42 + rng.next() * 0.2), m(0.35), m(0.1), 9, P, under);
+  for (let i = 0; i < Math.round(4 * quiet); i++) pwChips(c, rng, rng.int(0, W), top(H - 0.5 - rng.next() * 0.25), m(0.3), m(0.12), 8, P, under);
+  for (let i = 0; i < Math.round(5 * quiet); i++) pwChips(c, rng, rng.int(0, W), top(1.9 + rng.next() * 0.6), m(0.22), m(0.16), 6, P, under);
+  // Where the roller missed: short pale strokes of the last coat, in runs at two heights.
+  for (let i = 0; i < Math.round(26 * quiet); i++) {
+    const x = rng.int(0, W - m(0.3));
+    const y = top((i & 1 ? 2.15 : 2.62) + rng.spread(0.12));
+    const len = rng.int(m(0.06), m(0.24));
+    for (let q = 0; q < len; q++) if (c.at(x + q, y) === P && c.toneAt(x + q, y) === 3) c.shift(x + q, y, 1);
+    if (rng.chance(0.5)) for (let q = 2; q < len - 2; q++) if (c.at(x + q, y + 1) === P && c.toneAt(x + q, y + 1) === 3) c.shift(x + q, y + 1, 1);
+  }
   // Pin holes and plugs left by notices (pairs: a dark hole, a lit rim under it).
   for (let i = 0; i < 10; i++) {
     const x = rng.int(4, W - 5);
@@ -192,7 +207,11 @@ function paintPanel(c: PwCanvas, k: PwKit, st: StyleDef, variant: number, H: num
   const trH = Math.max(4, m(0.05));
   pwShadowUnder(c, 0, trY + trH, W, 3, seed + 2);
   pwMoulding(c, 0, trY, W, trH, trunk, { joint: m(2), phase: m(0.7 + variant * 0.5) });
-  for (let x = m(0.4); x < W; x += m(0.75)) c.shade(x, trY, 2, trH, -1, trunk);
+  for (let x = m(0.4); x < W; x += m(0.75)) {
+    c.shade(x, trY, 2, trH, -1, trunk);
+    // (Every other clip's screw has rusted: a weep down the plaster under it.)
+    if (hash2(x, variant, seed + 26) > 0.5) pwWeep(c, x, trY + trH + 1, m(0.12 + hash2(x, 1, seed + 27) * 0.3), rust, seed + 28);
+  }
   // The crash rail: timber, jointed every 2.4 m with a steel band, gouged; its shadow on the tiles.
   pwMoulding(c, 0, railTop, W, railH, rail, { joint: m(2.4), phase: m(1.1 + variant * 0.8) });
   for (let x = m(1.1 + variant * 0.8) % m(2.4); x < W; x += m(2.4)) {
@@ -239,7 +258,9 @@ function paintPanel(c: PwCanvas, k: PwKit, st: StyleDef, variant: number, H: num
     const lh = m(0.13);
     const lx = at(x) - (lw >> 1);
     const ly = top(y);
-    pwLampPool(c, at(x), ly + lh + m(0.3), m(0.62), m(0.5), seed + 41, 5);
+    // (One step over most of it — the wall stays under tone 5 — and a hot scallop right under the lens.)
+    pwLampPool(c, at(x), ly + lh + m(0.2), m(0.62), m(0.46), seed + 41, 4);
+    pwLampPool(c, at(x), ly + lh + m(0.03), m(0.2), m(0.1), seed + 42, 5);
     pwCast(c, lx, ly, lw, lh, 2);
     c.rect(lx, ly, lw, lh, metal, 3);
     c.bevel(lx, ly, lw, lh, true, 1, 2);
@@ -540,6 +561,47 @@ export function z2ClinicArchitrave(atlas: PwAtlas): PwTile {
     for (let y = c.h - 135; y < c.h - 95; y++) if (hash2(0, y >> 1, 91) > 0.4) c.shift(2 + (y & 1), y, -1);
     c.shade(0, c.h - 6, c.w, 6, -1);
     c.shade(0, c.h - 2, c.w, 2, -1);
+  }, { density: 96 });
+}
+
+/**
+ * The lining of a door or an opening (the reveal between its two architraves): a strip 0.42 m
+ * deep and 3 m long at 96 texels a metre. Painted steel like the architrave: a lit return at
+ * either edge, the door stop as a raised bead down the middle, and the marks of everything
+ * that was wheeled through — a band of dents and scrapes at bed height (bare metal, a lit edge
+ * under each), kick grime at the foot.
+ */
+export function z2ClinicLining(atlas: PwAtlas): PwTile {
+  return atlas.tile('z2clinic|lining', 40, 288, (c, k) => {
+    const rng = k.rng;
+    const paint = k.ramp(0x9aa39c, { dark: 0.5, light: 0.4 });
+    const metal = k.ramp(0x6f7876, { dark: 0.5, light: 0.45 });
+    c.rect(0, 0, c.w, c.h, paint, 3);
+    c.vline(0, 0, c.h, paint, 5);
+    c.vline(1, 0, c.h, paint, 4);
+    c.vline(c.w - 2, 0, c.h, paint, 2);
+    c.vline(c.w - 1, 0, c.h, paint, 1);
+    // The stop: a bead three texels wide, its shadow to the right.
+    c.vline(18, 0, c.h, paint, 5);
+    c.vline(19, 0, c.h, paint, 3);
+    c.vline(20, 0, c.h, paint, 2);
+    c.vline(21, 0, c.h, paint, 2);
+    // (Heights are up from the canvas's bottom: the floor end of a jamb.)
+    const up = (v: number) => c.h - 1 - v;
+    for (let i = 0; i < 22; i++) {
+      const y = up(i < 14 ? rng.int(62, 104) : rng.int(8, 40));
+      const x = rng.int(2, c.w - 12);
+      const len = rng.int(4, 12);
+      for (let q = 0; q < len; q++) {
+        c.set(x + q, y, metal, q === 0 ? 1 : 3);
+        if (rng.chance(0.6)) c.set(x + q, y + 1, metal, 5);
+      }
+      if (rng.chance(0.4)) for (let q = 1; q < len - 1; q++) c.set(x + q, y - 1, paint, 1);
+    }
+    for (let i = 0; i < 9; i++) c.cluster(rng.int(2, c.w - 5), up(rng.int(120, 280)), rng.int(0, 5), 0, -1);
+    c.shade(0, up(7), c.w, 8, -1);
+    c.shade(0, up(2), c.w, 3, -1);
+    for (let x = 2; x < c.w - 2; x++) if (hash2(x >> 1, 3, 95) > 0.5) c.shift(x, up(8 + (x & 1)), -1);
   }, { density: 96 });
 }
 
@@ -895,15 +957,37 @@ export function z2ClinicTroffer(atlas: PwAtlas, state: 'on' | 'warm' | 'off', ce
   }, { density: 64 });
 }
 
+/** Frames of the animated strips of this file (the stage's one animated material plays 4 at 7 fps). */
+export const Z2_CLINIC_FRAMES = 4;
+/** Where the failing end of a troffer's second tube lies in its module (texels from its left / bottom), and its size. */
+export const Z2_TUBE_END = { x: Z2_TROFFER_HALO + 28, y: Z2_TROFFER_HALO + 7, w: 4, h: 15 };
+
+/**
+ * A fluorescent tube's failing end, as a loop: 4 frames of 4 × 15 texels (dark, struck, dark,
+ * half) laid over the dark end of a lit troffer's second tube. Small on purpose: a flicker the
+ * eye catches, never a light that changes the room (the bible's §4.7).
+ */
+export function z2ClinicTubeFlicker(atlas: PwAtlas, warm: boolean): PwTile {
+  const { w, h } = Z2_TUBE_END;
+  return atlas.tile(`z2clinic|tube|${warm ? 1 : 0}`, w, h * Z2_CLINIC_FRAMES, (c, k) => {
+    const lens = k.ramp(warm ? 0xf4e4c0 : 0xdcf2e8, { dark: 0.6, light: 0.5, sat: 0.8 });
+    // (Frame 0 is the strip's BOTTOM block: the material steps up through it.)
+    [2, 5, 2, 3].forEach((t, f) => {
+      const y0 = c.h - (f + 1) * h;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) c.set(x, y0 + y, lens, t === 5 && (x === 0 || x === w - 1) ? 4 : t, PWF.GLOW);
+    });
+  }, { density: 64, frames: Z2_CLINIC_FRAMES });
+}
+
 /** Every tile of this file at the sizes the stage uses (look-dev dumps, benches). */
 export function z2ClinicTiles(atlas: PwAtlas): PwTile[] {
   const out: PwTile[] = [];
-  for (const [style, H, density] of [['clinic', 3.2, 96], ['clinic', 4.2, 64], ['clinic', 3.6, 64], ['ward', 3.6, 64]] as const) {
+  for (const [style, H, density] of [['clinic', 3.2, 128], ['clinic', 4.2, 64], ['clinic', 3.6, 64], ['ward', 3.6, 64]] as const) {
     for (let v = 0; v < Z2_PANEL_VARIANTS; v++) out.push(z2ClinicPanel(atlas, style, v, H, density));
   }
   out.push(z2CorridorFloor(atlas), z2RoomFloor(atlas, FLOOR, false), z2RoomFloor(atlas, 0x5a685e, true), z2ClinicCeiling(atlas, 0x7a827c));
   for (const kind of ['board', 'boardB', 'gel', 'switch', 'callpoint', 'clipboard', 'phone'] as const) out.push(z2ClinicFixture(atlas, kind));
-  out.push(z2ClinicArchitrave(atlas));
+  out.push(z2ClinicArchitrave(atlas), z2ClinicLining(atlas));
   for (const st of ['on', 'warm', 'off'] as const) out.push(z2ClinicTroffer(atlas, st, 0x7a827c));
   return out;
 }

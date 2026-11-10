@@ -479,3 +479,40 @@ export function pwSmudge(c: PwCanvas, rng: PwRng, cx: number, cy: number, rx: nu
     }
   }
 }
+
+/**
+ * Paint flaked off in small chips: `n` of them scattered round (cx, cy) within (rx, ry), each a
+ * shape of 3–9 texels of the coat underneath with the film's shadow along its top and a lit lip
+ * under it. Laid in loose GROUPS by the painters (round a big peel, along a rail, under a leak) —
+ * a wall chips where it is knocked or damp, not evenly.
+ */
+export function pwChips(c: PwCanvas, rng: PwRng, cx: number, cy: number, rx: number, ry: number, n: number, paint: number, under: number) {
+  for (let i = 0; i < n; i++) {
+    // (Thick near the middle of the group.)
+    const x = Math.round(cx + (rng.next() + rng.next() - 1) * rx);
+    const y = Math.round(cy + (rng.next() + rng.next() - 1) * ry);
+    const w = rng.int(2, 5);
+    const h = rng.int(2, 4);
+    for (let j = 0; j < h; j++) {
+      const inset = j === 0 || j === h - 1 ? rng.int(0, 1) : 0;
+      for (let q = inset; q < w - (j === h - 1 ? 1 : 0); q++) {
+        if (c.at(x + q, y + j) !== paint) continue;
+        c.set(x + q, y + j, under, j === 0 ? 1 : 3);
+      }
+    }
+    for (let q = 1; q < w; q++) if (c.at(x + q, y + h) === paint) c.set(x + q, y + h, paint, 5);
+  }
+}
+
+/** A rust weep: a thin run down a wall from a fixing at (x, y), `len` texels, a step darker, broken toward its end, a drop at the bottom. */
+export function pwWeep(c: PwCanvas, x: number, y: number, len: number, ramp: number, seed: number) {
+  let xx = x;
+  for (let j = 0; j < len; j++) {
+    if (j > len * 0.6 && hash2(x, j >> 1, seed) > 0.6) continue;
+    c.tint(xx, y + j, ramp, j < 3 ? -1 : 0);
+    if (j < len * 0.3) c.tint(xx + 1, y + j, ramp, 0);
+    if (hash2(x, j >> 3, seed + 1) > 0.8) xx += hash2(x, j, seed + 2) > 0.5 ? 1 : -1;
+  }
+  c.tint(xx, y + len, ramp, -1);
+  c.tint(xx + 1, y + len, ramp, -1);
+}

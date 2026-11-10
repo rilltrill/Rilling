@@ -13,8 +13,8 @@ import {
 import { fixture, nightWindow, troffer, type FixtureKind } from '../../pixelworld/z2modules';
 import { z2BigSign, z2ExitSign, z2LitSign, z2PlateSign, z2Poster, z2Stencil, type PosterKind } from '../../pixelworld/z2signs';
 import { pwPanelCuts, type PwPanelSpan } from '../../pixelworld/brush2i';
-import { z2ClinicArchitrave, z2ClinicCeiling, z2ClinicFixture, z2ClinicPanel, z2ClinicTroffer, z2CorridorFloor, z2RoomFloor, Z2_PANEL_LEN, Z2_TROFFER_HALO, type ClinicFixture, type ClinicStyle } from '../../pixelworld/z2clinic';
-import { PW_TPM_MID, PW_TPM_NEAR } from '../../pixelworld/canvas';
+import { z2ClinicArchitrave, z2ClinicCeiling, z2ClinicFixture, z2ClinicLining, z2ClinicPanel, z2ClinicTroffer, z2ClinicTubeFlicker, z2CorridorFloor, z2RoomFloor, Z2_CLINIC_FRAMES, Z2_PANEL_LEN, Z2_TROFFER_HALO, Z2_TUBE_END, type ClinicFixture, type ClinicStyle } from '../../pixelworld/z2clinic';
+import { PW_TPM_CLOSE, PW_TPM_MID, PW_TPM_NEAR } from '../../pixelworld/canvas';
 import { R } from './layout';
 import type { Z2PixelWorld } from './pixel';
 import { decalTint, emitMesh, GLAZED, isGlow, lay, neutral, NX, NZ, own, X, Y, Z, type MeshCtx, type Pick, type PickQuery, type Piece, type TagCtx, type Z2Registry } from './pwCore';
@@ -100,6 +100,15 @@ function handleShell(tc: TagCtx): boolean | undefined {
         const t = z2ClinicTroffer(a, info.on ? (info.warm ? 'warm' : 'on') : 'off', 0x7a827c);
         const h = Z2_TROFFER_HALO / t.density;
         lay(b, m, _o.set(-0.345 - h, -0.052, -0.625 - h), X, Z, t.w / t.density, t.h / t.density, t);
+        if (info.on && hsh < 0.3) {
+          // One lit fitting in three has a tube on its way out: its dark end flickers (a small loop).
+          const f = z2ClinicTubeFlicker(a, !!info.warm);
+          const e = Z2_TUBE_END;
+          const an = pw.animOf();
+          an.setMatrix(m);
+          an.rect(_o.set(-0.345 - h + e.x / t.density, -0.053, -0.625 - h + e.y / t.density), X, Z, e.w / t.density, e.h / t.density, f, { sub: { x: 0, y: 0, w: f.w, h: f.h / Z2_CLINIC_FRAMES } });
+          an.setMatrix(null);
+        }
       } else {
         const t = troffer(a, info.on ? (info.warm ? 'warm' : 'on') : 'off');
         lay(b, m, _o.set(-0.345, -0.052, -0.625), X, Z, 22 / PW_TPM, 40 / PW_TPM, t);
@@ -304,19 +313,21 @@ function buildWalls(pw: Z2PixelWorld, zone: string): PanelWall[] {
   const a = pw.atlas;
   const wall = (axis: 'x' | 'z', face: number, inward: 1 | -1, a0: number, a1: number, style: ClinicStyle, H: number, density: number, seq: string[]): PanelWall => {
     const layout: PwPanelSpan[] = seq.map((q, i) => {
-      const panel = z2ClinicPanel(a, style, Number(q[0]), H, density);
+      // (`n` = a span the rail passes close to in a room otherwise seen from afar: one tier denser.)
+      const panel = z2ClinicPanel(a, style, Number(q[0]), H, q.includes('n') ? PW_TPM_NEAR : density);
       pw.calm.add(panel);
-      return { at: i * Z2_PANEL_LEN, panel, flip: q.endsWith('f') };
+      return { at: i * Z2_PANEL_LEN, panel, flip: q.includes('f') };
     });
     return { axis, face, inward, a0, a1, layout };
   };
   switch (zone) {
     case 'corrA': {
-      // The showpiece: both walls pass at 2.2 m (96 texels a metre).
+      // The showpiece: both walls pass at 2.2 m and fill the frame's edges, where a 100° view
+      // magnifies them (measured: 96 texels a metre left 11–12 % of the frame over 1.5 px a texel).
       const r = R.corrA;
       return [
-        wall('x', r.z0 + HALF_T, 1, r.x0, r.x1, 'clinic', r.h, PW_TPM_NEAR, ['1', '0', '2', '1f', '0f', '2f', '1']),
-        wall('x', r.z1 - HALF_T, -1, r.x0, r.x1, 'clinic', r.h, PW_TPM_NEAR, ['0', '2f', '1', '0f', '2', '1f', '0']),
+        wall('x', r.z0 + HALF_T, 1, r.x0, r.x1, 'clinic', r.h, PW_TPM_CLOSE, ['1', '0', '2', '1f', '0f', '2f', '1']),
+        wall('x', r.z1 - HALF_T, -1, r.x0, r.x1, 'clinic', r.h, PW_TPM_CLOSE, ['0', '2f', '1', '0f', '2', '1f', '0']),
       ];
     }
     case 'er': {
@@ -325,7 +336,8 @@ function buildWalls(pw: Z2PixelWorld, zone: string): PanelWall[] {
         // Back wall (walkers come from it), west wall (doors), east wall (the grabbed nurse stands against its middle).
         wall('x', r.z0 + HALF_T, 1, r.x0, r.x1, 'clinic', r.h, PW_TPM_MID, ['2', '1', '2f', '0']),
         wall('z', r.x0 + HALF_T, 1, r.z0, r.z1, 'clinic', r.h, PW_TPM_MID, ['0', '2', '1f', '2f']),
-        wall('z', r.x1 - HALF_T, -1, r.z0, r.z1, 'clinic', r.h, PW_TPM_MID, ['1', '2', '2f', '0']),
+        // (The rail leaves through this wall's opening at 2.3 m from both its sides.)
+        wall('z', r.x1 - HALF_T, -1, r.z0, r.z1, 'clinic', r.h, PW_TPM_MID, ['2n', '2nf', '1', '0']),
       ];
     }
     case 'ward': {
@@ -409,23 +421,70 @@ function emitPanelled(mc: MeshCtx): boolean {
       const h = piece.y1 - piece.y0;
       if (h >= len) mc.b.rect(at(piece.a0, bx.min.y, 0), ux, Y, len, h, t, { sub: { x: 0, y: Math.round(piece.y0 * t.density), w: t.w, h: Math.min(t.h, h * t.density) } });
       else mc.b.rect(at(piece.a1, bx.min.y, 0), Y, _u.copy(ux).negate(), h, len, t, { sub: { x: 0, y: 0, w: t.w, h: Math.min(t.h, len * t.density) }, flipU: true });
+      if (!done.length) layLining(mc, bx, w.axis, h >= len);
       done.push(w);
       continue;
     }
     for (const c of pwPanelCuts(w.layout, piece)) {
       mc.b.rect(at(c.a0, mc.floorY + c.y0, 0), ux, Y, c.a1 - c.a0, c.y1 - c.y0, c.tile, { sub: c.sub, flipU: c.flipU });
       if (role === 'wall') continue;
-      // The top of a rail / skirting: its lit edge, drawn out over its depth.
+      // The top of a rail / skirting: the upper rows of its painting (the lit edge at the wall), at the panel's own density.
       const d = c.tile.density;
-      mc.b.rect(at(c.a0, bx.max.y, 0), ux, back, c.a1 - c.a0, hi - lo, c.tile, { sub: { x: c.sub.x, y: Math.round(piece.y1 * d) - 1, w: c.sub.w, h: 1 }, flipU: c.flipU });
+      const rows = Math.max(1, Math.round((hi - lo) * d));
+      mc.b.rect(at(c.a0, bx.max.y, 0), ux, back, c.a1 - c.a0, hi - lo, c.tile, { sub: { x: c.sub.x, y: Math.round(piece.y1 * d) - rows, w: c.sub.w, h: rows }, flipU: c.flipU });
     }
     done.push(w);
   }
   if (!done.length) return false;
-  // The other faces (ends at openings, a far side no room looks at, the underside): the generic paint.
+  // The other faces. A wall box's ends, underside and top are inside a door frame's trim, a
+  // window's sill or the wall it meets (drawn, they would fight the trim's lining for the same
+  // plane); a trim's reveals are its lining, laid above. What is left — a far side no panelled
+  // room looks at, the ends of a rail — takes the generic paint.
+  const axis = done[0].axis;
   const panelled = (x: number, z: number) => done.some((w) => (w.axis === 'x' ? z : x) * w.inward > 0.7);
-  emitMesh(mc.b, g, mc.rel, (x, y, z) => (panelled(x, z) || (role !== 'wall' && y > 0.7) ? null : mc.pick(x, y, z)), { world: true, flip: false, floorY: mc.floorY });
+  const along = (x: number, z: number) => Math.abs(axis === 'x' ? x : z) > 0.7;
+  emitMesh(
+    mc.b,
+    g,
+    mc.rel,
+    (x, y, z) => {
+      if (panelled(x, z)) return null;
+      if (role === 'wall' || role === 'trim') return along(x, z) || Math.abs(y) > 0.7 ? null : mc.pick(x, y, z);
+      return y > 0.7 ? null : mc.pick(x, y, z);
+    },
+    { world: true, flip: false, floorY: mc.floorY },
+  );
   return true;
+}
+
+/**
+ * The reveals of a door frame's trim box: the lining (z2clinic.ts) on both faces across the
+ * wall — up a jamb, or along the underside of a head in pieces no longer than the module.
+ */
+function layLining(mc: MeshCtx, bx: THREE.Box3, axis: 'x' | 'z', jamb: boolean) {
+  const t = z2ClinicLining(mc.pw.atlas);
+  const d = t.density;
+  const depth = axis === 'x' ? bx.max.z - bx.min.z : bx.max.x - bx.min.x;
+  const h = bx.max.y - bx.min.y;
+  if (jamb) {
+    const sub = { x: 0, y: Math.round((bx.min.y - mc.floorY) * d), w: t.w, h: Math.min(t.h, h * d) };
+    if (axis === 'x') {
+      mc.b.rect(_o.set(bx.max.x, bx.min.y, bx.max.z), NZ, Y, depth, h, t, { sub });
+      mc.b.rect(_o.set(bx.min.x, bx.min.y, bx.min.z), Z, Y, depth, h, t, { sub });
+    } else {
+      mc.b.rect(_o.set(bx.min.x, bx.min.y, bx.max.z), X, Y, depth, h, t, { sub });
+      mc.b.rect(_o.set(bx.max.x, bx.min.y, bx.min.z), NX, Y, depth, h, t, { sub });
+    }
+    return;
+  }
+  const len = axis === 'x' ? bx.max.x - bx.min.x : bx.max.z - bx.min.z;
+  const max = t.h / d;
+  for (let s = 0; s < len - 1e-3; s += max) {
+    const l = Math.min(max, len - s);
+    const sub = { x: 0, y: 0, w: t.w, h: l * d };
+    if (axis === 'x') mc.b.rect(_o.set(bx.min.x + s, bx.min.y, bx.max.z), NZ, X, depth, l, t, { sub });
+    else mc.b.rect(_o.set(bx.min.x, bx.min.y, bx.min.z + s), X, Z, depth, l, t, { sub });
+  }
 }
 
 /**
