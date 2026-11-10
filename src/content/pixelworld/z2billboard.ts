@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Kit } from '../kit/ModelKit';
-import type { PwAtlas, PwTile } from './atlas';
-import { PW_MIP_BIAS } from './material';
+import { pwRect, type PwAtlas, type PwTile } from './atlas';
+import { PW_FETCH, PW_MIP_BIAS, pwAtlasUniforms } from './material';
 import { PW_DEBUG_DECL, pwDebugPatch, pwDebugSetup } from '../../core/debugView';
 
 /**
@@ -39,14 +39,14 @@ const VERT_BEGIN = /* glsl */ `
 `;
 
 const FRAG_DECL = /* glsl */ `
-  uniform sampler2D uPwAtlas;
+  ${PW_DEBUG_DECL}
+  ${PW_FETCH}
   uniform float uPwBias;
   uniform float uPwGain;
   uniform float uPwGlow;
   uniform float uPwMaxLv;
   flat varying vec4 vPwRect;
   varying vec2 vPwUv;
-  ${PW_DEBUG_DECL}
 `;
 
 const FRAG_MAP = /* glsl */ `
@@ -55,17 +55,17 @@ const FRAG_MAP = /* glsl */ `
     vec2 pu = vPwUv;
     vec2 pg = max(abs(dFdx(pu)), abs(dFdy(pu)));
     float rho = max(pg.x, pg.y);
-    int lv = int(clamp(floor(log2(max(rho, 1e-3)) + uPwBias), 0.0, uPwMaxLv));
+    float ps = pwScale(vPwRect);
+    int lv = pwLevel(rho, ps, uPwBias, uPwMaxLv);
     vec2 rs = abs(vPwRect.zw);
     vec2 t = clamp(pu, vec2(0.0), rs - 0.001);
-    ivec2 ip = (ivec2(vPwRect.xy) + ivec2(floor(t))) >> lv;
-    vec4 pc = texelFetch(uPwAtlas, ip, lv);
+    vec4 pc = pwFetch(vPwRect.xy, t, ps, lv);
     if (pc.a < 0.25) discard;
     float glowK = pc.a < 0.85 ? 1.0 : 0.0;
     diffuseColor.rgb *= pc.rgb * (1.0 - glowK) * uPwGain;
     pwEmit = pc.rgb * glowK * uPwGlow;
     #ifdef PW_DEBUG
-      pwDbg = pwDbgMag(pu, 1.0, lv);
+      pwDbg = uPwDebug > 2.5 ? pwDbgTexel : pwDbgMag(pu, ps, lv);
     #endif
   }
 `;
@@ -79,7 +79,7 @@ export function z2BillboardMaterial(atlas: PwAtlas, gain = 1): THREE.MeshLambert
   const hit = byGain.get(gain);
   if (hit) return hit;
   const uniforms: Record<string, { value: unknown }> = {
-    uPwAtlas: { value: atlas.texture() },
+    ...pwAtlasUniforms(atlas),
     uPwBias: { value: PW_MIP_BIAS },
     uPwGain: { value: gain },
     uPwGlow: { value: 1 },
@@ -100,7 +100,7 @@ export function z2BillboardMaterial(atlas: PwAtlas, gain = 1): THREE.MeshLambert
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += pwEmit;');
     shader.fragmentShader = pwDebugPatch(shader.fragmentShader);
   };
-  m.customProgramCacheKey = () => 'z2Billboard1';
+  m.customProgramCacheKey = () => 'z2Billboard2';
   m.name = `pwBill:${atlas.name}`;
   Kit.track(m);
   byGain.set(gain, m);
@@ -160,7 +160,7 @@ export class Z2Billboards {
         pos.set([it.x, it.y, it.z], v * 3);
         bill.set([corners[k][0], corners[k][1]], v * 2);
         uv.set([corners[k][2], corners[k][3]], v * 2);
-        rect.set([t.x, t.y, -t.w, t.h], v * 4);
+        rect.set(pwRect(t, false), v * 4);
         col.set([Math.round(_c.r * 255), Math.round(_c.g * 255), Math.round(_c.b * 255)], v * 3);
       }
       idx.set([i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3], i * 6);

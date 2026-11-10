@@ -3,7 +3,7 @@ import { ConvexGeometry } from 'three/examples/jsm/geometries/ConvexGeometry.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Kit } from '../../kit/ModelKit';
 import type { TexName } from '../../kit/Textures';
-import { PwAtlas, type PwTile } from '../../pixelworld/atlas';
+import { PwAtlas, pwRect, type PwTile } from '../../pixelworld/atlas';
 import { PwBatch, planarUv } from '../../pixelworld/batch';
 import { NEUTRAL_BRICK, NEUTRAL_HEX } from '../../pixelworld/retexture';
 import { brickTile, curbTile, grateTile, hazardTile, roadPaintTile } from '../../pixelworld/surfaces';
@@ -498,13 +498,13 @@ export class Z2PixelWorld {
             const u = ((p.x - ox) / w) * leaf.w;
             uv[v * 2] = _n.z > 0 ? u : leaf.w - u;
             uv[v * 2 + 1] = ((p.y - oy) / h) * leaf.h;
-            rect.set([leaf.x, leaf.y, -leaf.w, leaf.h], v * 4);
+            rect.set(pwRect(leaf, false), v * 4);
             col.set([255, 255, 255], v * 3);
           } else {
             const [pu, pv] = planarUv(p, _n, PW_TPM);
             uv[v * 2] = pu;
             uv[v * 2 + 1] = pv;
-            rect.set([edge.x, edge.y, edge.w, edge.h], v * 4);
+            rect.set(pwRect(edge, true), v * 4);
             col.set([Math.round(edgeTint.r * 255), Math.round(edgeTint.g * 255), Math.round(edgeTint.b * 255)], v * 3);
           }
         }
@@ -1390,13 +1390,13 @@ export class Z2PixelWorld {
           if (side) {
             uv[vi * 2] = us[kk];
             uv[vi * 2 + 1] = (p.y - y0) * PW_TPM;
-            rect.set([body.x, body.y, body.w, body.h], vi * 4);
+            rect.set(pwRect(body, true), vi * 4);
             col.set([255, 255, 255], vi * 3);
           } else {
             const [pu, pv] = planarUv(p, _n, PW_TPM);
             uv[vi * 2] = pu;
             uv[vi * 2 + 1] = pv;
-            rect.set([enamel.x, enamel.y, enamel.w, enamel.h], vi * 4);
+            rect.set(pwRect(enamel, true), vi * 4);
             if (col0) _col.setRGB(col0.getX(vi), col0.getY(vi), col0.getZ(vi));
             else _col.copy((m.material as THREE.MeshLambertMaterial).color);
             col.set([Math.round(Math.min(1, _col.r / _base.r) * 255), Math.round(Math.min(1, _col.g / _base.g) * 255), Math.round(Math.min(1, _col.b / _base.b) * 255)], vi * 3);
@@ -1442,7 +1442,7 @@ export class Z2PixelWorld {
         const wy = _a.y + p.position.y;
         uv[i * 2] = (front ? (nrm.getZ(i) > 0 ? wx : -wx) : nrm.getX(i) !== 0 ? _a.z * Math.sign(nrm.getX(i)) : wx) * PW_TPM;
         uv[i * 2 + 1] = (Math.abs(nrm.getY(i)) > 0.7 ? _a.z : wy) * PW_TPM;
-        rect.set([t.x, t.y, t.w, t.h], i * 4);
+        rect.set(pwRect(t, true), i * 4);
         if (front) col.set([Math.round(_col.r * 255), Math.round(_col.g * 255), Math.round(_col.b * 255)], i * 3);
         else col.set([255, 255, 255], i * 3);
       }
@@ -1510,7 +1510,7 @@ export class Z2PixelWorld {
       const wy = _a.y + p.position.y;
       uv[v * 2] = (front ? (nz > 0 ? wx : -wx) : Math.abs(nrm.getX(v)) > Math.abs(nrm.getY(v)) ? _a.z + wy : wx + _a.z) * PW_TPM;
       uv[v * 2 + 1] = (front ? wy : Math.abs(nrm.getY(v)) > 0.7 ? _a.z : wy) * PW_TPM;
-      rect.set([t.x, t.y, t.w, t.h], v * 4);
+      rect.set(pwRect(t, true), v * 4);
       if (front) col.set([Math.round(tint.r * 255), Math.round(tint.g * 255), Math.round(tint.b * 255)], v * 3);
       else col.set([255, 255, 255], v * 3);
     }

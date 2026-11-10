@@ -1,4 +1,4 @@
-import { pwCacheHas, pwCacheKeep, pwCacheRestored, pwCached, pwCollectUnsaved, pwReturnUnsaved, pwTakeUnsaved, type PwAtlasData } from './atlas';
+import { PW_FORMAT, pwCacheHas, pwCacheKeep, pwCacheRestored, pwCached, pwCollectUnsaved, pwLevelOf, pwReturnUnsaved, pwTakeUnsaved, type PwAtlasData } from './atlas';
 
 /**
  * Persistent store for painted PixelWorld atlases (IndexedDB).
@@ -8,8 +8,8 @@ import { pwCacheHas, pwCacheKeep, pwCacheRestored, pwCached, pwCollectUnsaved, p
  * IndexedDB: one record per atlas NAME (`<version>|<name>`: a later paint of the
  * same atlas replaces it, so the store never holds more than one copy of each),
  * holding the tile-list signature it was painted for (checked on use), all its
- * levels (post-processed) and the tile rects. A stage loaded before skips
- * painting altogether.
+ * indexed levels (post-processed; two bytes a texel), its palette and the tile
+ * rects. A stage loaded before skips painting altogether.
  *
  *  - `version`: a hash of the game's sources, injected at build time
  *    (`__PW_VERSION__`, vite.config.ts): any code change invalidates every stored
@@ -40,14 +40,19 @@ let loadedPrefix = '';
 
 interface StoredAtlas {
   v: string;
+  /** The texel format (`PW_FORMAT`): a record in another one is not used. */
+  f: number;
   name: string;
   sig: string;
   w: number;
   h: number;
   levels: { data: Uint8Array; width: number; height: number }[];
+  mips: number;
+  pal: Uint8Array;
   rects: [string, number, number][];
   bytes: number;
   texels: number;
+  up: number;
   /** CPU ms the paint took (reported, not used). */
   ms: number;
 }
@@ -153,10 +158,11 @@ function prune(d: IDBDatabase) {
 }
 
 function restore(r: StoredAtlas): PwAtlasData | null {
-  if (!r || r.v !== version || !Array.isArray(r.levels) || !r.levels.length) return null;
+  if (!r || r.v !== version || r.f !== PW_FORMAT || !Array.isArray(r.levels) || !r.levels.length || !(r.pal instanceof Uint8Array)) return null;
   const rects = new Map<string, { x: number; y: number }>();
   for (const [k, x, y] of r.rects) rects.set(k, { x, y });
-  return { name: r.name, sig: r.sig, w: r.w, h: r.h, levels: r.levels, rects, ms: 0, bytes: r.bytes, texels: r.texels, painted: true, restored: true };
+  const levels = r.levels.map((l) => pwLevelOf(l.data, l.width, l.height));
+  return { name: r.name, sig: r.sig, w: r.w, h: r.h, levels, mips: r.mips, pal: r.pal, rects, ms: 0, bytes: r.bytes, texels: r.texels, up: r.up, painted: true, restored: true };
 }
 
 /**
@@ -226,14 +232,19 @@ export function pwStoreFlush(max = Infinity): number {
     for (const a of list) {
       const rec: StoredAtlas = {
         v: version,
+        f: PW_FORMAT,
         name: a.name,
         sig: a.sig,
         w: a.w,
         h: a.h,
-        levels: a.levels,
+        // (The bytes only: the texel views are rebuilt over them when the record comes back.)
+        levels: a.levels.map((l) => ({ data: l.data, width: l.width, height: l.height })),
+        mips: a.mips,
+        pal: a.pal,
         rects: [...a.rects].map(([k, r]) => [k, r.x, r.y]),
         bytes: a.bytes,
         texels: a.texels,
+        up: a.up,
         ms: a.ms,
       };
       st.put(rec, `${version}|${a.name}`);
