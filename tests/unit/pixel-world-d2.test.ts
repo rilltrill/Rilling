@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { PwPalette } from '../../src/content/pixelworld/canvas';
 import { PW_DEBUG_TILE_MS, PW_DEBUG_TILES } from '../../src/content/pixelworld/atlas';
-import { paintTile, type PwAtlas } from '../../src/content/pixelworld/atlas';
+import { paintTile, pwLevelRgba, type PwAtlas } from '../../src/content/pixelworld/atlas';
 import { encodePng, flipRows } from './pwPng';
 
 /**
@@ -51,7 +51,7 @@ describe.skipIf(!OUT)('d2 PixelWorld look-dev dump', () => {
     if (!only) {
       const d = atlas.build();
       const lv = d.levels[0];
-      writeFileSync(`${out}/_atlas.png`, await encodePng(flipRows(lv.data, lv.width, lv.height), lv.width, lv.height, 1, [255, 0, 255]));
+      writeFileSync(`${out}/_atlas.png`, await encodePng(flipRows(pwLevelRgba(d, 0), lv.width, lv.height), lv.width, lv.height, 1, [255, 0, 255]));
       console.log(`d2 atlas ${d.w}×${d.h}, ${(d.bytes / 1048576).toFixed(2)} MB, ${d.ms.toFixed(0)} ms, ${d.texels} texels, ${tiles.size} tiles`);
       console.log(PW_DEBUG_TILE_MS().slice(0, 25).join('\n'));
     }

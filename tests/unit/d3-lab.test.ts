@@ -1,6 +1,7 @@
 import { describe, it } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { encodePng, flipRows } from './pwPng';
+import { pwLevelRgba, type PwAtlasData } from '../../src/content/pixelworld/atlas';
 
 /**
  * TYRANT CHASE PIXEL WORLD look-dev (skipped unless D3_LAB=<out dir>): builds
@@ -44,13 +45,13 @@ describe.skipIf(!process.env.D3_LAB)('d3 lab', () => {
     console.log('slowest tiles (last atlas painted):\n' + PW_DEBUG_TILE_MS().slice(0, 12).join('\n'));
     const pw = (park() as unknown as { pw: Record<string, unknown> }).pw;
     for (const [k, v] of Object.entries(pw)) {
-      const a = v as { name?: string; build?: () => { w: number; h: number; levels: { data: Uint8Array; width: number; height: number }[] } };
+      const a = v as { name?: string; build?: () => PwAtlasData };
       if (!a || typeof a.build !== 'function' || !a.name || !(k.toLowerCase().includes('atlas'))) continue;
       const d = a.build();
       for (const l of [0, 1, 2, 3]) {
         const lv = d.levels[l];
         if (!lv || (l > 0 && d.levels.length < 3)) continue;
-        writeFileSync(`${out}/${a.name}-l${l}.png`, await encodePng(flipRows(lv.data, lv.width, lv.height), lv.width, lv.height, l === 0 ? 1 : 2, [255, 0, 255]));
+        writeFileSync(`${out}/${a.name}-l${l}.png`, await encodePng(flipRows(pwLevelRgba(d, l), lv.width, lv.height), lv.width, lv.height, l === 0 ? 1 : 2, [255, 0, 255]));
       }
     }
     if (process.env.D3_CPU) {

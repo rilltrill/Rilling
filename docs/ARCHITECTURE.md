@@ -693,6 +693,9 @@ Junk falls back to the default.
   (`PWF.GLOW` unlit, `PWF.DITHER` ordered dither between two steps; without it a fractional
   tone ROUNDS). Primitives: `set / rect / hline / vline / line / ellipse / poly / scatter`
   (hand-shaped clusters, `CLUSTERS`), `PwRng` seeded by the tile key. Pure CPU, node-safe.
+  `index()` gives the canvas as STORED TEXELS (16 bits: ramp, tone step, glow — never a
+  colour; see *PIXEL WORLD 2 pipeline*), `resolve(pal)` the same through the palette as RGBA
+  (look-dev, tests).
 - **Atlas** (`atlas.ts`): tiles are REGISTERED while the stage builds (`atlas.tile(key, w,
   h, paint, { wrap })` → a handle; the same key returns the same tile), LAID OUT in `build()`
   (rects known at once: meshes can be built) and PAINTED — at once (tests, tools), or, when
@@ -702,19 +705,23 @@ Junk falls back to the default.
   calm levels, z3 ink levels, z1 flame coverage) register with `atlas.post(fn)` right after
   `build()`: they run when the paint ends. Deterministic either way, cached by tile list for
   the session (`pwCacheKeep` drops other stages' copies: one stage's worth of CPU data) and
-  persisted (`store.ts`, below), packed into one RGBA8 texture with 5 hand-made levels. Mips are palette-faithful: each texel of a level is a real texel
-  of the four below it (the one nearest their average, within the class most of them
-  share) — never a blend; glow wins ties and survives over cut-out, so neon, stars and lit
-  windows keep reading at a distance. Alpha classes: 0 = cut out (discarded), 160
-  (`PW_GLOW_A`) = unlit glow, 255 = lit. Rects are 16-texel aligned (`PW_ALIGN`); wrap tiles
-  must be multiples of 16. `PW_STATS` holds bytes / paint ms / cached / stored per atlas
-  (`window.__pixelWorld`), `PW_PAINT_STATS` the longest single paint step.
+  persisted (`store.ts`, below), packed into one INDEXED texture (two bytes a texel) with
+  hand-made levels, beside a small palette texture (*PIXEL WORLD 2 pipeline*, below). Mips
+  are palette-faithful: each texel of a level is a real texel of the four below it (the one
+  nearest their average colour, within the class most of them share) — never a blend; glow
+  wins ties and survives over cut-out, so neon, stars and lit windows keep reading at a
+  distance. Texel classes: cut out (discarded), glow (unlit), lit. Rects are aligned so every
+  level stays inside its own rect (`PW_ALIGN` = 16 painted texels); wrap tiles must be
+  multiples of 16. `PW_STATS` holds size / bytes / paint ms / tiles stored at 2× / levels /
+  ramps / cached / stored per atlas (`window.__pixelWorld`), `PW_PAINT_STATS` the longest
+  single paint step.
 - **Store** (`store.ts`): painted atlases persist in IndexedDB (`overrun-pixelworld`), one
   record per atlas NAME under `<version>|<name>` — `version` a hash of every source file
   (`__PW_VERSION__`, injected by vite.config.ts: any code change repaints once; other
   versions' records are deleted by key range when the store opens). A record holds the tile
-  list it was painted for (checked on use), every level after its `post()` passes, and the
-  rects. Game opens the store at boot, `pwStorePrefetch(stageId)` reads a stage's records
+  list it was painted for (checked on use), every indexed level after its `post()` passes,
+  the palette, the rects and the texel format (`PW_FORMAT`: a record in another format is
+  not used). Game opens the store at boot, `pwStorePrefetch(stageId)` reads a stage's records
   while its intro card paints (the build waits ≤ 1.5 s for it), and `pwStoreFlush(1)` hands
   freshly painted atlases over one a frame, still behind the card (the data is cloned at the
   call; the disk write runs in the background). No IndexedDB (node, a sandboxed frame), a
@@ -723,11 +730,13 @@ Junk falls back to the default.
   `define` would not follow edits): `&pwstore=<tag>` turns it on for benchmarks.
 - **Material** (`material.ts`): flat-shaded Lambert (stage lights, flashlight, fog, tone
   mapping exactly like the 3D scenery) whose colour is fetched texel by texel
-  (`texelFetch`, level = log2(texels per pixel) + bias): hard texels, the hand-made levels
-  take over before anything crawls. Per vertex: the tile rect (w < 0 = module, clamped;
-  w > 0 = tileable, wrapped inside its rect), texel UV (or PLANAR: projected world
-  position, 24 B a vertex for big bakes), vertex colour (tint / painted AO). `gain` matches
-  the stage's scenery brightness; `anim` plays vertical strip tiles (water, flicker).
+  (`texelFetch` of the index, then of its palette entry; level = log2(texels per pixel) +
+  bias, picked per texel axis): hard texels, the hand-made levels take over before anything
+  crawls. Per vertex: the tile rect (`pwRect(tile)`: w < 0 = module, clamped; w > 0 =
+  tileable, wrapped inside its rect; h < 0 = stored at 2×), PAINTED-texel UV (or PLANAR:
+  projected world position, 24 B a vertex for big bakes), vertex colour (tint / painted AO).
+  `gain` matches the stage's scenery brightness; `anim` plays vertical strip tiles (water,
+  flicker).
 - **Batch** (`batch.ts`): `PwBatch` collects quads into ONE mesh per batch (one draw):
   `rect` (wrap tiles map at `PW_TPM` from `u0/v0`, modules stretch, `sub` / `flipU`,
   `tintRGB` for NEUTRAL tiles), `box`, `ribbon` (a strip along points with v running along
@@ -1333,6 +1342,9 @@ render / settle / total ms (`scripts/load-bench.mjs`).
 
 `?stage=z1` jump into a stage · `&art=3d|sprites|pixel` ART: CLASSIC / PIXEL CAST / PIXEL WORLD (default) ·
 `&pwstore=<tag>` persist painted atlases on the dev server (version `dev-<tag>`; `0` = off) ·
+`&pwdebug=mag|lvl|tone|ramp` PixelWorld debug views (`1` = compiled in, off until
+`__pwDebug(view)`) · `&pwup=0` no 2× fallback · `&pwaniso=0` one level for both texel axes
+(both off = the first pass's frames) ·
 `&spriteLook=pal:0,dirs:8` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
 overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor

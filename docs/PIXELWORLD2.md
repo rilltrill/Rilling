@@ -98,7 +98,8 @@ A surface seen both near and far is painted at its near density; the hand-made l
 carry it into the distance. Every tile that is NOT repainted natively is stored at 2× by the
 pipeline's pixel-art upscaler (the foundation work, §6), so nothing is left with 32-texel
 blocks next to the camera; that is a safety net, not the art: an upscaled tile has smooth
-shapes but no new detail. Paint natively wherever the player looks.
+shapes but no new detail, and at 2–4 m it is still a texel of 2–1 pixels. Paint natively
+wherever the player looks. (`&pwdebug=mag` shows where: anything orange or red.)
 
 Budget (per stage, all atlases, all levels): ≤ 48 MB of texture memory; paint ≤ 1.2 s on the
 test box for a cold load (it runs in slices behind the intro card and is stored after the
@@ -152,10 +153,34 @@ moving or flickering light comes from the stage lights through the material.
 
 ## 6. The pipeline (foundation)
 
-See the foundation section the engine work adds to docs/ARCHITECTURE.md. In short: indexed
-atlases (two bytes a texel) + a palette texture; ramp-step lighting; banded fog; palette-true
-output through the arcade-monitor pass; the 2× upscaler for tiles not yet repainted; debug
-views and the audit script (§8).
+Described in full in docs/ARCHITECTURE.md, *PIXEL WORLD 2 pipeline*. What exists:
+
+- **Indexed atlases**: a stored texel is two bytes of index (ramp id, painted tone, glow), the
+  colour comes from a palette texture per atlas — a row a ramp, 16 tones: the six painted ones
+  (columns 5…10), five deeper steps toward a deep blue-violet and five brighter ones toward a
+  warm white (`extendRamp`). Painters do not see any of it: they still draw (ramp, tone, flags)
+  into a `PwCanvas`.
+- **Density per tile**: `atlas.tile(key, w, h, paint, { density: PW_TPM_MID })` (64; `PW_TPM_NEAR`
+  96, `PW_TPM_CLOSE` 128; `pwDensityFor(metres)`). Paint `w` × `h` at that density (a 3 m × 2 m
+  front at 64 is 192 × 128 texels), lay it as before (wrap tiles at the tile's density, modules at
+  `tile.w / tile.density` metres). Wrap tiles at 64 or more must be multiples of 32 texels.
+- **The 2× fallback**: every tile still painted below 64 texels a metre is stored at twice its
+  size by a pixel-art upscaler (EPX shapes on equal texels, in-between tones on one ramp,
+  crisp cut-outs, dither redone at the new size) and shown only where a painted texel would be
+  larger than √2 frame pixels. Opt a far-only tile out with `{ upscale: false }`; backdrops
+  (one-level atlases) are never upscaled. It smooths, it adds no detail.
+- **Per-axis level pick**: a plane seen at a grazing angle (the road ahead, a corridor wall)
+  keeps its texels at pixel size across the view. Without it density would not help there at
+  all. A material's level `bias` still applies: the first pass's biases of 1.0 / 1.5 on z2 / d2
+  walls and floors draw texels of 1.4–2.8 pixels by design — set them back to the default (0.5)
+  when those surfaces are repainted, or the audit's `lvl>2` column stays high.
+- **Debug views and the audit** (§8).
+
+Still to come (the light part): ramp-step lighting through the extended palette (§5), banded
+fog, palette-true output through the arcade-monitor pass. Until then the material lights paint
+as the first pass did (palette colour × Lambert), so smooth gradients and the monitor's
+ordered dither are still in every frame — the audit's `tiny` column measures exactly that and
+cannot pass yet.
 
 ## 7. Definition of done for a scene
 
@@ -174,8 +199,22 @@ views and the audit script (§8).
   `node scripts/pixel-world.mjs --base http://localhost:<port> --out <dir> --modes pixel
   --retro pixel --vw 624 --vh 288 --dsf 3 --shots "z1:5:150:label,…"`. Phone view:
   `--vw 844 --vh 390 --dsf 2 --retro crt`. The first pass's frames: `/tmp/pw2/base/`.
-- **Audit**: `node scripts/pixel-audit.mjs` (foundation work) — per shot: share of world
-  pixels whose texel is drawn > 1.5 / > 2 frame pixels wide, share of 16 × 16 blocks that are
-  flat, distinct colours, share of smooth-gradient pixel pairs. Thresholds are printed by the
-  script; the first pass's numbers are its baseline.
-- **Tile dumps**: `PW_DUMP=<dir> npx vitest run tests/unit/pixel-world-dump.test.ts`.
+  `--extra "&pwup=0&pwaniso=0"` draws the first pass from the new formats (A/B).
+- **Debug views**: add `&pwdebug=mag` (frame pixels across one stored texel: green ≤ 1.25,
+  yellow ≤ 1.5, orange ≤ 2, red > 2 — the density check of §3), `lvl` (the same for the texel
+  actually drawn), `tone` (painted tone, glow magenta) or `ramp` (a hue per ramp) to any
+  `retro=pixel|crt` URL; everything that is not painted world is black. `__pwDebug('mag')`
+  in the console switches views on a frozen frame.
+- **Audit**: `node scripts/pixel-audit.mjs --base http://localhost:<port> --out <dir>
+  [--shots "z1:5:150:label,…"]` (default: three views a stage and its boss) — per shot, on the
+  exact 624 × 288 frame: `>1.5` / `>2` share of world pixels whose texel is wider than 1.5 / 2
+  frame pixels (`>2 mid`: in the middle 80 % of the frame), `lvl>2` the same for the texel
+  drawn, `flat` share of 16 × 16 world blocks with no drawn form (≤ 2 colours, or under 12 of
+  480 adjacent pairs more than two monitor steps apart; `<label>-flat.png` boxes them),
+  `colours`, `tiny` share of adjacent world pairs exactly one step of the monitor's 15-bit
+  colour apart (smooth gradients, screen-door dither). Pass marks, printed with the table:
+  `>1.5` ≤ 5 %, `>2 mid` ≤ 1 %, `flat` ≤ 4 %, `tiny` ≤ 20 %. The first pass (24 shots, means):
+  20.9 % / 6.3 % / flat 12.7 % / tiny 65.1 %, `lvl>2` 37.1 %, 1293 colours
+  (`/tmp/pw2/audit-v1.json`).
+- **Tile dumps**: `PW_DUMP=<dir> npx vitest run tests/unit/pixel-world-dump.test.ts`; with
+  `PW_UP=1` also `<tile>_up.png`, the tile as painted beside the upscaler's 2× copy.
