@@ -31,7 +31,7 @@ const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
 /** The flame strip (`variant` 0 / 1: two out-of-step fires so neighbours never flicker together). */
 export function z1TongueFlameTile(atlas: PwAtlas, variant: number): PwTile {
-  return atlas.tile(`z1fire2|${variant}|${Z1_FLAME_FRAMES}`, Z1_FLAME_W, Z1_FLAME_H * Z1_FLAME_FRAMES, (c, k) => paintTongues(c, k, variant));
+  return atlas.tile(`z1fire2|${variant}|${Z1_FLAME_FRAMES}`, Z1_FLAME_W, Z1_FLAME_H * Z1_FLAME_FRAMES, (c, k) => paintTongues(c, k, variant), { frames: Z1_FLAME_FRAMES });
 }
 
 function paintTongues(c: PwCanvas, k: PwKit, variant: number) {
@@ -224,7 +224,7 @@ export function z1FlameLevels(data: PwAtlasData, tiles: readonly PwTile[]) {
  * `variant` 0 / 1: two out-of-step fires.
  */
 export function z1FlameTile(atlas: PwAtlas, variant: number): PwTile {
-  return atlas.tile(`z1fire|${variant}|${Z1_FLAME_FRAMES}`, Z1_FLAME_W, Z1_FLAME_H * Z1_FLAME_FRAMES, (c, k) => paintFlames(c, k, variant));
+  return atlas.tile(`z1fire|${variant}|${Z1_FLAME_FRAMES}`, Z1_FLAME_W, Z1_FLAME_H * Z1_FLAME_FRAMES, (c, k) => paintFlames(c, k, variant), { frames: Z1_FLAME_FRAMES });
 }
 
 function paintFlames(c: PwCanvas, k: PwKit, variant: number) {

@@ -681,7 +681,7 @@ export function d3PuddleDecal(atlas: PwAtlas, o: { rim: number; sky: number }, v
         }
       }
     }
-  });
+  }, { frames: F });
 }
 
 /**
@@ -886,5 +886,5 @@ export function d3WaterTile(atlas: PwAtlas, o: { hex: number; deep: number; flow
         }
       }
     }
-  }, { wrap: true });
+  }, { wrap: true, frames: F });
 }

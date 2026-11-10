@@ -1259,6 +1259,6 @@ export function waterTile(atlas: PwAtlas, o: { hex: number; frames?: number; foa
         for (let i = 0; i < Math.round(30 * (o.foam ?? 0.3)); i++) c.set(fr.int(0, c.w - 1), y0 + fr.int(0, FH - 1), foam, 3);
       }
     },
-    { wrap: true },
+    { wrap: true, frames: F },
   );
 }

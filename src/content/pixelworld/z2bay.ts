@@ -175,7 +175,7 @@ export function z2PuddleTile(atlas: PwAtlas, light: PuddleLight, variant = 0): P
         }
       }
     }
-  });
+  }, { frames: F });
 }
 
 /** A sign's light shimmering on the wet ground under it (cut out): stacked broken dashes, densest under the sign. */

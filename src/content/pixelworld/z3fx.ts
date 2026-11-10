@@ -163,7 +163,7 @@ export class Z3FxAtlas {
       this.atlas.tile(`${src.key}|z3lick`, src.w, src.h, (c, k) => {
         paint(c, k);
         taperDetached(c, Z1_FLAME_H);
-      }),
+      }, { frames: Z1_FLAME_FRAMES }),
     ];
     this.puff = z3PuffTile(this.atlas);
   }
