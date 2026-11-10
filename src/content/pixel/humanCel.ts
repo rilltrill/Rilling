@@ -39,6 +39,9 @@ import { hash, mats, paintBubble, paintHat, paintPonytail, paintSmears, scaleOf,
  * strokes, stitching and small marks.
  */
 
+/** Close-up extras (fold strokes, glints, torn points) are added only while the figure holds fewer primitives than this: the cap is 160. */
+const ROOM = 138;
+
 const D = PF.FLAT;
 const SH = PF.FLAT | PF.SHADE_ONLY;
 const CUT = PF.CUT_A | PF.CUT_B;
@@ -136,7 +139,7 @@ function stain(f: PixelFigure, j: THREE.Object3D, x: number, y: number, z: numbe
   if (lod > 0) f.decal(f.at(j, x - w * 0.3, y + h * (0.1 + 0.3 * h1), z), f.at(j, x + w * 0.25, y - h * 0.3 * h1, z), h * 0.3 * s, h * 0.24 * s, M.blood).flag(D | PF.NO_OUTLINE);
   if (drip > 0) {
     f.decal(f.at(j, dx, y - h * 1.3, z), f.at(j, dx + 0.004, y - h * 1.5 - drip, z), 0.007 * s, 0.006 * s, M.blood).flag(D).tone(-0.2).min(0.5);
-    if (lod > 1) dot(f, f.at(j, dx + 0.004, y - h * 1.5 - drip - 0.008, z), 0.01 * s, M.blood);
+    if (lod > 1 && f.count < ROOM) dot(f, f.at(j, dx + 0.004, y - h * 1.5 - drip - 0.008, z), 0.01 * s, M.blood);
   }
 }
 
@@ -147,7 +150,7 @@ function stain(f: PixelFigure, j: THREE.Object3D, x: number, y: number, z: numbe
 function wound(f: PixelFigure, j: THREE.Object3D, x: number, y: number, z: number, dx: number, dy: number, r: number, M: Mats, s: number, lod: number) {
   f.decal(f.at(j, x - dx, y + dy, z), f.at(j, x + dx, y - dy, z), r * s, r * 0.8 * s, M.blood).flag(D).tone(-0.5);
   f.decal(f.at(j, x - dx * 0.5, y + dy * 0.5, z), f.at(j, x + dx * 0.45, y - dy * 0.45, z), r * 0.5 * s, r * 0.4 * s, M.gore).flag(D | PF.NO_OUTLINE);
-  if (lod > 1) {
+  if (lod > 1 && f.count < ROOM) {
     f.triDecal(f.at(j, x - dx + r * 0.4, y + dy + r * 0.5, z), f.at(j, x - dx - r * 0.6, y + dy - r * 0.2, z), f.at(j, x - dx * 2.2 - r * 0.4, y + dy * 2.2 + r * 0.5, z), M.blood).tone(-0.5);
     f.triDecal(f.at(j, x + dx - r * 0.4, y - dy - r * 0.5, z), f.at(j, x + dx + r * 0.6, y - dy + r * 0.2, z), f.at(j, x + dx * 2.1 + r * 0.3, y - dy * 2.1 - r * 0.6, z), M.blood).tone(-0.5);
     dot(f, f.at(j, x - dx * 0.25, y + dy * 0.25 + r * 0.12, z), 0.007 * s, M.gore).tone(0.5);
@@ -203,7 +206,9 @@ export function paintHumanCel(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: 
   const hemY = coat || gown ? 0.03 : o === 'nurse' ? -0.075 : untucked ? -0.04 : 0.025;
   const hemW = (coat || gown ? 0.16 : untucked ? 0.174 : 0.158) * b;
   const shH = 0.186 * b + 0.004;
-  if (st.pelvis !== false) trunkSlice(f, r.hips, hipY, hipZ, -0.025, 0.0, 0.168 * b, 0.078, 0.104 * sb, s, M.pants).u(0).k(0.012 * s);
+  // (The pelvis is drawn a touch nearer than the hip joints, from any side: where it overlaps the
+  // thigh tops, a shot hits the torso.)
+  if (st.pelvis !== false) trunkSlice(f, r.hips, hipY, hipZ, -0.025, 0.0, 0.168 * b, 0.078, 0.104 * sb, s, M.pants).u(0).k(0.012 * s).z(-0.016);
   // Chest (square at the shoulder line), ribs narrowing to the waist, the shirt out to its hem.
   f.coneE(f.at(r.spine, 0, 0.452, hz * 0.7), f.at(r.spine, 0, 0.27, hz * 0.45), spX, spZ, shH * s, 0.11 * sb * s, 0.172 * b * s, 0.108 * sb * s, M.shirt)
     .flag(CUT)
@@ -306,6 +311,15 @@ export function paintHumanCel(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: 
     if (untucked && !coat && !gown && st.pelvis !== false) {
       // The hem's shadow on the hips.
       f.decal(f.at(r.spine, -hemW, hemY - 0.03, 0), f.at(r.spine, hemW, hemY - 0.03, 0), 0.02 * s, 0.02 * s, M.pants).flag(SH).tone(-1);
+    }
+    if (lod > 1 && f.count < ROOM && !bare && front > 0.2 && L.vest === null) {
+      // Close up: the cloth's pulls — out of each armpit toward the chest, across the waist
+      // where the shirt bunches over the hunch.
+      for (let side = 1; side >= -1; side -= 2) stroke(f, f.at(r.spine, side * 0.17 * b, 0.39, fz), f.at(r.spine, side * 0.11 * b, 0.33, fz), M.shirt, s, -0.2);
+      if (hunch > 0.5) {
+        stroke(f, f.at(r.spine, -0.12 * b, 0.115, fz), f.at(r.spine, -0.045 * b, 0.095, fz), M.shirt, s, -0.2);
+        stroke(f, f.at(r.spine, 0.03 * b, 0.105, fz), f.at(r.spine, 0.11 * b, 0.09, fz), M.shirt, s, -0.2);
+      }
     }
   }
   if (st.torso) {
@@ -951,6 +965,10 @@ function headCel(f: PixelFigure, h: THREE.Object3D, L: HumanLook, M: Mats, st: H
         const eye = f.at(h, side * 0.05 * hs, ey, ez);
         f.decal(eye, eye, 0.012 * hs * s, 0.012 * hs * s, M.pupil).flag(D | PF.NO_OUTLINE).min(0.5);
       }
+      if (headTx >= 4.5 && st.face !== 'calm' && st.face !== 'relief') {
+        const mo = f.at(h, 0, 0.062 * hs, 0.118 * hs);
+        f.decal(mo, mo, 0.012 * hs * s, 0.012 * hs * s, M.mouth).flag(D | PF.NO_OUTLINE).min(0.5);
+      }
     }
   }
   if (M.hat) {
@@ -1017,10 +1035,12 @@ const hWrist = new THREE.Vector3();
  */
 function handCel(f: PixelFigure, el: THREE.Object3D, side: number, L: HumanLook, M: Mats, s: number, a: number, pose: number, chest: THREE.Object3D | null) {
   hWrist.copy(f.at(el, 0, -0.248 * a, 0.004));
-  // (The dead's claws a little big; the living's hands at their size — they hold them to their faces.)
-  const span = 0.17 * s * (L.dead ? 1.1 : 1);
+  // (The dead's claws a little big; the living's hands at their size — they hold them to their
+  // faces. A closed fist is two thirds of an open hand's length.)
+  const closed = pose === HAND.FIST || pose === HAND.THUMB;
+  const span = 0.17 * s * (L.dead ? 1.1 : 1) * (closed ? 0.68 : 1);
   const len = tx(f, hWrist, span);
-  if (len < 3) {
+  if (len < 2.2) {
     f.ball(f.at(el, 0, -0.3 * a, 0.004), 0.034 * s, M.skin).k(0.004 * s);
     return;
   }
@@ -1032,12 +1052,12 @@ function handCel(f: PixelFigure, el: THREE.Object3D, side: number, L: HumanLook,
   if ((dir === 2 || dir === 6) && chest) mirror = f.project(f.at(chest, 0, 0, 0), P0).x < w.x;
   const one = f.kHint / f.pxPerM(hWrist);
   // The stamp nearest the hand's real length in texels: 5, 7, ~10, ~12 or ~16 cells.
-  if (len < 8.8) {
+  if (len < (closed ? 9.6 : 8.8)) {
     const size = len < 6 ? 0 : 1;
     f.stamp(hWrist, one, STAMP.hand[pose][size][dir], M.skin, 0, 0, 0, mirror, true);
   } else {
-    const size = len < 11.6 ? 0 : len < 15.6 ? 1 : 2;
-    f.stamp(hWrist, Math.max(one, span / 24), CEL_HAND[pose][size][dir], M.skin, 0, 0, 0, mirror, true);
+    const size = closed || len >= 11.6 ? (len < 15.6 || closed ? 1 : 2) : 0;
+    f.stamp(hWrist, Math.max(one, span / (closed ? 17 : 25)), CEL_HAND[pose][size][dir], M.skin, 0, 0, 0, mirror, true);
   }
 }
 
@@ -1052,7 +1072,7 @@ function armCel(f: PixelFigure, sh: THREE.Object3D, elbow: THREE.Object3D | null
   const upperMat = bare ? M.skin : M.sleeve;
   const shortSleeve = L.sleeves === 'short';
   const o = L.outfit;
-  f.cone(f.at(sh, 0.008 * side, 0.03, 0.004), f.at(sh, 0.008 * side, -0.11 * a, 0.006), 0.064 * s, 0.053 * s, upperMat);
+  f.cone(f.at(sh, 0.008 * side, 0.03, 0.004), f.at(sh, 0.008 * side, -0.11 * a, 0.006), 0.063 * s, 0.05 * s, upperMat);
   f.cone(f.at(sh, 0, -0.08 * a, 0.006), f.at(sh, 0, -0.29 * a, -0.004), 0.052 * s, 0.039 * s, upperMat);
   if (shortSleeve) {
     f.mat2(M.skin, 0.36);
@@ -1097,12 +1117,9 @@ function armCel(f: PixelFigure, sh: THREE.Object3D, elbow: THREE.Object3D | null
   f.cone(f.at(elbow, 0, 0.012, 0.004), f.at(elbow, 0, -0.095 * a, 0.008), 0.043 * s, 0.05 * s, foreMat);
   if (longSleeve) {
     f.cone(f.at(elbow, 0, -0.085 * a, 0.006), f.at(elbow, 0, -0.236 * a, 0.002), 0.05 * s, 0.036 * s, foreMat).flag(PF.CUT_B);
-    // Cuff: a flared band at the wrist — the shirt's own white cuff under a jacket.
-    const cuff = L.jacket !== null ? M.collar : M.sleeve;
-    f.cone(f.at(elbow, 0, -0.2 * a, 0.002), f.at(elbow, 0, -0.246 * a, 0.002), 0.04 * s, 0.045 * s, cuff)
-      .flag(CUT)
-      .k(0.003 * s)
-      .tone(L.jacket !== null ? 0 : -0.2);
+    // Cuff: a flared band at the wrist; under a jacket, a strip of the shirt's own cuff shows beyond it.
+    if (L.jacket !== null) f.cone(f.at(elbow, 0, -0.225 * a, 0.002), f.at(elbow, 0, -0.256 * a, 0.002), 0.033 * s, 0.033 * s, M.collar).flag(CUT).k(0.003 * s);
+    else f.cone(f.at(elbow, 0, -0.2 * a, 0.002), f.at(elbow, 0, -0.246 * a, 0.002), 0.04 * s, 0.045 * s, M.sleeve).flag(CUT).k(0.003 * s).tone(-0.2);
   } else {
     f.cone(f.at(elbow, 0, -0.085 * a, 0.006), f.at(elbow, 0, -0.242 * a, 0.0), 0.05 * s, 0.03 * s, foreMat);
   }
@@ -1163,10 +1180,11 @@ function legCel(f: PixelFigure, hip: THREE.Object3D, knee: THREE.Object3D, side:
     f.cone(f.at(knee, 0, 0.012, 0.004), f.at(knee, 0, -0.375, 0.0), 0.054 * s, 0.033 * s, pm);
     f.cone(f.at(knee, 0, -0.05, -0.022), f.at(knee, 0, -0.21, -0.016), 0.058 * s, 0.044 * s, pm).k(0.02 * s);
   } else {
-    f.cone(f.at(knee, 0, 0.016, 0.0), f.at(knee, 0, -0.2, -0.008), 0.066 * s, 0.065 * s, pm);
+    // (The shin's front stays straight under the knee: the leg's hitbox reaches forward over the foot.)
+    f.cone(f.at(knee, 0, 0.016, 0.0), f.at(knee, 0, -0.2, 0.0), 0.066 * s, 0.066 * s, pm);
     // The calf fills the trouser leg behind (side view), then the leg narrows to the ankle.
-    f.cone(f.at(knee, 0, -0.07, -0.022), f.at(knee, 0, -0.22, -0.016), 0.062 * s, 0.056 * s, pm).k(0.02 * s);
-    f.cone(f.at(knee, 0, -0.18, -0.008), f.at(knee, 0, -0.378, 0.004), 0.065 * s, 0.054 * s, pm).flag(PF.CUT_B);
+    f.cone(f.at(knee, 0, -0.07, -0.024), f.at(knee, 0, -0.22, -0.018), 0.062 * s, 0.056 * s, pm).k(0.02 * s);
+    f.cone(f.at(knee, 0, -0.18, 0.0), f.at(knee, 0, -0.378, 0.004), 0.066 * s, 0.054 * s, pm).flag(PF.CUT_B);
     if (torn) f.mat2(M.skin, 0.2);
     if (L.dead && !torn) {
       // Torn hem: two points hanging over the shoe.
@@ -1200,18 +1218,23 @@ function legCel(f: PixelFigure, hip: THREE.Object3D, knee: THREE.Object3D, side:
       rect(f, f.at(knee, 0, 0.04, 0.066), f.at(knee, 0, -0.06, 0.066), 0.04 * s, pm).flag(PF.SHADE_ONLY).tone(-0.2);
       if (lod > 1) stroke(f, f.at(knee, -0.03, 0.02, 0.066), f.at(knee, 0.03, 0.02, 0.066), pm, s, 0.2);
     } else if (bend > 0.03 && lod > 0) stroke(f, f.at(knee, -0.04, -0.03, 0.066), f.at(knee, 0.035, -0.045, 0.066), pm, s, -0.5);
-    // The trouser's break over the shoe: one drawn fold.
-    if (lod > 1 && !L.dead) stroke(f, f.at(knee, -0.045, -0.31, 0.06), f.at(knee, 0.03, -0.335, 0.06), pm, s, -0.2);
+    if (lod > 1 && f.count < ROOM) {
+      // Close up: the trouser's break over the shoe, the pull from the crotch, the outer seam.
+      if (!L.dead) stroke(f, f.at(knee, -0.045, -0.31, 0.06), f.at(knee, 0.03, -0.335, 0.06), pm, s, -0.2);
+      stroke(f, f.at(hip, -side * 0.05, -0.03, 0.078), f.at(hip, -side * 0.005, -0.1, 0.084), pm, s, -0.2);
+      if (!away) stroke(f, f.at(knee, side * 0.045, -0.02, 0.045), f.at(knee, side * 0.04, -0.33, 0.04), pm, s, -0.2);
+    }
     if (o === 'soldier' && lod > 0) rect(f, f.at(hip, side * 0.07, -0.16, 0.05), f.at(hip, side * 0.07, -0.26, 0.05), 0.04 * s, pm).flag(PF.SHADE_ONLY).tone(-0.2);
   }
   if (L.dead && seenFront && !far) {
     if (torn) wound(f, knee, 0.0, -0.2, 0.06, 0.008, 0.04, 0.028, M, s, lod);
     if (lod > 0) {
       if (bareL) rot(f, hip, side * 0.01, -0.2 - 0.1 * hash(L.seed * 4.3 + side), 0.08, 0.028, 0.045, M.skin, s, L.seed * 1.9 + side);
-      else if (hash(L.seed * 4.3 + side) < 0.5) {
-        // A rip on the thigh showing skin; on the other leg, a stain run down from the knee.
+      else if ((hash(L.seed * 4.3) < 0.5 ? 1 : -1) === side) {
+        // A rip on one thigh showing skin; on the other leg, a stain run down from the knee
+        // (never the same mark on both legs).
         f.triDecal(f.at(hip, -0.03, -0.17, 0.08), f.at(hip, 0.035, -0.19, 0.085), f.at(hip, 0.0, -0.285, 0.085), M.skin);
-      } else stain(f, knee, side * 0.01, -0.08, 0.066, 0.028, 0.05, M, s, L.seed * 8.9 + side, 0.08, lod);
+      } else if (L.legWound === 0) stain(f, knee, side * 0.01, -0.08, 0.066, 0.028, 0.05, M, s, L.seed * 8.9 + side, 0.08, lod);
     }
   }
   if (bareL) {

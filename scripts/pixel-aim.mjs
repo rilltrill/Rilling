@@ -29,7 +29,18 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 const page = await (await browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true })).newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-// --extra "&castlook=b": more URL flags (the PIXEL CAST 2 look presets).
+// (The retro scale is pinned, as in pixel-look.mjs: under load the dynamic resolution would
+// otherwise paint the same placement at different sizes from run to run.)
+await page.addInitScript(() => {
+  const iv = setInterval(() => {
+    const g = window.__game;
+    if (!g?.engine?.retro) return;
+    g.engine.applyLevel = () => {};
+    g.engine.retro.scale = 1;
+    clearInterval(iv);
+  }, 20);
+});
+// --extra "&castlook=b": more URL flags (the PIXEL CAST 2 cel look).
 await page.goto(`${base}/?stage=zoo&zoo=none&god=1&retro=crt&seed=7&mute=1&art=sprites${args.extra ?? ''}`);
 for (let i = 0; i < 100; i++) {
   await page.waitForTimeout(250);
