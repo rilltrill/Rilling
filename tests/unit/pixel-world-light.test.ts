@@ -115,6 +115,8 @@ describe('PixelWorld light: steps', () => {
       expect(m.tint, id).toBeLessThanOrEqual(1.5);
       expect(m.torch, id).toBeGreaterThanOrEqual(0);
       expect(m.torch, id).toBeLessThanOrEqual(1);
+      expect(m.film, id).toBeGreaterThanOrEqual(0);
+      expect(m.film, id).toBeLessThanOrEqual(1);
     }
   });
 });
@@ -237,6 +239,8 @@ describe('PixelWorld light: moods and materials', () => {
     expect(u.uPwMood.value.toArray().map((v) => +v.toFixed(4))).toEqual([0.3, 0.9, -1, 1]);
     expect(u.uPwMood2.value.toArray().map((v) => +v.toFixed(4))).toEqual([3, 0.4, 7, 2]);
     expect(u.uPwMood3.value.x).toBe(0.25);
+    // … and shows lit paint as painted, none of the monitor's tone curve on it.
+    expect(u.uPwMood3.value.y).toBe(0);
     // (A mood that says nothing of the torch counts the spot lights like any lamp.)
     expect(PW_MOOD_DEFAULT.torch).toBe(1);
     expect(u.uPwWhite.value.toArray().map((v) => +v.toFixed(4))).toEqual([1, 1, 1]);

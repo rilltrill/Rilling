@@ -91,7 +91,7 @@ export interface SignpostBoard {
 }
 
 /** The mood of the day jungle (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
-export const D1_MOOD: Partial<PwMood> = { pivot: 0.95, hi: 1, tint: 0.5, shade: 0xa8c0f0 };
+export const D1_MOOD: Partial<PwMood> = { pivot: 0.95, hi: 1, tint: 0.5, shade: 0xa8c0f0, film: 1 };
 
 export class D1PixelWorld {
   /** Set before any material is made: every PixelWorld material of the stage is lit under it. */

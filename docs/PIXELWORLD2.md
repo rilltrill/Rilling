@@ -167,20 +167,20 @@ LIGHT*) does four things with the stage's lights:
 One `PwMood` per stage (`X_MOOD` in `stages/<id>/pixel.ts`; a stage may set another before it
 builds a zone's materials):
 
-| stage | pivot | steps / stop | lo … hi | tint | shade | where the light sits |
-|---|---|---|---|---|---|---|
-| z1 MAIN STREET | 0.55 | 0.75 | −2 … +2 | 0.8 | `0x9a90e8` blue-violet | moonlit walls (0.17) and road (0.29) −1; the torch's cone and the lamps' pools (0.46–0.8) 0; undersides −2 |
-| z2 ST. MERCY | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x90b8c8` teal | ward and bay ambient (0.12–0.30) −1; under a tube, in the torch (0.35–0.72) 0, +1 right under a fitting; unlit ceilings (0.03) −2 |
-| z3 HIGHWAY | 0.5 | 0.75 | −2 … +1 | 1.5 | `0xd098d8` magenta-violet | sunlit road and fronts (0.50–0.54) 0; faces turned from the sun, under the bridge (0.11–0.36) −1; beside a fire (0.8) +1 |
-| d1 JUNGLE RUN | 0.95 | 0.75 | −2 … +1 | 0.5 | `0xa8c0f0` sky blue | everything the sun reaches (0.97) 0; shaded sides −1 |
-| d2 RESEARCH LABS | 0.65 | 0.75 | −2 … +2 | 0.7 | `0xa4b4ec` cold blue | in the torch (0.65–0.85) 0; room ambient (0.30) −1; ceilings and unlit rooms (0.04–0.08) −2; the atrium's lit path (1.2) +1 |
-| d3 STORM | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x8c98f0` deep blue | lamp pools and headlights (0.65–0.72) 0; storm ambient (0.25–0.36) −1 / 0 by the facet; a lightning flash +1 … +2 |
+| stage | pivot | steps / stop | lo … hi | tint | shade | torch | film | where the light sits (its level × paint) |
+|---|---|---|---|---|---|---|---|---|
+| z1 MAIN STREET | 0.55 | 0.75 | −2 … +2 | 0.8 | `0x9a90e8` blue-violet | 0 | 0 | moonlit road and pavement (0.41–0.47) 0; walls (0.17–0.29) −1; under awnings, away from the moon −2; beside a lamp, the fire, a neon 0 … +1 |
+| z2 ST. MERCY | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x90b8c8` teal | 0 | 0 | ward and bay ambient (0.11–0.22) −1; under a tube, in the emergency lamp's reach (0.3–0.45) 0; unlit ceilings and far rooms (0.03) −2 |
+| z3 HIGHWAY | 0.5 | 0.75 | −2 … +1 | 1.5 | `0xd098d8` magenta-violet | 1 | 0 | sunlit road and fronts (0.50–0.54) 0; faces turned from the sun, under the bridge (0.11–0.36) −1; beside a fire (0.8) +1 |
+| d1 JUNGLE RUN | 0.95 | 0.75 | −2 … +1 | 0.5 | `0xa8c0f0` sky blue | 1 | 1 | everything the sun reaches (0.97) 0; shaded sides −1 |
+| d2 RESEARCH LABS | 0.65 | 0.75 | −2 … +2 | 0.7 | `0xa4b4ec` cold blue | 0 | 0 | floors under the room's light (0.65) 0; walls (0.29) −1; ceilings and unlit rooms (0.04–0.08) −2; the atrium's lit path +1 |
+| d3 STORM | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x8c98f0` deep blue | 1 | 0 | open ground, lamp pools, the jeep's headlights (0.3–0.65) 0; facets turned from the sky (0.11–0.28) −1; a lightning flash +1 … +2 |
 
 - `pivot`: the light at which paint shows as painted. `node scripts/pixel-mood.mjs --shots
   "z1:5:150:street"` prints the light levels of a shot (percentiles of the first pass's
   paint multiplier) and the share of the frame at each step; choose the pivot at the light of
-  the place the player looks at — in a night stage the torch's cone and the lamps' pools — so
-  that the rest sinks one step into the shade. `--moods "a=pivot:0.4;b=pivot:0.6,tint:1"`
+  the stage's open ground and lamp pools, so that walls and everything less lit sink one step
+  into the shade and only unlit corners two. `--moods "a=pivot:0.4;b=pivot:0.6,tint:1"`
   re-shoots the same frozen frame under variants; `__pwMood({ pivot: 0.4 })` in the console
   changes the live mood; `&pwdebug=steps` shows the steps (green = as painted, cyan −1, blue
   −2, yellow +1, orange +2).
@@ -190,12 +190,19 @@ builds a zone's materials):
 - `tint`: how far the light's colour leans the paint (0 … 1; above 1 exaggerates it: a
   sunset). `shade`: a PALE colour — its chroma is what counts; a saturated one drowns the
   paint. `white`: the light your paint is painted for, if not white.
+- `torch`: how much of the spot lights counts for the painted world. The shoulder torch that
+  follows the camera (z1, z2, d2) is for the cast; on paint it was a pale disc under the gun
+  that travelled with the view, so those moods set 0. Headlights (d3) count.
+- `film`: how much of the monitor's tone curve stays on lit paint. 0 = palette-true, the rule
+  for anything painted from now on. d1's first-pass ground was tuned through the curve in
+  full sun (it lifts and saturates mid tones) and keeps it (1) until it is repainted — set it
+  back to 0 with the repaint and pick the bright ramps yourself.
 - `fogBands` (6), `edge` / `fogEdge` (the dithered edges' width in frame pixels: 5 / 4).
 
 ### Painting for it
 
-- **Paint as if evenly lit, at the pivot**: the picture you paint is what the torch shows.
-  The pipeline makes the night around it. Do not paint a tile dark because the stage is dark.
+- **Paint as if evenly lit, at the pivot**: the picture you paint is what a lamp shows. The
+  pipeline makes the night around it. Do not paint a tile dark because the stage is dark.
 - **Tones for form**: base on 3, the lit top / left edge 4, small highlights 5, the shadow side
   and recesses 2, core shadows and cast shadows 1, outlines and the deepest cracks 0 only.
   Light moves the WHOLE tile: one step down your 4-3-2 reads as 3-2-1 (and leans to the shade),
@@ -212,7 +219,7 @@ builds a zone's materials):
   many tiles (a street lamp on the road) keep it as a stepped overlay made with
   `pwLightOverlay(material)` (z1's `LightPools`, `pwPoolTexture`: flat rings; the lit pixels
   stay on whole colours) — flat steps only, a soft gradient would band. Real stage lights are
-  for light that MOVES or FLICKERS (the torch, a fire, a buzzing neon, lightning): each is a
+  for light that MOVES or FLICKERS (a fire, a buzzing neon, headlights, lightning): each is a
   ring of whole tones that travels over your paint.
 - **GLOW** (`PWF.GLOW`) is for the light sources themselves: the lit window, the tube, the lamp
   head, the screen, the flame. A glow texel ignores light and fog bands apply to it; it shows

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PW_PAL_DEEP, PW_PAL_W } from './canvas';
-import { MONITOR, MONITOR_LEVELS, MONITOR_TOP } from '../../core/RetroPass';
+import { MONITOR, MONITOR_EXPOSURE, MONITOR_LEVELS, MONITOR_TOP } from '../../core/RetroPass';
 
 /**
  * PIXEL-ART LIGHT (docs/PIXELWORLD2.md §5): how light, fog and the arcade monitor reach a painted
@@ -76,13 +76,20 @@ export interface PwMood {
    * with the view — the tell of a lit 3D scene. The cast keeps all of it (its own pipeline).
    */
   torch: number;
+  /**
+   * How much of the monitor's tone curve lit paint still goes through (0 none: what is painted is
+   * what is shown … 1 all of it, as the first pass and as backdrops, plants and the cast do). The
+   * curve lifts and saturates mid tones and sinks dark ones; paint that was tuned through it in
+   * daylight (d1) looks duller than its plants without it. Still whole colours, never dithered.
+   */
+  film: number;
   /** Bands of fog between clear and the fog colour. */
   fogBands: number;
   /** Width of the dithered edge between two fog bands, frame pixels. */
   fogEdge: number;
 }
 
-export const PW_MOOD_DEFAULT: PwMood = { pivot: 0.5, steps: 0.75, lo: -2, hi: 2, edge: 5, tint: 0.6, white: 0xffffff, shade: 0xffffff, torch: 1, fogBands: 6, fogEdge: 4 };
+export const PW_MOOD_DEFAULT: PwMood = { pivot: 0.5, steps: 0.75, lo: -2, hi: 2, edge: 5, tint: 0.6, white: 0xffffff, shade: 0xffffff, torch: 1, film: 0, fogBands: 6, fogEdge: 4 };
 
 /** The uniforms of one mood (shared by every material made under it: a tweak shows at once). */
 export interface PwMoodUniforms {
@@ -100,7 +107,7 @@ function writeMood(u: PwMoodUniforms) {
   const m = u.mood;
   u.uPwMood.value.set(m.pivot, m.steps, m.lo, m.hi);
   u.uPwMood2.value.set(m.edge, m.tint, m.fogBands, m.fogEdge);
-  u.uPwMood3.value.set(m.torch, 0, 0, 0);
+  u.uPwMood3.value.set(m.torch, m.film, 0, 0);
   // Only the chroma of the white point and of the shade counts: how bright is the pivot's business.
   // (The light is divided by the white point: a saturated one must not divide by nothing.)
   u.uPwWhite.value.fromArray(pwChroma(m.white).map((v) => Math.max(v, 0.05)));
@@ -283,7 +290,7 @@ export function pwMonitorLevel(x: number, exposure: number): number {
  * curve — a backdrop's paint, the scene fog: what to match when a palette-true surface must meet
  * one (not snapped to the lattice).
  */
-export function pwFilmHex(hex: number, exposure = 1.05): number {
+export function pwFilmHex(hex: number, exposure = MONITOR_EXPOSURE): number {
   _c.setHex(hex);
   const q = (v: number) => Math.round(pwToSrgb(pwAces(v * exposure)) * 255);
   return (q(_c.r) << 16) | (q(_c.g) << 8) | q(_c.b);
@@ -337,7 +344,7 @@ export const PW_LIGHT_DECL = /* glsl */ `
   ${PW_MONITOR_GLSL}
   uniform vec4 uPwMood;  // pivot, steps a stop, fewest, most
   uniform vec4 uPwMood2; // band edge (frame px), tint, fog bands, fog edge (frame px)
-  uniform vec4 uPwMood3; // how much of the spot lights counts
+  uniform vec4 uPwMood3; // how much of the spot lights counts, how much of the tone curve stays on lit paint
   uniform vec3 uPwWhite;
   uniform vec3 uPwShade;
   const vec3 PW_LUM = vec3(0.2126, 0.7152, 0.0722);
@@ -393,6 +400,8 @@ export const PW_LIGHT_OUT = /* glsl */ `
       pwC *= pwCh * pwTint * pow(uPwShade, vec3(min(max(-pwSt, 0.0), 2.0) * 0.5));
     }
     vec3 pwD = pwToSrgb(pwC);
+    // (A stage whose paint was tuned through the monitor's tone curve keeps some of it: a grade of whole colours.)
+    if (uPwMood3.y > 0.0) pwD = mix(pwD, pwToSrgb(pwAces(pwC * (uPwMon.x > 0.0 ? uPwMon.x : ${MONITOR_EXPOSURE.toFixed(2)}))), uPwMood3.y);
     float pwFb = 0.0;
     #ifdef USE_FOG
       #ifdef FOG_EXP2

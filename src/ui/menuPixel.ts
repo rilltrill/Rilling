@@ -562,7 +562,7 @@ const MENU_JUNGLE_BIOME = { ...D1_BIOME, leaf: 0x2a5a24, leafLight: 0x3e7a2a, le
 
 const MENU_JUNGLE_GAIN = 1.5;
 /** The sunset jungle's mood: the paint as painted in the low sun and leaning its orange (the highway's sunset), violet where it does not reach. */
-const MENU_JUNGLE_MOOD: Partial<PwMood> = { pivot: 0.9, hi: 1, tint: 1.5, shade: 0xd098d8 };
+const MENU_JUNGLE_MOOD: Partial<PwMood> = { pivot: 0.9, hi: 1, tint: 1.5, shade: 0xd098d8, film: 1 };
 
 /** Backdrop materials' gain (lightning flashes the painted sky). */
 export function backdropGain(b: PwBackdrop, k: number) {

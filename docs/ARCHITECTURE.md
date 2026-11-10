@@ -1036,7 +1036,8 @@ screen-door over every painted colour, and no colour on screen that anyone had p
   no screen-door over a wall that happens to sit near a band's edge.
 - **Tint.** The lights are split in two groups: what is the same all over a facet (sky /
   ground hemisphere and the sun or moon, taken back out of three.js's direct sum) and what
-  falls off across it (torch, lamps, fire, muzzle flash). A band's tint is the chroma
+  falls off across it (lamps, fire, muzzle flash, and as much of the spot lights as
+  `mood.torch` counts: they are evaluated again and the rest subtracted). A band's tint is the chroma
   (luminance 1) of the even light plus as much of the local light as makes the band's own
   light — one colour for the whole ring, wherever the lamp's falloff puts a texel inside it —
   raised to `mood.tint` and divided by `mood.white` (the light the paint was painted for).
@@ -1074,24 +1075,32 @@ screen-door over every painted colour, and no colour on screen that anyone had p
   title vignettes in `ui/menuPixel.ts`; materials are cached per mood, `pwMaterial(atlas,
   { mood })` names one):
 
-  | stage | pivot | steps / stop | lo … hi | tint | shade | fog bands | where the light sits |
-  |---|---|---|---|---|---|---|---|
-  | z1 MAIN STREET | 0.55 | 0.75 | −2 … +2 | 0.8 | `0x9a90e8` blue-violet | 6 | moonlit walls (0.17) and road (0.29) −1; the torch's cone and the lamps' pools (0.46–0.8) 0; undersides −2 |
-  | z2 ST. MERCY | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x90b8c8` teal | 6 | ward and bay ambient (0.12–0.30) −1; under a tube, in the torch (0.35–0.72) 0, +1 right under a fitting; unlit ceilings (0.03) −2 |
-  | z3 HIGHWAY | 0.5 | 0.75 | −2 … +1 | 1.5 | `0xd098d8` magenta-violet | 6 | sunlit road and fronts (0.50–0.54) 0; faces turned from the sun, under the bridge (0.11–0.36) −1; beside a fire (0.8) +1 |
-  | d1 JUNGLE RUN | 0.95 | 0.75 | −2 … +1 | 0.5 | `0xa8c0f0` sky blue | 6 | everything the sun reaches (0.97) 0; shaded sides −1 |
-  | d2 RESEARCH LABS | 0.65 | 0.75 | −2 … +2 | 0.7 | `0xa4b4ec` cold blue | 6 | in the torch (0.65–0.85) 0; room ambient (0.30) −1; ceilings and unlit rooms (0.04–0.08) −2; the atrium's lit path (1.2) +1 |
-  | d3 STORM | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x8c98f0` deep blue | 6 | lamp pools and headlights (0.65–0.72) 0; storm ambient (0.25–0.36) −1 / 0 by the facet; a lightning flash +1 … +2 |
-  | title: night street | 0.5 | 0.75 | −2 … +2 | 0.8 | `0x9a90e8` | 6 | as z1 |
-  | title: sunset jungle | 0.9 | 0.75 | −2 … +1 | 1.5 | `0xd098d8` | 6 | as z3's sunset over d1's paint |
+  | stage | pivot | steps / stop | lo … hi | tint | shade | torch | film | fog bands | where the light sits (its level × paint) |
+  |---|---|---|---|---|---|---|---|---|---|
+  | z1 MAIN STREET | 0.55 | 0.75 | −2 … +2 | 0.8 | `0x9a90e8` blue-violet | 0 | 0 | 6 | moonlit road and pavement (0.41–0.47) 0; walls (0.17–0.29) −1; under awnings, away from the moon −2; beside a lamp, the fire, a neon 0 … +1 |
+  | z2 ST. MERCY | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x90b8c8` teal | 0 | 0 | 6 | ward and bay ambient (0.11–0.22) −1; under a tube, in the emergency lamp's reach (0.3–0.45) 0; unlit ceilings and far rooms (0.03) −2 |
+  | z3 HIGHWAY | 0.5 | 0.75 | −2 … +1 | 1.5 | `0xd098d8` magenta-violet | 1 | 0 | 6 | sunlit road and fronts (0.50–0.54) 0; faces turned from the sun, under the bridge (0.11–0.36) −1; beside a fire (0.8) +1 |
+  | d1 JUNGLE RUN | 0.95 | 0.75 | −2 … +1 | 0.5 | `0xa8c0f0` sky blue | 1 | 1 | 6 | everything the sun reaches (0.97) 0; shaded sides −1 |
+  | d2 RESEARCH LABS | 0.65 | 0.75 | −2 … +2 | 0.7 | `0xa4b4ec` cold blue | 0 | 0 | 6 | floors under the room's light (0.65) 0; walls (0.29) −1; ceilings and unlit rooms (0.04–0.08) −2; the atrium's lit path +1 |
+  | d3 STORM | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x8c98f0` deep blue | 1 | 0 | 6 | open ground, lamp pools, the jeep's headlights (0.3–0.65) 0; facets turned from the sky (0.11–0.28) −1; a lightning flash +1 … +2 |
+  | title: night street | 0.5 | 0.75 | −2 … +2 | 0.8 | `0x9a90e8` | 1 | 0 | 6 | as z1 (no torch there) |
+  | title: sunset jungle | 0.9 | 0.75 | −2 … +1 | 1.5 | `0xd098d8` | 1 | 1 | 6 | z3's sunset over d1's paint |
 
   `pivot` is chosen from the stage's light levels (`node scripts/pixel-mood.mjs --shots …`
   prints percentiles of the light on the painted world and the share of pixels at each step,
   and re-shoots the same frozen frame under `--moods "a=pivot:0.4;b=pivot:0.6,tint:1"`;
-  `__pwMood({ pivot: 0.4 })` changes the live mood from the console). In the night stages it
-  sits at the light inside the torch's cone and under the lamps, so the middle of the frame —
-  where the fight is — shows paint as painted and everything else sinks one step into the
-  stage's shade; two steps only where no light reaches (ceilings, undersides).
+  `__pwMood({ pivot: 0.4 })` changes the live mood from the console). The night stages sit
+  their open ground at the painted tone and everything the moon or the room's light reaches
+  less one step down, in the stage's shade; two steps only where no light reaches (ceilings,
+  undersides); what a lamp, a fire or a neon lights comes back up a step or two.
+  `torch` is how much of the SPOT lights counts: z1, z2 and d2 carry a shoulder torch on the
+  camera so that whoever stands in the middle of the frame reads — on painted ground it was a
+  pale disc under the gun, travelling with the view (the tell of a lit 3D scene), so their
+  moods leave it out of the world (the cast keeps it: its own pipeline); d3's are the jeep's
+  headlights and count. `film` is how much of the monitor's tone curve stays on lit paint
+  (0: what is painted is what is shown): d1's paint was tuned through the curve in full sun,
+  which lifts and saturates mid tones — without it the ground sat duller than its plants
+  (which keep the curve), so d1 keeps all of it; still whole colours, never dithered.
 - **Flicker.** Light that changes over time moves whole tones: a neon's buzz, a surge, the
   lightning. The stage code that drives those lights already calms them under
   `reduceFlashes`, and the materials add nothing of their own. Measured (`node
@@ -1586,9 +1595,11 @@ render / settle / total ms (`scripts/load-bench.mjs`).
 
 `?stage=z1` jump into a stage · `&art=3d|sprites|pixel` ART: CLASSIC / PIXEL CAST / PIXEL WORLD (default) ·
 `&pwstore=<tag>` persist painted atlases on the dev server (version `dev-<tag>`; `0` = off) ·
-`&pwdebug=mag|lvl|tone|ramp` PixelWorld debug views (`1` = compiled in, off until
-`__pwDebug(view)`) · `&pwup=0` no 2× fallback · `&pwaniso=0` one level for both texel axes
-(both off = the first pass's frames) ·
+`&pwdebug=mag|lvl|tone|ramp|steps|light|fog` PixelWorld debug views (`1` = compiled in, off
+until `__pwDebug(view)`) · `&pwup=0` no 2× fallback · `&pwaniso=0` one level for both texel
+axes · `&pwlight=0` the first pass's light (all three off = the first pass's frames) ·
+`&pwmood=pivot:0.4,tint:1` values over every stage's mood (`__pwMood({…})` changes the live
+one) · `&pwrt=8` an 8-bit scene target (the fallback of the palette-true output) ·
 `&spriteLook=pal:0,dirs:8` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
 overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor

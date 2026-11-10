@@ -6,6 +6,8 @@ import { PW_DEBUG_FLOOR, PW_DEBUG_KEY, pwDebug } from './debugView';
 const LINES: Record<QualityLevel, number> = { low: 224, medium: 288, high: 360 };
 /** Lowest line-count multiplier dynamic resolution may use. */
 export const RETRO_MIN_SCALE = 0.7;
+/** Exposure of the monitor's tone curve (the renderer's `toneMappingExposure`: Engine sets it once). */
+export const MONITOR_EXPOSURE = 1.05;
 /** Colour levels a channel of the monitor (15-bit colour: 0 … 31). */
 export const MONITOR_LEVELS = 31;
 /**
