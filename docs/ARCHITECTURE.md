@@ -540,6 +540,74 @@ cosmetics last (`layerIndex` / `reopen`), so an overflow would drop a vein, neve
   fallback for older iPhones / Low Power Mode. SpriteArt stats: `paints`, `texels` (repainted
   this frame), `impostors`, `prims`, `rtBytes`.
 
+### PIXEL CAST 2 — the flat cel looks (look-dev, `gameplay/pixel/look.ts`)
+
+The cast brief of docs/PIXELWORLD2.md §9: characters DRAWN flat and 2D so they sit in front
+of painted pixel backgrounds. It REPLACES the style guide's *Light*, *Outlines* and *Palette
+steps* rules above (contour shading from the blended field's normal, dither bands, a
+multiplied stage tint); alignment, budgets, allocation and animation rules stay word for word.
+Three candidate recipes and the first look are switchable, live, on the same frozen instant:
+
+| `castlook` | recipe |
+|---|---|
+| `0` CONTOUR | the first PIXEL CAST look: the legacy shaders and painters, pixel-identical (raw texels) to before this work |
+| `a` STRICT CEL | base + ONE shadow tone (2 steps down) + dark coloured ink on the silhouette and every interior edge; no highlights, no texture; rim in dark stages only; flat pixel contact shadow |
+| `b` CEL + ACCENTS | base / one shadow shape / highlight accents on what shines (leather, gloss, plate, wet gore, hair bar, toe caps, tape glints); interior lines one step down (coloured, light); selective outline (lit top / left edge = a dark shade of its own colour); rim in dark stages; contact shadow with a dashed skirt |
+| `c` DRAWN + TEXTURED | `b` + designed material texture (twill hatching on worn denim, weave ticks, scute dots along a back, veins) + a 1-texel coloured light rim in every stage |
+
+Select: URL `&castlook=`, `window.__castLook('b')` (SpriteArt repaints every sprite), node
+tests `CASTLOOK=a npx vitest run …` (read once in `look.ts`); `DEFAULT_CAST_LOOK` is what
+runs with no flag (today `'0'`: flip it when a preset ships). `PixelFigure.cel` (0–3) tells
+painters which look a frame is painted for.
+
+- **Paint pass** (`PAINT_FRAG` compiled with `CEL`): no light. Writes the material, a
+  whole-step tone offset (painter `tone` biases × 6.25, rounded: −0.2 = one step) and the
+  WIDTH of the shadow band the texel's form wants (0–6 texels from the blended radius ×
+  `style.band`; none on 1–2 texel features). Tone byte = `[band:3][absolute:1][value:3]`
+  (stamps keep their authored absolute steps). Patterns are designed marks only (plaid, stripes
+  and belly band, camo, ribs, gown print, rot / meat blotches in their own colour; texture
+  marks only in `c`) — never per-texel tone noise, and no noise stains.
+- **Resolve pass** (`RESOLVE_CEL_FRAG`): the ONE shadow shape = (a) the form's own band: a
+  texel is shaded when walking `band` texels AWAY from the sprite light (right and down)
+  leaves its layer's silhouette or lands on a farther layer; (b) cast shadows: a nearer layer
+  between the texel and the light (reach 1–4 texels by figure size: chin on neck, arm on
+  chest); (c) painter-drawn shadow shapes (`.flag(PF.SHADE_ONLY).tone(-1)`, also on
+  `triDecal`). All three use the same tone, so they join with one hard edge. Lines: coloured
+  ink on the silhouette (local ramp step 0 × `style.ink`), selective outline, inner contours
+  (nearer layer over farther), seam lines where two materials meet on a part (collar, cuff,
+  belt, hem, a wound's rim) and part lines between layers at the same depth (arm beside
+  trunk, leg beside leg); 1-texel runs are never inked. Highlight accent: one texel inside
+  the lit edge of a material with `spec > 0.45`. Then chroma × `style.sat`, the stage light,
+  rim and fog. No dither anywhere.
+- **Stage light** (`CAST_STAGE_LIGHT[stageId]`, fallback DAY / NIGHT by fog darkness): `step`
+  (whole tone steps for the whole figure: −1 at night), `floor` (a material whose base tone
+  is under this luma does not step down, a near-black one climbs a step: black suits read on
+  a night street), `rim` / `rimAmount` / `rimDir` (1-texel coloured rim on edges facing the
+  light), `ground` / `groundAlpha` (contact shadow colour), `fog` (share of scenery fog).
+  These are the knobs to match to the PIXEL WORLD 2 light model per stage.
+- **Figure API** (all additive; unused by the legacy painters): `PF.CUT_A / CUT_B` = flat
+  (butt) caps on a cone — cuffs, hems, square shoulders, soles, slabs (GPU + `sample()`);
+  `triDecal(a, b, c, mat)` = a triangle painted on the layer (lapels, collar points, rips,
+  wounds); `.bulge(m)` caps a broad slab's depth toward the viewer; `stamps.ts` `CEL_STAMP` +
+  `celSize` = bigger faces in four size classes (XS < 10.5 texel heads … L ≥ 21), one texel
+  per cell.
+- **Painters**: `content/pixel/humanCel.ts` (`paintHuman` / `paintLooseArm` dispatch to it
+  when `f.cel > 0`): trunk = two stacked trapezoids, hard-jointed limbs with a forearm swell,
+  cut cuffs / hems (torn into points on the dead), shoes with heel / sole / toe cap, hair as a
+  cap + pointed locks / spikes + highlight bar, stamped faces also in profile, costume details
+  per outfit (office, worker, nurse, flannel, casual; the other outfits reuse the legacy
+  `torsoDetails`), wounds as triangles. `zombieParts.ts` (brute plates cut square),
+  `theropod.ts` (scutes as triangles), `bosses.ts` (Butcher: squared apron with a torn hem,
+  slab cleaver, tighter melt) branch on `f.cel`. Every other painter already renders through
+  the cel passes unchanged (flat tones, band, ink) and is on the roll-out list.
+- **Contact shadow** (`SHADOW_FRAG`, `style.ground`): a flat ellipse in the stage's deepest
+  shadow colour, hard-edged (`a`) or with a skirt of broken horizontal dashes (`b`, `c`).
+- **Tools**: `scripts/cast-look.mjs` (raw-texel sheets, rows = subjects, columns = looks, from
+  `--place` on the zoo or `--shot stage:beat:frames`; `--frames` saves the frame per look;
+  civilians take `pose=cower|plead|flee`), `scripts/cast-probe.mjs` (who is on screen when),
+  `scripts/cast-scenes.sh` + `cast-sheet.py` (the four in-scene comparisons, art frame and
+  phone view), `scripts/pixel-aim.mjs --extra "&castlook=b"`, `scripts/bench-art.mjs --extra`.
+
 ### Props, pickups, gibs and the title screen (`content/pixel/cast*.ts`)
 - **Prop kit** (`castKit.ts`): hard objects drawn the way sprite artists draw them, from the
   prop's own (tumbling) mesh frame: `box` = the visible faces as flat triangles, each a ramp
@@ -1333,7 +1401,7 @@ render / settle / total ms (`scripts/load-bench.mjs`).
 
 `?stage=z1` jump into a stage · `&art=3d|sprites|pixel` ART: CLASSIC / PIXEL CAST / PIXEL WORLD (default) ·
 `&pwstore=<tag>` persist painted atlases on the dev server (version `dev-<tag>`; `0` = off) ·
-`&spriteLook=pal:0,dirs:8` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
+`&spriteLook=pal:0,dirs:8` sprite look tuning · `&castlook=0|a|b|c` PIXEL CAST 2 look preset (`0` = the first look) · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
 overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor
 mode (`?stage`/`?autoplay` deep links render with retro OFF unless `retro` is

@@ -111,9 +111,10 @@ export interface CastStageLight {
   /** Whole tone steps added to every lit tone (−1 = a night stage; never below −1: the game reads first). */
   step: number;
   /**
-   * The darkest a material's base tone may be drawn in this stage (display luma 0..1): a
-   * material that would sink under it (a black suit on a night street) climbs a step or
-   * two up its own ramp — figures stay at least a step brighter than what is behind them.
+   * The darkest base tone that still follows the stage's step-down (display luma 0..1): a
+   * material under it (a black suit on a night street) keeps its own base tone, and a
+   * near-black one (under a third of it) climbs a step up its ramp — figures stay brighter
+   * than what is behind them.
    */
   floor: number;
   /** Rim colour (sRGB hex) and strength 0..1 (how much of the edge texel it replaces). */

@@ -23,6 +23,12 @@ import { castStyle } from './look';
  *    back-lit edge in dark stages, the stage's light tint and fog. Output is the
  *    display-space colour with packed depth in alpha — the same sprite format the
  *    impostor bake produces, so SpriteArt's billboards draw both.
+ *
+ * PIXEL CAST 2 (`look.ts`, `castlook` a / b / c) runs the same two draws through
+ * the paint source compiled with `CEL` (flat tones: no light, a whole-step tone
+ * offset and the width of the form's shadow band) and `RESOLVE_CEL_FRAG` (the one
+ * shadow shape, coloured ink, seams, accents, stage steps and rim). Look `0`
+ * keeps the passes above untouched.
  */
 
 const VERT = /* glsl */ `
@@ -421,19 +427,12 @@ const PAINT_FRAG = /* glsl */ `
       float sd = bSeed * 1.37;
       bool tex = uCel.x > 0.5;
       if (pat == 1) {
-        // WEAVE: a rare big stain in its own colour; (texture) short weave ticks in worn patches.
-        float n = vnoise(uv * 5.0 + sd);
-        if (sec > 0.5 && n > 0.85) {
-          mat = sec;
-          mark = 4;
-        } else if (tex && n < 0.34 && mod(ip.x + ip.y * 2.0, 5.0) < 0.5) dl -= 0.2;
+        // WEAVE: a flat field (stains and wounds are the painter's drawn shapes, never a
+        // noise blotch); (texture) short weave ticks in worn patches.
+        if (tex && vnoise(uv * 5.0 + sd) < 0.34 && mod(ip.x + ip.y * 2.0, 5.0) < 0.5) dl -= 0.2;
       } else if (pat == 2) {
         // DENIM: (texture) twill hatching — diagonal 1-texel strokes, a step lighter, on the worn patches.
-        float n = vnoise(uv * 4.0 + sd);
-        if (sec > 0.5 && vnoise(uv * 6.0 + sd + 5.0) > 0.88) {
-          mat = sec;
-          mark = 4;
-        } else if (tex && n > 0.6 && mod(ip.x + ip.y, 4.0) < 0.5) dl += 0.2;
+        if (tex && vnoise(uv * 4.0 + sd) > 0.6 && mod(ip.x + ip.y, 4.0) < 0.5) dl += 0.2;
       } else if (pat == 3) {
         // PLAID: buffalo check stuck to the body (the crossings in their own dark colour).
         vec2 c = floor(uv / scale + vec2(sd, 0.0));
@@ -934,10 +933,11 @@ const RESOLVE_CEL_FRAG = /* glsl */ `
     } else {
       float lo = isAbs ? 0.0 : (st < 0.5 ? 0.0 : 1.0);
       float move = uStage.x;
-      // The game reads first: a material whose base tone would sink under the stage's floor
-      // (a black suit on a night street) is drawn a step or two up its own ramp instead.
-      float bl = dot(ramp(mat, clamp(uTone.x + uStage.x, 1.0, ${STEPS - 1}.0)), vec3(0.299, 0.587, 0.114));
-      move += bl < uStage.z * 0.55 ? 2.0 : bl < uStage.z ? 1.0 : 0.0;
+      // The game reads first: a material whose base tone is under the stage's floor (a black
+      // suit on a night street) does not step down with the stage, and a near-black one
+      // climbs a step up its own ramp.
+      float bl = dot(ramp(mat, uTone.x), vec3(0.299, 0.587, 0.114));
+      if (bl < uStage.z) move = max(move, 0.0) + (bl < uStage.z * 0.35 ? 1.0 : 0.0);
       st = clamp(st + (isAbs && float(val) < 1.5 ? 0.0 : move), lo, ${STEPS - 1}.0);
       col = ramp(mat, st);
     }

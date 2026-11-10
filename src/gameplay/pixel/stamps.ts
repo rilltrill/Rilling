@@ -40,7 +40,7 @@ export interface Stamp {
   y0: number;
 }
 
-/** Stamp atlas size (cells). */
+/** Stamp atlas size (cells; 256 since the PIXEL CAST 2 face sets joined it). */
 export const STAMP_ATLAS = 256;
 
 const CODE: Record<string, number> = { '.': 0, ' ': 0, '1': 31, '2': 32, '3': 33, '+': 40, A: 50, B: 51, C: 52, D: 53 };

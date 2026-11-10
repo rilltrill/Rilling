@@ -352,6 +352,15 @@ function torsoLines(f: PixelFigure, r: HumanoidRig, L: HumanLook, M: Mats, front
     for (let sd = 1; sd >= -1; sd -= 2) stroke(f, f.at(r.hips, sd * 0.095 * b, 0.025, 0.1 * sb), f.at(r.hips, sd * 0.15 * b, -0.055, 0.09 * sb), M.pants, s, -0.2);
     stroke(f, f.at(r.hips, 0.008, 0.02, 0.105 * sb), f.at(r.hips, 0.012, -0.085, 0.1 * sb), M.pants, s, -0.2);
   }
+  if (front > 0.1) {
+    // Drawn shadow shapes: a wedge in each armpit (the arm's shadow on the ribs). They join
+    // the one shadow tone, so the chest reads as a form without any shading.
+    for (let sd = 1; sd >= -1; sd -= 2) {
+      f.triDecal(f.at(sp, sd * 0.2 * b, 0.4, fz), f.at(sp, sd * 0.125 * b, 0.345, fz), f.at(sp, sd * 0.165 * b, 0.19, fz), M.shirt)
+        .flag(PF.SHADE_ONLY)
+        .tone(-1);
+    }
+  }
   if (front > 0.1 && hunch > 0.5 && L.vest === null && L.jacket === null) {
     // The shirt bunches over the hunch: one drawn fold.
     stroke(f, f.at(sp, -0.1 * b, 0.13, fz), f.at(sp, -0.02 * b, 0.105, fz), M.shirt, s, -0.2);
@@ -662,8 +671,10 @@ function legCel(f: PixelFigure, hip: THREE.Object3D, knee: THREE.Object3D, side:
     // Knee: patches on work trousers, else one crease across a bent knee.
     if (L.outfit === 'worker' || L.outfit === 'flannel') f.decal(f.at(knee, 0, 0.045, 0.066), f.at(knee, 0, -0.065, 0.066), 0.046 * s, 0.046 * s, pm).flag(SH | CUT).tone(-0.2);
     else if (bend > 0.03) stroke(f, f.at(knee, -0.04, -0.03, 0.066), f.at(knee, 0.035, -0.045, 0.066), pm, s, -0.2);
-    // The crotch pull at the hip.
-    stroke(f, f.at(hip, -side * 0.05, -0.03, 0.075), f.at(hip, -side * 0.012, -0.11, 0.08), pm, s, -0.2);
+    // The inside of the thigh falls into shadow below the crotch (a drawn wedge).
+    f.triDecal(f.at(hip, -side * 0.085, -0.03, 0.075), f.at(hip, -side * 0.02, -0.05, 0.08), f.at(hip, -side * 0.05, -0.26, 0.08), pm)
+      .flag(PF.SHADE_ONLY)
+      .tone(-1);
     if (L.dead && hash(L.seed * 4.3 + side) < 0.5) {
       f.triDecal(f.at(hip, -0.03, -0.17, 0.08), f.at(hip, 0.035, -0.19, 0.085), f.at(hip, 0.0, -0.285, 0.085), M.skin);
     } else if (L.dead) {

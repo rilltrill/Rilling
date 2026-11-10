@@ -189,10 +189,10 @@ if (shot) {
           } else if (k === 'pose' && e.debugPose) {
             // Civilians: hold a phase on the spot (plead / cower / flee …), `phase/seconds`.
             const [ph, sec] = (v ?? 'plead').split('/');
-            e.debugPose(ph, Number(sec ?? 0.6));
             e.root.position.copy(pos);
-            for (let t = 0; t < 0.35; t += 1 / 60) e.update(1 / 60);
-            if (ph !== 'flee') e.root.position.copy(pos);
+            e.debugPose(ph, Number(sec ?? (ph === 'cower' ? 1.2 : ph === 'flee' ? 0.4 : 0.3)), ph === 'cower' ? { peek: 0 } : {});
+            e.root.position.copy(pos);
+            e.root.updateMatrixWorld(true);
           }
         }
       }

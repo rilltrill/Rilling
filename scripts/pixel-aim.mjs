@@ -6,7 +6,7 @@
  * screen pixel — and reports which part it hits. A drawn head must be a head hit.
  *
  *   node scripts/pixel-aim.mjs --base http://localhost:5701 \
- *     --place "walker@office:-1:4,walker@worker:1:5:30:windup=0.8,raptor@red:0:8:70"
+ *     --place "walker@office:-1:4,walker@worker:1:5:30:windup=0.8,raptor@red:0:8:70" [--extra "&castlook=b"]
  */
 import { chromium } from '@playwright/test';
 
@@ -29,7 +29,8 @@ const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--ena
 const page = await (await browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true })).newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-await page.goto(`${base}/?stage=zoo&zoo=none&god=1&retro=crt&seed=7&mute=1&art=sprites`);
+// --extra "&castlook=b": more URL flags (the PIXEL CAST 2 look presets).
+await page.goto(`${base}/?stage=zoo&zoo=none&god=1&retro=crt&seed=7&mute=1&art=sprites${args.extra ?? ''}`);
 for (let i = 0; i < 100; i++) {
   await page.waitForTimeout(250);
   if (await page.evaluate(() => window.__game?.state === 'playing' && !!window.__game.world)) break;
