@@ -1,0 +1,1133 @@
+import { PW_TPM_MID, type PwCanvas, type PwRng } from './canvas';
+import type { PwAtlas, PwKit, PwTile } from './atlas';
+import { blob, Brush2, dashAt, wobbler } from './brush2';
+import { hash2 } from './surfaces';
+
+/**
+ * MAIN STREET (z1) carriageways for PIXEL WORLD 2: the road as a painted CROSS-SECTION, kerb to
+ * kerb, at 64 texels a metre — what fills the lower half of every street frame.
+ *
+ * The first pass laid one 8 m asphalt tile by world projection: a dark plane with specks. A
+ * street is not a material, it is a thing with a shape: a crown worn pale between the lanes,
+ * two tyre-polished wheel tracks a lane that hold the rain, a concrete gutter pan against each
+ * kerb, a double yellow line scuffed off where traffic crossed it, patches and trenches cut
+ * across lanes, covers, cracks. `z1RoadTile(variant)` paints that picture 12 m wide and 8 m
+ * long; u runs kerb to kerb (west → east on a street heading north), v wraps along the street,
+ * and three variants laid in a shuffled order (`z1RoadOrder`) keep any one trench or cover from
+ * coming round every 8 m.
+ *
+ * Painted far side up (canvas row 0 = the far end as the rail walks it): light from the upper
+ * left, so every groove carries its lit lip below it and every cover its shadow at lower right,
+ * as on the walls. The driving lanes (the enemies' floor) stay within three tones; the stronger
+ * contrast — gutter water, leaves, iron, concrete — is kept to the kerbs.
+ */
+
+/** Road module size: 12 m kerb to kerb × 8 m along, at 64 texels a metre. */
+export const Z1_ROAD_W = 768;
+export const Z1_ROAD_H = 512;
+export type Z1RoadVariant = 0 | 1 | 2;
+
+/** The ground palette of the stage: every ground painter takes its ramps from here (one street, one set of colours). */
+export function z1GroundRamps(k: PwKit) {
+  return {
+    /** Wet asphalt: the body of the road (an indigo-violet grey). */
+    asph: k.ramp(0x363a48, { light: 0.36, sat: 1.0, dark: 0.42 }),
+    /** The crown and the lane edges: older, drier, a shade paler and greyer. */
+    dry: k.ramp(0x41434f, { light: 0.34, sat: 0.85, dark: 0.42 }),
+    /** Tar: sealed cracks, fresh patches, oil. */
+    tar: k.ramp(0x25262f, { light: 0.5, sat: 1.0, dark: 0.5 }),
+    /** The night sky lying in the wet. */
+    sky: k.ramp(0x5a6890, { light: 0.32, sat: 0.95 }),
+    /** Concrete: gutter pans, kerbs, flags. */
+    conc: k.ramp(0x62646c, { light: 0.38, sat: 0.7, dark: 0.42 }),
+    concDark: k.ramp(0x53555d, { light: 0.36, sat: 0.75, dark: 0.42 }),
+    /** Walks: old bluestone flags, a greyer stone, the paler granite of the kerb, a newer cast slab. */
+    blue: k.ramp(0x505768, { light: 0.36, sat: 0.9, dark: 0.42 }),
+    flag: k.ramp(0x5b5c66, { light: 0.36, sat: 0.75, dark: 0.42 }),
+    cast: k.ramp(0x67655f, { light: 0.34, sat: 0.6, dark: 0.42 }),
+    kerb: k.ramp(0x74767e, { light: 0.34, sat: 0.7, dark: 0.4 }),
+    /** Road paint, worn: never a pure yellow or white on the enemies' floor. */
+    yellow: k.ramp(0xa8892e, { light: 0.3, sat: 0.9, dark: 0.45 }),
+    white: k.ramp(0xa9a8a2, { light: 0.3, sat: 0.6, dark: 0.45 }),
+    iron: k.ramp(0x3c3e48, { light: 0.5, sat: 0.9, dark: 0.45 }),
+    rust: k.ramp(0x7a4024, { light: 0.4 }),
+    leaf: k.ramp(0x6a5228, { light: 0.4 }),
+    leafRed: k.ramp(0x7a3a22, { light: 0.4 }),
+    moss: k.ramp(0x3e5a32, { light: 0.35 }),
+    paper: k.ramp(0xa8a290, { light: 0.4, sat: 0.6 }),
+    water: k.ramp(0x1e2638, { light: 0.4, sat: 1, dark: 0.55 }),
+    oilP: k.ramp(0x5a3a7a, { light: 0.4 }),
+    oilT: k.ramp(0x2a6a6a, { light: 0.4 }),
+  };
+}
+export type Z1GroundRamps = ReturnType<typeof z1GroundRamps>;
+
+/** The wet-asphalt road module (see the header). */
+export function z1RoadTile(atlas: PwAtlas, variant: Z1RoadVariant): PwTile {
+  return atlas.tile(`z1road|${variant}`, Z1_ROAD_W, Z1_ROAD_H, (c, k) => paintZ1Road(c, k, variant), { wrap: true, density: PW_TPM_MID });
+}
+
+/** Which variant lies on segment `i` of a street (`salt` per street): shuffled, never the same twice running. */
+export function z1RoadOrder(i: number, salt = 0): Z1RoadVariant {
+  const a = Math.floor(hash2(i, salt, 733) * 3);
+  const prev = i > 0 ? Math.floor(hash2(i - 1, salt, 733) * 3) : -1;
+  return ((a === prev ? a + 1 : a) % 3) as Z1RoadVariant;
+}
+
+// Cross-section, in texels from the centreline (64 = 1 m).
+const TRACK_IN = 64; // inner wheel track centre (1.0 m)
+const TRACK_OUT = 166; // outer wheel track centre (2.6 m)
+const TRACK_HALF = 20;
+const PARK = 230; // the parking line (3.6 m)
+const PAN = 346; // the gutter pan starts (5.4 m); the kerb is at 384
+
+/**
+ * The asphalt of a street, painted in the order an artist blocks it in. Works on columns x0…x1 of
+ * the canvas (the pans and walks beside it are someone else's):
+ *
+ *  1. body: one tone, with `dry` bands (the crown, lane edges: older paler stone) whose edges
+ *     break into dashes along the road;
+ *  2. the WET: rain lies where tyres have polished the road — not as ruled stripes but as chains
+ *     of long lobed sheets down every wheel path (`tracksV` along y, `tracksH` along x), with
+ *     gaps, and a few broad sheets across the lanes. A sheet is a step darker than the dry road
+ *     (wet asphalt drinks the light) and its ends fray into strokes;
+ *  3. what the wet mirrors: LADDERS of the night sky — strokes of blue stacked down each sheet,
+ *     every stroke its own width, some fat with a bright core. The stacked stroke is how a 2D
+ *     street says "wet": the sky standing in the road. Fainter ladders in the road's own lighter
+ *     tone lie on the dry parts (it is all damp);
+ *  4. the dry road's own skin: scabs of ravelled stone (a pale lobed chip with its shadow), pits.
+ * Returns the wet mask (1 = under water) for the painters that add to it.
+ */
+function paintAsphalt(
+  b: Brush2,
+  rng: PwRng,
+  P: Z1GroundRamps,
+  seed: number,
+  o: { x0: number; x1: number; dry: readonly [number, number][]; tracksV?: readonly number[]; tracksH?: readonly number[]; sheets?: number; half?: number },
+): Uint8Array {
+  const W = b.w;
+  const H = b.h;
+  const R = b.R;
+  const T = b.T;
+  const half = o.half ?? TRACK_HALF;
+  // 1. Body.
+  for (let y = 0; y < H; y++) {
+    const row = y * W;
+    for (let x = o.x0; x < o.x1; x++) {
+      R[row + x] = P.asph;
+      T[row + x] = 3;
+    }
+  }
+  o.dry.forEach(([a0, b0], k) => {
+    const wl = wobbler(seed + 91 + k * 2, b.wrapY ? H : 0);
+    const wr = wobbler(seed + 92 + k * 2, b.wrapY ? H : 0);
+    for (let y = 0; y < H; y++) {
+      const row = y * W;
+      const a = Math.max(o.x0, Math.round(a0 + wl(y) * 5));
+      const e = Math.min(o.x1, Math.round(b0 + wr(y) * 5));
+      for (let x = a; x < e; x++) R[row + x] = P.dry;
+      // Edges fray into strokes along the road.
+      if (a - 2 >= o.x0 && dashAt(y, seed + 3 + k, 3, 9, 2, 6)) R[row + a - 2] = P.dry;
+      if (e + 1 < o.x1 && dashAt(y, seed + 4 + k, 3, 9, 2, 6)) R[row + e + 1] = P.dry;
+    }
+  });
+  // 2. The wet mask: chains of sheets down the wheel paths, a few broad ones across.
+  const wet = new Uint8Array(W * H);
+  const sheets: { x: number; y: number; w: number; h: number }[] = [];
+  const stamp = (bl: { m: Uint8Array; w: number; h: number }, ox: number, oy: number) => {
+    for (let y = 0; y < bl.h; y++) {
+      for (let x = 0; x < bl.w; x++) {
+        if (!bl.m[y * bl.w + x]) continue;
+        const i = b.at(ox + x, oy + y);
+        if (i >= 0 && ox + x >= o.x0 && ox + x < o.x1) wet[i] = 1;
+      }
+    }
+    sheets.push({ x: ox, y: oy, w: bl.w, h: bl.h });
+  };
+  for (const t of o.tracksV ?? []) {
+    let y = rng.int(0, 90);
+    while (y < H - 30) {
+      const len = rng.int(70, 230);
+      const wd = Math.round(half * 2 * rng.range(0.75, 1.25));
+      stamp(blob(rng, wd, len, Math.max(3, Math.round(len / 45)), 0.75), Math.round(t - wd / 2 + rng.spread(6)), y);
+      y += len + rng.int(18, 110);
+    }
+  }
+  for (const t of o.tracksH ?? []) {
+    let x = o.x0 + rng.int(0, 90);
+    while (x < o.x1 - 30) {
+      const len = rng.int(70, 230);
+      const wd = Math.round(half * 2 * rng.range(0.75, 1.25));
+      stamp(blob(rng, len, wd, Math.max(3, Math.round(len / 45)), 0.75), x, Math.round(t - wd / 2 + rng.spread(6)));
+      x += len + rng.int(18, 110);
+    }
+  }
+  for (let i = 0; i < (o.sheets ?? 3); i++) {
+    const w = rng.int(80, 170);
+    const h = rng.int(36, 76);
+    stamp(blob(rng, w, h, 5, 0.6), o.x0 + rng.int(10, Math.max(11, o.x1 - o.x0 - w - 10)), rng.int(0, H - 1));
+  }
+  for (let y = 0; y < H; y++) {
+    for (let x = o.x0; x < o.x1; x++) {
+      const i = y * W + x;
+      if (!wet[i]) continue;
+      R[i] = P.asph;
+      T[i] = 2;
+      // The far and near edges of a sheet fray: a broken stroke one row beyond the edge.
+      const up = b.at(x, y - 1);
+      const dn = b.at(x, y + 1);
+      if (up >= 0 && !wet[up] && dashAt(x, y + seed, 3, 8, 2, 5)) {
+        const j = b.at(x, y - 2);
+        if (j >= 0 && (R[j] === P.asph || R[j] === P.dry)) T[j] = 2;
+      }
+      if (dn >= 0 && !wet[dn] && dashAt(x, y + seed + 1, 3, 8, 2, 5)) {
+        const j = b.at(x, y + 2);
+        if (j >= 0 && (R[j] === P.asph || R[j] === P.dry)) T[j] = 2;
+      }
+    }
+  }
+  // 3. Ladders of sky in the sheets (two or three a sheet, each a column of strokes), fainter ones on the dry road.
+  const inWet = (r: number) => r === P.asph || r === P.sky;
+  for (const s of sheets) {
+    const tall = s.h >= s.w;
+    const n = tall ? (s.w > 40 ? 2 : 1) + (s.h > 150 ? 1 : 0) : Math.max(2, Math.round(s.w / 42));
+    for (let k = 0; k < n; k++) {
+      const lx = s.x + Math.round(s.w * (tall ? 0.25 + rng.next() * 0.5 : (k + 0.2 + rng.next() * 0.6) / n));
+      const ly = s.y + Math.round(s.h * rng.range(0.02, 0.3));
+      const ll = Math.round(s.h * rng.range(0.45, 0.75));
+      ladder(b, rng, lx, ly, ll, rng.int(10, 24), P.sky, 2, wet, inWet);
+    }
+  }
+  // The damp road between the sheets: paler lobes where it drains first (large, low in contrast: they carry
+  // the far levels), then ladders of its own lighter tone all over it — it is raining, nothing is dry.
+  const nLobe = Math.round(((o.x1 - o.x0) * H) / 26000);
+  for (let k = 0; k < nLobe; k++) {
+    const lw = rng.int(22, 56);
+    const lh = rng.int(60, 170);
+    const bl = blob(rng, lw, lh, 5, 0.6);
+    const ox = rng.int(o.x0 + 4, o.x1 - lw - 4);
+    const oy = rng.int(0, H - 1);
+    for (let y = 0; y < lh; y++) {
+      for (let x = 0; x < lw; x++) {
+        if (!bl.m[y * lw + x]) continue;
+        const i = b.at(ox + x, oy + y);
+        if (i >= 0 && !wet[i] && R[i] === P.asph) R[i] = P.dry;
+      }
+    }
+  }
+  const nDry = Math.round(((o.x1 - o.x0) * H) / 3200);
+  for (let k = 0; k < nDry; k++) {
+    const lx = rng.int(o.x0 + 8, o.x1 - 8);
+    ladder(b, rng, lx, rng.int(0, H - 1), rng.int(30, 110), rng.int(7, 20), 0, 1, null, (r) => r === P.asph || r === P.dry);
+  }
+  // 4. The road's skin: scabs of ravelled stone in drifts (a pale lobed chip, its shadow at lower right), pits
+  // with a dark reveal and a lit lip; none under water.
+  const dryOnly = (x: number, y: number) => {
+    const i = b.at(x, y);
+    return i >= 0 && !wet[i] && (R[i] === P.asph || R[i] === P.dry);
+  };
+  const nScab = Math.round(((o.x1 - o.x0) * H) / 2200);
+  for (let d = 0; d < Math.ceil(nScab / 4); d++) {
+    const cx = rng.int(o.x0 + 6, o.x1 - 6);
+    const cy = rng.int(0, H - 1);
+    for (let q = 0; q < 4; q++) {
+      const x = Math.round(cx + (rng.next() + rng.next() - 1) * 16);
+      const y = Math.round(cy + (rng.next() + rng.next() - 1) * 44);
+      if (!dryOnly(x, y) || !dryOnly(x + 6, y + 3) || !dryOnly(x - 6, y - 3) || x < o.x0 + 8 || x > o.x1 - 9) continue;
+      const big = rng.chance(0.3);
+      b.bump(rng, x, y, big ? rng.int(8, 13) : rng.int(4, 7), { fill: 1, lit: 0, dark: 1, cast: 1 });
+    }
+  }
+  for (let i = 0; i < nScab; i++) {
+    const x = rng.int(o.x0 + 4, o.x1 - 5);
+    const y = rng.int(0, H - 1);
+    if (!dryOnly(x, y) || !dryOnly(x + 3, y + 2) || !dryOnly(x - 3, y - 2)) continue;
+    b.chip(rng, x, y, rng.chance(0.25) ? rng.int(5, 8) : 3, { depth: 2 });
+  }
+  return wet;
+}
+
+/**
+ * A ladder: the standing reflection of a pale sky (or a faint lamp) in wet ground — strokes stacked
+ * down the canvas, each its own width, the column leaning a texel now and then, rungs missing,
+ * every third or fourth one fat with a brighter core. `ramp` 0 lifts the surface's own tone by
+ * `tone` instead of painting the sky (the damp shine of the dry road). `mask` keeps it on the wet.
+ */
+function ladder(b: Brush2, rng: PwRng, x: number, y: number, len: number, width: number, ramp: number, tone: number, mask: Uint8Array | null, only: (r: number) => boolean) {
+  let cx = x;
+  let k = 0;
+  while (k < len) {
+    // The column is widest in its middle third.
+    const t = k / len;
+    const env = 0.55 + 0.45 * Math.sin(Math.PI * Math.min(1, Math.max(0, t)));
+    const wd = Math.max(3, Math.round(width * env * (0.5 + rng.next() * 0.5)));
+    const fat = ramp !== 0 && wd > 9 && rng.chance(0.3);
+    const thick = fat ? 4 : 2;
+    cx += rng.int(-1, 1);
+    if (!rng.chance(0.18)) {
+      for (let j = 0; j < thick; j++) {
+        const inset = fat && (j === 0 || j === 3) ? 2 + Math.round(wd * 0.15) : 0;
+        for (let q = inset; q < wd - inset; q++) {
+          const i = b.at(cx - (wd >> 1) + q, y + k + j);
+          if (i < 0 || !only(b.R[i]) || (mask && !mask[i])) continue;
+          const tip = q === inset || q === wd - inset - 1;
+          if (ramp) {
+            b.R[i] = ramp;
+            b.T[i] = fat && (j === 1 || j === 2) && q > inset + 2 && q < wd - inset - 3 ? tone + 1 : tip ? tone - 1 : tone;
+          } else if (!tip) b.T[i] = Math.min(5, b.T[i] + tone);
+        }
+      }
+    }
+    // (Even pitches: two-texel rungs sit inside one texel of the next level.)
+    k += thick + 2 * rng.int(1, 3);
+  }
+}
+
+export function paintZ1Road(c: PwCanvas, k: PwKit, variant: Z1RoadVariant) {
+  const W = c.w;
+  const H = c.h;
+  const R = c.ramp;
+  const T = c.tone;
+  const P = z1GroundRamps(k);
+  const rng = k.rng;
+  const b = new Brush2(c, { wrapY: true });
+  const CX = W / 2;
+  const seed = 40 + variant * 17;
+  const tracks = [CX - TRACK_OUT, CX - TRACK_IN, CX + TRACK_IN, CX + TRACK_OUT];
+
+  // (a, b) Body, the wet, the sky in it, the dry skin.
+  const wet = paintAsphalt(b, rng, P, seed, {
+    x0: CX - PAN,
+    x1: CX + PAN,
+    dry: [
+      [CX - 34, CX + 34],
+      [CX - PAN, CX - PARK - 40 + variant * 12],
+      [CX + PARK + 26 - variant * 10, CX + PAN],
+    ],
+    tracksV: tracks,
+    sheets: 3,
+  });
+
+  // (b) The gutter pans: a cast concrete strip against each kerb, wet and darker than a dry walk, with
+  // a sealed seam to the asphalt and a joint every 4 m.
+  for (const side of [-1, 1]) {
+    const x0 = side < 0 ? 0 : CX + PAN;
+    const x1 = side < 0 ? CX - PAN : W;
+    for (let y = 0; y < H; y++) {
+      for (let x = x0; x < x1; x++) {
+        R[y * W + x] = P.conc;
+        T[y * W + x] = 3;
+      }
+    }
+    // The asphalt's ragged edge laps onto the pan here and there; the seam itself is a tar-sealed groove,
+    // two texels (it must hold at the first far level).
+    const seam = side < 0 ? x1 : x0 - 1;
+    const wf = wobbler(seed + 50 + side, H, 3);
+    for (let y = 0; y < H; y++) {
+      const lap = Math.max(0, Math.round(wf(y) * 2.5));
+      for (let q = 0; q < lap; q++) b.set(side < 0 ? seam - 1 - q : seam + 1 + q, y, P.asph, 3);
+      b.set(seam, y, P.tar, 1);
+      b.set(seam + side, y, P.tar, dashAt(y, seed + 7, 4, 14, 2, 6) ? 1 : 2);
+    }
+    // Pan joints every 4 m, each a groove with its lit lip.
+    for (let j = 0; j < 2; j++) {
+      const y = 70 + j * 256 + variant * 40;
+      b.groove([x0, y, x1 - 1, y], { dt: -2, lip: 1, width: 2, only: P.conc });
+    }
+    // Scour: long tongues where the flow has washed the concrete darker, down the fall of the pan.
+    for (let i = 0; i < 7; i++) {
+      const sw = rng.int(6, 13);
+      const sh = rng.int(40, 130);
+      const s = blob(rng, sw, sh, 4, 0.6);
+      const ox = side < 0 ? x0 + rng.int(4, x1 - x0 - sw - 4) : x0 + rng.int(4, x1 - x0 - sw - 4);
+      const oy = rng.int(0, H - 1);
+      for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) if (s.m[y * sw + x]) b.shift(ox + x, oy + y, -1, P.conc);
+    }
+    b.band(x0, 0, x1 - x0, H, side < 0 ? 'left' : 'right', { dt: -1, steps: 1, reach: 0.34, wob: 2.5, seed: seed + side, only: P.conc });
+  }
+
+  // (c) Construction. The centre joint between the two paving passes, sealed with tar in stretches.
+  for (let y = 0; y < H; y++) {
+    const sealed = dashAt(y, seed + 31, 30, 90, 20, 60);
+    b.set(CX - 1, y, P.tar, sealed ? 1 : 2);
+    b.set(CX, y, sealed ? P.tar : P.dry, sealed ? 1 : 2);
+    if (sealed) b.shift(CX + 1, y, 1);
+  }
+  // A saw-cut trench across one lane (utility work), filled with newer, darker asphalt, banded with tar.
+  {
+    const right = variant !== 1;
+    const tx0 = right ? CX + 14 : CX - 224;
+    const tx1 = right ? CX + 224 : CX - 14;
+    const ty = [118, 300, 404][variant];
+    const th = [44, 38, 52][variant];
+    for (let y = 0; y < th; y++) {
+      for (let x = tx0; x < tx1; x++) {
+        const i = b.at(x, ty + y);
+        const edge = y < 2 || y >= th - 2 || x < tx0 + 2 || x >= tx1 - 2;
+        R[i] = P.tar;
+        // Inside: a smoother, darker fill; its far and left edges in shadow (it has sunk a little), the near edge lit.
+        T[i] = edge ? 1 : y < 4 || x < tx0 + 4 ? 2 : 3;
+        c.flag[i] = 0;
+        wet[i] = 0;
+      }
+    }
+    // Tar banding painted over the cut, wandering off it; lit lip along the near side.
+    const wf = wobbler(seed + 70, 0, 4);
+    for (let x = tx0 - 6; x < tx1 + 6; x++) {
+      const o1 = Math.round(wf(x) * 1.6);
+      b.set(x, ty - 1 + o1, P.tar, 1);
+      b.set(x, ty + th + o1, P.tar, 1);
+      if (dashAt(x, seed + 71, 5, 16, 2, 5)) b.shift(x, ty + th + 1 + o1, 1);
+    }
+    // The fill has its own wear: a seam down the middle, the wheel paths worn pale across it, water in its sunk corners.
+    b.groove([tx0 + 4, ty + (th >> 1), tx1 - 4, ty + (th >> 1) + 2], { dt: -1, lip: 1, breakup: 0.5, seed });
+    for (const t of tracks) {
+      if (t > tx0 && t < tx1) ladder(b, rng, t + rng.int(-4, 4), ty + 4, th - 8, 18, P.sky, 2, null, (r) => r === P.tar);
+    }
+    for (let i = 0; i < 5; i++) b.bump(rng, rng.int(tx0 + 8, tx1 - 8), ty + rng.int(6, th - 6), rng.int(4, 8), { lit: 1, dark: 0, cast: 1, only: P.tar });
+  }
+  // A big rectangular overlay in the other lane (an older repair: paler, its edges gone soft, cracked along one side).
+  {
+    const right = variant === 1;
+    const px0 = right ? CX + 96 : CX - 210;
+    const pw = [118, 96, 140][variant];
+    const py = [8, 150, 190][variant];
+    const ph = [96, 130, 84][variant];
+    for (let y = 0; y < ph; y++) {
+      for (let x = 0; x < pw; x++) {
+        const i = b.at(px0 + x, py + y);
+        if (R[i] !== P.asph && R[i] !== P.dry && R[i] !== P.sky) continue;
+        // (Its corners are rounded off: a paver's shovel, not a saw.)
+        const cxk = Math.min(x, pw - 1 - x);
+        const cyk = Math.min(y, ph - 1 - y);
+        if (cxk + cyk < 4) continue;
+        if (wet[i]) continue;
+        R[i] = P.dry;
+        T[i] = cxk === 0 || cyk === 0 ? (x === 0 || y === 0 ? 4 : 2) : 3;
+      }
+    }
+    b.crack(rng, px0 + 2, py + ph - 3, pw - 10, 0.05, { dt: -2, lip: 1, branch: 0.04, fat: 0.4, wander: 0.4 });
+  }
+  if (variant === 0) manhole(b, rng, P, CX - 116, 330, 21, 'SEWER');
+  if (variant === 2) manhole(b, rng, P, CX + 112, 170, 17, 'WATER');
+
+  // (e, early) The paint, under the wear that comes after it.
+  roadPaint(b, P, seed, CX, variant);
+
+  // (d) Wear. Tar snakes: sealed cracks wandering down the lanes, shining on their upper-left edge.
+  const nSnakes = 5 + variant;
+  for (let s = 0; s < nSnakes; s++) {
+    let x = CX + (rng.chance(0.5) ? 1 : -1) * rng.range(20, PAN - 30);
+    let y = rng.int(0, H - 1);
+    let a = Math.PI / 2 + rng.spread(0.5);
+    const len = rng.int(70, 210);
+    const fat = rng.chance(0.5) ? 3 : 2;
+    for (let j = 0; j < len; j++) {
+      const ix = Math.round(x);
+      const iy = Math.round(y);
+      for (let q = 0; q < fat; q++) b.set(ix + q, iy, P.tar, q === fat - 1 ? 2 : 1);
+      // Wet tar catches the light in short runs.
+      if (dashAt(j, s + seed, 3, 7, 5, 14)) b.tint(ix - 1, iy, P.sky, 0);
+      a += rng.spread(0.12);
+      a += (Math.PI / 2 - a) * 0.03;
+      x += Math.cos(a);
+      y += Math.sin(a);
+      if (rng.chance(0.012)) a += rng.chance(0.5) ? 0.9 : -0.9;
+    }
+  }
+  // Long cracks with a lit lip, forking; more of them toward the lane edges.
+  for (let i = 0; i < 9; i++) {
+    const side = rng.chance(0.5) ? 1 : -1;
+    const x = CX + side * rng.range(30, PAN - 20);
+    b.crack(rng, x, rng.int(0, H - 1), rng.int(40, 130), rng.chance(0.6) ? Math.PI / 2 + rng.spread(0.5) : rng.spread(0.6), { dt: -2, lip: 1, branch: 0.03, fat: 0.3, wander: 0.7 });
+  }
+  // Alligator cracking: one failed patch in a wheel track — polygonal plates, each with a dark far edge and a lit near one.
+  alligator(b, rng, tracks[variant === 1 ? 0 : 3] - 34, [20, 250, 60][variant], 78, 150, seed);
+  // A pothole in the other lane, holding water.
+  pothole(b, rng, P, tracks[variant === 1 ? 2 : 1] + rng.int(-10, 10), [400, 96, 250][variant], 34, 22);
+  if (variant === 1) pothole(b, rng, P, CX + PARK + 30, 420, 24, 16);
+
+  // (e) Dressing. Oil under where engines stand in the parking lanes; drifted leaves and litter in the pans.
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 2; i++) oilStain(b, rng, P, CX + side * (PARK + 56 + rng.int(-14, 14)), rng.int(0, H - 1), rng.int(26, 44));
+    gutterDrift(b, rng, P, side < 0 ? 2 : CX + PAN + 2, side < 0 ? CX - PAN - 2 : W - 2, side, variant);
+  }
+  if (variant === 2) drainGrate(b, P, W - 37, 380, 34, 26);
+  if (variant === 1) drainGrate(b, P, 3, 150, 34, 26);
+
+  // (f) Contact: the kerb's shadow lies on the pan (a hard line at its foot, one softer step, dashed).
+  b.contact(0, 0, H, 'right', { dt: -2, depth: 5, line: 2, seed });
+  b.contact(W - 1, 0, H, 'left', { dt: -2, depth: 3, line: 1, seed: seed + 1 });
+}
+
+/** The double yellow and the parking lines, worn: ragged edges, chips, whole stretches scuffed down to a ghost. */
+function roadPaint(b: Brush2, P: Z1GroundRamps, seed: number, CX: number, variant: number) {
+  const H = b.h;
+  const line = (x0: number, wdt: number, ramp: number, wearSeed: number, wear: number, on: (y: number) => boolean) => {
+    const wf = wobbler(wearSeed, H, 2);
+    const wg = wobbler(wearSeed + 1, H, 5);
+    for (let y = 0; y < H; y++) {
+      if (!on(y)) continue;
+      // Wear along the line: a slow rise and fall (whole stretches gone), with quicker chips on top.
+      const w = wf(y) * 0.6 + wg(y) * 0.4;
+      const gone = w > 1 - wear * 1.6;
+      const thin = w > 1 - wear * 2.4;
+      for (let q = 0; q < wdt; q++) {
+        const i = b.at(x0 + q, y);
+        if (i < 0) continue;
+        const edge = q === 0 || q === wdt - 1;
+        if (gone) {
+          // A ghost: the paint's stain left in the asphalt, as broken strokes.
+          if (!edge && dashAt(y + q * 5, wearSeed + q, 2, 5, 3, 7)) b.shift(x0 + q, y, 1);
+          continue;
+        }
+        // Ragged edges, and chips eaten into thin paint.
+        if (edge && dashAt(y, wearSeed + 3 + q, 2, 5, 3, 9)) continue;
+        if (thin && hash2((x0 + q) >> 1, y >> 1, wearSeed) < 0.45) continue;
+        b.R[i] = ramp;
+        // The paint has a thickness: its left edge catches the light, its right edge is a step down.
+        b.T[i] = q === 0 ? 4 : q === wdt - 1 ? 2 : 3;
+      }
+    }
+  };
+  // Double yellow: two 12 cm lines, 12 cm apart.
+  line(CX - 12, 8, P.yellow, seed + 80, 0.3 + variant * 0.04, () => true);
+  line(CX + 4, 8, P.yellow, seed + 82, 0.26 + variant * 0.05, () => true);
+  // Parking lines: long dashes, far more worn (tyres cross them all day).
+  for (const side of [-1, 1]) line(CX + side * PARK - 4, 8, P.white, seed + 84 + side, 0.42, (y) => (y + variant * 90 + (side > 0 ? 60 : 0)) % 256 < 150);
+  // A bay tick toward the kerb, one a module.
+  for (const side of [-1, 1]) {
+    const y0 = [56, 230, 344][variant] + (side > 0 ? 100 : 0);
+    const x0 = side < 0 ? CX - PAN + 6 : CX + PARK + 4;
+    const x1 = side < 0 ? CX - PARK - 4 : CX + PAN - 6;
+    for (let y = 0; y < 8; y++) {
+      for (let x = x0; x < x1; x++) {
+        if (hash2(x >> 2, (y0 + y) >> 1, seed + 5) < 0.4 || ((y === 0 || y === 7) && dashAt(x, seed + y, 2, 5, 2, 6))) continue;
+        b.set(x, y0 + y, P.white, y === 0 ? 4 : y === 7 ? 2 : 3);
+      }
+    }
+  }
+}
+
+/** An iron cover in its concrete collar: a cast pattern of studs, a lettered ring, lit upper-left rim, shadow at lower right. */
+export function manhole(b: Brush2, rng: PwRng, P: Z1GroundRamps, cx: number, cy: number, r: number, word: string) {
+  // The square patch of newer asphalt it was set in, with a tar seam.
+  const pr = r + 12;
+  for (let y = -pr; y <= pr; y++) {
+    for (let x = -pr; x <= pr; x++) {
+      const edge = Math.abs(x) >= pr - 1 || Math.abs(y) >= pr - 1;
+      b.set(cx + x, cy + y, P.tar, edge ? 1 : 3);
+    }
+  }
+  b.hrun(cx - pr, cy + pr + 1, pr * 2 + 1, 0, 1);
+  // Collar.
+  const cr = r + 5;
+  for (let y = -cr; y <= cr; y++) {
+    for (let x = -cr; x <= cr; x++) {
+      const d = Math.hypot(x + 0.5, y + 0.5);
+      if (d > cr) continue;
+      b.set(cx + x, cy + y, P.conc, d > cr - 1.2 ? (x + y < 0 ? 4 : 1) : 3);
+    }
+  }
+  // The lid.
+  for (let y = -r; y <= r; y++) {
+    for (let x = -r; x <= r; x++) {
+      const d = Math.hypot(x + 0.5, y + 0.5);
+      if (d > r) continue;
+      let t = 2;
+      // Rim: a groove round the lid (dark upper-left inside, lit lower-right), then the raised ring.
+      if (d > r - 1.5) t = x + y < 0 ? 0 : 3;
+      else if (d > r - 4) t = x + y < 0 ? 4 : 2;
+      else if (d > r - 5) t = 1;
+      else {
+        // Studs: 4-texel cells, each a lit upper-left pair and a dark lower-right one.
+        const sx = (x + 64) & 3;
+        const sy = (y + 64) & 3;
+        t = sx < 2 && sy < 2 ? (sx === 0 && sy === 0 ? 4 : 3) : sx === 2 && sy === 2 ? 1 : 2;
+        // A plain ring where the word is cast.
+        if (Math.abs(d - r * 0.52) < 1.2) t = x + y < 0 ? 3 : 1;
+      }
+      b.set(cx + x, cy + y, P.iron, t);
+    }
+  }
+  void word;
+  // Two pick holes, rust bleeding from them down the fall of the road.
+  for (const sx of [-1, 1]) {
+    const hx = cx + sx * Math.round(r * 0.52);
+    b.set(hx, cy, P.iron, 0);
+    b.set(hx + 1, cy, P.iron, 0);
+    b.set(hx, cy + 1, P.rust, 2);
+    b.set(hx + 1, cy + 1, P.rust, 3);
+  }
+  b.drip(rng, cx + Math.round(r * 0.3), cy + r + 1, 14, { ramp: P.rust, dt: 0, width: 2, only: P.conc });
+  // Cast shadow of the collar's lip on the patch.
+  for (let a = 0; a < 40; a++) {
+    const t = -0.4 + (a / 40) * 2.4;
+    b.shift(Math.round(cx + Math.cos(t) * (cr + 1)), Math.round(cy + Math.sin(t) * (cr + 1)), -1, P.tar);
+  }
+}
+
+/** A storm drain set in the gutter pan: a cast frame, slots with the dark drop under them, leaves caught on the bars. */
+export function drainGrate(b: Brush2, P: Z1GroundRamps, x: number, y: number, w: number, h: number) {
+  for (let yy = 0; yy < h; yy++) {
+    for (let xx = 0; xx < w; xx++) {
+      const edge = xx === 0 || yy === 0 || xx === w - 1 || yy === h - 1;
+      const frame = xx < 3 || yy < 3 || xx >= w - 3 || yy >= h - 3;
+      let t = 3;
+      if (edge) t = xx === 0 || yy === 0 ? 4 : 1;
+      else if (!frame) {
+        // Slots across the flow: 2 texels of drop, 2 of bar (lit on top).
+        const s = (yy - 3) % 4;
+        t = s < 2 ? 0 : s === 2 ? 4 : 2;
+        if ((xx - 3) % 9 === 8) t = 3;
+      }
+      b.set(x + xx, y + yy, P.iron, t);
+    }
+  }
+  // Cast shadow, and the wet dark fan where water runs in from up the street.
+  b.hrun(x + 1, y + h, w, 0, -1);
+  b.vrun(x + w, y + 1, h, 0, -1);
+  for (let i = 0; i < 5; i++) b.vrun(x + 4 + i * 6, y - 9 + (i % 2) * 3, 8 - (i % 2) * 3, 0, -1);
+}
+
+/** Alligator cracking over a w × h area at (x, y): plates 9…14 texels across, drawn plate by plate. */
+function alligator(b: Brush2, rng: PwRng, x: number, y: number, w: number, h: number, seed: number) {
+  // Jittered plate centres; a texel belongs to the nearest one. Where its lower / right neighbour belongs to
+  // another plate it is the crack (dark); where its upper / left one does, the plate's lit edge.
+  const cw = 11;
+  const cols = Math.ceil(w / cw) + 2;
+  const rows = Math.ceil(h / cw) + 2;
+  const px = new Float32Array(cols * rows);
+  const py = new Float32Array(cols * rows);
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      px[j * cols + i] = (i - 0.5 + (hash2(i, j, seed) - 0.5) * 0.9) * cw;
+      py[j * cols + i] = (j - 0.5 + (hash2(i, j, seed + 1) - 0.5) * 0.9) * cw;
+    }
+  }
+  const id = new Int16Array(w * h);
+  for (let yy = 0; yy < h; yy++) {
+    for (let xx = 0; xx < w; xx++) {
+      // The area's own ragged outline: plates only inside a lobed shape.
+      const u = (xx - w / 2) / (w / 2);
+      const v = (yy - h / 2) / (h / 2);
+      if (u * u + v * v > 0.8 + 0.25 * Math.sin(xx * 0.21 + seed) * Math.cos(yy * 0.13)) {
+        id[yy * w + xx] = -1;
+        continue;
+      }
+      const gi = Math.floor(xx / cw) + 1;
+      const gj = Math.floor(yy / cw) + 1;
+      let best = 0;
+      let bd = 1e9;
+      for (let j = gj - 1; j <= gj + 1; j++) {
+        for (let i = gi - 1; i <= gi + 1; i++) {
+          if (i < 0 || j < 0 || i >= cols || j >= rows) continue;
+          const d = (xx - px[j * cols + i]) ** 2 + (yy - py[j * cols + i]) ** 2;
+          if (d < bd) {
+            bd = d;
+            best = j * cols + i;
+          }
+        }
+      }
+      id[yy * w + xx] = best;
+    }
+  }
+  for (let yy = 0; yy < h - 1; yy++) {
+    for (let xx = 0; xx < w - 1; xx++) {
+      const a = id[yy * w + xx];
+      if (a < 0) continue;
+      const rgt = id[yy * w + xx + 1];
+      const dn = id[(yy + 1) * w + xx];
+      if ((rgt >= 0 && rgt !== a) || (dn >= 0 && dn !== a)) b.shift(x + xx, y + yy, -2);
+      else if ((xx > 0 && id[yy * w + xx - 1] !== a && id[yy * w + xx - 1] >= 0) || (yy > 0 && id[(yy - 1) * w + xx] !== a && id[(yy - 1) * w + xx] >= 0)) b.shift(x + xx, y + yy, 1);
+      // A few plates have sunk (a step darker) or lost their surface.
+      else if (hash2(a, seed, 9) > 0.8) b.shift(x + xx, y + yy, -1);
+    }
+  }
+  void rng;
+}
+
+/** A pothole: a lobed hole with a shadowed far wall, broken lumps on its floor, rain standing in its near half, a lit lip. */
+export function pothole(b: Brush2, rng: PwRng, P: Z1GroundRamps, cx: number, cy: number, w: number, h: number) {
+  const s = blob(rng, w, h, 4, 0.6);
+  const ox = Math.round(cx - w / 2);
+  const oy = Math.round(cy - h / 2);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!s.m[y * w + x]) continue;
+      // Depth from the far edge: wall (dark), then the floor, then water in the near half.
+      let d = 0;
+      while (d < 6 && y - d - 1 >= 0 && s.m[(y - d - 1) * w + x]) d++;
+      const water = y > h * 0.45;
+      if (d < 2) b.set(ox + x, oy + y, P.tar, d === 0 ? 0 : 1);
+      else if (water) b.set(ox + x, oy + y, P.water, 2);
+      else b.set(ox + x, oy + y, P.tar, 2);
+    }
+  }
+  // The sky in the water (a few strokes), lumps on the dry floor.
+  b.sheen(rng, ox + 3, oy + Math.round(h * 0.5), w - 6, Math.round(h * 0.4), 5, P.sky, 3, { min: 4, max: 9, only: (r) => r === P.water, drifts: 1 });
+  for (let i = 0; i < 4; i++) b.bump(rng, ox + rng.int(4, w - 5), oy + rng.int(3, Math.max(4, Math.round(h * 0.4))), 3, { ramp: P.asph, tone: 3, only: P.tar });
+  // Lit lip on the near / right edge, outside the hole; crumbs thrown out round it.
+  for (let y = 0; y <= h; y++) {
+    for (let x = 0; x < w; x++) {
+      const inside = y < h && s.m[y * w + x] === 1;
+      if (!inside && y > 0 && s.m[(y - 1) * w + x]) {
+        b.shift(ox + x, oy + y, 1);
+        b.shift(ox + x, oy + y + 1, 1);
+      }
+    }
+  }
+  for (let i = 0; i < 7; i++) b.bump(rng, cx + rng.spread(w * 0.75), cy + h * 0.5 + rng.range(2, 9), rng.int(2, 3), {});
+}
+
+/** Oil under a parked engine: a dark lobed stain, darker heart, a broken rainbow rim on its near side. */
+export function oilStain(b: Brush2, rng: PwRng, P: Z1GroundRamps, cx: number, cy: number, size: number) {
+  const w = size;
+  const h = Math.round(size * rng.range(0.9, 1.5));
+  const s = blob(rng, w, h, 4, 0.7);
+  const ox = Math.round(cx - w / 2);
+  const oy = Math.round(cy - h / 2);
+  const road = (r: number) => r === P.asph || r === P.dry || r === P.sky;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!s.m[y * w + x]) continue;
+      const i = b.at(ox + x, oy + y);
+      if (i < 0 || !road(b.R[i])) continue;
+      const edgeDn = y + 1 >= h || !s.m[(y + 1) * w + x];
+      const edgeRt = x + 1 >= w || !s.m[y * w + x + 1];
+      const u = (x - w / 2) / (w / 2);
+      const v = (y - h / 2) / (h / 2);
+      b.R[i] = P.tar;
+      b.T[i] = u * u + v * v < 0.2 ? 2 : 3;
+      // The sheen: violet and teal, only along the near / right rim, in dashes.
+      if ((edgeDn || edgeRt) && dashAt(x + y, cx, 2, 5, 1, 3)) {
+        b.R[i] = (x + y) % 7 < 3 ? P.oilP : P.oilT;
+        b.T[i] = 2;
+      }
+    }
+  }
+  // Drips trailing away from it.
+  for (let i = 0; i < 4; i++) b.bump(rng, cx + rng.spread(w * 0.8), cy + rng.spread(h * 0.9), 3, { ramp: P.tar, tone: 3, lit: 0, cast: 0, only: P.asph });
+}
+
+/** What the rain has carried into a gutter pan: runs of water toward the drain, leaves, a pack, a can, a page stuck flat. */
+function gutterDrift(b: Brush2, rng: PwRng, P: Z1GroundRamps, x0: number, x1: number, side: number, variant: number) {
+  const H = b.h;
+  const w = x1 - x0;
+  // Running water: long bright strokes ALONG the kerb (the one place the sheen runs with the road), nearest the kerb.
+  for (let i = 0; i < 26; i++) {
+    const x = side < 0 ? x0 + rng.int(3, Math.round(w * 0.6)) : x1 - 1 - rng.int(3, Math.round(w * 0.6));
+    const y = rng.int(0, H - 1);
+    const len = rng.int(8, 30);
+    for (let q = 0; q < len; q++) {
+      b.tint(x, y + q, P.sky, q < 2 || q > len - 3 ? 0 : 1, P.conc);
+      if (len > 18) b.tint(x + 1, y + q, P.sky, 0, P.conc);
+    }
+  }
+  // Leaves: each a little pointed shape with a lit midrib, drifted into two or three heaps.
+  const heaps = 2 + (variant % 2);
+  for (let hh = 0; hh < heaps; hh++) {
+    const hy = rng.int(0, H - 1);
+    const n = rng.int(7, 13);
+    for (let i = 0; i < n; i++) {
+      const lx = side < 0 ? x0 + 1 + Math.abs(rng.spread(w * 0.7)) : x1 - 5 - Math.abs(rng.spread(w * 0.7));
+      leaf(b, rng, rng.chance(0.3) ? P.leafRed : P.leaf, lx, hy + rng.spread(26));
+    }
+  }
+  // Litter, each piece drawn: a cigarette pack, a crushed can, a page plastered flat.
+  const ly = [150, 330, 40][variant] + (side > 0 ? 170 : 0);
+  const lx = side < 0 ? x0 + 9 : x1 - 20;
+  b.formRect(lx, ly, 7, 5, { raised: true, ramp: P.paper, tone: 4, cast: 1 });
+  b.hrun(lx + 1, ly + 1, 5, P.rust, 3);
+  const cx = side < 0 ? x0 + 20 : x1 - 14;
+  const cy = ly + 120;
+  b.formRect(cx, cy, 6, 9, { raised: true, ramp: P.iron, tone: 4, cast: 1 });
+  b.vrun(cx + 2, cy + 1, 7, P.rust, 4);
+  b.set(cx + 1, cy + 2, P.paper, 5);
+  // The page: a skewed quad, creased, the print as grey bars, its lower edge lifting (a shadow line).
+  const px = side < 0 ? x0 + 6 : x1 - 26;
+  const py = ly + 250;
+  for (let y = 0; y < 15; y++) {
+    for (let x = 0; x < 19; x++) {
+      const sx = x + (y >> 2);
+      if (hash2(x >> 1, y >> 1, variant + 3) < 0.07 && (x < 3 || y > 11)) continue;
+      const print = y > 2 && y < 12 && y % 3 === 1 && x > 2 && x < 16 - (y % 5);
+      b.set(px + sx, py + y, P.paper, print ? 2 : x === 9 ? 3 : y === 0 || x === 0 ? 5 : 4);
+    }
+  }
+  b.hrun(px + 4, py + 15, 18, 0, -1);
+}
+
+/** One fallen leaf (5–7 texels): a pointed oval turned any way, a lit midrib, a dark underside edge. */
+export function leaf(b: Brush2, rng: PwRng, ramp: number, x: number, y: number) {
+  const s = LEAVES[Math.floor(rng.next() * LEAVES.length)];
+  const flip = rng.chance(0.5);
+  const tone = rng.chance(0.4) ? 4 : 3;
+  for (let j = 0; j < s.length; j++) {
+    const row = s[j];
+    for (let i = 0; i < row.length; i++) {
+      const ch = row[flip ? row.length - 1 - i : i];
+      if (ch === '.') continue;
+      b.set(Math.round(x) + i, Math.round(y) + j, ramp, ch === 'r' ? tone + 1 : ch === 'd' ? tone - 2 : tone);
+    }
+  }
+}
+const LEAVES: readonly (readonly string[])[] = [
+  ['.xx...', 'xrxx..', '.xrxx.', '..xrxd', '...ddd'],
+  ['..xx.', '.xrx.', 'xxrxd', '.xrdd', '..d..'],
+  ['x.....', 'xxxx..', '.rrrxx', '.xxxdd', '...dd.'],
+  ['.xxx', 'xrxd', 'xrxd', '.xd.'],
+];
+
+// ─── Walks and kerbs ─────────────────────────────────────────────────────────
+
+/** Walk module: 3.5 m (kerb to wall) × 8 m along, at 64 texels a metre. */
+export const Z1_WALK_W = 224;
+export const Z1_WALK_H = 512;
+/** Kerbstone width on the walk module (texels) and kerbstone length (joints line up with the face tile). */
+const KERB_W = 12;
+const KERB_LEN = 64;
+
+/**
+ * A walk, kerb to wall: granite kerbstones (the lit arris of the kerb FORM), then old flags laid
+ * in courses across the walk — every course its own depth, two or three stones wide, each stone a
+ * flat tone with a lit upper-left arris and an open joint in shadow at lower right — with what a
+ * street does to them: a cast-concrete replacement, a cracked flag, a broken corner made good with
+ * tar, a coal-hole cover, a cellar hatch, gum, a sprayed utility mark, rain lying in the dished
+ * stones and running to the kerb, the damp mossy foot of the wall. `side` 0 = kerb on the left
+ * (the east walk of a street heading north), 1 = kerb on the right; both are painted with the light
+ * from the upper left (never one mirrored from the other).
+ */
+export function z1WalkTile(atlas: PwAtlas, side: 0 | 1): PwTile {
+  return atlas.tile(`z1walk|${side}`, Z1_WALK_W, Z1_WALK_H, (c, k) => paintZ1Walk(c, k, side), { wrap: true, density: PW_TPM_MID });
+}
+
+export function paintZ1Walk(c: PwCanvas, k: PwKit, side: 0 | 1) {
+  const W = c.w;
+  const H = c.h;
+  const R = c.ramp;
+  const T = c.tone;
+  const P = z1GroundRamps(k);
+  const rng = k.rng;
+  const b = new Brush2(c, { wrapY: true });
+  const seed = 300 + side * 23;
+  // Kerb-relative x: 0 at the kerb's road edge, growing toward the wall.
+  const X = (kx: number) => (side ? W - 1 - kx : kx);
+  // Flags: courses across the walk (depths sum to 8 m), each split into stones.
+  const F0 = KERB_W + 2;
+  const FW = W - F0 - 2;
+  const courses = side ? [72, 56, 64, 80, 48, 72, 56, 64] : [64, 56, 72, 48, 80, 64, 56, 72];
+  const stones = [P.blue, P.blue, P.flag, P.blue, P.flag];
+  let y0 = 0;
+  const stoneOf: { x: number; y: number; w: number; h: number; ramp: number }[] = [];
+  for (let ci = 0; ci < courses.length; ci++) {
+    const ch = courses[ci];
+    // Split points: 2 or 3 stones, never two joints in line with the course before.
+    const n = (ci + side) % 3 === 0 ? 3 : 2;
+    const cuts = n === 3 ? [0.3 + hash2(ci, seed, 1) * 0.08, 0.64 + hash2(ci, seed, 2) * 0.1] : [0.38 + hash2(ci, seed, 3) * 0.26];
+    let fx = 0;
+    for (let si = 0; si < n; si++) {
+      const fe = si === n - 1 ? FW : Math.round(cuts[si] * FW);
+      const ramp = stones[Math.floor(hash2(ci, si, seed) * stones.length)];
+      const tone = hash2(ci, si, seed + 7) > 0.8 ? 4 : 3;
+      for (let y = y0; y < y0 + ch; y++) {
+        for (let x = fx; x < fe; x++) {
+          const i = y * W + X(F0 + x);
+          R[i] = ramp;
+          T[i] = tone;
+        }
+      }
+      stoneOf.push({ x: F0 + fx, y: y0, w: fe - fx, h: ch, ramp });
+      fx = fe;
+    }
+    y0 += ch;
+  }
+  // One cast-concrete replacement (a paler, newer slab with a tooled border and a date stamped in it).
+  const repl = stoneOf[side ? 5 : 9];
+  for (let y = 0; y < repl.h; y++) {
+    for (let x = 0; x < repl.w; x++) {
+      const i = (repl.y + y) * W + X(repl.x + x);
+      R[i] = P.cast;
+      T[i] = 3;
+    }
+  }
+  repl.ramp = P.cast;
+  // Value structure: each stone's worn, dished middle (paler: the feet polish it) as a lobed shape, and the
+  // unworn corners left a step darker where dirt stays.
+  for (const s of stoneOf) {
+    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
+    if (s.ramp !== P.cast && s.w > 40) {
+      const bw = Math.round(s.w * (0.45 + rng.next() * 0.2));
+      const bh = Math.round(s.h * (0.4 + rng.next() * 0.25));
+      const bl = blob(rng, bw, bh, 4, 0.8);
+      const ox = x0 + Math.round((s.w - bw) * (0.3 + rng.next() * 0.4));
+      const oy = s.y + Math.round((s.h - bh) * (0.3 + rng.next() * 0.4));
+      for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) if (bl.m[y * bw + x]) b.shift(ox + x, oy + y, 1, s.ramp);
+    }
+    // Dirt in two corners (stepped triangles).
+    for (const [cxk, cyk] of [
+      [0, 1],
+      [1, 1],
+      [1, 0],
+    ]) {
+      if (rng.chance(0.45)) continue;
+      const r = rng.int(6, 13);
+      for (let y = 0; y < r; y++) {
+        for (let x = 0; x < r - y; x++) b.shift(cxk ? x0 + s.w - 3 - x : x0 + x, cyk ? s.y + s.h - 3 - y : s.y + y, -1, s.ramp);
+      }
+    }
+  }
+  // Construction: every stone a FORM — lit arris on its upper / left edge, the open joint (two texels, in
+  // shadow) on its lower / right.
+  for (const s of stoneOf) {
+    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
+    for (let y = 0; y < s.h; y++) {
+      for (let x = 0; x < s.w; x++) {
+        const i = (s.y + y) * W + x0 + x;
+        if (x >= s.w - 2 || y >= s.h - 2) {
+          R[i] = P.concDark;
+          T[i] = x === s.w - 1 || y === s.h - 1 ? 1 : 0;
+        } else if (x === 0 || y === 0) T[i] = Math.min(5, T[i] + 1);
+      }
+    }
+  }
+  // The kerb: granite stones 1 m long, paler than the flags; the arris toward the road is the lightest line
+  // of the street's edge, the joint to the flags a dark groove.
+  for (let y = 0; y < H; y++) {
+    const ly = y % KERB_LEN;
+    for (let kx = 0; kx < F0; kx++) {
+      const i = y * W + X(kx);
+      if (kx >= KERB_W) {
+        R[i] = P.concDark;
+        T[i] = kx === KERB_W ? 0 : 1;
+        continue;
+      }
+      R[i] = P.kerb;
+      // Joint between stones (two texels); the stone's top lit along its far edge.
+      T[i] = ly >= KERB_LEN - 2 ? 1 : ly === 0 ? 4 : kx < 2 ? 4 : kx >= KERB_W - 2 ? 2 : 3;
+    }
+  }
+  // Kerb wear: bites out of the arris, a chipped corner at some joints, a stretch of old yellow paint.
+  for (let i = 0; i < 9; i++) {
+    const y = rng.int(0, H - 1);
+    const n = rng.int(3, 7);
+    for (let q = 0; q < n; q++) {
+      b.set(X(0), y + q, P.kerb, 1);
+      if (q > 0 && q < n - 1) b.set(X(1), y + q, P.kerb, 2);
+    }
+  }
+  {
+    const py = side ? 290 : 96;
+    for (let y = 0; y < 132; y++) {
+      for (let kx = 0; kx < KERB_W - 1; kx++) {
+        const i = b.at(X(kx), py + y);
+        if (T[i] <= 1 || hash2(kx >> 1, (py + y) >> 1, seed + 5) < 0.42 || ((y < 3 || y > 128) && dashAt(kx, y, 1, 3, 1, 2))) continue;
+        R[i] = P.yellow;
+        T[i] = Math.max(2, T[i] - 1);
+      }
+    }
+  }
+  b.aggregate(rng, Math.min(X(2), X(KERB_W - 3)), 0, KERB_W - 4, H, 60, { drifts: 12, up: -1, down: 1, only: P.kerb });
+
+  // Wear on the flags. A crack right across one, a second from a corner; spalls; a corner broken off and tarred.
+  const big = stoneOf.filter((s) => s.w > 80 && s.ramp !== P.cast);
+  for (let i = 0; i < 3 && i < big.length; i++) {
+    const s = big[(i * 3 + side) % big.length];
+    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
+    if (i === 0) b.crack(rng, x0 + 3, s.y + rng.int(10, s.h - 12), s.w - 8, rng.spread(0.25), { dt: -2, lip: 1, branch: 0.02, fat: 0.5, only: s.ramp, wander: 0.6 });
+    else b.crack(rng, x0 + rng.int(8, s.w - 8), s.y + 2, Math.round(s.h * 0.7), Math.PI / 2 + rng.spread(0.4), { dt: -2, lip: 1, branch: 0.03, fat: 0.3, only: s.ramp });
+  }
+  {
+    const s = stoneOf[side ? 12 : 3];
+    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
+    const r = 19;
+    for (let y = 0; y < r; y++) {
+      for (let x = 0; x < r - y + (y & 1); x++) {
+        const edge = x >= r - y - 2;
+        b.set(x0 + x, s.y + y, P.tar, edge ? 0 : y < 2 || x < 2 ? 1 : 2);
+      }
+    }
+  }
+  for (const s of stoneOf) {
+    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
+    b.wearDrift(rng, x0 + 3, s.y + 3, s.w - 8, s.h - 8, s.ramp === P.cast ? 2 : 5, { drifts: 2, max: 6, only: s.ramp, dirY: 0 });
+  }
+  // The replacement slab: tooled border (a groove a hand in from its edge), a trowelled date.
+  {
+    const x0 = Math.min(X(repl.x), X(repl.x + repl.w - 1));
+    for (const [gx, gy, gw, gh] of [
+      [x0 + 5, repl.y + 5, repl.w - 12, 1],
+      [x0 + 5, repl.y + repl.h - 8, repl.w - 12, 1],
+      [x0 + 5, repl.y + 5, 1, repl.h - 12],
+      [x0 + repl.w - 8, repl.y + 5, 1, repl.h - 12],
+    ]) {
+      for (let y = 0; y < gh; y++) {
+        for (let x = 0; x < gw; x++) {
+          b.shift(gx + x, gy + y, -1, P.cast);
+          b.shift(gx + x + (gw === 1 ? 1 : 0), gy + y + (gh === 1 ? 1 : 0), 1, P.cast);
+        }
+      }
+    }
+  }
+  // Dressing. A coal-hole cover let into one flag; a cellar hatch by the wall; gum; a sprayed utility mark.
+  {
+    const s = stoneOf[side ? 2 : 6];
+    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
+    coalHole(b, P, x0 + Math.round(s.w * 0.5), s.y + Math.round(s.h * 0.5), 13);
+  }
+  cellarHatch(b, rng, P, side ? 4 : W - 4 - 62, side ? 150 : 372, 62, 76);
+  for (let i = 0; i < 16; i++) {
+    const gx = rng.int(F0 + 6, W - 12);
+    const gy = rng.int(0, H - 1);
+    const r = b.rampAt(X(gx), gy);
+    if (r !== P.blue && r !== P.flag && r !== P.cast) continue;
+    b.bump(rng, X(gx), gy, rng.chance(0.3) ? 4 : 3, { ramp: P.tar, tone: rng.chance(0.5) ? 2 : 3, lit: 1, dark: 1, cast: 0 });
+  }
+  {
+    // Utility mark: a sprayed arrow and a letter, half worn off.
+    const ux = X(side ? 150 : 96) - 10;
+    const uy = side ? 40 : 250;
+    const mark = ['..x.....xxx.', '.xx....x...x', 'xxxxxx.x...x', '.xx....x.xxx', '..x....x...x', '........xxx.'];
+    for (let j = 0; j < mark.length; j++) {
+      for (let i = 0; i < 12; i++) {
+        if (mark[j][i] !== 'x') continue;
+        for (let q = 0; q < 4; q++) {
+          const px = ux + i * 2 + (q & 1);
+          const py = uy + j * 2 + (q >> 1);
+          if (hash2(px >> 1, py, seed) < 0.3) continue;
+          const r = b.rampAt(px, py);
+          if (r === P.blue || r === P.flag || r === P.cast) b.tint(px, py, P.rust, 1);
+        }
+      }
+    }
+  }
+  // Rain: lying in the dished stones (strokes of sky), and a darker wet apron running to the kerb.
+  const stone = (r: number) => r === P.blue || r === P.flag || r === P.cast;
+  b.sheen(rng, Math.min(X(F0 + 4), X(W - 24)), 0, W - F0 - 28, H, 150, P.sky, 2, { min: 5, max: 14, fat: 0.16, only: stone, drifts: 24, core: 3 });
+  // The foot of the wall: damp (a step down, hand-wobbled, dashed), moss in the joint, leaves blown against it.
+  b.band(side ? 0 : W - 20, 0, 20, H, side ? 'left' : 'right', { dt: -1, steps: 1, wob: 3, seed, reach: 0.7 });
+  for (let i = 0; i < 26; i++) {
+    const y = rng.int(0, H - 1);
+    const n = rng.int(3, 9);
+    for (let q = 0; q < n; q++) {
+      b.set(X(W - 1), y + q, P.moss, q % 3 === 1 ? 4 : 3);
+      if (rng.chance(0.5)) b.set(X(W - 2), y + q, P.moss, 2);
+    }
+  }
+  for (let i = 0; i < 9; i++) leaf(b, rng, rng.chance(0.4) ? P.leafRed : P.leaf, (side ? 2 : W - 9) + rng.int(-1, 5) * (side ? 1 : -1), rng.int(0, H - 1));
+  b.contact(side ? 0 : W - 1, 0, H, side ? 'right' : 'left', { dt: -2, depth: 4, line: 2, seed: seed + 3 });
+  // Moss and weeds in the joint behind the kerb.
+  for (let i = 0; i < 14; i++) {
+    const y = rng.int(0, H - 1);
+    const n = rng.int(2, 6);
+    for (let q = 0; q < n; q++) b.set(X(KERB_W + (q & 1)), y + q, P.moss, q === 1 ? 4 : 2);
+  }
+}
+
+/** A cast-iron coal-hole cover: a disc of raised concentric rings and a star of ribs, its rim lit upper left. */
+function coalHole(b: Brush2, P: Z1GroundRamps, cx: number, cy: number, r: number) {
+  for (let y = -r - 1; y <= r + 1; y++) {
+    for (let x = -r - 1; x <= r + 1; x++) {
+      const d = Math.hypot(x + 0.5, y + 0.5);
+      if (d > r + 1) continue;
+      let t: number;
+      if (d > r) t = x + y < 0 ? 0 : 4; // the groove round it: shadow on the upper left, the stone's lit edge lower right
+      else if (d > r - 2) t = x + y < 0 ? 4 : 2;
+      else {
+        const a = Math.atan2(y, x);
+        const rib = Math.abs(Math.sin(a * 4)) < 0.28;
+        const ring = Math.abs(d - r * 0.5) < 1;
+        t = rib || ring ? 3 : 1;
+        if (d < 2.2) t = 4;
+      }
+      if (d > r) b.shift(cx + x, cy + y, t === 0 ? -2 : 1);
+      else b.set(cx + x, cy + y, P.iron, t);
+    }
+  }
+}
+
+/** A steel cellar hatch flush in the walk: two diamond-plate leaves in an angle frame, hinges, a hasp, rust at the low edge. */
+function cellarHatch(b: Brush2, rng: PwRng, P: Z1GroundRamps, x: number, y: number, w: number, h: number) {
+  for (let yy = 0; yy < h; yy++) {
+    for (let xx = 0; xx < w; xx++) {
+      const edge = xx < 2 || yy < 2 || xx >= w - 2 || yy >= h - 2;
+      let t: number;
+      if (edge) t = xx < 2 || yy < 2 ? (xx === 0 || yy === 0 ? 4 : 3) : xx === w - 1 || yy === h - 1 ? 0 : 1;
+      else {
+        // Diamond plate: short raised dashes in two directions on a 6-texel lattice, each lit on top.
+        const cxk = Math.floor((xx - 2) / 6);
+        const cyk = Math.floor((yy - 2) / 6);
+        const lx = (xx - 2) % 6;
+        const ly = (yy - 2) % 6;
+        const diag = (cxk + cyk) % 2 === 0 ? lx - ly : lx + ly - 5;
+        t = Math.abs(diag) === 0 && lx > 0 && lx < 5 ? 4 : diag === 1 && lx > 0 && lx < 5 ? 1 : 2;
+        // The gap between the two leaves.
+        const mid = w >> 1;
+        if (xx === mid - 1) t = 0;
+        else if (xx === mid) t = 4;
+      }
+      b.set(x + xx, y + yy, P.iron, t);
+    }
+  }
+  // Hinges on both long sides, a hasp across the gap.
+  for (const hy of [10, h - 16]) {
+    for (const hx of [3, w - 11]) b.formRect(x + hx, y + hy, 8, 5, { raised: true, ramp: P.iron, tone: 3, cast: 1 });
+  }
+  b.formRect(x + (w >> 1) - 4, y + (h >> 1) - 3, 8, 6, { raised: true, ramp: P.rust, tone: 4, cast: 1 });
+  // Rust creeping in from the lower edge, a wet trail leaving it.
+  for (let i = 0; i < 12; i++) {
+    const rx = x + rng.int(3, w - 5);
+    const n = rng.int(2, 9);
+    for (let q = 0; q < n; q++) b.tint(rx, y + h - 3 - q, P.rust, 0, P.iron);
+  }
+  b.hrun(x + 1, y + h, w, 0, -1);
+  b.vrun(x + w, y + 1, h, 0, -1);
+}
+
+/**
+ * The kerb's face (wrap strip, 8 m × 0.5 m of which the bottom 14 cm show): granite in the kerb's own
+ * shadow — a step under its top — with the gutter line at its foot, a joint every metre in line with the
+ * kerbstones of the walk module, damp runs under the joints, moss where water stands, old yellow paint.
+ */
+export function z1KerbFaceTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('z1kerbface', 512, 32, (c, k) => {
+    const P = z1GroundRamps(k);
+    const rng = k.rng;
+    const b = new Brush2(c, { wrapX: true });
+    const H = c.h;
+    // Rows from the foot: 0–1 the gutter line, 2–7 the face, 8 the arris just under the top.
+    c.rect(0, 0, c.w, H, P.kerb, (_x, y) => {
+      const v = H - 1 - y;
+      return v < 1 ? 0 : v < 2 ? 1 : v >= 8 ? 3 : 2;
+    });
+    for (let x = 0; x < c.w; x += KERB_LEN) {
+      // (Joints two texels wide; the walk's kerbstones end on the same lines.)
+      c.rect(x + KERB_LEN - 2, 0, 2, H, P.kerb, 0);
+      b.drip(rng, x + KERB_LEN - 3, H - 8, 6, { dt: -1, width: 2 });
+    }
+    // Yellow paint over two metres, flaking.
+    for (let x = 96; x < 228; x++) {
+      for (let y = H - 9; y < H - 1; y++) {
+        if (c.toneAt(x, y) < 1 || hash2(x >> 1, y >> 1, 12) < 0.4) continue;
+        c.set(x, y, P.yellow, y === H - 9 ? 3 : 2);
+      }
+    }
+    // Moss at the foot, chips out of the arris.
+    for (let i = 0; i < 22; i++) {
+      const x = rng.int(0, c.w - 6);
+      const n = rng.int(2, 6);
+      for (let q = 0; q < n; q++) b.set(x + q, H - 2 - (q % 2 && rng.chance(0.5) ? 1 : 0), P.moss, rng.chance(0.5) ? 3 : 2);
+    }
+    for (let i = 0; i < 10; i++) {
+      const x = rng.int(0, c.w - 4);
+      const n = rng.int(2, 4);
+      for (let q = 0; q < n; q++) b.set(x + q, H - 9, P.kerb, 1);
+    }
+  }, { wrap: true, density: PW_TPM_MID });
+}
+
+/** Everything this file paints, for look-dev dumps and benches. */
+export function z1GroundLookdev(atlas: PwAtlas): PwTile[] {
+  return [z1RoadTile(atlas, 0), z1RoadTile(atlas, 1), z1RoadTile(atlas, 2), z1WalkTile(atlas, 0), z1WalkTile(atlas, 1), z1KerbFaceTile(atlas)];
+}
+

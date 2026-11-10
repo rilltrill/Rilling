@@ -3,8 +3,11 @@ import type { PwAtlas, PwTile } from '../../pixelworld/atlas';
 import type { PwBatch } from '../../pixelworld/batch';
 import { PW_TPM } from '../../pixelworld/canvas';
 import { decalSub, z1GroundDecals, Z1_DECALS, type Z1DecalName } from '../../pixelworld/z1ground';
+import { z1KerbFaceTile, z1RoadOrder, z1RoadTile, z1WalkTile } from '../../pixelworld/z1road';
 import { hash2 } from '../../pixelworld/surfaces';
-import { ALLEY_N, ALLEY_S, CROSS_Z0, CROSS_Z1, SECOND_E, SECOND_W, SECOND_X, SQ_X0, SQ_X1, SQ_Z0, SQ_Z1 } from './layout';
+import { texStd } from './bake';
+import { ALLEY_N, ALLEY_S, CROSS_Z0, CROSS_Z1, GAS_Z0, GAS_Z1, MAIN_FACADE, SECOND_E, SECOND_W, SECOND_X, SQ_X0, SQ_X1, SQ_Z0, SQ_Z1 } from './layout';
+import { M } from './props';
 import { zoneFor, type ZoneId } from './town';
 
 /**
@@ -34,11 +37,109 @@ const _e = new THREE.Euler();
 const ROAD_Y = 0.019;
 /** Sidewalk top (sidewalk boxes are 0.15 tall). */
 const WALK_Y = 0.156;
+/** The painted carriageway and the top of the painted walks. */
+const ROAD_TOP = 0.01;
+const WALK_TOP = 0.15;
+
+const X = new THREE.Vector3(1, 0, 0);
+const NX = new THREE.Vector3(-1, 0, 0);
+const Y = new THREE.Vector3(0, 1, 0);
+const Z = new THREE.Vector3(0, 0, 1);
+const NZ = new THREE.Vector3(0, 0, -1);
 
 export class Z1Ground {
   readonly sheet: PwTile;
+  /** The road cross-section (three variants), the two walks (kerb on the left / on the right), the kerb's face. */
+  private road: PwTile[];
+  private walk: PwTile[];
+  private kerb: PwTile;
   constructor(readonly atlas: PwAtlas) {
     this.sheet = z1GroundDecals(atlas);
+    this.road = [z1RoadTile(atlas, 0), z1RoadTile(atlas, 1), z1RoadTile(atlas, 2)];
+    this.walk = [z1WalkTile(atlas, 0), z1WalkTile(atlas, 1)];
+    this.kerb = z1KerbFaceTile(atlas);
+  }
+
+  // ─── The ground itself ────────────────────────────────────────────────────
+
+  /**
+   * A street running north (−Z) from `zS` to `zN`, centred on `cx`: the 12 m cross-section module
+   * laid 8 m at a time (west kerb = u 0, the far end up), the variants in the street's shuffled
+   * order. `i0` = the index of the first module along the whole street (zones split a street).
+   */
+  private street(b: PwBatch, cx: number, zS: number, zN: number, salt: number, i0 = 0) {
+    let i = i0;
+    for (let z = zS; z > zN + 1e-6; z -= 8, i++) {
+      const len = Math.min(8, z - zN);
+      b.rect(_o.set(cx - 6, ROAD_TOP, z), X, NZ, 12, len, this.road[z1RoadOrder(i, salt)]);
+    }
+  }
+
+  /**
+   * A raised walk along a street heading north: x0…x1, `zS` → `zN`, its kerb on the `kerbSide`
+   * (−1 = the west edge, 1 = the east edge). The top is one painted strip (kerbstones, flags, the
+   * damp foot of the wall); the kerb is a FORM: the lit arris is the strip's first texels, its face
+   * a shadowed band of its own with the gutter line at its foot. `ends` closes the strip's ends
+   * with the same face (where a walk stops at a junction).
+   */
+  private walkStrip(b: PwBatch, x0: number, x1: number, zS: number, zN: number, kerbSide: -1 | 1, ends: { s?: boolean; n?: boolean } = {}) {
+    const len = zS - zN;
+    const t = this.walk[kerbSide < 0 ? 0 : 1];
+    const h = WALK_TOP - ROAD_TOP;
+    // (The walk module is 3.5 m wide; v runs north from the strip's south end, phased by the street so two strips never line up.)
+    const v0 = Math.round(((-zS * 64) % t.h) + t.h) % t.h;
+    b.rect(_o.set(x0, WALK_TOP, zS), X, NZ, x1 - x0, len, t, { v0 });
+    // Kerb face, seen from the road (its joints in line with the kerbstones on top: u runs south on the west-facing one).
+    if (kerbSide < 0) b.rect(_o.set(x0, ROAD_TOP, zN), Z, Y, len, h, this.kerb, { u0: (((-(v0 + len * 64)) % 512) + 512) % 512 });
+    else b.rect(_o.set(x1, ROAD_TOP, zS), NZ, Y, len, h, this.kerb, { u0: v0 });
+    if (ends.s) b.rect(_o.set(x0, ROAD_TOP, zS), X, Y, x1 - x0, h, this.kerb, { u0: 96 });
+    if (ends.n) b.rect(_o.set(x1, ROAD_TOP, zN), NX, Y, x1 - x0, h, this.kerb, { u0: 288 });
+  }
+
+  /**
+   * Lay the painted ground of a zone and return the classic meshes it stands in for (road planes,
+   * lane paint, sidewalk and kerb boxes), which the caller removes before the zone is re-textured.
+   */
+  private lay(b: PwBatch, id: ZoneId, zone: THREE.Object3D): THREE.Object3D[] {
+    const F = MAIN_FACADE;
+    if (id === 'A') {
+      this.street(b, 0, 40, -60, 1);
+      this.walkStrip(b, 6, F, 40, -60, -1);
+      this.walkStrip(b, -F, -6, 40, -60, 1);
+    } else if (id === 'B') {
+      // (Main Street runs on through the junction for now: module index continues from zone A's 13.)
+      this.street(b, 0, -60, -205, 1, 13);
+      this.walkStrip(b, 6, F, -60, CROSS_Z0, -1, { n: true });
+      this.walkStrip(b, 6, F, CROSS_Z1, -205, -1, { s: true });
+      this.walkStrip(b, -F, -6, -60, CROSS_Z0, 1, { n: true });
+      this.walkStrip(b, -F, -6, CROSS_Z1, ALLEY_S, 1, { s: true, n: true });
+      this.walkStrip(b, -F, -6, ALLEY_N, -205, 1, { s: true });
+    } else if (id === 'C') {
+      this.street(b, SECOND_X, -110, -200, 2);
+      this.walkStrip(b, SECOND_E - 3.5, SECOND_E, -110, ALLEY_S, -1, { n: true });
+      this.walkStrip(b, SECOND_E - 3.5, SECOND_E, ALLEY_N, -200, -1, { s: true });
+      this.walkStrip(b, SECOND_W, SECOND_W + 3.5, -110, GAS_Z0, 1, { n: true });
+    } else if (id === 'D') {
+      this.street(b, SECOND_X, -200, SQ_Z0, 2, 12);
+      this.walkStrip(b, SECOND_E - 3.5, SECOND_E, -200, SQ_Z0, -1, { n: true });
+      this.walkStrip(b, SECOND_W, SECOND_W + 3.5, GAS_Z1, SQ_Z0, 1, { s: true, n: true });
+    }
+    // The classic ground this replaces.
+    const roads = new Set<THREE.Material>([texStd(0x23262e, 0.42, 0.1, 'asphalt', 1, 0.85)]);
+    const out: THREE.Object3D[] = [];
+    zone.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || Array.isArray(m.material)) return;
+      const p = (m.geometry as THREE.BoxGeometry).parameters as { width?: number; height?: number; depth?: number } | undefined;
+      if (!p) return;
+      const mat = m.material;
+      // Street planes (not the cross street yet: it keeps its plane until the junction is painted).
+      if (roads.has(mat) && m.geometry.type === 'PlaneGeometry' && p.width === 12) out.push(m);
+      else if ((mat === M.yellowPaint || mat === M.whitePaint) && p.height === 0.012 && !(p.width === 0.55)) out.push(m);
+      else if (mat === M.sidewalk && p.height === 0.15) out.push(m);
+      else if (mat === M.curb && p.height === 0.17) out.push(m);
+    });
+    return out;
   }
 
   /**
@@ -63,6 +164,8 @@ export class Z1Ground {
     zone.traverse((o) => {
       if (o.userData.pwGround) found.push(o as THREE.Mesh);
     });
+    // (The zone groups are named `zone<id>` by town.ts.)
+    const ground = this.lay(b, zone.name.slice(-1) as ZoneId, zone);
     const trails = new Set<{ x: number; z: number; len: number; ry: number }>();
     for (const m of found) {
       const tag = m.userData.pwGround as string;
@@ -114,7 +217,7 @@ export class Z1Ground {
         this.decal(b, 'bloodTrail', t.x + dx * d, 0.025, t.z + dz * d, t.ry - Math.PI / 2, seg, 1.2, i % 2 === 1);
       }
     }
-    return found;
+    return [...found, ...ground];
   }
 
   /** The PixelWorld-only street dressing of one zone. */
