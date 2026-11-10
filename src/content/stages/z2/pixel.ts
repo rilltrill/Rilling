@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { TexName } from '../../kit/Textures';
 import { PwAtlas, type PwTile } from '../../pixelworld/atlas';
 import { PwBatch } from '../../pixelworld/batch';
-import { PW_TPM } from '../../pixelworld/canvas';
+import { PW_TPM, PW_TPM_MID } from '../../pixelworld/canvas';
 import { pwMaterial, pwTick } from '../../pixelworld/material';
 import { d2CalmLevels } from '../../pixelworld/d2levels';
 import { z2VentModule } from '../../pixelworld/z2objects';
@@ -131,8 +131,9 @@ export class Z2PixelWorld {
     // Calm far levels on the tileable surfaces (grout, chequer, bricks collapse into their mid-tone
     // instead of crawling into dashes), and signs kept at level 0 a step longer (letters stay whole).
     this.atlas.post((data) => d2CalmLevels(data, tiles));
-    const signs = new Set<number>();
-    for (const t of tiles) if (/^z2(lit|plate|exit|stencil|road)\|/.test(t.key)) signs.add(t.x * 65536 + t.y);
+    // Which draw group each tile's triangles join (by the tile's place in the atlas).
+    const groups = new Map<number, number>();
+    for (const t of tiles) groups.set(t.x * 65536 + t.y, z2TileGroup(t));
     let anim: THREE.Material | null = null;
     let poolTex: THREE.Texture | null = null;
     for (const j of this.jobs) {
@@ -142,7 +143,7 @@ export class Z2PixelWorld {
       const sign = pwMaterial(this.atlas, { gain: jg, bias: Z2_SIGN_BIAS, tag: 'sign' });
       const mesh = j.batch.build(mods);
       if (mesh) {
-        splitMaterials(mesh, mods, surf, sign, signs);
+        splitMaterials(mesh, mods, surf, sign, groups);
         j.parent.add(mesh);
       }
       const bm = j.bills.build(this.atlas, jg);
@@ -397,18 +398,33 @@ const Z2_SURF_BIAS = 1.0;
 const Z2_SIGN_BIAS = -0.25;
 
 /**
- * One painted zone mesh, up to three draws: its triangles re-ordered into
- * modules (`mods`), tileable surfaces (`surf`) and signs (`sign`), as
- * geometry groups.
+ * The draw group of a tile's triangles: 0 = the default level bias (modules, and surfaces painted
+ * at their viewing density), 1 = the first pass's tileable surfaces (`Z2_SURF_BIAS`: their calm
+ * levels a step sooner), 2 = signs (`Z2_SIGN_BIAS`).
+ *
+ * A wrap tile painted natively (`PW_TPM_MID` texels a metre or more: docs/PIXELWORLD2.md §3) is
+ * drawn at the default bias: its texels are already one frame pixel where the player looks, and a
+ * level sooner would draw them twice as fat as painted. Only what is still first-pass paint (below
+ * `PW_TPM_MID`, shown through the 2× fallback) keeps the old bias.
  */
-function splitMaterials(m: THREE.Mesh, mods: THREE.Material, surf: THREE.Material, sign: THREE.Material, signs: Set<number>) {
+export function z2TileGroup(t: { key: string; wrap: boolean; density: number }): 0 | 1 | 2 {
+  if (/^z2(lit|plate|exit|stencil|road)\|/.test(t.key)) return 2;
+  return t.wrap && t.density < PW_TPM_MID ? 1 : 0;
+}
+
+/**
+ * One painted zone mesh, up to three draws: its triangles re-ordered into
+ * the default group (`mods`), first-pass tileable surfaces (`surf`) and signs
+ * (`sign`) — `groups`: `z2TileGroup` by atlas place — as geometry groups.
+ */
+function splitMaterials(m: THREE.Mesh, mods: THREE.Material, surf: THREE.Material, sign: THREE.Material, groups: Map<number, number>) {
   const g = m.geometry;
   const idx = g.index!;
   const rect = g.getAttribute('pwRect');
   const parts: number[][] = [[], [], []];
   for (let t = 0; t < idx.count; t += 3) {
     const v = idx.getX(t);
-    const k = rect.getZ(v) > 0 ? 1 : signs.has(rect.getX(v) * 65536 + rect.getY(v)) ? 2 : 0;
+    const k = groups.get(rect.getX(v) * 65536 + rect.getY(v)) ?? 0;
     parts[k].push(v, idx.getX(t + 1), idx.getX(t + 2));
   }
   const mats = [mods, surf, sign];
