@@ -71,7 +71,7 @@ function paintPanel(c: PwCanvas, k: PwKit, st: StyleDef, variant: number, H: num
 
   const soft = { dark: 0.5, light: 0.4, sat: 1 };
   const P = k.ramp(st.plaster, soft);
-  const P2 = k.ramp(shiftHue(darken(st.plaster, 0.86), -0.02, 1.1), soft);
+  const P2 = k.ramp(shiftHue(darken(st.plaster, 0.89), -0.02, 1.1), soft);
   const rust = k.ramp(mix(st.plaster, 0x7a5236, 0.5), { dark: 0.55, light: 0.3 });
   const mould = k.ramp(mix(st.plaster, 0x3a4a40, 0.55), { dark: 0.6, light: 0.3 });
   const filler = k.ramp(mix(st.plaster, 0xb4b0a4, 0.55), { dark: 0.55, light: 0.3 });

@@ -143,6 +143,27 @@ export const ZONE_FLOOR: Record<string, number> = {
   atrium: B,
 };
 
+/**
+ * Where each zone's decal counter starts (`Z2PixelWorld.nDecal` staggers coplanar decals by a
+ * few tenths of a millimetre, cycling). It used to run on from zone to zone, so repainting one
+ * zone re-staggered every zone built after it; each zone now starts from the count the first
+ * pass reached there — the same stagger as before, and no zone depends on another.
+ */
+export const ZONE_DECAL0: Record<string, number> = {
+  bay: 0,
+  bayField: 0,
+  er: 40,
+  corrA: 126,
+  ward: 219,
+  hub: 285,
+  stair: 340,
+  morgue: 365,
+  corrB: 421,
+  or: 428,
+  corrC: 480,
+  atrium: 497,
+};
+
 /** Wainscot / wall tiles per material colour. */
 export const GLAZED: Record<number, { tw?: number; th?: number; bond?: boolean; grime?: number; grout?: number; calm?: boolean; foot?: boolean }> = {
   0x2a6258: { grime: 0.6 },

@@ -13,7 +13,7 @@ import { Z2Billboards } from '../../pixelworld/z2billboard';
 import type { Ambulance } from './props';
 import { PwBackdrop } from '../../pixelworld/backdrop';
 import { z2CityTile, z2RoofsTile, z2SkyDome, z2StormSkyTile } from '../../pixelworld/z2sky';
-import { emitMesh, pieceKind, X, Z, NZ, ZONE_FLOOR, Z2Registry, type Job, type Pick, type Piece } from './pwCore';
+import { emitMesh, pieceKind, X, Z, NZ, ZONE_DECAL0, ZONE_FLOOR, Z2Registry, type Job, type Pick, type Piece } from './pwCore';
 import { paintAmbulance, registerBay } from './pwBay';
 import { registerShell, roomGlimpse, scatter } from './pwShell';
 import { paintDoor, paintTank, registerProps, registerPropsLast } from './pwProps';
@@ -89,6 +89,7 @@ export class Z2PixelWorld {
     const floor = ZONE_FLOOR[g.name] ?? 0;
     this.job = { parent: g, batch: b, bills: this.bills, anim: null, pools: [], gain: g.name === 'atrium' ? 1.3 : 1, floor: g.name.startsWith('bay') ? undefined : floor, zone: g.name };
     this.jobs.push(this.job);
+    this.nDecal = ZONE_DECAL0[g.name] ?? this.nDecal;
     g.updateMatrixWorld(true);
     const pieces: Piece[] = [];
     for (const h of REG.preps.get(g.name) ?? []) h(this, b, g);

@@ -515,7 +515,7 @@ const WALL_FIXTURES: Record<string, [ClinicFixture, number, number, number][]> =
     ['gel', 1, 47.6, 1.6],
   ],
   er: [
-    ['board', 1, -38, 1.62],
+    // (Nothing pale on the west wall behind the desk: the health kit hovers in front of it.)
     ['callpoint', 1, -28.2, 1.62],
     ['gel', 1, -41.6, 1.6],
     ['gel', 2, -31.6, 1.6],
