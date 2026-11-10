@@ -7,12 +7,12 @@
  *        --shots "z1:5:150:z1-street,…" [--moods "a=pivot:0.3,steps:0.8;b=pivot:0.4"] [--extra "&pwrt=8"]
  *        [--hud] [--noauto] [--views]
  *
- * A shot is  stage:beat:frames[:label]  (as scripts/pixel-world.mjs). Per shot it prints
+ * A shot is  stage:beat:frames[:label]  (as scripts/pixel-world.mjs). Per shot it prints, under
+ * the stage's mood and under each of --moods (`name=key:value,…`, laid over it with `__pwMood`):
  *   light     the luminance of the light on the painted world (the first pass's multiplier of the
- *             paint: irradiance / π × gain), percentiles 5 / 25 / 50 / 75 / 95 — a stage's
- *             `pivot` is chosen from these;
- *   steps     the share of world pixels at each tone step under the stage's mood (and under each
- *             of --moods: `name=key:value,…`, laid over the stage's mood with `__pwMood`).
+ *             paint: irradiance / π × gain, the spot lights as far as `torch` counts them),
+ *             percentiles 5 / 25 / 50 / 75 / 95 — a stage's `pivot` is chosen from these;
+ *   steps     the share of world pixels at each tone step.
  * Writes <out>/<label>[-<mood>]-pixel.png (the exact 624 × 288 art frame, 3×: the name
  * scripts/pixel-sheet.mjs pairs with a scripts/pixel-world.mjs capture) and, with --views,
  * <label>[-<mood>]-steps.png and <label>-light.png.
@@ -112,14 +112,17 @@ for (const shot of shots) {
   };
   const save = (img, name) => writeFileSync(`${out}/${name}.png`, encodePng(scale(img, 3).data, W * 3, H * 3));
   // The light itself: stops on the green channel of the `light` view (−8 … +4), over full red.
-  const light = await view('light');
-  if (views) save(light, `${shot.label}-light`);
-  const stops = [];
-  for (let q = 0; q < light.data.length; q += 4) if (light.data[q] > 200 && light.data[q + 2] < 60) stops.push((light.data[q + 1] / 255) * 12 - 8);
-  stops.sort((a, b) => a - b);
-  const pct = (p) => stops[Math.min(stops.length - 1, Math.floor(stops.length * p))] ?? 0;
+  const lightLevels = async (tag) => {
+    const light = await view('light');
+    if (views) save(light, `${tag}-light`);
+    const stops = [];
+    for (let q = 0; q < light.data.length; q += 4) if (light.data[q] > 200 && light.data[q + 2] < 60) stops.push((light.data[q + 1] / 255) * 12 - 8);
+    stops.sort((a, b) => a - b);
+    const pct = (p) => (2 ** (stops[Math.min(stops.length - 1, Math.floor(stops.length * p))] ?? 0)).toFixed(3);
+    return `p5 ${pct(0.05)}  p25 ${pct(0.25)}  p50 ${pct(0.5)}  p75 ${pct(0.75)}  p95 ${pct(0.95)}`;
+  };
   const mood = await page.evaluate(() => window.__pwMood({}));
-  console.log(`${shot.label}: light (× paint) p5 ${(2 ** pct(0.05)).toFixed(3)}  p25 ${(2 ** pct(0.25)).toFixed(3)}  p50 ${(2 ** pct(0.5)).toFixed(3)}  p75 ${(2 ** pct(0.75)).toFixed(3)}  p95 ${(2 ** pct(0.95)).toFixed(3)}   mood ${JSON.stringify(mood)}`);
+  console.log(`${shot.label}: mood ${JSON.stringify(mood)}`);
   for (const m of [{ name: '', patch: {} }, ...moods]) {
     await page.evaluate((p) => window.__pwMood(p), { ...mood, ...m.patch });
     const tag = m.name ? `${shot.label}-${m.name}` : shot.label;
@@ -134,7 +137,7 @@ for (const shot of shots) {
       n++;
     }
     const line = [-3, -2, -1, 0, 1, 2, 3].map((s) => `${s > 0 ? '+' : ''}${s}: ${(((cnt.get(s) ?? 0) / Math.max(1, n)) * 100).toFixed(0).padStart(2)}%`).join('  ');
-    console.log(`  ${(m.name || 'stage').padEnd(8)} steps  ${line}`);
+    console.log(`  ${(m.name || 'stage').padEnd(8)} light (× paint) ${await lightLevels(tag)}   steps  ${line}`);
     save(await view('off'), `${tag}-pixel`);
   }
   await ctx.close();

@@ -30,6 +30,9 @@
  *             the monitor's 15-bit colour (8.2 / 255) — the fingerprint of smooth gradients and
  *             screen-door dither, which pixel art does not have. (`tiny6`, 1…6 of 255, is kept
  *             in the JSON: it is zero by construction while the monitor pass quantises.)
+ *   tiny pw   the same among the pixels drawn by PixelWorld materials alone (the `steps` view's
+ *             mask: FLORA plants, which share the density views, keep the monitor's dither and
+ *             are not what a stage painter or the light can change)
  * Writes <out>/<label>.png, <label>-mag.png, <label>-lvl.png, <label>-flat.png (the frame
  * with its flat blocks boxed), each 3×, and the JSON.
  */
@@ -94,7 +97,7 @@ function magClass(d, q) {
   return g > 191 ? 2 : g > 63 ? 3 : 4;
 }
 
-function analyse(frame, mag, lvl) {
+function analyse(frame, mag, lvl, pw) {
   const d = frame.data;
   const n = W * H;
   const cls = new Uint8Array(n);
@@ -160,6 +163,9 @@ function analyse(frame, mag, lvl) {
   let tiny6 = 0;
   let pairsAll = 0;
   let tinyAll = 0;
+  let pairsPw = 0;
+  let tinyPw = 0;
+  const isPw = (i) => pw.data[i * 4] + pw.data[i * 4 + 1] + pw.data[i * 4 + 2] >= 60;
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const i = y * W + x;
@@ -172,6 +178,10 @@ function analyse(frame, mag, lvl) {
         const m = diff(q, j * 4);
         pairsAll++;
         if (m >= 1 && m <= 9) tinyAll++;
+        if (isPw(i) && isPw(j)) {
+          pairsPw++;
+          if (m >= 1 && m <= 9) tinyPw++;
+        }
         if (!cls[i] || !cls[j]) continue;
         pairs++;
         if (m >= 1 && m <= 9) tiny++;
@@ -197,6 +207,7 @@ function analyse(frame, mag, lvl) {
     tiny: share(tiny, pairs),
     tiny6: share(tiny6, pairs),
     tinyAll: share(tinyAll, pairsAll),
+    tinyPw: share(tinyPw, pairsPw),
   };
 }
 
@@ -257,6 +268,7 @@ for (const shot of shots) {
   const frame = await view('off');
   const mag = await view('mag');
   const lvl = await view('lvl');
+  const pw = await view('steps');
   await page.evaluate(() => window.__pwDebug('off'));
   const st = await page.evaluate(() => {
     const g = window.__game;
@@ -268,7 +280,7 @@ for (const shot of shots) {
   writeFileSync(`${out}/${shot.label}.png`, encodePng(scale(frame, 3).data, W * 3, H * 3));
   writeFileSync(`${out}/${shot.label}-mag.png`, encodePng(scale(mag, 3).data, W * 3, H * 3));
   writeFileSync(`${out}/${shot.label}-lvl.png`, encodePng(scale(lvl, 3).data, W * 3, H * 3));
-  const { flatMap, ...m } = analyse(frame, mag, lvl);
+  const { flatMap, ...m } = analyse(frame, mag, lvl, pw);
   // The flat blocks, boxed on the frame (what to paint next).
   const boxed = { w: W, h: H, data: new Uint8Array(frame.data) };
   for (let k = 0; k < flatMap.length; k += 2) {
@@ -290,14 +302,14 @@ await browser.close();
 
 const pc = (v) => `${(v * 100).toFixed(1)}%`.padStart(7);
 const mark = (ok) => (ok ? ' ' : '!');
-const head = `${'shot'.padEnd(14)}  world   >1.5     >2  >2 mid  lvl>2    flat  (2col) colours    tiny  ok`;
+const head = `${'shot'.padEnd(14)}  world   >1.5     >2  >2 mid  lvl>2    flat  (2col) colours    tiny  (pw)   ok`;
 const lines = results.map(
   (r) =>
-    `${r.shot.padEnd(14)}${pc(r.world)}${pc(r.mag15)}${mark(r.pass.mag15)}${pc(r.mag2)}${pc(r.mag2mid)}${mark(r.pass.mag2mid)}${pc(r.lvl2)} ${pc(r.flat)}${mark(r.pass.flat)}${pc(r.flat2)} ${String(r.colours).padStart(7)} ${pc(r.tiny)}${mark(r.pass.tiny)} ${r.ok ? 'PASS' : 'fail'}`,
+    `${r.shot.padEnd(14)}${pc(r.world)}${pc(r.mag15)}${mark(r.pass.mag15)}${pc(r.mag2)}${pc(r.mag2mid)}${mark(r.pass.mag2mid)}${pc(r.lvl2)} ${pc(r.flat)}${mark(r.pass.flat)}${pc(r.flat2)} ${String(r.colours).padStart(7)} ${pc(r.tiny)}${mark(r.pass.tiny)}${pc(r.tinyPw)} ${r.ok ? 'PASS' : 'fail'}`,
 );
 const mean = (k) => results.reduce((s, r) => s + r[k], 0) / Math.max(1, results.length);
-const means = Object.fromEntries(['world', 'mag15', 'mag2', 'mag15mid', 'mag2mid', 'lvl2', 'flat', 'flat2', 'flatForm', 'colours', 'tiny', 'tiny6', 'tinyAll'].map((k) => [k, mean(k)]));
-const foot = `${'mean'.padEnd(14)}${pc(means.world)}${pc(means.mag15)} ${pc(means.mag2)}${pc(means.mag2mid)} ${pc(means.lvl2)} ${pc(means.flat)} ${pc(means.flat2)} ${String(Math.round(means.colours)).padStart(7)} ${pc(means.tiny)}`;
+const means = Object.fromEntries(['world', 'mag15', 'mag2', 'mag15mid', 'mag2mid', 'lvl2', 'flat', 'flat2', 'flatForm', 'colours', 'worldColours', 'tiny', 'tiny6', 'tinyAll', 'tinyPw'].map((k) => [k, mean(k)]));
+const foot = `${'mean'.padEnd(14)}${pc(means.world)}${pc(means.mag15)} ${pc(means.mag2)}${pc(means.mag2mid)} ${pc(means.lvl2)} ${pc(means.flat)} ${pc(means.flat2)} ${String(Math.round(means.colours)).padStart(7)} ${pc(means.tiny)} ${pc(means.tinyPw)}`;
 const rule = `pass: >1.5 ≤ ${THRESHOLDS.mag15 * 100}% of world pixels · >2 ≤ ${THRESHOLDS.mag2mid * 100}% in the middle 80% · flat blocks ≤ ${THRESHOLDS.flat * 100}% · tiny pairs ≤ ${THRESHOLDS.tiny * 100}%   (! = over)`;
 const table = [head, ...lines, foot, rule].join('\n');
 console.log(table);

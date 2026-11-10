@@ -113,6 +113,8 @@ describe('PixelWorld light: steps', () => {
       expect(m.fogBands, id).toBeLessThanOrEqual(8);
       expect(m.tint, id).toBeGreaterThanOrEqual(0);
       expect(m.tint, id).toBeLessThanOrEqual(1.5);
+      expect(m.torch, id).toBeGreaterThanOrEqual(0);
+      expect(m.torch, id).toBeLessThanOrEqual(1);
     }
   });
 });
@@ -230,10 +232,13 @@ describe('PixelWorld light: palette-true through the arcade monitor', () => {
 
 describe('PixelWorld light: moods and materials', () => {
   it('pwMood sets the uniforms of the materials made after it; a tweak shows in place; &pwmood overrides', () => {
-    const u = pwMood({ pivot: 0.3, steps: 0.9, lo: -1, hi: 1, edge: 3, tint: 0.4, fogBands: 7, fogEdge: 2, shade: 0x9a90e8 });
+    const u = pwMood({ pivot: 0.3, steps: 0.9, lo: -1, hi: 1, edge: 3, tint: 0.4, fogBands: 7, fogEdge: 2, shade: 0x9a90e8, torch: 0.25 });
     expect(pwMoodNow()).toBe(u);
     expect(u.uPwMood.value.toArray().map((v) => +v.toFixed(4))).toEqual([0.3, 0.9, -1, 1]);
     expect(u.uPwMood2.value.toArray().map((v) => +v.toFixed(4))).toEqual([3, 0.4, 7, 2]);
+    expect(u.uPwMood3.value.x).toBe(0.25);
+    // (A mood that says nothing of the torch counts the spot lights like any lamp.)
+    expect(PW_MOOD_DEFAULT.torch).toBe(1);
     expect(u.uPwWhite.value.toArray().map((v) => +v.toFixed(4))).toEqual([1, 1, 1]);
     expect(u.uPwShade.value.z).toBeGreaterThan(u.uPwShade.value.x);
     const atlas = new PwAtlas('light-test', { levels: 1 });

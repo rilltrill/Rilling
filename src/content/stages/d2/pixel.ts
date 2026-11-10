@@ -57,7 +57,7 @@ interface RoomBatches {
 export const D2_DEBUG: { last: D2PixelWorld | null } = { last: null };
 
 /** The mood of the labs at night (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
-export const D2_MOOD: Partial<PwMood> = { pivot: 0.65, tint: 0.7, shade: 0xa4b4ec };
+export const D2_MOOD: Partial<PwMood> = { pivot: 0.65, tint: 0.7, shade: 0xa4b4ec, torch: 0 };
 
 export class D2PixelWorld {
   /** Set before any material is made: every PixelWorld material of the stage is lit under it. */

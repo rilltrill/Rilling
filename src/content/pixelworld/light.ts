@@ -54,7 +54,11 @@ export interface PwMood {
   hi: number;
   /** Width of the dithered edge between two bands of light, frame pixels (0 = a hard edge). */
   edge: number;
-  /** How far the light's colour tints the paint: 0 not at all … 1 as a coloured light would. */
+  /**
+   * How far the light's colour tints the paint: 0 not at all … 1 as a coloured light would; more
+   * exaggerates it (a sunset: the monitor's tone curve, which used to saturate dim coloured light,
+   * no longer touches lit paint).
+   */
   tint: number;
   /** The light the stage's paint is painted for (sRGB hex; its chroma tints nothing). Default white. */
   white: number;
@@ -65,19 +69,27 @@ export interface PwMood {
    * own colour already does — pale colours, a saturated one drowns the paint.
    */
   shade: number;
+  /**
+   * How much of the SPOT lights counts for the painted world (1 as any lamp … 0 not at all). The
+   * night stages carry a shoulder torch that follows the camera so that whoever stands in the
+   * middle of the frame reads; on painted ground it is a pale disc under the gun that travels
+   * with the view — the tell of a lit 3D scene. The cast keeps all of it (its own pipeline).
+   */
+  torch: number;
   /** Bands of fog between clear and the fog colour. */
   fogBands: number;
   /** Width of the dithered edge between two fog bands, frame pixels. */
   fogEdge: number;
 }
 
-export const PW_MOOD_DEFAULT: PwMood = { pivot: 0.5, steps: 0.75, lo: -2, hi: 2, edge: 5, tint: 0.6, white: 0xffffff, shade: 0xffffff, fogBands: 6, fogEdge: 4 };
+export const PW_MOOD_DEFAULT: PwMood = { pivot: 0.5, steps: 0.75, lo: -2, hi: 2, edge: 5, tint: 0.6, white: 0xffffff, shade: 0xffffff, torch: 1, fogBands: 6, fogEdge: 4 };
 
 /** The uniforms of one mood (shared by every material made under it: a tweak shows at once). */
 export interface PwMoodUniforms {
   mood: PwMood;
   uPwMood: { value: THREE.Vector4 };
   uPwMood2: { value: THREE.Vector4 };
+  uPwMood3: { value: THREE.Vector4 };
   uPwWhite: { value: THREE.Vector3 };
   uPwShade: { value: THREE.Vector3 };
 }
@@ -88,6 +100,7 @@ function writeMood(u: PwMoodUniforms) {
   const m = u.mood;
   u.uPwMood.value.set(m.pivot, m.steps, m.lo, m.hi);
   u.uPwMood2.value.set(m.edge, m.tint, m.fogBands, m.fogEdge);
+  u.uPwMood3.value.set(m.torch, 0, 0, 0);
   // Only the chroma of the white point and of the shade counts: how bright is the pivot's business.
   // (The light is divided by the white point: a saturated one must not divide by nothing.)
   u.uPwWhite.value.fromArray(pwChroma(m.white).map((v) => Math.max(v, 0.05)));
@@ -102,7 +115,7 @@ export function pwChroma(hex: number): [number, number, number] {
 }
 
 function moodUniforms(mood: PwMood): PwMoodUniforms {
-  const u: PwMoodUniforms = { mood, uPwMood: { value: new THREE.Vector4() }, uPwMood2: { value: new THREE.Vector4() }, uPwWhite: { value: new THREE.Vector3() }, uPwShade: { value: new THREE.Vector3() } };
+  const u: PwMoodUniforms = { mood, uPwMood: { value: new THREE.Vector4() }, uPwMood2: { value: new THREE.Vector4() }, uPwMood3: { value: new THREE.Vector4() }, uPwWhite: { value: new THREE.Vector3() }, uPwShade: { value: new THREE.Vector3() } };
   writeMood(u);
   return u;
 }
@@ -324,6 +337,7 @@ export const PW_LIGHT_DECL = /* glsl */ `
   ${PW_MONITOR_GLSL}
   uniform vec4 uPwMood;  // pivot, steps a stop, fewest, most
   uniform vec4 uPwMood2; // band edge (frame px), tint, fog bands, fog edge (frame px)
+  uniform vec4 uPwMood3; // how much of the spot lights counts
   uniform vec3 uPwWhite;
   uniform vec3 uPwShade;
   const vec3 PW_LUM = vec3(0.2126, 0.7152, 0.0722);
@@ -345,8 +359,19 @@ export const PW_LIGHT_OUT = /* glsl */ `
       for (int i = 0; i < NUM_DIR_LIGHTS; i++) pwSun += saturate(dot(normal, directionalLights[i].direction)) * directionalLights[i].color;
       pwSun *= RECIPROCAL_PI;
     #endif
+    // The spot lights (the shoulder torch, headlights) count only as much as the mood says: the rest
+    // of them is left out of the local light.
+    vec3 pwOff = vec3(0.0);
+    #if NUM_SPOT_LIGHTS > 0
+      IncidentLight pwIl;
+      for (int i = 0; i < NUM_SPOT_LIGHTS; i++) {
+        getSpotLightInfo(spotLights[i], -vViewPosition, pwIl);
+        pwOff += saturate(dot(normal, pwIl.direction)) * pwIl.color;
+      }
+      pwOff *= RECIPROCAL_PI * (1.0 - uPwMood3.x);
+    #endif
     vec3 pwEi = (reflectedLight.indirectDiffuse + pwSun) * uPwGain / uPwWhite;
-    vec3 pwEd = max(reflectedLight.directDiffuse - pwSun, vec3(0.0)) * uPwGain / uPwWhite;
+    vec3 pwEd = max(reflectedLight.directDiffuse - pwSun - pwOff, vec3(0.0)) * uPwGain / uPwWhite;
     float pwYi = dot(pwEi, PW_LUM);
     float pwYd = dot(pwEd, PW_LUM);
     float pwSf = uPwMood.y * log2(max(pwYi + pwYd, 1e-4) / uPwMood.x);
@@ -387,7 +412,7 @@ export const PW_LIGHT_OUT = /* glsl */ `
       if (uPwDebug > 4.5) {
         // steps: violet -3 and under, blue -2, cyan -1, green 0 (as painted), yellow +1, orange +2, red +3 and over; glow white.
         // light: the luminance of the light in stops, -8 … +4 on the green channel (tools read it back).
-        // fog: the band, clear (red) to the fog colour (blue).
+        // fog: the band, clear (magenta) to all fog (blue).
         float s = pwSt;
         pwDbg = uPwDebug > 6.5 ? vec3(1.0 - pwFb, pwFb < 1.0 ? 0.0 : 0.5, 1.0)
           : pwGlowK > 0.5 ? vec3(uPwDebug > 5.5 ? 0.0 : 1.0)
@@ -401,7 +426,7 @@ export const PW_LIGHT_OUT = /* glsl */ `
 
 /** The uniforms `PW_LIGHT_DECL` declares, for a material made under the current mood. */
 export function pwLightUniforms(mood: PwMoodUniforms = current): Record<string, { value: unknown }> {
-  return { uPwMood: mood.uPwMood, uPwMood2: mood.uPwMood2, uPwWhite: mood.uPwWhite, uPwShade: mood.uPwShade, uPwMon: MONITOR.uPwMon };
+  return { uPwMood: mood.uPwMood, uPwMood2: mood.uPwMood2, uPwMood3: mood.uPwMood3, uPwWhite: mood.uPwWhite, uPwShade: mood.uPwShade, uPwMon: MONITOR.uPwMon };
 }
 
 /**
