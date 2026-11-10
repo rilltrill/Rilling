@@ -3,7 +3,7 @@ import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { blob, Brush2, dashAt, discBlob, shore } from './brush2';
 import { drawText, FONT_BOLD } from './font';
 import { cells, darken, hash2, smooth } from './surfaces';
-import { drainGrate, leaf, manhole, pothole, z1GroundRamps, type Z1GroundRamps } from './z1road';
+import { drainGrate, flagCourses, leaf, manhole, pothole, wearFlags, z1GroundRamps, type Z1GroundRamps } from './z1road';
 
 /**
  * MAIN STREET (z1) ground painters for ART: PIXEL WORLD — the wet night street
@@ -202,97 +202,6 @@ function herringbone(b: Brush2, P: Z1GroundRamps, x0: number, y0: number, w: num
   }
 }
 
-/** Old flags in courses across a rectangle (depths from `courses`), each course cut into two to four stones. */
-function flagCourses(b: Brush2, rng: PwRng, P: Z1GroundRamps, x0: number, y0: number, w: number, h: number, seed: number, minW = 60): { x: number; y: number; w: number; h: number; ramp: number }[] {
-  const R = b.R;
-  const T = b.T;
-  const W = b.w;
-  const out: { x: number; y: number; w: number; h: number; ramp: number }[] = [];
-  const stones = [P.flag, P.blue, P.flag, P.cast];
-  let y = 0;
-  let ci = 0;
-  while (y < h) {
-    let ch = [44, 56, 38, 62, 48][(ci + seed) % 5];
-    if (h - y - ch < 30) ch = h - y;
-    let x = 0;
-    let si = 0;
-    while (x < w) {
-      let sw = minW + Math.floor(hash2(ci, si, seed) * minW * 0.9);
-      if (w - x - sw < minW * 0.6) sw = w - x;
-      const hr = hash2(ci, si, seed + 7);
-      const ramp = stones[Math.floor(hr * stones.length)];
-      const tone = hash2(ci, si, seed + 9) > 0.82 ? 4 : 3;
-      for (let yy = 0; yy < ch; yy++) {
-        for (let xx = 0; xx < sw; xx++) {
-          const k = (y0 + y + yy) * W + x0 + x + xx;
-          if (xx >= sw - 2 || yy >= ch - 2) {
-            R[k] = P.concDark;
-            T[k] = xx === sw - 1 || yy === ch - 1 ? 1 : 0;
-          } else {
-            R[k] = ramp;
-            T[k] = xx === 0 || yy === 0 ? tone + 1 : tone;
-          }
-        }
-      }
-      out.push({ x: x0 + x, y: y0 + y, w: sw - 2, h: ch - 2, ramp });
-      x += sw;
-      si++;
-    }
-    y += ch;
-    ci++;
-  }
-  void rng;
-  return out;
-}
-
-/** What weather and feet do to a flag: a paler dished middle, dirt in its corners, now and then a crack, a spall, rain. */
-function wearFlags(b: Brush2, rng: PwRng, P: Z1GroundRamps, flags: { x: number; y: number; w: number; h: number; ramp: number }[], o: { cracks?: number } = {}) {
-  let cracks = o.cracks ?? 2;
-  for (const s of flags) {
-    if (s.w > 36 && s.h > 26 && rng.chance(0.7)) {
-      const bw = Math.round(s.w * rng.range(0.4, 0.62));
-      const bh = Math.round(s.h * rng.range(0.4, 0.6));
-      const bl = blob(rng, bw, bh, 4, 0.8);
-      const ox = s.x + Math.round((s.w - bw) * rng.range(0.25, 0.75));
-      const oy = s.y + Math.round((s.h - bh) * rng.range(0.25, 0.75));
-      const wet = rng.chance(0.35);
-      for (let y = 0; y < bh; y++) {
-        for (let x = 0; x < bw; x++) {
-          if (!bl.m[y * bw + x]) continue;
-          // Dished and dry-worn (paler), or dished and holding rain (a step down, the sky in it).
-          b.shift(ox + x, oy + y, wet ? -1 : 1, s.ramp);
-        }
-      }
-      if (wet) {
-        b.sheen(rng, ox + 2, oy + 2, bw - 4, bh - 4, 5, P.sky, 2, { min: 5, max: Math.max(6, Math.min(16, bw - 6)), drifts: 1, fat: 0.25, core: 3, only: (r) => r === s.ramp });
-        // The pool's near edge: the stone's lit rim showing through the water's edge.
-        for (let x = 0; x < bw; x++) {
-          for (let y = bh - 1; y > 0; y--) {
-            if (bl.m[y * bw + x]) {
-              if (dashAt(x, s.x + s.y, 2, 6, 1, 3)) b.shift(ox + x, oy + y + 1, 1, s.ramp);
-              break;
-            }
-          }
-        }
-      }
-    }
-    for (const [cxk, cyk] of [
-      [0, 1],
-      [1, 1],
-      [1, 0],
-    ]) {
-      if (rng.chance(0.5)) continue;
-      const r = rng.int(5, 11);
-      for (let y = 0; y < r; y++) for (let x = 0; x < r - y; x++) b.shift(cxk ? s.x + s.w - 1 - x : s.x + 1 + x, cyk ? s.y + s.h - 1 - y : s.y + 1 + y, -1, s.ramp);
-    }
-    if (cracks > 0 && s.w > 50 && rng.chance(0.2)) {
-      cracks--;
-      b.crack(rng, s.x + 2, s.y + rng.int(6, Math.max(7, s.h - 8)), s.w - 6, rng.spread(0.3), { dt: -2, lip: 1, branch: 0.03, fat: 0.4, only: s.ramp, wander: 0.6 });
-    }
-    b.wearDrift(rng, s.x + 2, s.y + 2, s.w - 5, s.h - 5, 3, { drifts: 1, max: 6, only: s.ramp, dirY: 0 });
-  }
-}
-
 /** A brick soldier course over a rectangle (`along` 'x' = the band runs across the canvas), worn. */
 function brickBand(b: Brush2, rng: PwRng, P: Z1GroundRamps, brick: number, brickDark: number, x0: number, y0: number, w: number, h: number, alongX: boolean, seed: number) {
   const R = b.R;
@@ -363,7 +272,7 @@ function paintSquareField(c: PwCanvas, k: PwKit) {
         b.sheen(rng, x0, y0, n, n, 26, P.sky, 2, { min: 5, max: 10, fat: 0, drifts: 7, only: (r) => r === P.flag || r === P.blue });
       } else {
         const flags = flagCourses(b, rng, P, x0, y0, n, n, seed + px * 3 + py * 5);
-        wearFlags(b, rng, P, flags, { cracks: 2 });
+        wearFlags(b, rng, P, flags, { cracks: 2, wet: 0.5 });
       }
     }
   }
@@ -407,7 +316,7 @@ export function z1SquarePathTile(atlas: PwAtlas): PwTile {
     const W = c.w;
     const H = c.h;
     const D = 12; // drain width
-    const flags = flagCourses(b, rng, P, BAND + D, 0, W - 2 * (BAND + D), H, 1300, 78);
+    const flags = flagCourses(b, rng, P, BAND + D, 0, W - 2 * (BAND + D), H, 1300, 54);
     // (Courses are cut to wrap: the last one runs to the tile's end.)
     wearFlags(b, rng, P, flags, { cracks: 2 });
     for (const side of [0, 1]) {
@@ -445,7 +354,7 @@ export function z1ApronTile(atlas: PwAtlas): PwTile {
     const W = c.w;
     const H = c.h;
     // (Row 0 = the shop front; the doorway is at the middle of the top edge.)
-    const flags = flagCourses(b, rng, P, 0, 0, W, H, 1400, 60);
+    const flags = flagCourses(b, rng, P, 0, 0, W, H, 1400, 40);
     for (const s of flags) if (s.ramp === P.cast) for (let y = 0; y < s.h; y++) for (let x = 0; x < s.w; x++) if (b.R[(s.y + y) * W + s.x + x] === P.cast) b.R[(s.y + y) * W + s.x + x] = P.flag;
     wearFlags(b, rng, P, flags.map((s) => ({ ...s, ramp: s.ramp === P.cast ? P.flag : s.ramp })), { cracks: 3 });
     // The hosed fan: a wet lobe from the door, a step down, frayed, strokes of sky in it.
@@ -639,7 +548,8 @@ function puddle(b: Brush2, rng: PwRng, P: Z1GroundRamps, r: DecalRect, lights: r
     const lx = Math.round(w * (lights.length === 1 ? 0.5 : 0.28 + (0.44 * i) / (lights.length - 1)) + rng.spread(w * 0.06));
     let y0 = 0;
     while (y0 < h && !inS(lx, y0)) y0++;
-    b.wetStreak(rng, ox + lx, oy + y0 + 4, Math.round(h * 0.72), Math.max(8, Math.round(w * 0.11)), rmp, 4, { flag: PWF.GLOW, only: water, rows: 2, gap: 0.12 });
+    // (Lit paint, not glow: a mirrored light is no lamp — it dims with the street and melts into the far levels.)
+    b.wetStreak(rng, ox + lx, oy + y0 + 4, Math.round(h * 0.72), Math.max(8, Math.round(w * 0.11)), rmp, 4, { only: water, rows: 2, gap: 0.12 });
   });
   // Rain rings: small ellipses of three or four strokes, a few caught at different moments.
   for (let i = 0; i < Math.round((w * h) / 2600); i++) {

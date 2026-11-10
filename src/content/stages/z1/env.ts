@@ -12,7 +12,7 @@ import { Z1_BIOME } from '../../pixel/floraBiomes';
 import { STREET_TREE } from '../../pixel/floraSpecies';
 import { STREET_PROPS } from '../../pixel/floraProps';
 import { pixelWorld } from '../../../core/art';
-import { Z1PixelWorld, Z1_GAIN, pwPoolTexture } from './pixel';
+import { Z1PixelWorld, Z1_GAIN } from './pixel';
 import { PwBatch } from '../../pixelworld/batch';
 
 /** Per-world handles the stage script needs (set pieces, lights). */
@@ -152,7 +152,7 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   vegPx.add(flora2d.build());
   root.add(veg3D, vegPx);
   const untoggle = floraArtToggle(scene, [vegPx], [veg3D]);
-  const pools = pw ? town.pools.buildPixel(pwPoolTexture(), 0.5) : town.pools.build(poolSurface);
+  const pools = pw ? town.pools.buildPixel(0.5) : town.pools.build(poolSurface);
   const beams = town.beams.build(!!pw);
   root.add(pools, beams);
   // ART: PIXEL WORLD: painted wet-road reflections under the fires, the neon and the street lamps.

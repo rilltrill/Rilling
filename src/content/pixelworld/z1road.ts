@@ -803,6 +803,115 @@ export function z1WalkTile(atlas: PwAtlas, side: 0 | 1): PwTile {
   return atlas.tile(`z1walk|${side}`, Z1_WALK_W, Z1_WALK_H, (c, k) => paintZ1Walk(c, k, side), { wrap: true, density: PW_TPM_MID });
 }
 
+/** Old flags in courses across a rectangle (depths from `courses`), each course cut into two to four stones. */
+export function flagCourses(b: Brush2, rng: PwRng, P: Z1GroundRamps, x0: number, y0: number, w: number, h: number, seed: number, minW = 60): { x: number; y: number; w: number; h: number; ramp: number }[] {
+  const R = b.R;
+  const T = b.T;
+  const W = b.w;
+  const out: { x: number; y: number; w: number; h: number; ramp: number }[] = [];
+  const stones = [P.flag, P.blue, P.flag, P.cast];
+  let y = 0;
+  let ci = 0;
+  while (y < h) {
+    let ch = [36, 46, 32, 52, 40][(ci + seed) % 5];
+    if (h - y - ch < 26) ch = h - y;
+    let x = 0;
+    let si = 0;
+    while (x < w) {
+      let sw = minW + Math.floor(hash2(ci, si, seed) * minW * 0.9);
+      if (w - x - sw < minW * 0.6) sw = w - x;
+      const hr = hash2(ci, si, seed + 7);
+      const ramp = stones[Math.floor(hr * stones.length)];
+      const tone = hash2(ci, si, seed + 9) > 0.82 ? 4 : 3;
+      for (let yy = 0; yy < ch; yy++) {
+        for (let xx = 0; xx < sw; xx++) {
+          const k = (y0 + y + yy) * W + x0 + x + xx;
+          if (xx >= sw - 2 || yy >= ch - 2) {
+            R[k] = P.concDark;
+            T[k] = xx === sw - 1 || yy === ch - 1 ? 1 : 0;
+          } else {
+            R[k] = ramp;
+            T[k] = xx === 0 || yy === 0 ? tone + 1 : tone;
+          }
+        }
+      }
+      out.push({ x: x0 + x, y: y0 + y, w: sw - 2, h: ch - 2, ramp });
+      x += sw;
+      si++;
+    }
+    y += ch;
+    ci++;
+  }
+  void rng;
+  return out;
+}
+
+/**
+ * What weather and feet do to a flag, drawn inside its own joints: the rain on it as a short ladder
+ * of strokes (the sky's blue on a wet stone, the stone's own lighter tone on a damp one), dirt
+ * packed in a corner or two (stepped), bites out of its lit arris, now and then a crack from edge
+ * to edge or a spalled patch. No blotches: a flag is flat, what varies is drawn.
+ */
+export function wearFlags(b: Brush2, rng: PwRng, P: Z1GroundRamps, flags: { x: number; y: number; w: number; h: number; ramp: number }[], o: { cracks?: number; wet?: number } = {}) {
+  let cracks = o.cracks ?? 2;
+  const wetP = o.wet ?? 0.4;
+  for (const s of flags) {
+    // Rain: one or two ladders, clipped to the stone.
+    const nl = s.w > 70 ? 2 : 1;
+    for (let q = 0; q < nl; q++) {
+      if (!rng.chance(0.75)) continue;
+      const wet = rng.chance(wetP);
+      const lx = s.x + Math.round(s.w * ((q + 0.25 + rng.next() * 0.5) / nl));
+      const top = s.y + rng.int(3, Math.max(4, Math.round(s.h * 0.3)));
+      const len = Math.round((s.y + s.h - 3 - top) * rng.range(0.6, 1));
+      const width = Math.min(Math.round(s.w / nl) - 8, rng.int(10, 26));
+      let k = 0;
+      let cx = lx;
+      while (k < len - 1) {
+        const wd = Math.max(4, Math.round(width * (0.5 + rng.next() * 0.5)));
+        cx += rng.int(-1, 1);
+        if (!rng.chance(0.2)) {
+          for (let j = 0; j < 2; j++) {
+            for (let p = 0; p < wd; p++) {
+              const px = cx - (wd >> 1) + p;
+              if (px <= s.x + 1 || px >= s.x + s.w - 2) continue;
+              const i = b.at(px, top + k + j);
+              if (i < 0 || b.R[i] !== s.ramp) continue;
+              const tip = p === 0 || p === wd - 1;
+              if (wet) {
+                b.R[i] = P.sky;
+                b.T[i] = tip ? 1 : 2;
+              } else if (!tip) b.T[i] = Math.min(5, b.T[i] + 1);
+            }
+          }
+        }
+        k += 2 + 2 * rng.int(1, 3);
+      }
+    }
+    for (const [cxk, cyk] of [
+      [0, 1],
+      [1, 1],
+      [1, 0],
+    ]) {
+      if (rng.chance(0.55)) continue;
+      const r = rng.int(5, 10);
+      for (let y = 0; y < r; y++) for (let x = 0; x < r - y; x++) b.shift(cxk ? s.x + s.w - 1 - x : s.x + 1 + x, cyk ? s.y + s.h - 1 - y : s.y + 1 + y, -1, s.ramp);
+    }
+    // Bites out of the lit arris (the far edge), each a short dark notch.
+    for (let i = 0; i < Math.round(s.w / 40); i++) {
+      const x = s.x + rng.int(3, Math.max(4, s.w - 8));
+      const n = rng.int(2, 5);
+      for (let p = 0; p < n; p++) b.shift(x + p, s.y, -2, s.ramp);
+      if (n > 3) b.shift(x + 1, s.y + 1, -1, s.ramp);
+    }
+    if (cracks > 0 && s.w > 44 && rng.chance(0.18)) {
+      cracks--;
+      b.crack(rng, s.x + 2, s.y + rng.int(6, Math.max(7, s.h - 8)), s.w - 6, rng.spread(0.3), { dt: -2, lip: 1, branch: 0.03, fat: 0.4, only: s.ramp, wander: 0.6 });
+    }
+    if (rng.chance(0.3)) b.chip(rng, s.x + rng.int(6, Math.max(7, s.w - 7)), s.y + rng.int(5, Math.max(6, s.h - 6)), rng.int(4, 8), { depth: 2, only: s.ramp });
+  }
+}
+
 export function paintZ1Walk(c: PwCanvas, k: PwKit, side: 0 | 1) {
   const W = c.w;
   const H = c.h;
@@ -814,84 +923,13 @@ export function paintZ1Walk(c: PwCanvas, k: PwKit, side: 0 | 1) {
   const seed = 300 + side * 23;
   // Kerb-relative x: 0 at the kerb's road edge, growing toward the wall.
   const X = (kx: number) => (side ? W - 1 - kx : kx);
-  // Flags: courses across the walk (depths sum to 8 m), each split into stones.
   const F0 = KERB_W + 2;
   const FW = W - F0 - 2;
-  const courses = side ? [72, 56, 64, 80, 48, 72, 56, 64] : [64, 56, 72, 48, 80, 64, 56, 72];
-  const stones = [P.blue, P.blue, P.flag, P.blue, P.flag];
-  let y0 = 0;
-  const stoneOf: { x: number; y: number; w: number; h: number; ramp: number }[] = [];
-  for (let ci = 0; ci < courses.length; ci++) {
-    const ch = courses[ci];
-    // Split points: 2 or 3 stones, never two joints in line with the course before.
-    const n = (ci + side) % 3 === 0 ? 3 : 2;
-    const cuts = n === 3 ? [0.3 + hash2(ci, seed, 1) * 0.08, 0.64 + hash2(ci, seed, 2) * 0.1] : [0.38 + hash2(ci, seed, 3) * 0.26];
-    let fx = 0;
-    for (let si = 0; si < n; si++) {
-      const fe = si === n - 1 ? FW : Math.round(cuts[si] * FW);
-      const ramp = stones[Math.floor(hash2(ci, si, seed) * stones.length)];
-      const tone = hash2(ci, si, seed + 7) > 0.8 ? 4 : 3;
-      for (let y = y0; y < y0 + ch; y++) {
-        for (let x = fx; x < fe; x++) {
-          const i = y * W + X(F0 + x);
-          R[i] = ramp;
-          T[i] = tone;
-        }
-      }
-      stoneOf.push({ x: F0 + fx, y: y0, w: fe - fx, h: ch, ramp });
-      fx = fe;
-    }
-    y0 += ch;
-  }
-  // One cast-concrete replacement (a paler, newer slab with a tooled border and a date stamped in it).
-  const repl = stoneOf[side ? 5 : 9];
-  for (let y = 0; y < repl.h; y++) {
-    for (let x = 0; x < repl.w; x++) {
-      const i = (repl.y + y) * W + X(repl.x + x);
-      R[i] = P.cast;
-      T[i] = 3;
-    }
-  }
-  repl.ramp = P.cast;
-  // Value structure: each stone's worn, dished middle (paler: the feet polish it) as a lobed shape, and the
-  // unworn corners left a step darker where dirt stays.
-  for (const s of stoneOf) {
-    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
-    if (s.ramp !== P.cast && s.w > 40) {
-      const bw = Math.round(s.w * (0.45 + rng.next() * 0.2));
-      const bh = Math.round(s.h * (0.4 + rng.next() * 0.25));
-      const bl = blob(rng, bw, bh, 4, 0.8);
-      const ox = x0 + Math.round((s.w - bw) * (0.3 + rng.next() * 0.4));
-      const oy = s.y + Math.round((s.h - bh) * (0.3 + rng.next() * 0.4));
-      for (let y = 0; y < bh; y++) for (let x = 0; x < bw; x++) if (bl.m[y * bw + x]) b.shift(ox + x, oy + y, 1, s.ramp);
-    }
-    // Dirt in two corners (stepped triangles).
-    for (const [cxk, cyk] of [
-      [0, 1],
-      [1, 1],
-      [1, 0],
-    ]) {
-      if (rng.chance(0.45)) continue;
-      const r = rng.int(6, 13);
-      for (let y = 0; y < r; y++) {
-        for (let x = 0; x < r - y; x++) b.shift(cxk ? x0 + s.w - 3 - x : x0 + x, cyk ? s.y + s.h - 3 - y : s.y + y, -1, s.ramp);
-      }
-    }
-  }
-  // Construction: every stone a FORM — lit arris on its upper / left edge, the open joint (two texels, in
-  // shadow) on its lower / right.
-  for (const s of stoneOf) {
-    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
-    for (let y = 0; y < s.h; y++) {
-      for (let x = 0; x < s.w; x++) {
-        const i = (s.y + y) * W + x0 + x;
-        if (x >= s.w - 2 || y >= s.h - 2) {
-          R[i] = P.concDark;
-          T[i] = x === s.w - 1 || y === s.h - 1 ? 1 : 0;
-        } else if (x === 0 || y === 0) T[i] = Math.min(5, T[i] + 1);
-      }
-    }
-  }
+  const fx0 = side ? 2 : F0;
+  // Flags in courses across the walk, then what the street does to them.
+  const flags = flagCourses(b, rng, P, fx0, 0, FW, H, seed, 46);
+  wearFlags(b, rng, P, flags, { cracks: 3, wet: 0.45 });
+  const stone = (r: number) => r === P.blue || r === P.flag || r === P.cast;
   // The kerb: granite stones 1 m long, paler than the flags; the arris toward the road is the lightest line
   // of the street's edge, the joint to the flags a dark groove.
   for (let y = 0; y < H; y++) {
@@ -908,7 +946,15 @@ export function paintZ1Walk(c: PwCanvas, k: PwKit, side: 0 | 1) {
       T[i] = ly >= KERB_LEN - 2 ? 1 : ly === 0 ? 4 : kx < 2 ? 4 : kx >= KERB_W - 2 ? 2 : 3;
     }
   }
-  // Kerb wear: bites out of the arris, a chipped corner at some joints, a stretch of old yellow paint.
+  // The wall-side joint.
+  for (let y = 0; y < H; y++) {
+    for (let q = 0; q < 2; q++) {
+      const i = y * W + X(W - 1 - q);
+      R[i] = P.concDark;
+      T[i] = 1;
+    }
+  }
+  // Kerb wear: bites out of the arris, a stretch of old yellow paint, the stone's own grain.
   for (let i = 0; i < 9; i++) {
     const y = rng.int(0, H - 1);
     const n = rng.int(3, 7);
@@ -922,7 +968,8 @@ export function paintZ1Walk(c: PwCanvas, k: PwKit, side: 0 | 1) {
     for (let y = 0; y < 132; y++) {
       for (let kx = 0; kx < KERB_W - 1; kx++) {
         const i = b.at(X(kx), py + y);
-        if (T[i] <= 1 || hash2(kx >> 1, (py + y) >> 1, seed + 5) < 0.42 || ((y < 3 || y > 128) && dashAt(kx, y, 1, 3, 1, 2))) continue;
+        // (Flaked off in lobes, its ends frayed.)
+        if (T[i] <= 1 || hash2(kx >> 2, (py + y) >> 3, seed + 5) < 0.3 || ((y < 3 || y > 128) && dashAt(kx, y, 1, 3, 1, 2))) continue;
         R[i] = P.yellow;
         T[i] = Math.max(2, T[i] - 1);
       }
@@ -930,63 +977,32 @@ export function paintZ1Walk(c: PwCanvas, k: PwKit, side: 0 | 1) {
   }
   b.aggregate(rng, Math.min(X(2), X(KERB_W - 3)), 0, KERB_W - 4, H, 60, { drifts: 12, up: -1, down: 1, only: P.kerb });
 
-  // Wear on the flags. A crack right across one, a second from a corner; spalls; a corner broken off and tarred.
-  const big = stoneOf.filter((s) => s.w > 80 && s.ramp !== P.cast);
-  for (let i = 0; i < 3 && i < big.length; i++) {
-    const s = big[(i * 3 + side) % big.length];
-    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
-    if (i === 0) b.crack(rng, x0 + 3, s.y + rng.int(10, s.h - 12), s.w - 8, rng.spread(0.25), { dt: -2, lip: 1, branch: 0.02, fat: 0.5, only: s.ramp, wander: 0.6 });
-    else b.crack(rng, x0 + rng.int(8, s.w - 8), s.y + 2, Math.round(s.h * 0.7), Math.PI / 2 + rng.spread(0.4), { dt: -2, lip: 1, branch: 0.03, fat: 0.3, only: s.ramp });
-  }
+  // A corner broken off one flag and made good with tar.
   {
-    const s = stoneOf[side ? 12 : 3];
-    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
-    const r = 19;
+    const s = flags[side ? 9 : 3];
+    const r = 17;
     for (let y = 0; y < r; y++) {
       for (let x = 0; x < r - y + (y & 1); x++) {
         const edge = x >= r - y - 2;
-        b.set(x0 + x, s.y + y, P.tar, edge ? 0 : y < 2 || x < 2 ? 1 : 2);
+        b.set(s.x + x, s.y + y, P.tar, edge ? 0 : y < 2 || x < 2 ? 1 : 2);
       }
     }
   }
-  for (const s of stoneOf) {
-    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
-    b.wearDrift(rng, x0 + 3, s.y + 3, s.w - 8, s.h - 8, s.ramp === P.cast ? 2 : 5, { drifts: 2, max: 6, only: s.ramp, dirY: 0 });
-  }
-  // The replacement slab: tooled border (a groove a hand in from its edge), a trowelled date.
+  // Dressing. A coal-hole cover let into a flag; a cellar hatch by the wall; gum; a sprayed utility mark.
   {
-    const x0 = Math.min(X(repl.x), X(repl.x + repl.w - 1));
-    for (const [gx, gy, gw, gh] of [
-      [x0 + 5, repl.y + 5, repl.w - 12, 1],
-      [x0 + 5, repl.y + repl.h - 8, repl.w - 12, 1],
-      [x0 + 5, repl.y + 5, 1, repl.h - 12],
-      [x0 + repl.w - 8, repl.y + 5, 1, repl.h - 12],
-    ]) {
-      for (let y = 0; y < gh; y++) {
-        for (let x = 0; x < gw; x++) {
-          b.shift(gx + x, gy + y, -1, P.cast);
-          b.shift(gx + x + (gw === 1 ? 1 : 0), gy + y + (gh === 1 ? 1 : 0), 1, P.cast);
-        }
-      }
-    }
+    const s = flags.find((f, i) => i > (side ? 4 : 12) && f.w > 40 && f.h > 34) ?? flags[0];
+    coalHole(b, P, s.x + Math.round(s.w * 0.5), s.y + Math.round(s.h * 0.5), 13);
   }
-  // Dressing. A coal-hole cover let into one flag; a cellar hatch by the wall; gum; a sprayed utility mark.
-  {
-    const s = stoneOf[side ? 2 : 6];
-    const x0 = Math.min(X(s.x), X(s.x + s.w - 1));
-    coalHole(b, P, x0 + Math.round(s.w * 0.5), s.y + Math.round(s.h * 0.5), 13);
-  }
-  cellarHatch(b, rng, P, side ? 4 : W - 4 - 62, side ? 150 : 372, 62, 76);
-  for (let i = 0; i < 16; i++) {
-    const gx = rng.int(F0 + 6, W - 12);
+  cellarHatch(b, rng, P, side ? 3 : W - 3 - 62, side ? 150 : 372, 62, 76);
+  for (let i = 0; i < 18; i++) {
+    const gx = fx0 + rng.int(6, FW - 10);
     const gy = rng.int(0, H - 1);
-    const r = b.rampAt(X(gx), gy);
-    if (r !== P.blue && r !== P.flag && r !== P.cast) continue;
-    b.bump(rng, X(gx), gy, rng.chance(0.3) ? 4 : 3, { ramp: P.tar, tone: rng.chance(0.5) ? 2 : 3, lit: 1, dark: 1, cast: 0 });
+    if (!stone(b.rampAt(gx, gy)) || !stone(b.rampAt(gx + 3, gy + 2))) continue;
+    b.bump(rng, gx, gy, rng.chance(0.3) ? 4 : 3, { ramp: P.tar, tone: rng.chance(0.5) ? 2 : 3, lit: 1, dark: 1, cast: 0 });
   }
   {
     // Utility mark: a sprayed arrow and a letter, half worn off.
-    const ux = X(side ? 150 : 96) - 10;
+    const ux = fx0 + (side ? 60 : 96);
     const uy = side ? 40 : 250;
     const mark = ['..x.....xxx.', '.xx....x...x', 'xxxxxx.x...x', '.xx....x.xxx', '..x....x...x', '........xxx.'];
     for (let j = 0; j < mark.length; j++) {
@@ -995,16 +1011,18 @@ export function paintZ1Walk(c: PwCanvas, k: PwKit, side: 0 | 1) {
         for (let q = 0; q < 4; q++) {
           const px = ux + i * 2 + (q & 1);
           const py = uy + j * 2 + (q >> 1);
-          if (hash2(px >> 1, py, seed) < 0.3) continue;
-          const r = b.rampAt(px, py);
-          if (r === P.blue || r === P.flag || r === P.cast) b.tint(px, py, P.rust, 1);
+          if (hash2(px >> 2, py >> 1, seed) < 0.25) continue;
+          if (stone(b.rampAt(px, py))) b.tint(px, py, P.rust, 1);
         }
       }
     }
   }
-  // Rain: lying in the dished stones (strokes of sky), and a darker wet apron running to the kerb.
-  const stone = (r: number) => r === P.blue || r === P.flag || r === P.cast;
-  b.sheen(rng, Math.min(X(F0 + 4), X(W - 24)), 0, W - F0 - 28, H, 150, P.sky, 2, { min: 5, max: 14, fat: 0.16, only: stone, drifts: 24, core: 3 });
+  // Water running to the kerb: long strokes ALONG the fall in the joint behind the kerbstones, moss in it.
+  for (let i = 0; i < 14; i++) {
+    const y = rng.int(0, H - 1);
+    const n = rng.int(2, 6);
+    for (let q = 0; q < n; q++) b.set(X(KERB_W + (q & 1)), y + q, P.moss, q === 1 ? 4 : 2);
+  }
   // The foot of the wall: damp (a step down, hand-wobbled, dashed), moss in the joint, leaves blown against it.
   b.band(side ? 0 : W - 20, 0, 20, H, side ? 'left' : 'right', { dt: -1, steps: 1, wob: 3, seed, reach: 0.7 });
   for (let i = 0; i < 26; i++) {
@@ -1017,12 +1035,6 @@ export function paintZ1Walk(c: PwCanvas, k: PwKit, side: 0 | 1) {
   }
   for (let i = 0; i < 9; i++) leaf(b, rng, rng.chance(0.4) ? P.leafRed : P.leaf, (side ? 2 : W - 9) + rng.int(-1, 5) * (side ? 1 : -1), rng.int(0, H - 1));
   b.contact(side ? 0 : W - 1, 0, H, side ? 'right' : 'left', { dt: -2, depth: 4, line: 2, seed: seed + 3 });
-  // Moss and weeds in the joint behind the kerb.
-  for (let i = 0; i < 14; i++) {
-    const y = rng.int(0, H - 1);
-    const n = rng.int(2, 6);
-    for (let q = 0; q < n; q++) b.set(X(KERB_W + (q & 1)), y + q, P.moss, q === 1 ? 4 : 2);
-  }
 }
 
 /** A cast-iron coal-hole cover: a disc of raised concentric rings and a star of ribs, its rim lit upper left. */
@@ -1284,36 +1296,49 @@ export function z1CrosswalkTile(atlas: PwAtlas): PwTile {
     const W = c.w;
     const BAR0 = 6;
     const BAR1 = 198;
+    const tracks = [-TRACK_OUT, -TRACK_IN, TRACK_IN, TRACK_OUT].map((t) => W / 2 + t);
+    // Rub the paint through in a lobe (a long hole down the travel line), leaving a ragged, lit-edged shore.
+    const rub = (x: number, y: number, w: number, h: number, lobes: number) => {
+      const hole = blob(rng, w, h, lobes, 0.5, 1);
+      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (hole.m[yy * w + xx] && c.at(x + xx, y + yy) === P.white) c.ramp[(y + yy) * W + x + xx] = 0;
+    };
     for (let bar = 0; bar < 11; bar++) {
       const x0 = Math.round((0.6 + bar * 1.1 - 0.275) * 64);
       const bw = 35;
-      // Wheel paths cross the bars: wear is strongest where a track runs under this bar.
-      const mid = x0 + bw / 2 - W / 2;
-      const near = Math.min(...[-TRACK_OUT, -TRACK_IN, TRACK_IN, TRACK_OUT].map((t) => Math.abs(mid - t)));
-      const wear = near < 24 ? 0.62 : near < 44 ? 0.4 : 0.2;
-      const wf = wobbler(700 + bar, 0, 3);
-      for (let y = BAR0; y < BAR1; y++) {
-        const a = x0 + Math.max(0, Math.round(wf(y) * 1.5));
-        const e = x0 + bw - Math.max(0, Math.round(wf(y + 40) * 1.5));
-        for (let x = a; x < e; x++) {
-          // Worn through in lobes (coarse), chipped finer; the bar's two ends fray.
-          const lobe = hash2((x - x0) >> 3, y >> 4, 710 + bar) * 0.6 + hash2((x - x0) >> 2, y >> 2, 720 + bar) * 0.4;
-          if (lobe < wear) continue;
-          if ((y < BAR0 + 4 || y > BAR1 - 5) && dashAt(x, bar + y, 2, 4, 1, 3)) continue;
-          c.set(x, y, P.white, x === a ? 4 : x === e - 1 || lobe < wear + 0.08 ? 2 : 3);
+      c.rect(x0, BAR0, bw, BAR1 - BAR0, P.white, 3);
+      // Wheel paths cross the bars: two or three long lobes where a track runs under this bar, a chip or two elsewhere.
+      for (const t of tracks) {
+        const d = Math.abs(x0 + bw / 2 - t);
+        if (d > 44) continue;
+        const n = d < 22 ? 3 : 2;
+        for (let i = 0; i < n; i++) {
+          const hw = rng.int(12, 24);
+          const hh = rng.int(40, 96);
+          rub(Math.round(t - hw / 2 + rng.spread(8)), BAR0 + rng.int(-10, BAR1 - BAR0 - hh + 10), hw, hh, 4);
         }
       }
+      for (let i = 0; i < 2; i++) rub(x0 + rng.int(-4, bw - 8), BAR0 + rng.int(0, BAR1 - BAR0 - 20), rng.int(6, 12), rng.int(12, 30), 2);
+      // The bar's ends are scuffed back unevenly.
+      rub(x0 + rng.int(-4, 10), BAR0 - 6, rng.int(16, 30), rng.int(8, 16), 2);
+      rub(x0 + rng.int(-4, 10), BAR1 - rng.int(6, 12), rng.int(16, 30), 16, 2);
       // A crack carried up through the paint.
-      if (bar % 3 === 1) b.crack(rng, x0 + 4, rng.int(BAR0 + 30, BAR1 - 30), bw - 6, rng.spread(0.5), { ramp: P.tar, tone: 1, lip: 0 });
+      if (bar % 3 === 1) b.crack(rng, x0 + 2, rng.int(BAR0 + 30, BAR1 - 30), bw - 3, rng.spread(0.5), { ramp: P.tar, tone: 1, lip: 0 });
     }
-    // The stop line, 40 cm, two lanes of it scuffed away.
-    for (let y = 226; y < 252; y++) {
-      for (let x = 20; x < W - 20; x++) {
-        const lobe = hash2(x >> 3, y >> 3, 730) * 0.6 + hash2(x >> 2, y >> 1, 731) * 0.4;
-        const mid = x - W / 2;
-        const near = Math.min(...[-TRACK_OUT, -TRACK_IN, TRACK_IN, TRACK_OUT].map((t) => Math.abs(mid - t)));
-        if (lobe < (near < 22 ? 0.7 : 0.3) || mid * mid < 100) continue;
-        c.set(x, y, P.white, y === 226 ? 4 : y === 251 ? 2 : 3);
+    // The stop line, 40 cm; the lanes' wheels have rubbed four gaps in it.
+    c.rect(20, 226, W - 40, 26, P.white, 3);
+    for (const t of tracks) for (let i = 0; i < 2; i++) rub(Math.round(t - 18 + rng.spread(10)), 220 + rng.int(0, 8), rng.int(20, 40), rng.int(14, 30), 3);
+    rub(W / 2 - 8, 222, 16, 34, 2);
+    for (let i = 0; i < 8; i++) rub(rng.int(20, W - 40), 222 + rng.int(0, 20), rng.int(8, 14), rng.int(6, 12), 2);
+    // Paint has a thickness: its left edge lit, its right and near edges a step down; edges nibbled in dashes.
+    for (let y = 1; y < c.h - 1; y++) {
+      for (let x = 1; x < W - 1; x++) {
+        const i = y * W + x;
+        if (c.ramp[i] !== P.white) continue;
+        const l = c.ramp[i - 1] !== P.white;
+        const r = c.ramp[i + 1] !== P.white;
+        const d = c.ramp[i + W] !== P.white;
+        if ((l || r) && dashAt(y, x, 2, 4, 4, 10)) c.ramp[i] = 0;
+        else c.tone[i] = l ? 4 : r || d ? 2 : 3;
       }
     }
   }, { density: PW_TPM_MID });
@@ -1402,12 +1427,13 @@ function setts(b: Brush2, P: Z1GroundRamps, x0: number, y0: number, w: number, h
       const lx = x - sx;
       const i = row + x;
       if (ly >= SH - 2 || lx >= sw - 2) {
+        // (Joints a step under the stone, the open gap darker only along the near edge: calm at a distance.)
         R[i] = P.concDark;
-        T[i] = ly === SH - 1 || lx === sw - 1 ? 1 : 0;
+        T[i] = ly === SH - 1 ? 1 : 2;
       } else {
         R[i] = ramp;
-        // A sett is domed: lit along its far and left edge, its near right corner a step down.
-        T[i] = ly === 0 || lx === 0 ? tone + 1 : ly === SH - 3 && lx >= sw - 5 ? tone - 1 : tone;
+        // A sett is domed: lit along its far edge, its near right corner a step down.
+        T[i] = ly === 0 && lx < sw - 3 ? tone + 1 : ly === SH - 3 && lx >= sw - 6 ? tone - 1 : tone;
       }
     }
   }
