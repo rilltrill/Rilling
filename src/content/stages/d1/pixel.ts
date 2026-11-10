@@ -5,6 +5,7 @@ import { PwAtlas, type PwTile } from '../../pixelworld/atlas';
 import { PwBatch } from '../../pixelworld/batch';
 import { PwBackdrop } from '../../pixelworld/backdrop';
 import { pwMaterial, pwTick } from '../../pixelworld/material';
+import { pwMood, type PwMood } from '../../pixelworld/light';
 import { kitTile, neutral, NEUTRAL_HEX, retexture, type TileRule } from '../../pixelworld/retexture';
 import { d1EscarpTile, d1RangeTile, d1SkyTile, d1TreelineTile } from '../../pixelworld/d1Sky';
 import { d1VolcanoSpan, d1VolcanoTile } from '../../pixelworld/d1Volcano';
@@ -89,7 +90,12 @@ export interface SignpostBoard {
   green: boolean;
 }
 
+/** The mood of the day jungle (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
+export const D1_MOOD: Partial<PwMood> = { pivot: 0.95, steps: 0.75, lo: -2, hi: 1 };
+
 export class D1PixelWorld {
+  /** Set before any material is made: every PixelWorld material of the stage is lit under it. */
+  readonly mood = pwMood(D1_MOOD);
   readonly atlas = new PwAtlas('d1');
   readonly skyAtlas = new PwAtlas('d1-sky', { levels: 1 });
   /** Road, meadow, decals, the gate and every static painted structure (always shown in a PIXEL WORLD stage). */

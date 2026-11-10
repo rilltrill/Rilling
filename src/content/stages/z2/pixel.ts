@@ -15,6 +15,7 @@ import {
 import { B } from './layout';
 import { PW_TPM } from '../../pixelworld/canvas';
 import { pwMaterial, pwTick } from '../../pixelworld/material';
+import { pwMood, type PwMood } from '../../pixelworld/light';
 import { d2CalmLevels } from '../../pixelworld/d2levels';
 import { CYL_SIZE, z2CopingTile, z2CylTile, z2FireDoorLeaf, z2FleshDrape, z2PedestalFace, z2PlankModule, z2RubbleTile, z2VineModule, z2DangleCard, z2VentModule, type CylKind } from '../../pixelworld/z2objects';
 import { drainpipeTile } from '../../pixelworld/facade';
@@ -127,8 +128,13 @@ const BODY_HEAD = [[-0.66, 0.07, 0.06], [-0.62, 0.15, 0.12], [-0.5, 0.18, 0.14],
 const BODY_TORSO = [[-0.38, 0.02, 0.12], [-0.3, 0.15, 0.24], [-0.05, 0.18, 0.24], [0.25, 0.14, 0.22], [0.5, 0.09, 0.18], [0.7, 0.07, 0.15], [0.8, 0.14, 0.15], [0.88, 0.11, 0.12], [0.92, 0.01, 0.1]];
 
 
+/** The mood of ST. MERCY HOSPITAL (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
+export const Z2_MOOD: Partial<PwMood> = { pivot: 0.24, steps: 0.75, lo: -2, hi: 2 };
+
 /** ST. MERCY HOSPITAL's PIXEL WORLD converter (one per stage build). */
 export class Z2PixelWorld {
+  /** Set before any material is made: every PixelWorld material of the stage is lit under it. */
+  readonly mood = pwMood(Z2_MOOD);
   readonly atlas = new PwAtlas('z2');
   readonly skyAtlas = new PwAtlas('z2-sky', { levels: 1 });
   private jobs: Job[] = [];

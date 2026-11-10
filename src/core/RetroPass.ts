@@ -6,6 +6,30 @@ import { PW_DEBUG_FLOOR, PW_DEBUG_KEY, pwDebug } from './debugView';
 const LINES: Record<QualityLevel, number> = { low: 224, medium: 288, high: 360 };
 /** Lowest line-count multiplier dynamic resolution may use. */
 export const RETRO_MIN_SCALE = 0.7;
+/** Colour levels a channel of the monitor (15-bit colour: 0 … 31). */
+export const MONITOR_LEVELS = 31;
+/**
+ * The brightest level a palette-true pixel is written at. The top level needs a scene value of 6.9
+ * (the tone curve's shoulder), which the CRT's phosphor bloom would spread over its neighbours as no
+ * tone-mapped paint ever did; one level under it (247 of 255) needs 2.1.
+ */
+export const MONITOR_TOP = 30;
+/** Alpha a palette-true pixel is flagged with in an 8-bit scene target (see `MONITOR`). */
+const EXACT_ALPHA = 128 / 255;
+
+/**
+ * What a material that writes PALETTE-TRUE pixels needs to know of the pass its pixel goes through
+ * (content/pixelworld/light.ts): a shared uniform — x the exposure of the tone curve the pass will
+ * apply (0: there is no pass, the frame goes straight to the canvas), y its colour levels (0: no
+ * lattice), z the top level such a pixel may take, w the alpha to write. Such a material snaps its
+ * display colour to the lattice and writes the scene value the curve maps there; in the half-float
+ * target that survives exactly enough for the ordered dither below to do nothing to it (a pixel
+ * something transparent was blended over is off the lattice again, and dithered as ever). An 8-bit
+ * target cannot hold it that finely, so there the pixel is flagged in alpha instead (untouched by
+ * blending only while nothing is drawn over it) and the pass rounds flagged pixels to the nearest
+ * level instead of dithering them.
+ */
+export const MONITOR = { uPwMon: { value: new THREE.Vector4(0, 0, MONITOR_TOP, 1) } };
 
 const _css = new THREE.Vector2();
 const _out = new THREE.Vector2();
@@ -28,6 +52,7 @@ const FRAG = /* glsl */ `
   uniform float uExposure;
   uniform float uLevels;  // colour levels per channel after quantisation
   uniform float uTime;
+  uniform float uExact;   // alpha of pixels to round, not dither (8-bit scene target; 0 = none)
   #ifdef PW_DEBUG
     uniform float uPwDebug;
   #endif
@@ -89,6 +114,8 @@ const FRAG = /* glsl */ `
     col = toSRGB(col);
     // 15-bit-era colour depth with ordered dithering on the low-res grid.
     float th = (bayer4(px) + 0.5) / 16.0 - 0.5;
+    // (An 8-bit target: palette-true pixels are flagged in alpha and rounded to their level.)
+    if (uExact > 0.0 && abs(texture2D(tScene, (floor(px) + 0.5) / uRes).a - uExact) < 0.002) th = 0.0;
     col = clamp(floor(col * uLevels + 0.5 + th) / uLevels, 0.0, 1.0);
     if (uCrt > 0.0) {
       // Scanlines: each low-res row is a bright beam with darker gaps.
@@ -138,8 +165,9 @@ export class RetroPass {
         uOut: { value: new THREE.Vector2(1, 1) },
         uCrt: { value: 1 },
         uExposure: { value: 1.05 },
-        uLevels: { value: 31 },
+        uLevels: { value: MONITOR_LEVELS },
         uTime: { value: 0 },
+        uExact: { value: 0 },
         uPwDebug: pwDebug.view,
       },
       defines: pwDebug.compiled ? { PW_DEBUG: '' } : {},
@@ -151,8 +179,12 @@ export class RetroPass {
     quad.frustumCulled = false;
     this.scene.add(quad);
     const ext = renderer.extensions;
-    this.hdr = !!(ext.has('EXT_color_buffer_half_float') || ext.has('EXT_color_buffer_float'));
+    this.hdr = !!(ext.has('EXT_color_buffer_half_float') || ext.has('EXT_color_buffer_float')) && !RetroPass.force8;
+    this.mat.uniforms.uExact.value = this.hdr ? 0 : EXACT_ALPHA;
   }
+
+  /** `&pwrt=8` (tests of the fallback): the scene target is 8-bit even where half-float is there. */
+  static force8 = false;
 
   get enabled() {
     return this.mode !== 'off';
@@ -162,6 +194,13 @@ export class RetroPass {
     this.mode = mode;
     this.quality = quality;
     this.mat.uniforms.uCrt.value = mode === 'crt' ? 1 : 0;
+    this.link();
+  }
+
+  /** Tell the palette-true materials what their pixels go through (`MONITOR`). */
+  private link() {
+    if (this.mode === 'off') MONITOR.uPwMon.value.set(0, 0, MONITOR_TOP, 1);
+    else MONITOR.uPwMon.value.set(this.renderer.toneMappingExposure, MONITOR_LEVELS, MONITOR_TOP, this.hdr ? 1 : EXACT_ALPHA);
   }
 
   /** Low-res target size for an output of (w, h) CSS pixels. */
@@ -207,6 +246,7 @@ export class RetroPass {
     u.uOut.value.copy(out);
     u.uTime.value = this.time;
     u.uExposure.value = r.toneMappingExposure;
+    this.link();
     // (Debug views are keyed through the float target; an 8-bit one would clamp the key away.)
     if (pwDebug.compiled) pwDebug.gain.value = this.hdr ? PW_DEBUG_KEY : 1;
     r.setRenderTarget(rt);

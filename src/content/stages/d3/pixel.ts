@@ -4,6 +4,7 @@ import { PwBatch } from '../../pixelworld/batch';
 import { d2CalmLevels } from '../../pixelworld/d2levels';
 import { PwBackdrop } from '../../pixelworld/backdrop';
 import { pwBackdropMaterial, pwMaterial, pwTick } from '../../pixelworld/material';
+import { pwMood, type PwMood } from '../../pixelworld/light';
 import { hash2 } from '../../pixelworld/surfaces';
 import {
   D3_ANIM_FRAMES, D3_ROAD_W, d3FloorTile, d3RockTile, d3FootprintDecal, d3GravelTile, d3MudRoadTile, d3MudTile, d3PuddleDecal, d3RoadTile, d3SkidDecal, d3VergeTile, d3WaterTile,
@@ -176,7 +177,12 @@ function d3SkyMaterial(atlas: PwAtlas, v0: number, v1: number): THREE.MeshBasicM
 
 export type TerrainKind = 'floor' | 'mud' | 'rock' | 'bed';
 
+/** The mood of the storm night (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
+export const D3_MOOD: Partial<PwMood> = { pivot: 0.3, steps: 0.75, lo: -2, hi: 2 };
+
 export class D3PixelWorld {
+  /** Set before any material is made: every PixelWorld material of the stage is lit under it. */
+  readonly mood = pwMood(D3_MOOD);
   readonly atlas = new PwAtlas('d3');
   readonly skyAtlas = new PwAtlas('d3-sky', { levels: 1 });
   /** The terrain: one planar mesh (world-projected wrap tiles, per-vertex tint). */

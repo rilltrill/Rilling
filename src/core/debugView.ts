@@ -1,5 +1,5 @@
 /**
- * PixelWorld debug views (`&pwdebug=mag|lvl|tone|ramp`: look-dev and the audit
+ * PixelWorld debug views (`&pwdebug=mag|lvl|tone|ramp|steps|light`: look-dev and the audit
  * script, never in a player's build path — without the flag nothing below is
  * compiled into any shader).
  *
@@ -14,6 +14,12 @@
  *    drawn wide along the other one).
  *  - `tone`: the painted tone of each texel (0 blue … 5 orange, glow magenta).
  *  - `ramp`: a hue per ramp id (which material a texel belongs to).
+ *  - `steps`: how many tones the light moves each texel along its ramp (violet −3
+ *    and under, blue −2, cyan −1, green 0 = as painted, yellow +1, orange +2,
+ *    red +3 and over; glow texels white): the bands of content/pixelworld/light.ts.
+ *  - `light`: the light itself before it is cut into steps — its luminance in
+ *    stops, −8 … +4 on the green channel over full red (dark red = dark, yellow =
+ *    bright): tools read a stage's light levels back from it to set its mood.
  *
  * Everything that is not PixelWorld paint (the cast, classic scenery, backdrops)
  * shows BLACK: the materials write their view colour × `PW_DEBUG_KEY` into the
@@ -27,7 +33,7 @@
  * switches between them and the game as it is, on the same frozen frame.
  */
 
-export const PW_DEBUG_VIEWS = ['off', 'mag', 'lvl', 'tone', 'ramp'] as const;
+export const PW_DEBUG_VIEWS = ['off', 'mag', 'lvl', 'tone', 'ramp', 'steps', 'light'] as const;
 export type PwDebugView = (typeof PW_DEBUG_VIEWS)[number];
 
 /** Scale of a view colour in the scene target (the monitor pass shows only pixels above `PW_DEBUG_FLOOR`). */
