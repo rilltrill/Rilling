@@ -44,6 +44,12 @@ export interface PwMaterialOptions {
   glow?: number;
   /** Level bias (default 0.5: level 0 until a texel is 1.4 pixels' worth). */
   bias?: number;
+  /**
+   * false = one level for both texel axes, picked for the squeezed one (the first pass's rule: a
+   * surface whose fine regular pattern should melt into its calm far levels as soon as the view
+   * foreshortens it, at the price of texels drawn wide across the view). Default: per axis.
+   */
+  axes?: boolean;
   fog?: boolean;
   /** Planar mode: texels per metre (default PW_TPM). */
   density?: number;
@@ -270,7 +276,7 @@ const cacheByAtlas = new WeakMap<PwAtlas, Map<string, THREE.MeshLambertMaterial>
 export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.MeshLambertMaterial {
   let byKey = cacheByAtlas.get(atlas);
   if (!byKey) cacheByAtlas.set(atlas, (byKey = new Map()));
-  const key = `${o.planar ? 'p' : 'u'}|${o.side ?? 0}|${o.gain ?? 1}|${o.glow ?? 1}|${o.bias ?? PW_MIP_BIAS}|${o.fog ?? true}|${o.density ?? PW_TPM}|${o.tag ?? ''}|${o.anim ? `${o.anim.frames}x${o.anim.fps}` : ''}|${axesOn ? 'x' : ''}`;
+  const key = `${o.planar ? 'p' : 'u'}|${o.side ?? 0}|${o.gain ?? 1}|${o.glow ?? 1}|${o.bias ?? PW_MIP_BIAS}|${o.fog ?? true}|${o.density ?? PW_TPM}|${o.tag ?? ''}|${o.anim ? `${o.anim.frames}x${o.anim.fps}` : ''}|${axesOn && o.axes !== false ? 'x' : ''}`;
   const hit = byKey.get(key);
   if (hit) return hit;
   const uniforms: Record<string, { value: unknown }> = {
@@ -288,7 +294,7 @@ export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.Mes
   if (o.planar) defines.PW_PLANAR = '';
   if (o.anim) defines.PW_ANIM = '';
   // (Backdrops, billboards and sprites face the camera: one level is right for them.)
-  if (axesOn) defines.PW_ANISO = '';
+  if (axesOn && o.axes !== false) defines.PW_ANISO = '';
   pwDebugSetup(defines, uniforms);
   m.defines = defines;
   m.userData.pw = uniforms;

@@ -926,13 +926,16 @@ backdrops, the store, deferred paint) works as described, on new formats.
   the squeezed axis are reduced in the shader the way levels are made (majority class,
   glow wins ties, the texel nearest their mean): texels stay at pixel size ACROSS the view
   instead of being drawn two to six pixels wide, and the pick is the same anywhere inside
-  the block, so nothing crawls (measured: the share of world pixels whose texel changes
-  from one 1/60 s step to the next on a moving rail is within ±1.2 points of the first
-  pass in z1 / z2 / d2). Costs up to 3 more texel fetches (and palette lookups) on such
-  pixels, none elsewhere. Without it neither the 2× copy nor a natively dense tile shows on
-  foreshortened planes at all. A material's `bias` still applies per axis: z2 / d2 keep
-  their first-pass biases of 1.0 (walls) and 1.5 (floors), i.e. texels of 1.4–2.8 pixels —
-  lower them when those stages are repainted.
+  the block: it does not slide with the sample. Measured on a moving rail, the share of
+  world pixels whose painted tone changes from one 1/60 s step to the next: z1 13.9 → 15.1 %,
+  z2 12.5 → 11.8 %; d2's chequer floors 13.6 → 15.5–16.9 % — a fine regular pattern now
+  shows further out instead of melting into its calm far level as soon as the view
+  foreshortens it (`pwMaterial(atlas, { axes: false })` gives a material the old rule back).
+  Costs up to 3 more texel fetches (and palette lookups) on such pixels, none elsewhere.
+  Without it neither the 2× copy nor a natively dense tile shows on foreshortened planes at
+  all. A material's `bias` still applies per axis: z2 / d2 keep their first-pass biases of
+  1.0 (walls) and 1.5 (floors), i.e. texels of 1.4–2.8 pixels — lower them when those
+  stages are repainted.
 - **Flags**: `&pwup=0` (no 2× storage) and `&pwaniso=0` (one level for both axes) together
   give the first pass's frames from the new formats (the parity check: 7 of the 9 reference
   shots identical to the pixel, the other two within the run-to-run flicker of a lamp and
