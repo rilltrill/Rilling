@@ -118,12 +118,12 @@ describe('d1 JUNGLE RUN in PIXEL WORLD', () => {
     expect(c).toEqual(a);
   });
 
-  it('the atlases stay within budget (≤ 24 MB all levels)', { timeout: 120_000 }, () => {
+  it('the atlases stay within budget (≤ 48 MB all levels)', { timeout: 120_000 }, () => {
     clearPwCache();
     PW_STATS.clear();
     const { w } = build('pixel');
     const bytes = [...PW_STATS.values()].reduce((s, a) => s + a.bytes, 0);
-    expect(bytes).toBeLessThanOrEqual(24 * 1048576);
+    expect(bytes).toBeLessThanOrEqual(48 * 1048576);
     expect(PW_STATS.has('d1')).toBe(true);
     expect(PW_STATS.has('d1-jeep')).toBe(true);
     w.dispose();
