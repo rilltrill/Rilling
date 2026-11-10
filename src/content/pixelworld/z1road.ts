@@ -1,6 +1,6 @@
 import { PW_TPM_MID, type PwCanvas, type PwRng } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
-import { blob, Brush2, dashAt, wobbler } from './brush2';
+import { blob, Brush2, dashAt, shore, wobbler } from './brush2';
 import { hash2 } from './surfaces';
 
 /**
@@ -706,7 +706,7 @@ export function pothole(b: Brush2, rng: PwRng, P: Z1GroundRamps, cx: number, cy:
 export function oilStain(b: Brush2, rng: PwRng, P: Z1GroundRamps, cx: number, cy: number, size: number) {
   const w = size;
   const h = Math.round(size * rng.range(0.9, 1.5));
-  const s = blob(rng, w, h, 4, 0.7);
+  const s = shore(rng, w, h, 1);
   const ox = Math.round(cx - w / 2);
   const oy = Math.round(cy - h / 2);
   const road = (r: number) => r === P.asph || r === P.dry || r === P.sky;

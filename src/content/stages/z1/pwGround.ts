@@ -171,8 +171,8 @@ export class Z1Ground {
       this.zebra(b, SECOND_X, SQ_Z0 + 3.3, 1);
       this.walkStrip(b, SECOND_E - 3.5, SECOND_E, -200, SQ_Z0, -1, { n: true });
       this.walkStrip(b, SECOND_W, SECOND_W + 3.5, GAS_Z1, SQ_Z0, 1, { s: true, n: true });
-      // The gas station's forecourt slab.
-      this.field2(b, this.forecourt, SECOND_W - 26, SECOND_W, GAS_Z0, GAS_Z1, 0.012);
+      // The gas station's forecourt slab, run out across the walk's gap to the kerb line (the lot's crossover).
+      this.field2(b, this.forecourt, SECOND_W - 26, SECOND_W + 3.5, GAS_Z0, GAS_Z1, 0.012);
     } else if (id === 'E') {
       // The square: the calm path up the rail's line to PRIME MEATS, the patterned field either side of it,
       // the butcher's apron over the last 8 m.

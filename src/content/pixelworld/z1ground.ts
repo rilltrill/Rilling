@@ -544,14 +544,34 @@ function puddle(b: Brush2, rng: PwRng, P: Z1GroundRamps, r: DecalRect, lights: r
     const y = Math.round(h * 0.36) + ((x * 7) % 5);
     if (dashAt(x, r.y + 3, 3, 8, 2, 5)) for (let q = 0; q < 2; q++) if (inS(x, y + q) && inS(x + 2, y + q) && b.rampAt(ox + x, oy + y + q) === P.sky) b.set(ox + x, oy + y + q, P.sky, 2);
   }
-  const water = (rm: number) => rm === P.sky;
+  // What stands over the puddle is in it: two or three dark bands (house fronts) hanging down from the far
+  // shore, their sides frayed row by row — between them the sky, on them the lights.
+  const nb = w > 150 ? 3 : 2;
+  for (let q = 0; q < nb; q++) {
+    const bx = Math.round(w * ((q + 0.15 + rng.next() * 0.3) / nb));
+    const bw = Math.round(w * rng.range(0.1, 0.2));
+    const bh = Math.round(h * rng.range(0.45, 0.8));
+    for (let y = 2; y < bh; y++) {
+      const fray = (hash2(y >> 1, q, r.x + 9) > 0.5 ? 1 : 0) + (y > bh - 8 ? Math.round((8 - (bh - y)) * 0.6) : 0);
+      for (let x = bx + fray; x < bx + bw - fray; x++) {
+        // (Broken into rungs toward its end, like everything a puddle mirrors.)
+        if (y > bh * 0.6 && (y >> 1) % 3 === 0) continue;
+        const i = b.at(ox + x, oy + y);
+        if (i >= 0 && b.R[i] === P.sky && inS(x, y)) {
+          b.R[i] = P.asph;
+          b.T[i] = 2;
+        }
+      }
+    }
+  }
+  const mirror = (rm: number) => rm === P.sky || rm === P.asph;
   // Lights: a column each, from just under the far shore toward the viewer.
   lights.forEach((rmp, i) => {
     const lx = Math.round(w * (lights.length === 1 ? 0.5 : 0.28 + (0.44 * i) / (lights.length - 1)) + rng.spread(w * 0.06));
     let y0 = 0;
     while (y0 < h && !inS(lx, y0)) y0++;
     // (Lit paint, not glow: a mirrored light is no lamp — it dims with the street and melts into the far levels.)
-    b.wetStreak(rng, ox + lx, oy + y0 + 4, Math.round(h * 0.72), Math.max(8, Math.round(w * 0.11)), rmp, 4, { only: water, rows: 2, gap: 0.12 });
+    b.wetStreak(rng, ox + lx, oy + y0 + 4, Math.round(h * 0.72), Math.max(8, Math.round(w * 0.11)), rmp, 4, { only: mirror, rows: 2, gap: 0.12 });
   });
   // Rain rings: small ellipses of three or four strokes, a few caught at different moments.
   for (let i = 0; i < Math.round((w * h) / 2600); i++) {
@@ -579,7 +599,7 @@ function paintDecals(c: PwCanvas, k: PwKit) {
   const ink = k.ramp(0x2a2a30, { light: 0.4 });
   const steel = k.ramp(0x5a5e66, { light: 0.5, sat: 0.6 });
   const brass = k.ramp(0xb08a3a, { light: 0.45 });
-  const flyer = k.ramp(0xc8b040, { light: 0.4 });
+  const flyer = k.ramp(0x9a8a4a, { light: 0.4, sat: 0.8 });
   const glassG = k.ramp(0x3a7a5a, { light: 0.5 });
   const D = Z1_DECALS;
 
