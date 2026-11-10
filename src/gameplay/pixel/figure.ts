@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { atlasCode, stampInfo, stampReach } from './stamps';
+import { castStyle } from './look';
 
 /**
  * PixelCast figures: a character's sprite frame described as a short list of
@@ -57,6 +58,13 @@ export const PF = {
    * (bellies, flesh mounds) get blotches, not bullseye rings round the centre.
    */
   PLANAR: 1024,
+  /**
+   * Flat (butt) cap at the A / B end of a cone: the shape is cut square across its
+   * axis there instead of ending in a round cap — the corners of drawn cloth:
+   * cuffs, straight hems, square shoulders, soles, collars (PIXEL CAST 2).
+   */
+  CUT_A: 2048,
+  CUT_B: 4096,
 } as const;
 
 /** Hit-part code of a primitive (alignment tests / gore). */
@@ -270,6 +278,12 @@ export class PixelFigure {
    * instead of popping to chunkier texels mid-fight. Reset by `begin`.
    */
   maxWide = 0;
+  /**
+   * The cast look this frame is painted for (`look.ts`): 0 = the first PIXEL CAST
+   * look (contour shading), 1–3 = PIXEL CAST 2 (flat cel: strict / accents / drawn).
+   * Painters branch on it for shape design and detail. Set by `begin`.
+   */
+  cel = 0;
 
   private pool: THREE.Vector3[] = [];
   private poolN = 0;
@@ -302,6 +316,7 @@ export class PixelFigure {
     this.maxTexels = 140;
     this.kHint = 1;
     this.maxWide = 0;
+    this.cel = castStyle().cel;
   }
 
   // ─── Painter API ──────────────────────────────────────────────────────────
@@ -620,6 +635,20 @@ export class PixelFigure {
     this.foot.expandByPoint(a);
     this.foot.expandByPoint(b);
     this.foot.expandByPoint(c);
+    return this;
+  }
+
+  /**
+   * A triangle PAINTED ON the current layer where it is covered (a decal with
+   * corners): lapels, collar points, patches, torn holes, drawn shadow shapes
+   * (`.flag(PF.SHADE_ONLY).tone(-1)`). Never changes the silhouette.
+   */
+  triDecal(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, mat: number): this {
+    this.tri(a, b, c, mat, 0);
+    if (this.last >= 0) {
+      const o = this.last * PRIM_FLOATS + FLAGS;
+      this.data[o] = (this.data[o] | PF.DECAL) >>> 0;
+    }
     return this;
   }
 
@@ -1107,13 +1136,20 @@ export class PixelFigure {
       const ay = d[o + AY];
       const bx = d[o + BX];
       const by = d[o + BY];
-      const di = sdRoundCone(x, y, ax, ay, bx, by, d[o + RA], d[o + RB]);
+      let di = sdRoundCone(x, y, ax, ay, bx, by, d[o + RA], d[o + RB]);
       const k = d[o + K];
-      const wb = shareB(lD, di, k);
-      const hh = k > 0 ? Math.max(k - Math.abs(lD - di), 0) / k : 0;
       const dx = bx - ax;
       const dy = by - ay;
       const h = dx * dx + dy * dy;
+      if (d[o + FLAGS] & (PF.CUT_A | PF.CUT_B)) {
+        // Flat caps: cut square across the axis at A and / or B (same rule as the GPU).
+        const len = Math.sqrt(h);
+        const al = ((x - ax) * dx + (y - ay) * dy) / Math.max(len, 1e-3);
+        if (d[o + FLAGS] & PF.CUT_A) di = Math.max(di, -al);
+        if (d[o + FLAGS] & PF.CUT_B) di = Math.max(di, al - len);
+      }
+      const wb = shareB(lD, di, k);
+      const hh = k > 0 ? Math.max(k - Math.abs(lD - di), 0) / k : 0;
       const t = h > 1e-6 ? Math.min(1, Math.max(0, ((x - ax) * dx + (y - ay) * dy) / h)) : 0;
       const z = d[o + ZA] + (d[o + ZB] - d[o + ZA]) * t;
       lZ = lD > 1e8 ? z : lZ + (z - lZ) * wb;

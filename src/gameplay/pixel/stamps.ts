@@ -41,7 +41,7 @@ export interface Stamp {
 }
 
 /** Stamp atlas size (cells). */
-export const STAMP_ATLAS = 128;
+export const STAMP_ATLAS = 256;
 
 const CODE: Record<string, number> = { '.': 0, ' ': 0, '1': 31, '2': 32, '3': 33, '+': 40, A: 50, B: 51, C: 52, D: 53 };
 for (let i = 0; i < 24; i++) CODE[String.fromCharCode(97 + i)] = 1 + i;
@@ -349,6 +349,145 @@ export const CIV_STAMP = {
 };
 // The thumbs-up joins the hand poses (STAMP.hand[HAND.THUMB]).
 STAMP.hand.push(THUMB_HAND.right.map((r, i) => hand8(r, THUMB_HAND.diag[i])));
+
+// ─── PIXEL CAST 2: bigger, clearer faces (four size classes) ────────────────
+// A face must read on a figure 40–60 px tall and be a pleasure at 150: eyes and
+// mouths are drawn bolder and in one more size at each end. Size class from the
+// head's height in texels (`celSize`): XS < 10.5, S < 14.5, M < 21, L above.
+// Eyes are authored for the eye on the VIEWER'S LEFT (the nose is to the right).
+
+/** Zombie eye: a heavy brow shadow over a near-black socket, a glowing pin (slot 0) turned to the nose, a bag under it. */
+const ZEYE2: StampDef[] = [
+  { rows: ['22', '3A'], ax: 1, ay: 1 },
+  { rows: ['222', '3A3'], ax: 1, ay: 1 },
+  { rows: ['2222', '33A3', '.11.'], ax: 2, ay: 1 },
+  { rows: ['.33333.', '3333AA3', '3333AA3', '.33333.', '..111..'], ax: 4, ay: 1 },
+];
+/** Zombie mouth [closed snarl / open / gaping][size]: interior slot 0, teeth slot 1 (two tones: separate teeth). */
+const ZMOUTH2: StampDef[][] = [
+  [
+    { rows: ['222'], ax: 1, ay: 0 },
+    { rows: ['2kjk2', '.222.'], ax: 2, ay: 0 },
+    { rows: ['2kjkjk2', '.22222.'], ax: 3, ay: 0 },
+    { rows: ['2kjkjkjk2', '2jkjkjkj2', '.2222222.'], ax: 4, ay: 0 },
+  ],
+  [
+    { rows: ['2k2', '.a.'], ax: 1, ay: 0 },
+    { rows: ['2kjk2', 'baaab', '.2a2.'], ax: 2, ay: 0 },
+    { rows: ['2kjkjk2', 'baaaaab', '.kjkjk.', '..222..'], ax: 3, ay: 0 },
+    { rows: ['2kjkjkjk2', 'baaaaaaab', 'baaabbaab', '.jkjkjkj.', '..22222..'], ax: 4, ay: 0 },
+  ],
+  [
+    { rows: ['2k2', 'aaa', '.a.'], ax: 1, ay: 0 },
+    { rows: ['2kjk2', 'baaab', 'aaaaa', '.jkj.', '..2..'], ax: 2, ay: 0 },
+    { rows: ['2kjkjk2', 'baaaaab', 'baaaaab', 'aabbbaa', '.kjkjk.', '..222..'], ax: 3, ay: 0 },
+    { rows: ['2kjkjkjk2', 'baaaaaaab', 'baaaaaaab', 'baabbbaab', 'aabbbbbaa', '.jkjkjkj.', '..22222..'], ax: 4, ay: 0 },
+  ],
+];
+/** Nose shadow / nostrils under the nose tip (zombies and the living) [size]. */
+const NOSE2: StampDef[] = [
+  { rows: ['1'], ax: 0, ay: 0 },
+  { rows: ['2'], ax: 0, ay: 0 },
+  { rows: ['2.2'], ax: 1, ay: 0 },
+  { rows: ['.1.1.', '22.22'], ax: 2, ay: 1 },
+];
+/**
+ * Living eyes [size]: brow slot 3, white slot 1, pupil / lid line slot 2.
+ * calm, scream (brows arched high, whites round a centred pupil), terror (brows pulled
+ * up at the inner end, a small pupil in a wide white), relief (shut in a smiling arc),
+ * strain (squeezed shut toward the nose, brows knitted).
+ */
+const LEYE2: Record<'calm' | 'scream' | 'terror' | 'relief' | 'strain', StampDef[]> = {
+  calm: [
+    { rows: ['tt', 'ln'], ax: 1, ay: 1 },
+    { rows: ['ttt', 'lnl'], ax: 1, ay: 1 },
+    { rows: ['tttt.', 'nnnnn', 'llnnl', '.111.'], ax: 2, ay: 2 },
+    { rows: ['.ttttt.', '.......', '.nnnnn.', 'nllnnln', '.llnnl.', '..111..'], ax: 3, ay: 3 },
+  ],
+  scream: [
+    { rows: ['tt', '..', 'ln', 'll'], ax: 1, ay: 2 },
+    { rows: ['ttt', '...', 'lnl', 'lll'], ax: 1, ay: 2 },
+    { rows: ['.ttt.', 't...t', '.nnn.', 'nlnln', 'nllln', '.111.'], ax: 2, ay: 3 },
+    { rows: ['..ttt..', '.t...t.', '.......', '.nnnnn.', 'nllnlln', 'nllnlln', '.lllll.'], ax: 3, ay: 4 },
+  ],
+  terror: [
+    { rows: ['.t', 't.', 'ln', 'll'], ax: 1, ay: 2 },
+    { rows: ['..t', 'tt.', 'lnl', 'lll'], ax: 1, ay: 2 },
+    { rows: ['...tt', 'ttt..', '.nnn.', 'nllln', 'nlnln', '.lll.'], ax: 2, ay: 4 },
+    { rows: ['....ttt', 'tttt...', '.nnnnn.', 'nllllln', 'nllnlln', 'nllllln', '.11111.'], ax: 3, ay: 4 },
+  ],
+  relief: [
+    { rows: ['tt', '22'], ax: 1, ay: 1 },
+    { rows: ['ttt', '.2.', '2.2'], ax: 1, ay: 1 },
+    { rows: ['.ttt.', '.....', '.222.', '2...2'], ax: 2, ay: 2 },
+    { rows: ['.ttttt.', '.......', '..222..', '.2...2.', '2.....2'], ax: 3, ay: 2 },
+  ],
+  strain: [
+    { rows: ['tt', '22'], ax: 1, ay: 1 },
+    { rows: ['tt.', '..t', '22.', '..2'], ax: 1, ay: 2 },
+    { rows: ['tt...', '..ttt', '22...', '..222', '22...'], ax: 2, ay: 3 },
+    { rows: ['ttt....', '...tttt', '222....', '...2222', '222....'], ax: 3, ay: 3 },
+  ],
+};
+/** Living mouths [size]: calm (a worried line), scream (an open O, teeth on top), gasp, smile, gritted teeth. Interior slot 0, teeth slot 1. */
+const LMOUTH3: Record<'calm' | 'scream' | 'gasp' | 'smile' | 'grit', StampDef[]> = {
+  calm: [
+    { rows: ['22'], ax: 0, ay: 0 },
+    { rows: ['222'], ax: 1, ay: 0 },
+    { rows: ['.222.', '2...2'], ax: 2, ay: 0 },
+    { rows: ['..222..', '.2...2.'], ax: 3, ay: 0 },
+  ],
+  scream: [
+    { rows: ['aa', 'aa'], ax: 0, ay: 0 },
+    { rows: ['kkk', 'aaa', '.a.'], ax: 1, ay: 0 },
+    { rows: ['.kkk.', 'aaaaa', 'aaaaa', '.aba.'], ax: 2, ay: 0 },
+    { rows: ['.kkkkk.', 'aaaaaaa', 'aaaaaaa', 'aabbbaa', '.aaaaa.'], ax: 3, ay: 0 },
+  ],
+  gasp: [
+    { rows: ['aa'], ax: 0, ay: 0 },
+    { rows: ['.a.', 'aaa', '.a.'], ax: 1, ay: 0 },
+    { rows: ['.aa.', 'aaaa', '.aa.'], ax: 1, ay: 0 },
+    { rows: ['.aaa.', 'aaaaa', 'aaaaa', '.aaa.'], ax: 2, ay: 0 },
+  ],
+  smile: [
+    { rows: ['2.2', '.2.'], ax: 1, ay: 0 },
+    { rows: ['2.2', '.2.'], ax: 1, ay: 0 },
+    { rows: ['2...2', '.kkk.', '..a..'], ax: 2, ay: 0 },
+    { rows: ['2.....2', '.kkkkk.', '.aaaaa.', '..aaa..'], ax: 3, ay: 0 },
+  ],
+  grit: [
+    { rows: ['kk'], ax: 0, ay: 0 },
+    { rows: ['2kjk2', '.111.'], ax: 2, ay: 0 },
+    { rows: ['2kjkjk2', '.11111.'], ax: 3, ay: 0 },
+    { rows: ['2kjkjkjk2', '2jkjkjkj2', '.1111111.'], ax: 4, ay: 0 },
+  ],
+};
+
+/** PIXEL CAST 2 face stamps (ids): [size] for eyes / nose, [state][size] for the zombie mouth. */
+export const CEL_STAMP = {
+  zeye: ZEYE2.map(add),
+  zmouth: ZMOUTH2.map((st) => st.map(add)),
+  nose: NOSE2.map(add),
+  leye: {
+    calm: LEYE2.calm.map(add),
+    scream: LEYE2.scream.map(add),
+    terror: LEYE2.terror.map(add),
+    relief: LEYE2.relief.map(add),
+    strain: LEYE2.strain.map(add),
+  },
+  lmouth: {
+    calm: LMOUTH3.calm.map(add),
+    scream: LMOUTH3.scream.map(add),
+    gasp: LMOUTH3.gasp.map(add),
+    smile: LMOUTH3.smile.map(add),
+    grit: LMOUTH3.grit.map(add),
+  },
+};
+
+/** PIXEL CAST 2 face size class (0 XS … 3 L) for a head `headPx` texels tall. */
+export function celSize(headPx: number): number {
+  return headPx < 10.5 ? 0 : headPx < 14.5 ? 1 : headPx < 21 ? 2 : 3;
+}
 
 /**
  * How far (in cells) a stamp may reach from its anchor, for the figure's bounds:

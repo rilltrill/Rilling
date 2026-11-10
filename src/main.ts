@@ -9,6 +9,7 @@ import { isArtStyle } from './core/art';
 import { CAMPAIGNS } from './content';
 import { initPlatform } from './platform';
 import { pwStoreEnable } from './content/pixelworld/store';
+import { isCastLook, setCastLook } from './gameplay/pixel/look';
 
 function parseFlags(q: URLSearchParams): DebugFlags {
   const num = (k: string) => (q.has(k) ? Number(q.get(k)) : undefined);
@@ -55,6 +56,10 @@ function main() {
   // Dev / bench: `&pwstore=<tag>` persists painted PixelWorld atlases under that version (off on the dev server by default).
   const store = query.get('pwstore');
   if (store) pwStoreEnable(store === '0' ? '' : `dev-${store}`);
+  // PIXEL CAST 2 look-dev: `&castlook=a|b|c` picks a candidate cast look, `0` the look before it.
+  const castlook = query.get('castlook')?.toLowerCase();
+  if (isCastLook(castlook)) setCastLook(castlook);
+  (window as unknown as { __castLook: typeof setCastLook }).__castLook = setCastLook;
 
   // Landscape hint (dismissible).
   document.getElementById('rotate-dismiss')?.addEventListener('pointerdown', (ev) => {
