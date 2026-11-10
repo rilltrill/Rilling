@@ -314,6 +314,9 @@ export function pwAoBand(c: PwCanvas, x: number, y: number, w: number, rows: num
 }
 
 /** An irregular blob: true inside. `p1`, `p2` = phases of its lobes (0…2π), `lob` their depth. */
+export function pwBlob(dx: number, dy: number, rx: number, ry: number, p1: number, p2: number, lob: number): boolean {
+  return blobIn(dx, dy, rx, ry, p1, p2, lob);
+}
 function blobIn(dx: number, dy: number, rx: number, ry: number, p1: number, p2: number, lob: number): boolean {
   const u = dx / rx;
   const v = dy / ry;
@@ -515,4 +518,167 @@ export function pwWeep(c: PwCanvas, x: number, y: number, len: number, ramp: num
   }
   c.tint(xx, y + len, ramp, -1);
   c.tint(xx + 1, y + len, ramp, -1);
+}
+
+// ─── Floors ──────────────────────────────────────────────────────────────────
+
+export interface PwVinylOpts {
+  /** Tile pitch in texels, joint included. The canvas must hold whole tiles (it wraps). */
+  tp: number;
+  /** The field's ramp, and other batches: `batches[0]` is laid in loose groups of two or three, the rest are single replaced tiles. */
+  face: number;
+  batches?: readonly number[];
+  /** What a broken corner shows: the adhesive. */
+  bed: number;
+  /** Tone of a tile's face (default 3). Its marbling moves one step either side, its lit edge one up, the joint one down. */
+  tone?: number;
+  seed: number;
+  /** Share of tiles with a corner broken off (default 1 in 16). */
+  broken?: number;
+}
+
+/**
+ * A field of vinyl composition tiles over the whole (wrapping) canvas, each tile DRAWN: laid
+ * quarter-turned to its neighbours as VCT is (the marbling of one runs across the next), five to
+ * eight marbling streaks as shaped lozenges one step either side of the face, a joint one step
+ * down with the next tile's edge catching the light beside it, dirt worked into the joint of one
+ * tile in three, batches that differ a little, and now and then a corner broken off: a triangle
+ * of dark adhesive, the break lit along its lip. Everything is within a step of the face: the
+ * floor reads as tiles from 2 m and melts into one tone down a corridor, and nothing in it is a
+ * speck.
+ */
+export function pwVinylTiles(c: PwCanvas, o: PwVinylOpts) {
+  const { tp, face, bed, seed } = o;
+  const T = o.tone ?? 3;
+  const batches = o.batches ?? [];
+  const broken = o.broken ?? 1 / 16;
+  const k = tp / 48;
+  for (let ty = 0; ty < c.h / tp; ty++) {
+    for (let tx = 0; tx < c.w / tp; tx++) {
+      const x0 = tx * tp;
+      const y0 = ty * tp;
+      const h = hash2(tx, ty, seed);
+      const h2 = hash2(tx, ty, seed + 2);
+      // Batches: a group shares a 2 × 2 block and most of its tiles; single replaced tiles are rarer.
+      const grp = batches.length > 0 && hash2(tx >> 1, ty >> 1, seed + 1) < 0.24 && h2 < 0.74;
+      const ramp = grp ? batches[0] : batches.length > 1 && h2 > 0.955 ? batches[1 + (Math.floor(h2 * 997) % (batches.length - 1))] : face;
+      c.rect(x0, y0, tp, tp, ramp, T);
+      // Marbling: lozenges along the tile's own grain (quarter-turned from its neighbours').
+      const along = ((tx + ty) & 1) === 0;
+      const n = 5 + Math.floor(h * 4);
+      for (let i = 0; i < n; i++) {
+        const a = hash2(tx * 8 + i, ty, seed + 3);
+        const b = hash2(tx, ty * 8 + i, seed + 4);
+        const len = Math.round((6 + a * 9) * k);
+        const thick = b > 0.55 ? 2 : 1;
+        const p = 3 + Math.floor(b * 97 * 31) % Math.max(1, tp - 6 - len);
+        const q = 3 + Math.floor(a * 89 * 37) % Math.max(1, tp - 7);
+        const dt = hash2(tx + i, ty - i, seed + 5) > 0.42 ? -1 : 1;
+        const lean = hash2(tx - i, ty + i, seed + 6) > 0.5 ? 1 : -1;
+        for (let j = 0; j < len; j++) {
+          // (A lozenge: one texel thick at its ends, leaning a texel over its length.)
+          const off = j > len * 0.6 ? lean : 0;
+          for (let t = 0; t < thick; t++) {
+            if (t === 1 && (j < 2 || j > len - 3)) continue;
+            const u = p + j;
+            const v = q + off + t;
+            if (along) c.set(x0 + u, y0 + v, ramp, T + dt);
+            else c.set(x0 + v, y0 + u, ramp, T + dt);
+          }
+        }
+      }
+      // The joint (top and left of the cell) and the edge of this tile catching the light beside it — worn off in runs.
+      c.hline(x0, y0, tp, ramp, T - 1);
+      c.vline(x0, y0, tp, ramp, T - 1);
+      for (let i = 1; i < tp - 1; i++) {
+        if (hash2((x0 + i) >> 3, ty, seed + 7) > 0.22) c.set(x0 + i, y0 + 1, ramp, T + 1);
+        if (i > 1 && hash2(tx, (y0 + i) >> 3, seed + 8) > 0.3) c.set(x0 + 1, y0 + i, ramp, T + 1);
+      }
+      // Dirt worked into a joint: the last two rows (or columns) inside it, the inner one in dashes.
+      if (h2 > 0.4 && h2 < 0.73) {
+        const row = h2 < 0.57;
+        const from = Math.floor(h * tp * 0.5);
+        const to = tp - Math.floor(h2 * 7);
+        for (let i = from; i < to; i++) {
+          const dash = hash2((i + x0) >> 2, y0 + (row ? 1 : 2), seed + 9) > 0.45;
+          if (row) {
+            c.shift(x0 + i, y0 + tp - 1, -1);
+            if (dash) c.shift(x0 + i, y0 + tp - 2, -1);
+          } else {
+            c.shift(x0 + tp - 1, y0 + i, -1);
+            if (dash) c.shift(x0 + tp - 2, y0 + i, -1);
+          }
+        }
+      }
+      if (h < broken) {
+        // A corner broken off: adhesive in a triangle (combed: alternate rows a step apart), the break's lip lit, a crack running on from it.
+        const s = Math.round((8 + (h / broken) * 4) * Math.max(0.75, k));
+        const right = h2 > 0.5;
+        const low = hash2(tx, ty, seed + 10) > 0.5;
+        for (let j = 0; j <= s; j++) {
+          for (let i = 0; i <= s - j; i++) {
+            const x = right ? x0 + tp - 1 - i : x0 + 1 + i;
+            const y = low ? y0 + tp - 1 - j : y0 + 1 + j;
+            const lip = i + j === s || i + j === s - 1;
+            c.set(x, y, lip ? ramp : bed, lip ? (i + j === s ? T + 2 : T - 1) : j & 1 ? 2 : 1);
+          }
+        }
+        let cx = right ? x0 + tp - 2 - s : x0 + 2 + s;
+        const cy = low ? y0 + tp - 2 : y0 + 2;
+        for (let j = 0; j < s; j++) {
+          const y = low ? cy - j : cy + j;
+          c.shift(cx, y, -1);
+          if (hash2(cx, y, seed + 11) > 0.45) cx += right ? -1 : 1;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * The ragged edge of a band that runs along a wrapping canvas (a wear lane, a polished path, a
+ * border worn from its side): for every column, how many rows (0…`depth`) the band reaches past
+ * its nominal edge — constant over runs of 3–8 texels, so the edge is broken DASHES two rows
+ * deep, not a dither and not a ruler line.
+ */
+export function pwRaggedEdge(w: number, seed: number, depth = 2): Uint8Array {
+  const out = new Uint8Array(w);
+  let x = 0;
+  let i = 0;
+  while (x < w) {
+    const len = 3 + Math.floor(hash2(i, 1, seed) * 6);
+    const v = Math.floor(hash2(i, 2, seed) * (depth + 1));
+    for (let q = 0; q < len && x < w; q++, x++) out[x] = v;
+    i++;
+  }
+  return out;
+}
+
+/**
+ * A light in a polished floor, as a cut-out decal: `ramp` is the FLOOR's own ramp. The lamp's
+ * image is stretched toward the eye along x and broken the way a waxed, scuffed floor breaks it —
+ * rows of dashes: a core of tone `hot` (rows side by side, cut by a dark gap every few), inside a
+ * lozenge of tone `hot − 1` whose rows thin toward its edge. Empty texels between the dashes let
+ * the floor's own joints and marks show through, so the reflection lies IN the floor.
+ */
+export function pwFloorGlare(c: PwCanvas, ramp: number, hot: number, seed: number, core = 0.3) {
+  const W = c.w;
+  const H = c.h;
+  const cy = (H - 1) / 2;
+  for (let y = 0; y < H; y++) {
+    const v = Math.abs(y - cy) / (H / 2);
+    // A gap row every few (never two together): the floor's wear lines cutting the image.
+    if (hash2(y, 3, seed) > 0.78 && hash2(y - 1, 3, seed) <= 0.78) continue;
+    const inCore = v < core;
+    // The lozenge: full length in the middle rows, shorter and sparser outward.
+    const half = (W / 2) * Math.sqrt(Math.max(0, 1 - v * v)) * (inCore ? 0.62 : 1);
+    const keep = inCore ? 0.88 : 0.75 - v * 0.55;
+    let x = Math.round(W / 2 - half + hash2(y, 4, seed) * 6);
+    const end = W / 2 + half - hash2(y, 5, seed) * 6;
+    while (x < end) {
+      const len = 4 + Math.floor(hash2(x, y, seed + 1) * (inCore ? 22 : 12));
+      if (hash2(x, y, seed + 2) < keep) for (let q = 0; q < len && x + q < end; q++) c.set(x + q, y, ramp, inCore ? hot : hot - 1);
+      x += len + 1 + Math.floor(hash2(x, y, seed + 3) * (inCore ? 3 : 7));
+    }
+  }
 }

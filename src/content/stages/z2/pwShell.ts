@@ -13,7 +13,9 @@ import {
 import { fixture, nightWindow, troffer, type FixtureKind } from '../../pixelworld/z2modules';
 import { z2BigSign, z2ExitSign, z2LitSign, z2PlateSign, z2Poster, z2Stencil, type PosterKind } from '../../pixelworld/z2signs';
 import { pwPanelCuts, type PwPanelSpan } from '../../pixelworld/brush2i';
-import { z2ClinicArchitrave, z2ClinicCeiling, z2ClinicFixture, z2ClinicLining, z2ClinicPanel, z2ClinicTroffer, z2ClinicTubeFlicker, z2CorridorFloor, z2RoomFloor, Z2_CLINIC_FRAMES, Z2_PANEL_LEN, Z2_TROFFER_HALO, Z2_TUBE_END, type ClinicFixture, type ClinicStyle } from '../../pixelworld/z2clinic';
+import { z2ClinicArchitrave, z2ClinicFixture, z2ClinicLining, z2ClinicPanel, Z2_PANEL_LEN, type ClinicFixture, type ClinicStyle } from '../../pixelworld/z2clinic';
+import { z2CeilingSnap, z2ClinicCeiling, z2ClinicCeilingHole, z2ClinicTroffer, z2ClinicTubeFlicker, z2ClinicVentHole, Z2_CEIL_GRID, Z2_CLINIC_FRAMES, Z2_TROFFER_BODY, Z2_TUBE_END } from '../../pixelworld/z2clinicCeiling';
+import { z2CorridorFloor, z2FloorGlare, z2RoomFloor, z2RoomVinyl, Z2_FLOOR } from '../../pixelworld/z2clinicFloor';
 import { PW_TPM_CLOSE, PW_TPM_MID, PW_TPM_NEAR } from '../../pixelworld/canvas';
 import { R } from './layout';
 import type { Z2PixelWorld } from './pixel';
@@ -48,6 +50,72 @@ function dangle(pw: Z2PixelWorld, b: PwBatch, m: THREE.Matrix4, v: number) {
   lay(b, m, _o.set(w / 2, -h - 0.01, 0.002), NX, Y, w, h, t);
   lay(b, m, _o.set(0, -h - 0.01, w / 2), NZ, Y, w, h, t, { flipU: true });
   lay(b, m, _o.set(0.002, -h - 0.01, -w / 2), Z, Y, w, h, t, { flipU: true });
+}
+
+/** Colour of the clinical floor's ceiling boards (mats.ts `C.ceiling`). */
+const CEILING = 0x7a827c;
+
+/** Is a point of the ground floor inside one of the repainted rooms (ER, corridor A, ward 3, the nurse station)? */
+export function z2InClinic(x: number, y: number, z: number): boolean {
+  if (y < 0.5) return false;
+  for (const r of [R.er, R.corrA, R.ward, R.hub]) if (x > r.x0 && x < r.x1 && z > r.z0 && z < r.z1) return true;
+  return false;
+}
+
+const _ro = new THREE.Vector3();
+/**
+ * Where a ceiling fitting standing at `m` (a matrix in the zone's frame, or a world position and
+ * whether its long side runs along x) is drawn: moved the few centimetres it takes to sit on its
+ * cells of the ceiling grid (z2clinicCeiling.ts). `part`: the whole module (the fitting and the
+ * boards it lights, three cells by four) or the fitting's body (one cell by two, with its bars).
+ * World frame; u runs across the fitting, v along it.
+ */
+export function z2TrofferRect(m: THREE.Matrix4 | { x: number; y: number; z: number; alongX: boolean }, part: 'module' | 'body') {
+  let x: number, y: number, z: number, alongX: boolean;
+  if (m instanceof THREE.Matrix4) {
+    const e = m.elements;
+    x = e[12];
+    y = e[13] - 0.052;
+    z = e[14];
+    alongX = Math.abs(e[8]) > 0.7;
+  } else ({ x, y, z, alongX } = m);
+  const G = Z2_CEIL_GRID;
+  const [cx, cz] = z2CeilingSnap(x, z, alongX);
+  const k = part === 'module' ? 1 : 0;
+  const d = 64;
+  const w = part === 'module' ? 3 * G : Z2_TROFFER_BODY.w / d;
+  const h = part === 'module' ? 4 * G : Z2_TROFFER_BODY.h / d;
+  // (Bars are two texels thick on the far side of each line: across a fitting that runs along x, u runs toward −z.)
+  if (alongX) return { o: _ro.set(cx - G - k * G, y, cz + G / 2 + k * G + 2 / d), ux: NZ, vy: X, w, h, cx, cz, alongX };
+  return { o: _ro.set(cx - G / 2 - k * G, y, cz - G - k * G), ux: X, vy: Z, w, h, cx, cz, alongX };
+}
+
+/** A fitting of the clinical floor in its cells, the tube that flickers on one in three, and its light in the floor's polish. */
+function layClinicTroffer(pw: Z2PixelWorld, b: PwBatch, m: THREE.Matrix4, state: 'on' | 'warm' | 'off', hsh: number) {
+  const a = pw.atlas;
+  const t = z2ClinicTroffer(a, state, CEILING);
+  const r = z2TrofferRect(m, state === 'off' ? 'body' : 'module');
+  b.rect(r.o, r.ux, r.vy, r.w, r.h, t);
+  if (state === 'off') return;
+  if (hsh < 0.3) {
+    // One lit fitting in three has a tube on its way out: its end flickers (a small loop).
+    const f = z2ClinicTubeFlicker(a, state === 'warm');
+    const e = Z2_TUBE_END;
+    _v.copy(r.o).addScaledVector(r.ux, e.x / t.density).addScaledVector(r.vy, e.y / t.density);
+    _v.y -= 0.001;
+    pw.animOf().rect(_v, r.ux, r.vy, e.w / t.density, e.h / t.density, f, { sub: { x: 0, y: 0, w: f.w, h: f.h / Z2_CLINIC_FRAMES } });
+  }
+  // Its image in the floor's polish, drawn toward the eye (the rail runs along x here; in the ER the room is seen along z), on the floor's texel grid.
+  const fl = pw.job?.floor;
+  if (fl === undefined) return;
+  const zone = pw.job!.zone;
+  const g = zone === 'corrA' ? z2FloorGlare(a, Z2_FLOOR, 96, hsh > 0.5 ? 1 : 0) : z2FloorGlare(a, z2RoomVinyl(zone === 'ward' ? 0x5a685e : 0x5d6a63), 64, 0);
+  const gw = g.w / g.density;
+  const gh = g.h / g.density;
+  const snap = (v: number) => Math.round(v * g.density) / g.density;
+  const y = fl + 0.003;
+  if (zone === 'er') b.rect(_v.set(snap(r.cx - gh / 2), y, snap(r.cz - gw / 2)), Z, X, gw, gh, g);
+  else b.rect(_v.set(snap(r.cx - gw / 2), y, snap(r.cz + gh / 2)), X, NZ, gw, gh, g);
 }
 
 /** Signs, the ceiling's fixtures, windows, blood and papers. */
@@ -96,23 +164,11 @@ function handleShell(tc: TagCtx): boolean | undefined {
     }
     case 'panel': {
       if (PANEL_ZONES.includes(pw.job?.zone ?? '')) {
-        // The clinical floor's troffers: repainted at 64, with their halo on the ceiling grid round them.
-        const t = z2ClinicTroffer(a, info.on ? (info.warm ? 'warm' : 'on') : 'off', 0x7a827c);
-        const h = Z2_TROFFER_HALO / t.density;
-        lay(b, m, _o.set(-0.345 - h, -0.052, -0.625 - h), X, Z, t.w / t.density, t.h / t.density, t);
-        if (info.on && hsh < 0.3) {
-          // One lit fitting in three has a tube on its way out: its dark end flickers (a small loop).
-          const f = z2ClinicTubeFlicker(a, !!info.warm);
-          const e = Z2_TUBE_END;
-          const an = pw.animOf();
-          an.setMatrix(m);
-          an.rect(_o.set(-0.345 - h + e.x / t.density, -0.053, -0.625 - h + e.y / t.density), X, Z, e.w / t.density, e.h / t.density, f, { sub: { x: 0, y: 0, w: f.w, h: f.h / Z2_CLINIC_FRAMES } });
-          an.setMatrix(null);
-        }
-      } else {
-        const t = troffer(a, info.on ? (info.warm ? 'warm' : 'on') : 'off');
-        lay(b, m, _o.set(-0.345, -0.052, -0.625), X, Z, 22 / PW_TPM, 40 / PW_TPM, t);
+        layClinicTroffer(pw, b, m, info.on ? (info.warm ? 'warm' : 'on') : 'off', hsh);
+        return true;
       }
+      const t = troffer(a, info.on ? (info.warm ? 'warm' : 'on') : 'off');
+      lay(b, m, _o.set(-0.345, -0.052, -0.625), X, Z, 22 / PW_TPM, 40 / PW_TPM, t);
       // A lit panel's stepped pool on the floor below (the polish catches it).
       const fl = pw.job?.floor;
       if (info.on && fl !== undefined) {
@@ -125,13 +181,17 @@ function handleShell(tc: TagCtx): boolean | undefined {
       // The dynamic diffuser covers it (painted in `finish`).
       return true;
     case 'panelHole': {
-      const t = ceilingHoleDecal(a, hsh > 0.5 ? 1 : 0);
-      lay(b, m, _o.set(-0.35, -0.012, -0.65), X, Z, 0.7, 1.3, t);
+      if (PANEL_ZONES.includes(pw.job?.zone ?? '')) {
+        // The clinical floor's ceiling is a grid: the hole is the two cells a fitting hung in.
+        const r = z2TrofferRect(m, 'body');
+        b.rect(r.o, r.ux, r.vy, r.w, r.h, z2ClinicCeilingHole(a, CEILING, 2, 0));
+      } else lay(b, m, _o.set(-0.35, -0.012, -0.65), X, Z, 0.7, 1.3, ceilingHoleDecal(a, hsh > 0.5 ? 1 : 0));
       dangle(pw, b, m, hsh > 0.5 ? 1 : 0);
       return true;
     }
     case 'ventHole': {
-      lay(b, m, _o.set(-0.37, -0.012, -0.37), X, Z, 0.74, 0.74, ceilingHoleDecal(a, 1));
+      if (PANEL_ZONES.includes(pw.job?.zone ?? '')) lay(b, m, _o.set(-0.375, -0.012, -0.375), X, Z, 0.75, 0.75, z2ClinicVentHole(a));
+      else lay(b, m, _o.set(-0.37, -0.012, -0.37), X, Z, 0.74, 0.74, ceilingHoleDecal(a, 1));
       return true;
     }
     case 'blind':
@@ -264,7 +324,7 @@ function pickShell(pw: Z2PixelWorld, q: PickQuery): Pick | null | undefined {
       if (hex === 0x5d6a63) return own(z2VinylTile(a, { a: 0x5d6a63, b: 0x46524c }));
       return own(z2SheetVinylTile(a, { hex }));
     case 'tiles|0.5|0.8':
-      if (PANEL_ZONES.includes(q.zone)) return own(z2ClinicCeiling(a, hex));
+      if (PANEL_ZONES.includes(q.zone)) return own(z2ClinicCeiling(a, CEILING));
       return neutral(z2CeilingTile(a, { hex: NEUTRAL_HEX }), hex);
     default:
       break;
@@ -561,6 +621,8 @@ export function registerShell(reg: Z2Registry) {
   reg.prebuild((pw) => {
     troffer(pw.atlas, 'on');
     troffer(pw.atlas, 'warm');
+    z2ClinicTroffer(pw.atlas, 'on', CEILING);
+    z2ClinicTroffer(pw.atlas, 'warm', CEILING);
     z2VentModule(pw.atlas, 0x9aa09c);
   }, 2);
 }

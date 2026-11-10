@@ -15,7 +15,8 @@ import { PwBackdrop } from '../../pixelworld/backdrop';
 import { z2CityTile, z2RoofsTile, z2SkyDome, z2StormSkyTile } from '../../pixelworld/z2sky';
 import { emitMesh, pieceKind, X, Z, NZ, ZONE_DECAL0, ZONE_FLOOR, Z2Registry, type Job, type Pick, type Piece } from './pwCore';
 import { paintAmbulance, registerBay } from './pwBay';
-import { registerShell, roomGlimpse, scatter } from './pwShell';
+import { registerShell, roomGlimpse, scatter, z2InClinic, z2TrofferRect } from './pwShell';
+import { z2ClinicTroffer, Z2_TROFFER_BODY } from '../../pixelworld/z2clinicCeiling';
 import { paintDoor, paintTank, registerProps, registerPropsLast } from './pwProps';
 import { paintWall, registerBasement } from './pwBasement';
 import { paintShafts, registerAtrium } from './pwAtrium';
@@ -178,10 +179,27 @@ export class Z2PixelWorld {
       };
       const gOn = geo(troffer(this.atlas, 'on'));
       const gWarm = geo(troffer(this.atlas, 'warm'));
+      const body = { x: Z2_TROFFER_BODY.x, y: Z2_TROFFER_BODY.y, w: Z2_TROFFER_BODY.w, h: Z2_TROFFER_BODY.h };
       for (const f of flickers) {
         const warm = this.dynFlickers.find((d) => d.mesh === f.mesh)?.warm ?? false;
         const lit = f.mesh.material === f.on;
-        f.mesh.geometry = warm ? gWarm : gOn;
+        f.mesh.updateWorldMatrix(true, false);
+        _o.setFromMatrixPosition(f.mesh.matrixWorld);
+        if (z2InClinic(_o.x, _o.y, _o.z)) {
+          // The clinical floor's fittings sit in the ceiling grid: the diffuser shows the repainted fitting's
+          // body (no light on the boards round it: it comes and goes), where its cells are — or, on a panel
+          // hanging by its wires, where the panel is.
+          const t = z2ClinicTroffer(this.atlas, warm ? 'warm' : 'on', 0x7a827c);
+          const b = new PwBatch(this.atlas);
+          const e = f.mesh.matrixWorld.elements;
+          if (Math.abs(e[5]) > 0.99) {
+            const r = z2TrofferRect({ x: _o.x, y: _o.y - 0.016, z: _o.z, alongX: Math.abs(e[8]) > 0.7 }, 'body');
+            b.setMatrix(_inv.copy(f.mesh.matrixWorld).invert());
+            b.rect(r.o, r.ux, r.vy, r.w, r.h, t, { sub: body });
+            b.setMatrix(null);
+          } else b.rect(_o.set(-body.w / 128, -0.016, -body.h / 128), X, Z, body.w / 64, body.h / 64, t, { sub: body });
+          f.mesh.geometry = b.build()!.geometry;
+        } else f.mesh.geometry = warm ? gWarm : gOn;
         f.on = on;
         f.off = off;
         f.mesh.material = lit ? on : off;
