@@ -145,18 +145,19 @@ function paintAsphalt(
     sheets.push({ x: ox, y: oy, w: bl.w, h: bl.h });
   };
   for (const t of o.tracksV ?? []) {
-    let y = rng.int(0, 90);
-    while (y < H - 30) {
-      const len = rng.int(70, 230);
+    // (Sheets stop short of the tile's ends: another variant may follow this one.)
+    let y = rng.int(8, 90);
+    while (y < H - 78) {
+      const len = Math.min(H - 8 - y, rng.int(70, 230));
       const wd = Math.round(half * 2 * rng.range(0.75, 1.25));
       stamp(blob(rng, wd, len, Math.max(3, Math.round(len / 45)), 0.75), Math.round(t - wd / 2 + rng.spread(6)), y);
       y += len + rng.int(18, 110);
     }
   }
   for (const t of o.tracksH ?? []) {
-    let x = o.x0 + rng.int(0, 90);
-    while (x < o.x1 - 30) {
-      const len = rng.int(70, 230);
+    let x = o.x0 + rng.int(8, 90);
+    while (x < o.x1 - 78) {
+      const len = Math.min(o.x1 - 8 - x, rng.int(70, 230));
       const wd = Math.round(half * 2 * rng.range(0.75, 1.25));
       stamp(blob(rng, len, wd, Math.max(3, Math.round(len / 45)), 0.75), x, Math.round(t - wd / 2 + rng.spread(6)));
       x += len + rng.int(18, 110);
@@ -165,7 +166,7 @@ function paintAsphalt(
   for (let i = 0; i < (o.sheets ?? 3); i++) {
     const w = rng.int(80, 170);
     const h = rng.int(36, 76);
-    stamp(blob(rng, w, h, 5, 0.6), o.x0 + rng.int(10, Math.max(11, o.x1 - o.x0 - w - 10)), rng.int(0, H - 1));
+    stamp(blob(rng, w, h, 5, 0.6), o.x0 + rng.int(10, Math.max(11, o.x1 - o.x0 - w - 10)), rng.int(8, H - h - 8));
   }
   for (let y = 0; y < H; y++) {
     for (let x = o.x0; x < o.x1; x++) {
@@ -1126,8 +1127,444 @@ export function z1KerbFaceTile(atlas: PwAtlas): PwTile {
   }, { wrap: true, density: PW_TPM_MID });
 }
 
-/** Everything this file paints, for look-dev dumps and benches. */
-export function z1GroundLookdev(atlas: PwAtlas): PwTile[] {
-  return [z1RoadTile(atlas, 0), z1RoadTile(atlas, 1), z1RoadTile(atlas, 2), z1WalkTile(atlas, 0), z1WalkTile(atlas, 1), z1KerbFaceTile(atlas)];
+// ─── The junction, crosswalks, the cross street's margins ────────────────────
+
+/** Junction core: Main Street's 12 m × the cross street's 14 m, at 64 texels a metre (north up). */
+export const Z1_JUNCTION_W = 768;
+export const Z1_JUNCTION_H = 896;
+
+/**
+ * The intersection of Main Street and the cross street, one unique painting: both streets'
+ * wheel paths running on through it as a plaid of wet sheets, the dark arcs tyres leave turning
+ * the corners, the old streetcar rails still showing in the cross street where the tar has worn
+ * off them (two steel lines in a strip of setts), a telephone vault lid, a cover, saw-cut joints
+ * where each street's paving ends, a concrete apron and a drain in every corner. This is the floor
+ * the crawlers rise from: everything between the corners stays within the body's three tones.
+ */
+export function z1JunctionTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('z1junction', Z1_JUNCTION_W, Z1_JUNCTION_H, paintZ1Junction, { density: PW_TPM_MID });
 }
 
+function paintZ1Junction(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const H = c.h;
+  const P = z1GroundRamps(k);
+  const rng = k.rng;
+  const b = new Brush2(c);
+  const CX = W / 2;
+  const CY = H / 2;
+  const seed = 500;
+  const wet = paintAsphalt(b, rng, P, seed, {
+    x0: 0,
+    x1: W,
+    dry: [],
+    tracksV: [CX - TRACK_OUT, CX - TRACK_IN, CX + TRACK_IN, CX + TRACK_OUT],
+    tracksH: [CY - TRACK_OUT, CY - TRACK_IN, CY + TRACK_IN, CY + TRACK_OUT],
+    sheets: 4,
+  });
+  // The streetcar line down the cross street: two rails 1.435 m apart in a strip of granite setts, tarred
+  // over long ago; the tar has worn through in stretches and the steel shows.
+  for (const ry of [CY - 46, CY + 46]) {
+    const worn = wobbler(seed + ry, 0, 1.4);
+    for (let x = 0; x < W; x++) {
+      const open = worn(x) > -0.15;
+      if (open) {
+        // Setts either side of the rail (two courses each side), then the rail: a lit head, the dark flangeway.
+        for (let q = -9; q <= 9; q++) {
+          const i = b.at(x, ry + q);
+          if (i < 0) continue;
+          const aq = Math.abs(q);
+          if (aq <= 1) continue;
+          const course = aq < 6 ? 0 : 1;
+          const joint = (x + course * 5) % 11 === 0 || aq === 5 || aq === 9;
+          b.R[i] = joint ? P.concDark : P.flag;
+          b.T[i] = joint ? 1 : (x + course * 5) % 11 === 1 || aq === 2 || aq === 6 ? 4 : 3;
+          wet[i] = 0;
+        }
+      }
+      b.set(x, ry - 1, P.iron, open ? 4 : 3);
+      b.set(x, ry, P.iron, open ? 3 : 2);
+      b.set(x, ry + 1, P.tar, 0);
+      if (!open && dashAt(x, seed + ry, 3, 8, 3, 9)) b.shift(x, ry + 2, 1);
+    }
+    // The ragged lip of the tar where the strip is open.
+    for (let x = 1; x < W - 1; x++) {
+      if (worn(x) > -0.15 !== worn(x + 1) > -0.15) for (let q = -10; q <= 10; q++) b.set(x + (hash2(q, x, 3) > 0.5 ? 1 : 0), ry + q, P.tar, 1);
+    }
+  }
+  // Turning marks: the dark double arcs of tyres cutting each corner (rubber on wet tar: one step down, broken).
+  for (const [ox, oy] of [
+    [0, 0],
+    [W, 0],
+    [0, H],
+    [W, H],
+  ]) {
+    for (const r of [150, 196, 318, 366]) {
+      const n = Math.round(r * 1.7);
+      for (let s = 0; s < n; s++) {
+        const a = (s / n) * (Math.PI / 2);
+        const x = ox + (ox ? -1 : 1) * Math.cos(a) * r;
+        const y = oy + (oy ? -1 : 1) * Math.sin(a) * r * 1.12;
+        if (!dashAt(s, r + ox + oy, 14, 46, 6, 30)) continue;
+        for (let q = 0; q < 4; q++) {
+          const i = b.at(x + q, y);
+          if (i >= 0 && (b.R[i] === P.asph || b.R[i] === P.dry)) b.T[i] = Math.max(2, b.T[i] - 1);
+        }
+      }
+    }
+  }
+  // Saw-cut joints where the streets' paving ends (the modules beside this one stop on these lines).
+  for (const y of [1, H - 3]) b.groove([0, y, W - 1, y], { ramp: P.tar, tone: 1, lip: 1, width: 2 });
+  for (const x of [1, W - 3]) b.groove([x, 0, x, H - 1], { ramp: P.tar, tone: 1, lip: 1, width: 2 });
+  // Corners: a concrete apron under each kerb return, a drain in two of them, leaves and litter washed in.
+  for (const [sx, sy] of [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+    [1, 1],
+  ]) {
+    const aw = 40;
+    const ah = 74;
+    const x0 = sx ? W - aw : 0;
+    const y0 = sy ? H - ah : 0;
+    for (let y = 0; y < ah; y++) {
+      for (let x = 0; x < aw; x++) {
+        // Rounded toward the junction.
+        const u = sx ? x : aw - 1 - x;
+        const v = sy ? y : ah - 1 - y;
+        if (u < 12 && v < 12 && (12 - u) ** 2 + (12 - v) ** 2 > 150) continue;
+        const i = (y0 + y) * W + x0 + x;
+        const edge = u === 0 || v === 0;
+        b.R[i] = edge ? P.tar : P.conc;
+        b.T[i] = edge ? 1 : 3;
+        wet[i] = 0;
+      }
+    }
+    b.band(x0, y0, aw, ah, sx ? 'right' : 'left', { dt: -1, steps: 1, reach: 0.4, wob: 2, seed: seed + sx * 2 + sy, only: P.conc });
+    if (sx === sy) drainGrate(b, P, sx ? W - 37 : 4, sy ? H - 44 : 14, 32, 26);
+    for (let i = 0; i < 8; i++) leaf(b, rng, rng.chance(0.4) ? P.leafRed : P.leaf, x0 + rng.int(3, aw - 9), y0 + rng.int(4, ah - 8));
+  }
+  // A telephone vault lid (a cast rectangle in two leaves) and a cover, off the wheel paths.
+  {
+    const vx = CX + 196;
+    const vy = CY + 150;
+    b.formRect(vx - 2, vy - 2, 60, 44, { raised: false, ramp: P.conc, tone: 3, dark: 1, lit: 1 });
+    for (let y = 0; y < 40; y++) {
+      for (let x = 0; x < 56; x++) {
+        const lx = x % 28;
+        const edge = lx === 0 || y === 0 ? 4 : lx === 27 || y === 39 ? 1 : (lx + y) % 5 === 0 ? 3 : 2;
+        b.set(vx + x, vy + y, P.iron, edge);
+      }
+    }
+    b.hrun(vx - 2, vy + 42, 62, 0, -1);
+  }
+  manhole(b, rng, P, CX - 150, CY - 170, 20, 'SEWER');
+  // Wear: cracks radiating from the lids, long ones across the lanes, an alligator patch, a pothole.
+  for (let i = 0; i < 12; i++) b.crack(rng, rng.int(40, W - 40), rng.int(90, H - 90), rng.int(50, 140), rng.next() * 6.28, { dt: -2, lip: 1, branch: 0.03, fat: 0.3, wander: 0.7 });
+  alligator(b, rng, CX + 30, CY + 250, 90, 110, seed + 9);
+  pothole(b, rng, P, CX - 60, CY + 96, 38, 22);
+  for (let i = 0; i < 3; i++) oilStain(b, rng, P, rng.int(120, W - 120), rng.int(120, H - 120), rng.int(22, 36));
+}
+
+/** Crosswalk overlay: 12 m across × 4 m (cut-out bars 0.55 m wide, a stop line on the approach side at the bottom). */
+export const Z1_CROSSWALK_W = 768;
+export const Z1_CROSSWALK_H = 256;
+
+/**
+ * A zebra crossing as paint ON the road (a cut-out laid a few millimetres over it): eleven bars,
+ * each worn the way crossings wear — rubbed through in two bands where the wheels run, chipped
+ * at the ends, cracked where the road under it cracked — and a stop line. Kept to the paint's
+ * middle tones (this is the enemies' floor: nothing white).
+ */
+export function z1CrosswalkTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('z1crosswalk', Z1_CROSSWALK_W, Z1_CROSSWALK_H, (c, k) => {
+    const P = z1GroundRamps(k);
+    const rng = k.rng;
+    const b = new Brush2(c);
+    const W = c.w;
+    const BAR0 = 6;
+    const BAR1 = 198;
+    for (let bar = 0; bar < 11; bar++) {
+      const x0 = Math.round((0.6 + bar * 1.1 - 0.275) * 64);
+      const bw = 35;
+      // Wheel paths cross the bars: wear is strongest where a track runs under this bar.
+      const mid = x0 + bw / 2 - W / 2;
+      const near = Math.min(...[-TRACK_OUT, -TRACK_IN, TRACK_IN, TRACK_OUT].map((t) => Math.abs(mid - t)));
+      const wear = near < 24 ? 0.62 : near < 44 ? 0.4 : 0.2;
+      const wf = wobbler(700 + bar, 0, 3);
+      for (let y = BAR0; y < BAR1; y++) {
+        const a = x0 + Math.max(0, Math.round(wf(y) * 1.5));
+        const e = x0 + bw - Math.max(0, Math.round(wf(y + 40) * 1.5));
+        for (let x = a; x < e; x++) {
+          // Worn through in lobes (coarse), chipped finer; the bar's two ends fray.
+          const lobe = hash2((x - x0) >> 3, y >> 4, 710 + bar) * 0.6 + hash2((x - x0) >> 2, y >> 2, 720 + bar) * 0.4;
+          if (lobe < wear) continue;
+          if ((y < BAR0 + 4 || y > BAR1 - 5) && dashAt(x, bar + y, 2, 4, 1, 3)) continue;
+          c.set(x, y, P.white, x === a ? 4 : x === e - 1 || lobe < wear + 0.08 ? 2 : 3);
+        }
+      }
+      // A crack carried up through the paint.
+      if (bar % 3 === 1) b.crack(rng, x0 + 4, rng.int(BAR0 + 30, BAR1 - 30), bw - 6, rng.spread(0.5), { ramp: P.tar, tone: 1, lip: 0 });
+    }
+    // The stop line, 40 cm, two lanes of it scuffed away.
+    for (let y = 226; y < 252; y++) {
+      for (let x = 20; x < W - 20; x++) {
+        const lobe = hash2(x >> 3, y >> 3, 730) * 0.6 + hash2(x >> 2, y >> 1, 731) * 0.4;
+        const mid = x - W / 2;
+        const near = Math.min(...[-TRACK_OUT, -TRACK_IN, TRACK_IN, TRACK_OUT].map((t) => Math.abs(mid - t)));
+        if (lobe < (near < 22 ? 0.7 : 0.3) || mid * mid < 100) continue;
+        c.set(x, y, P.white, y === 226 ? 4 : y === 251 ? 2 : 3);
+      }
+    }
+  }, { density: PW_TPM_MID });
+}
+
+/**
+ * The cross street's margin (wrap strip, 1 m × 8 m): the strip of old concrete between the
+ * carriageway's kerb line and the buildings that front straight onto it — slabs with a joint every
+ * 2 m, the damp foot of the wall along one edge, a drain channel along the other.
+ */
+export function z1MarginTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('z1margin', 64, 512, (c, k) => {
+    const P = z1GroundRamps(k);
+    const rng = k.rng;
+    const b = new Brush2(c, { wrapY: true });
+    c.rect(0, 0, c.w, c.h, P.concDark, 3);
+    // (u 0 = the wall, u 63 = the road.)
+    for (let y = 0; y < c.h; y += 128) {
+      b.groove([0, y + 60, c.w - 9, y + 60], { dt: -2, lip: 1, width: 2 });
+      c.rect(8, y + 66, c.w - 20, 56, P.concDark, hash2(y, 3, 5) > 0.5 ? 3 : 4);
+    }
+    // Drain channel by the road: a dark slot between two lit lips, a grating every 4 m.
+    c.rect(c.w - 8, 0, 8, c.h, P.conc, 3);
+    c.rect(c.w - 6, 0, 3, c.h, P.tar, 0);
+    c.rect(c.w - 3, 0, 1, c.h, P.conc, 4);
+    for (let y = 30; y < c.h; y += 256) for (let q = 0; q < 40; q += 4) c.rect(c.w - 7, y + q, 5, 2, P.iron, 3);
+    b.band(0, 0, 18, c.h, 'left', { dt: -1, steps: 1, wob: 2.5, seed: 77 });
+    for (let i = 0; i < 12; i++) {
+      const y = rng.int(0, c.h - 1);
+      for (let q = 0; q < rng.int(3, 8); q++) b.set(0, y + q, P.moss, q % 3 === 1 ? 4 : 3);
+    }
+    b.sheen(rng, 10, 0, c.w - 22, c.h, 40, P.sky, 2, { min: 5, max: 12, drifts: 8, only: (r) => r === P.concDark });
+    b.wearDrift(rng, 8, 0, c.w - 20, c.h, 14, { drifts: 4, only: P.concDark });
+    b.contact(0, 0, c.h, 'right', { dt: -2, depth: 3, line: 1, seed: 78 });
+  }, { wrap: true, density: PW_TPM_MID });
+}
+
+// ─── The alley ───────────────────────────────────────────────────────────────
+
+/** Alley floor module: 7 m wall to wall × 12 m along, at 64 texels a metre. */
+export const Z1_ALLEY_W = 448;
+export const Z1_ALLEY_H = 768;
+
+/**
+ * The alley floor: granite setts in courses across it, a dished stone channel down the middle
+ * with the rain running in it, and over the setts the remains of a tarmac skin — worn back to long
+ * ragged islands along both walls, so the setts show wherever wheels and water went. Along each
+ * wall a concrete margin gone green at the foot. Leaves, a soaked carton, paw prints across the
+ * tar. The centre (where things drop from the fire escapes and rise from the ground) keeps to the
+ * setts' middle tones.
+ */
+export function z1AlleyTile(atlas: PwAtlas): PwTile {
+  return atlas.tile('z1alleyfloor', Z1_ALLEY_W, Z1_ALLEY_H, paintZ1Alley, { wrap: true, density: PW_TPM_MID });
+}
+
+/** Granite setts over a rectangle, course by course (direct fills: this is most of several big modules). */
+function setts(b: Brush2, P: Z1GroundRamps, x0: number, y0: number, w: number, h: number, seed: number, o: { sw?: number; sh?: number } = {}) {
+  const SW = o.sw ?? 13;
+  const SH = o.sh ?? 8;
+  const R = b.R;
+  const T = b.T;
+  const W = b.w;
+  const ramps = [P.flag, P.flag, P.blue, P.flag, P.blue];
+  for (let y = y0; y < y0 + h; y++) {
+    const cr = Math.floor((y - y0) / SH);
+    const ly = (y - y0) % SH;
+    // Each course starts at its own offset; setts run 11…15 texels (cut by hand).
+    const off = Math.floor(hash2(cr, seed, 1) * SW);
+    const row = y * W;
+    let col = -1;
+    let sx = x0 - off;
+    let sw = SW;
+    let ramp = P.flag;
+    let tone = 3;
+    for (let x = x0; x < x0 + w; x++) {
+      while (x >= sx + sw || col < 0) {
+        if (col >= 0) sx += sw;
+        col++;
+        sw = SW - 2 + Math.floor(hash2(col, cr, seed + 2) * 5);
+        // Tone and stone change in runs of a few setts.
+        const run = Math.floor((col + Math.floor(hash2(cr, 7, seed) * 5)) / 4);
+        const hr = hash2(run, cr, seed + 3);
+        ramp = ramps[Math.floor(hr * ramps.length)];
+        tone = hr > 0.86 ? 4 : hr < 0.12 ? 2 : 3;
+      }
+      const lx = x - sx;
+      const i = row + x;
+      if (ly >= SH - 2 || lx >= sw - 2) {
+        R[i] = P.concDark;
+        T[i] = ly === SH - 1 || lx === sw - 1 ? 1 : 0;
+      } else {
+        R[i] = ramp;
+        // A sett is domed: lit along its far and left edge, its near right corner a step down.
+        T[i] = ly === 0 || lx === 0 ? tone + 1 : ly === SH - 3 && lx >= sw - 5 ? tone - 1 : tone;
+      }
+    }
+  }
+}
+
+function paintZ1Alley(c: PwCanvas, k: PwKit) {
+  const W = c.w;
+  const H = c.h;
+  const R = c.ramp;
+  const T = c.tone;
+  const P = z1GroundRamps(k);
+  const rng = k.rng;
+  const b = new Brush2(c, { wrapY: true });
+  const CX = W / 2;
+  const seed = 900;
+  const M0 = 26; // concrete margins along both walls
+  // (a) Setts wall to wall.
+  setts(b, P, 0, 0, W, H, seed);
+  // (b) The channel: three courses of long kerb-like stones laid ALONG the alley, dished (the middle one a step
+  // down and wet), with a lit lip on its near side.
+  for (let y = 0; y < H; y++) {
+    const ly = y % 96;
+    for (let q = -15; q < 15; q++) {
+      const i = y * W + CX + q;
+      const mid = q >= -5 && q < 5;
+      const joint = ly >= 94 || q === -15 || q === -6 || q === 5 || q === 14;
+      R[i] = joint ? P.concDark : mid ? P.blue : P.flag;
+      T[i] = joint ? 1 : mid ? 2 : q === -14 || q === 6 || ly === 0 ? 4 : 3;
+    }
+  }
+  // (c) The tarmac skin: islands along both walls and two across the alley, edges ragged, a step lower in
+  // tone than the setts; its broken edge has a thickness (dark rim on its far / left side, lit on the near).
+  const tar = new Uint8Array(W * H);
+  const island = (x: number, y: number, w: number, h: number, lobes: number) => {
+    const bl = blob(rng, w, h, lobes, 0.55);
+    for (let yy = 0; yy < h; yy++) {
+      for (let xx = 0; xx < w; xx++) {
+        if (!bl.m[yy * w + xx]) continue;
+        const i = b.at(x + xx, y + yy);
+        if (i >= 0 && Math.abs(x + xx - CX) > 17) tar[i] = 1;
+      }
+    }
+  };
+  for (const side of [0, 1]) {
+    let y = rng.int(0, 60);
+    while (y < H - 40) {
+      const h = rng.int(90, 260);
+      const w = rng.int(70, 150);
+      island(side ? W - M0 - w + rng.int(0, 20) : M0 - rng.int(0, 20), y, w, h, 6);
+      y += h + rng.int(10, 90);
+    }
+  }
+  island(60, 300, 330, 70, 7);
+  island(90, 620, 280, 56, 6);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (!tar[i]) continue;
+      const up = !tar[b.at(x, y - 1)] || (x > 0 && !tar[i - 1]);
+      const dn = !tar[b.at(x, y + 1)] || (x < W - 1 && !tar[i + 1]);
+      R[i] = P.asph;
+      T[i] = up ? 4 : dn ? 1 : 3;
+    }
+  }
+  // Cast shadow of the skin's near edge on the setts.
+  for (let y = 0; y < H; y++) {
+    for (let x = 1; x < W; x++) {
+      const i = y * W + x;
+      if (tar[i]) continue;
+      const j = b.at(x - 1, y - 1);
+      if (j >= 0 && tar[j]) T[i] = Math.max(0, T[i] - 1);
+    }
+  }
+  // Margins: a cast strip along each wall, jointed, its foot damp and green.
+  for (const side of [0, 1]) {
+    const x0 = side ? W - M0 : 0;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < M0; x++) {
+        const i = y * W + x0 + x;
+        const inner = side ? x === 0 : x === M0 - 1;
+        R[i] = inner ? P.tar : P.conc;
+        T[i] = inner ? 1 : y % 128 >= 126 ? 1 : y % 128 === 0 ? 4 : 3;
+        tar[i] = 0;
+      }
+    }
+    b.band(x0, 0, M0, H, side ? 'right' : 'left', { dt: -1, steps: 2, wob: 2.5, seed: seed + side, only: P.conc, reach: 0.8 });
+    for (let i = 0; i < 40; i++) {
+      const y = rng.int(0, H - 1);
+      const n = rng.int(3, 10);
+      for (let q = 0; q < n; q++) {
+        b.set(side ? W - 1 : 0, y + q, P.moss, q % 3 === 1 ? 4 : 3);
+        if (rng.chance(0.6)) b.set(side ? W - 2 : 1, y + q, P.moss, 2);
+        if (rng.chance(0.25)) b.set(side ? W - 3 : 2, y + q, P.moss, 3);
+      }
+    }
+    b.contact(side ? W - 1 : 0, 0, H, side ? 'left' : 'right', { dt: -2, depth: 5, line: 2, seed: seed + 5 + side });
+  }
+  // (d) The wet: sheets on the tar, the sky in them; water in the channel as strokes ALONG it; rain between setts.
+  const wet = new Uint8Array(W * H);
+  for (let s = 0; s < 9; s++) {
+    const w = rng.int(50, 120);
+    const h = rng.int(40, 130);
+    const bl = blob(rng, w, h, 5, 0.6);
+    const ox = rng.int(M0, W - M0 - w);
+    const oy = rng.int(0, H - 1);
+    let any = false;
+    for (let yy = 0; yy < h; yy++) {
+      for (let xx = 0; xx < w; xx++) {
+        const i = b.at(ox + xx, oy + yy);
+        if (bl.m[yy * w + xx] && i >= 0 && tar[i] && T[i] === 3) {
+          wet[i] = 1;
+          T[i] = 2;
+          any = true;
+        }
+      }
+    }
+    if (any) for (let q = 0; q < 2; q++) ladder(b, rng, ox + Math.round(w * (0.3 + q * 0.4)), oy + 6, h - 12, rng.int(10, 22), P.sky, 2, wet, (r) => r === P.asph || r === P.sky);
+  }
+  for (let i = 0; i < 46; i++) {
+    const y = rng.int(0, H - 1);
+    const len = rng.int(8, 34);
+    const x = CX + rng.int(-4, 3);
+    for (let q = 0; q < len; q++) b.tint(x, y + q, P.sky, q < 2 || q > len - 3 ? 0 : 1, P.blue);
+  }
+  b.sheen(rng, M0 + 4, 0, W - 2 * M0 - 8, H, 220, P.sky, 2, { min: 4, max: 9, fat: 0, drifts: 40, only: (r) => r === P.flag || r === P.blue });
+  // (e) Wear and dressing: cracks in the tar, a patch of setts relaid in sand (paler, out of bond), a drain in
+  // the channel, leaves against the walls, a soaked carton, paw prints over a tar island.
+  for (let i = 0; i < 8; i++) b.crack(rng, rng.int(M0 + 10, W - M0 - 10), rng.int(0, H - 1), rng.int(30, 90), rng.next() * 6.28, { dt: -2, lip: 1, branch: 0.03, only: P.asph });
+  drainGrate(b, P, CX - 16, 430, 32, 28);
+  manhole(b, rng, P, CX + 110, 130, 17, 'GAS');
+  for (const side of [0, 1]) {
+    for (let i = 0; i < 16; i++) leaf(b, rng, rng.chance(0.4) ? P.leafRed : P.leaf, side ? W - 12 - rng.int(0, 22) : 3 + rng.int(0, 22), rng.int(0, H - 1));
+  }
+  {
+    // The carton: a flattened box, its flaps splayed, a tape line, the wet corner dark.
+    const x = 300;
+    const y = 520;
+    b.formRect(x, y, 38, 26, { raised: true, ramp: P.leaf, tone: 4, cast: 1, castLen: 2 });
+    b.formRect(x - 9, y + 4, 9, 18, { raised: true, ramp: P.leaf, tone: 3, cast: 1 });
+    b.formRect(x + 38, y + 2, 10, 20, { raised: true, ramp: P.leaf, tone: 3, cast: 1 });
+    b.hrun(x + 2, y + 12, 34, P.paper, 4);
+    for (let yy = 14; yy < 26; yy++) for (let xx = 22 - (26 - yy); xx < 38; xx++) b.shift(x + xx, y + yy, -1, P.leaf);
+  }
+  for (let s = 0; s < 9; s++) pawPrint(b, P, 96 + s * 17 + (s & 1) * 6, 356 - s * 9 + (s & 1) * 7);
+  void wet;
+}
+
+/** A dog's wet paw print (7 × 7): pad and four toes, in the mud's dark tone. */
+function pawPrint(b: Brush2, P: Z1GroundRamps, x: number, y: number) {
+  const s = ['.x.x.x.', '.x.x.x.', '.......', '..xxx..', '.xxxxx.', '.xxxxx.', '..xxx..'];
+  for (let j = 0; j < 7; j++) for (let i = 0; i < 7; i++) if (s[j][i] === 'x') b.shift(x + i, y + j, -1, P.asph);
+}
+
+/** Everything this file paints, for look-dev dumps and benches. */
+export function z1GroundLookdev(atlas: PwAtlas): PwTile[] {
+  return [
+    z1RoadTile(atlas, 0), z1RoadTile(atlas, 1), z1RoadTile(atlas, 2), z1WalkTile(atlas, 0), z1WalkTile(atlas, 1), z1KerbFaceTile(atlas),
+    z1JunctionTile(atlas), z1CrosswalkTile(atlas), z1MarginTile(atlas), z1AlleyTile(atlas),
+  ];
+}

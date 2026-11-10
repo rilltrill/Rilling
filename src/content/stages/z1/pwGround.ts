@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import type { PwAtlas, PwTile } from '../../pixelworld/atlas';
 import type { PwBatch } from '../../pixelworld/batch';
-import { PW_TPM } from '../../pixelworld/canvas';
-import { decalSub, z1GroundDecals, Z1_DECALS, type Z1DecalName } from '../../pixelworld/z1ground';
-import { z1KerbFaceTile, z1RoadOrder, z1RoadTile, z1WalkTile } from '../../pixelworld/z1road';
+import { decalSub, z1ApronTile, z1ForecourtTile, z1GroundDecals, z1SquareFieldTile, z1SquarePathTile, Z1_DECALS, type Z1DecalName } from '../../pixelworld/z1ground';
+import { z1AlleyTile, z1CrosswalkTile, z1JunctionTile, z1KerbFaceTile, z1MarginTile, z1RoadOrder, z1RoadTile, z1WalkTile } from '../../pixelworld/z1road';
 import { hash2 } from '../../pixelworld/surfaces';
+import { Kit } from '../../kit/ModelKit';
 import { texStd } from './bake';
 import { ALLEY_N, ALLEY_S, CROSS_Z0, CROSS_Z1, GAS_Z0, GAS_Z1, MAIN_FACADE, SECOND_E, SECOND_W, SECOND_X, SQ_X0, SQ_X1, SQ_Z0, SQ_Z1 } from './layout';
 import { M } from './props';
@@ -53,11 +53,34 @@ export class Z1Ground {
   private road: PwTile[];
   private walk: PwTile[];
   private kerb: PwTile;
+  private junction: PwTile;
+  private crosswalk: PwTile;
+  private margin: PwTile;
+  private alley: PwTile;
+  private field: PwTile;
+  private path: PwTile;
+  private apron: PwTile;
+  private forecourt: PwTile;
   constructor(readonly atlas: PwAtlas) {
     this.sheet = z1GroundDecals(atlas);
     this.road = [z1RoadTile(atlas, 0), z1RoadTile(atlas, 1), z1RoadTile(atlas, 2)];
     this.walk = [z1WalkTile(atlas, 0), z1WalkTile(atlas, 1)];
     this.kerb = z1KerbFaceTile(atlas);
+    this.junction = z1JunctionTile(atlas);
+    this.crosswalk = z1CrosswalkTile(atlas);
+    this.margin = z1MarginTile(atlas);
+    this.alley = z1AlleyTile(atlas);
+    this.field = z1SquareFieldTile(atlas);
+    this.path = z1SquarePathTile(atlas);
+    this.apron = z1ApronTile(atlas);
+    this.forecourt = z1ForecourtTile(atlas);
+  }
+
+  /** A wrap tile over x0…x1, zS → zN, mapped in world space (the pattern runs on across neighbouring pieces). */
+  private field2(b: PwBatch, t: PwTile, x0: number, x1: number, zS: number, zN: number, y: number) {
+    const u0 = (((x0 * t.density) % t.w) + t.w) % t.w;
+    const v0 = (((-zS * t.density) % t.h) + t.h) % t.h;
+    b.rect(_o.set(x0, y, zS), X, NZ, x1 - x0, zS - zN, t, { u0, v0 });
   }
 
   // ─── The ground itself ────────────────────────────────────────────────────
@@ -107,25 +130,63 @@ export class Z1Ground {
       this.walkStrip(b, 6, F, 40, -60, -1);
       this.walkStrip(b, -F, -6, 40, -60, 1);
     } else if (id === 'B') {
-      // (Main Street runs on through the junction for now: module index continues from zone A's 13.)
-      this.street(b, 0, -60, -205, 1, 13);
+      // Main Street up to the junction, the junction's own painting, Main Street on to its end.
+      this.street(b, 0, -60, CROSS_Z0, 1, 13);
+      b.rect(_o.set(-6, ROAD_TOP, CROSS_Z0), X, NZ, 12, CROSS_Z0 - CROSS_Z1, this.junction);
+      this.street(b, 0, CROSS_Z1, -205, 1, 17);
+      // The crossings: bars over both ends of the junction, each with its stop line toward the traffic it stops.
+      this.zebra(b, 0, CROSS_Z0 - 0.3, 1);
+      this.zebra(b, 0, CROSS_Z1 + 0.3, -1);
+      // The cross street's two arms: the same cross-section turned (far end = away from Main Street), with a
+      // metre of concrete margin either side up to the buildings that front it.
+      const zc = (CROSS_Z0 + CROSS_Z1) / 2;
+      let i = 0;
+      for (let x = 6; x < 65; x += 8, i++) {
+        const len = Math.min(8, 65 - x);
+        b.rect(_o.set(x, ROAD_TOP, zc - 6), Z, X, 12, len, this.road[z1RoadOrder(i, 3)]);
+        b.rect(_o.set(-x, ROAD_TOP, zc + 6), NZ, NX, 12, len, this.road[z1RoadOrder(i, 4)]);
+      }
+      // (Margin: u 0 = the wall.)
+      b.rect(_o.set(6, ROAD_TOP, CROSS_Z1), Z, X, 1, 59, this.margin);
+      b.rect(_o.set(65, ROAD_TOP, CROSS_Z0), NZ, NX, 1, 59, this.margin);
+      b.rect(_o.set(-6, ROAD_TOP, CROSS_Z0), NZ, NX, 1, 59, this.margin);
+      b.rect(_o.set(-65, ROAD_TOP, CROSS_Z1), Z, X, 1, 59, this.margin);
       this.walkStrip(b, 6, F, -60, CROSS_Z0, -1, { n: true });
       this.walkStrip(b, 6, F, CROSS_Z1, -205, -1, { s: true });
       this.walkStrip(b, -F, -6, -60, CROSS_Z0, 1, { n: true });
       this.walkStrip(b, -F, -6, CROSS_Z1, ALLEY_S, 1, { s: true, n: true });
       this.walkStrip(b, -F, -6, ALLEY_N, -205, 1, { s: true });
+      // The alley's mouth on Main Street: its floor runs out across the walk's gap to the kerb line.
+      b.rect(_o.set(-6, ROAD_TOP, ALLEY_S), NZ, NX, 7, F - 6, this.alley, { v0: 0 });
     } else if (id === 'C') {
+      // The alley, walked westward: u 0 = its south wall (the left hand), the far end up.
+      b.rect(_o.set(-F, ROAD_TOP, ALLEY_S), NZ, NX, 7, -F - (SECOND_E - 3.5), this.alley, { v0: (F - 6) * 64 });
       this.street(b, SECOND_X, -110, -200, 2);
       this.walkStrip(b, SECOND_E - 3.5, SECOND_E, -110, ALLEY_S, -1, { n: true });
       this.walkStrip(b, SECOND_E - 3.5, SECOND_E, ALLEY_N, -200, -1, { s: true });
       this.walkStrip(b, SECOND_W, SECOND_W + 3.5, -110, GAS_Z0, 1, { n: true });
     } else if (id === 'D') {
       this.street(b, SECOND_X, -200, SQ_Z0, 2, 12);
+      this.zebra(b, SECOND_X, SQ_Z0 + 3.3, 1);
       this.walkStrip(b, SECOND_E - 3.5, SECOND_E, -200, SQ_Z0, -1, { n: true });
       this.walkStrip(b, SECOND_W, SECOND_W + 3.5, GAS_Z1, SQ_Z0, 1, { s: true, n: true });
+      // The gas station's forecourt slab.
+      this.field2(b, this.forecourt, SECOND_W - 26, SECOND_W, GAS_Z0, GAS_Z1, 0.012);
+    } else if (id === 'E') {
+      // The square: the calm path up the rail's line to PRIME MEATS, the patterned field either side of it,
+      // the butcher's apron over the last 8 m.
+      const px0 = SECOND_X - 3;
+      const px1 = SECOND_X + 3;
+      this.field2(b, this.field, SQ_X0 - 20, px0, SQ_Z0, SQ_Z1, ROAD_TOP);
+      this.field2(b, this.field, px1, SQ_X1, SQ_Z0, SQ_Z1, ROAD_TOP);
+      b.rect(_o.set(px0, ROAD_TOP, SQ_Z0), X, NZ, 6, SQ_Z0 - SQ_Z1, this.path);
+      b.rect(_o.set(SECOND_X - 8, ROAD_TOP + 0.004, SQ_Z1 + 8), X, NZ, 16, 8, this.apron);
     }
     // The classic ground this replaces.
-    const roads = new Set<THREE.Material>([texStd(0x23262e, 0.42, 0.1, 'asphalt', 1, 0.85)]);
+    const roads = new Set<THREE.Material>([texStd(0x23262e, 0.42, 0.1, 'asphalt', 1, 0.85), texStd(0x272a31, 0.5, 0.05, 'asphalt', 1.3, 0.9)]);
+    // (Kit.tex is cached: the square's flags and the forecourt's slab are the instances town.ts used.)
+    const flagsMat = Kit.tex('tiles', 0x4c4943, 0.5, 0.9);
+    const slabMat = Kit.tex('concrete', 0x45464b, 0.9);
     const out: THREE.Object3D[] = [];
     zone.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -133,9 +194,8 @@ export class Z1Ground {
       const p = (m.geometry as THREE.BoxGeometry).parameters as { width?: number; height?: number; depth?: number } | undefined;
       if (!p) return;
       const mat = m.material;
-      // Street planes (not the cross street yet: it keeps its plane until the junction is painted).
-      if (roads.has(mat) && m.geometry.type === 'PlaneGeometry' && p.width === 12) out.push(m);
-      else if ((mat === M.yellowPaint || mat === M.whitePaint) && p.height === 0.012 && !(p.width === 0.55)) out.push(m);
+      if ((roads.has(mat) || mat === flagsMat || mat === slabMat) && m.geometry.type === 'PlaneGeometry') out.push(m);
+      else if ((mat === M.yellowPaint || mat === M.whitePaint) && p.height === 0.012) out.push(m);
       else if (mat === M.sidewalk && p.height === 0.15) out.push(m);
       else if (mat === M.curb && p.height === 0.17) out.push(m);
     });
@@ -143,19 +203,31 @@ export class Z1Ground {
   }
 
   /**
+   * A zebra crossing over a street centred on `cx`. `z` = the edge of its bars next to the stop line; `dir` 1
+   * stops traffic heading north (the bars run from `z` three metres north, the stop line lies south of
+   * them), −1 traffic heading south.
+   */
+  private zebra(b: PwBatch, cx: number, z: number, dir: 1 | -1) {
+    // (The tile is painted bars up, stop line down; its bars start 58 texels above its lower edge.)
+    const off = 58 / 64;
+    if (dir > 0) b.rect(_o.set(cx - 6, ROAD_TOP + 0.006, z + off), X, NZ, 12, 4, this.crosswalk);
+    else b.rect(_o.set(cx + 6, ROAD_TOP + 0.006, z - off), NX, Z, 12, 4, this.crosswalk);
+  }
+
+  /**
    * A decal centred at (x, z), `w` × `h` metres (default: its painted size),
    * turned by `yaw` (radians, around +Y; at 0 the decal's up runs toward −Z).
    */
-  decal(b: PwBatch, name: Z1DecalName, x: number, y: number, z: number, yaw = 0, w?: number, h?: number, flip = false) {
+  decal(b: PwBatch, name: Z1DecalName, x: number, y: number, z: number, yaw = 0, w?: number, h?: number, flip = false, tintRGB?: readonly number[]) {
     const r = Z1_DECALS[name];
-    const W = w ?? r.w / PW_TPM;
-    const H = h ?? r.h / PW_TPM;
+    const W = w ?? r.w / this.sheet.density;
+    const H = h ?? r.h / this.sheet.density;
     const c = Math.cos(yaw);
     const s = Math.sin(yaw);
     _u.set(c, 0, -s);
     _v.set(-s, 0, -c);
     _o.set(x, y, z).addScaledVector(_u, -W / 2).addScaledVector(_v, -H / 2);
-    b.rect(_o, _u, _v, W, H, this.sheet, { sub: decalSub(this.sheet, name), flipU: flip });
+    b.rect(_o, _u, _v, W, H, this.sheet, { sub: decalSub(this.sheet, name), flipU: flip, tintRGB });
   }
 
   /** Replace the tagged classic ground meshes of a zone (returns them for removal). */
@@ -167,6 +239,7 @@ export class Z1Ground {
     // (The zone groups are named `zone<id>` by town.ts.)
     const ground = this.lay(b, zone.name.slice(-1) as ZoneId, zone);
     const trails = new Set<{ x: number; z: number; len: number; ry: number }>();
+    const D = this.sheet.density;
     for (const m of found) {
       const tag = m.userData.pwGround as string;
       m.updateMatrixWorld(true);
@@ -175,36 +248,38 @@ export class Z1Ground {
       const yaw = _e.y;
       const g = m.geometry as THREE.CylinderGeometry & THREE.BoxGeometry;
       const k = hash2(Math.round(_p.x * 10), Math.round(_p.z * 10), 3);
+      // Mirrored lights run toward the walker: decals with them lie along the way the rail takes there.
+      const along = inAlley(_p.x, _p.z) ? Math.PI / 2 : 0;
       if (tag === 'puddle') {
+        // A long sheet along the street where the classic puddle was big, a broad one across the lane otherwise.
         const r = g.parameters.radiusTop;
-        const name: Z1DecalName = r > 1.9 ? 'puddleA' : r > 1.45 ? 'puddleC' : 'puddleB';
-        const want = (2 * r) / (Z1_DECALS[name].w / PW_TPM);
-        // Scale toward the classic puddle (within reason: painted texels stay near the stage density).
-        const f = Math.min(1.3, Math.max(0.8, want));
-        this.decal(b, name, _p.x, ROAD_Y, _p.z, yaw, (Z1_DECALS[name].w / PW_TPM) * f, (Z1_DECALS[name].h / PW_TPM) * f, k > 0.5);
-      } else if (tag === 'manhole') this.decal(b, 'manhole', _p.x, ROAD_Y + 0.002, _p.z, Math.round(k * 4) * (Math.PI / 2));
+        const name: Z1DecalName = r > 1.9 ? 'puddleA' : r > 1.7 ? 'puddleD' : r > 1.45 ? 'puddleC' : 'puddleB';
+        this.decal(b, name, _p.x, ROAD_Y, _p.z, along, undefined, undefined, k > 0.5);
+      } else if (tag === 'manhole') this.decal(b, 'manhole', _p.x, ROAD_Y + 0.002, _p.z, along);
       else if (tag === 'blood') {
         const w = Math.min(2.6, g.parameters.radiusTop * 3.4);
-        this.decal(b, 'blood', _p.x, 0.024, _p.z, yaw, w, w * 0.75, k > 0.5);
+        this.decal(b, 'blood', _p.x, 0.024, _p.z, yaw, w, w * 0.8, k > 0.5);
       } else if (tag === 'paper') {
-        const p = g.parameters;
-        const name: Z1DecalName = k < 0.4 ? 'paperA' : k < 0.75 ? 'paperB' : 'paperC';
+        // Half of the classic scraps, each a drawn piece of litter at its painted size.
+        if (k > 0.55) continue;
+        const name: Z1DecalName = k < 0.2 ? 'paperA' : k < 0.34 ? 'paperB' : k < 0.42 ? 'paperC' : k < 0.48 ? 'can' : 'bottle';
         const y = isSidewalk(_p.x, _p.z) ? WALK_Y + 0.002 : 0.028;
-        this.decal(b, name, _p.x, y, _p.z, yaw, Math.max(0.4, p.width * 1.4), Math.max(0.4, p.depth * 1.2));
+        this.decal(b, name, _p.x, y, _p.z, Math.round(yaw / 0.4) * 0.4);
       } else if (tag === 'skid') {
         // One streak of the skid sheet along the box's long axis (its local z).
         const p = g.parameters;
-        const r = Z1_DECALS.skid;
         const c = Math.cos(yaw);
         const s = Math.sin(yaw);
         // Box local z (along) in world: (sin yaw, 0, cos yaw); decal u runs along it.
         _u.set(s, 0, c);
         _v.set(c, 0, -s).negate();
-        _o.set(_p.x, 0.021, _p.z).addScaledVector(_u, -p.depth / 2).addScaledVector(_v, -0.15);
+        _o.set(_p.x, 0.021, _p.z).addScaledVector(_u, -p.depth / 2).addScaledVector(_v, -0.08);
         const sub = decalSub(this.sheet, 'skid');
-        b.rect(_o, _u, _v, p.depth, 0.3, this.sheet, { sub: { x: sub.x + Math.floor(k * 64), y: sub.y + r.h - 16, w: 64, h: 10 } });
+        const len = Math.min(Z1_DECALS.skid.w - 4, Math.round(p.depth * D));
+        // (The lower streak of the sheet: canvas rows 44…58.)
+        b.rect(_o, _u, _v, len / D, 14 / D, this.sheet, { sub: { x: sub.x + 2 + Math.floor(k * (Z1_DECALS.skid.w - 4 - len)), y: sub.y + 5, w: len, h: 14 } });
       } else if (tag === 'trail') trails.add(m.userData.pwTrail);
-      // ('drop': blood drops round a pool — the painted pool has its own spatter.)
+      // ('drop': blood drops round a pool — the painted pool has its own cast-off.)
     }
     for (const t of trails) {
       const L = t.len * 0.7;
@@ -214,89 +289,94 @@ export class Z1Ground {
       const dz = Math.cos(t.ry);
       for (let i = 0; i < n; i++) {
         const d = seg * (i + 0.5);
-        this.decal(b, 'bloodTrail', t.x + dx * d, 0.025, t.z + dz * d, t.ry - Math.PI / 2, seg, 1.2, i % 2 === 1);
+        this.decal(b, 'bloodTrail', t.x + dx * d, 0.025, t.z + dz * d, t.ry - Math.PI / 2, seg, 1.5, i % 2 === 1);
       }
     }
     return [...found, ...ground];
   }
 
-  /** The PixelWorld-only street dressing of one zone. */
+  /** The PixelWorld-only street dressing of one zone: the story told on the ground. */
   dress(b: PwBatch, id: ZoneId) {
     const put = (name: Z1DecalName, x: number, y: number, z: number, yaw = 0, w?: number, h?: number, flip = false) => {
       if (zoneFor(x, z) === id) this.decal(b, name, x, y, z, yaw, w, h, flip);
     };
     const H = (a: number, k: number) => hash2(Math.round(a * 7), k, 911);
-    // Main Street (x −6…6, z 38…−200) and Second Street (x −64…−52, z −110…−262).
-    const streets: { cx: number; z0: number; z1: number; skip: [number, number][] }[] = [
-      { cx: 0, z0: 36, z1: -196, skip: [[CROSS_Z0 + 1, CROSS_Z1 - 1]] },
-      { cx: SECOND_X, z0: -112, z1: SQ_Z0 + 2, skip: [[ALLEY_S + 1, ALLEY_N - 1]] },
+    // The barricade (the cordon failed from the inside): spent shells, a cap, glass by the cruisers.
+    put('shells', -1.6, ROAD_Y + 0.004, -3.2, 0.3);
+    put('shells', 2.2, ROAD_Y + 0.004, -9.5, -0.5);
+    put('hat', 0.9, ROAD_Y + 0.006, -6.4, 0.6);
+    put('glass', -3.8, ROAD_Y + 0.003, -5.5, 0.2);
+    put('glass', 4.2, ROAD_Y + 0.003, -11, -0.3);
+    // Legends: SLOW and an arrow before the junction from each side (laid long: they read from the walker's eye),
+    // KEEP CLEAR across Second Street in front of the police station (read coming out of the alley).
+    put('slow', -3, ROAD_Y + 0.003, CROSS_Z0 + 17, 0, 2.5, 2.0);
+    put('arrow', -3, ROAD_Y + 0.003, CROSS_Z0 + 10, 0, 1.0, 2.2);
+    put('slow', 3, ROAD_Y + 0.003, CROSS_Z1 - 15, Math.PI, 2.5, 2.0);
+    put('slow', SECOND_X - 3, ROAD_Y + 0.003, -120, 0, 2.5, 2.0);
+    put('keepClear', SECOND_X + 2, ROAD_Y + 0.003, (ALLEY_S + ALLEY_N) / 2, Math.PI / 2, 4, 1.8);
+    // The burnt car: a scorch ring under it, glass thrown across the lane, bottles from the looted liquor store.
+    put('scorch', 3.2, ROAD_Y + 0.001, -66.5, 0.1, 4.4, 3.3);
+    put('glass', 0.8, ROAD_Y + 0.004, -65, 0.4);
+    put('bottle', 5.3, ROAD_Y + 0.006, -61.5, 1.9);
+    put('bottle', 5.6, ROAD_Y + 0.006, -70.2, 0.4);
+    put('can', 5.1, ROAD_Y + 0.006, -72.8, 2.6);
+    // The gas station: fuel on the wet slab from the pumps toward the drums.
+    put('fuel', -73.5, 0.03, (GAS_Z0 + GAS_Z1) / 2 + 2.5, 0.25, 4.6, 1.3);
+    put('fuel', -70, 0.03, (GAS_Z0 + GAS_Z1) / 2 - 3, -0.5, 3.5, 1.0, true);
+    // The bus: gouges where it slid, homework stuck to the wet road, glass.
+    put('gouge', -56.2, ROAD_Y + 0.002, -239.5, -0.38, 1, 3);
+    put('gouge', -59.4, ROAD_Y + 0.002, -241, -0.3, 1, 3, true);
+    put('pages', -57.6, ROAD_Y + 0.005, -243.2, 0.2);
+    put('pages', -60.4, ROAD_Y + 0.005, -246.5, -0.6, undefined, undefined, true);
+    put('glass', -56.5, ROAD_Y + 0.004, -245.2, 0.1);
+    // PRIME MEATS: the pool by the door and the drag that leads to it.
+    put('blood', -58, 0.024, -298.5, 0.3, 2.4, 1.9);
+    put('drag', -56.6, 0.025, -294.4, -0.35, 1.5, 3);
+    put('drag', -59.8, 0.025, -291.2, 0.3, 1.5, 3, true);
+    // Walks: litter and small street things, sparse (the modules carry the rest).
+    const walks: [number, number, number, [number, number][]][] = [
+      [7.75, 36, -200, [[CROSS_Z0 + 1, CROSS_Z1 - 1]]],
+      [-7.75, 36, -200, [[CROSS_Z0 + 1, CROSS_Z1 - 1], [ALLEY_S + 1, ALLEY_N - 1]]],
+      [SECOND_E - 1.75, -112, SQ_Z0 + 2, [[ALLEY_S + 1, ALLEY_N - 1]]],
+      [SECOND_W + 1.75, -112, SQ_Z0 + 2, [[GAS_Z0 + 1, GAS_Z1 - 1]]],
     ];
-    const inSkip = (z: number, skip: [number, number][]) => skip.some(([a, c]) => z <= a && z >= c);
-    for (const st of streets) {
-      // Storm drains at both curbs every 26 m.
-      for (let z = st.z0 - 9; z > st.z1; z -= 26) {
-        for (const side of [-1, 1]) if (!inSkip(z, st.skip)) put('drain', st.cx + side * 5.72, ROAD_Y, z, Math.PI / 2 * side, undefined, undefined, side < 0);
-      }
-      // Oil under the parking lanes and the driving lanes, potholes, tar patches.
-      for (let z = st.z0 - 4; z > st.z1; z -= 7.3) {
-        if (inSkip(z, st.skip)) continue;
-        const h = H(z, st.cx);
-        const side = h > 0.5 ? 1 : -1;
-        if (h < 0.55) put('oil', st.cx + side * (1.6 + H(z, 3) * 2.6), ROAD_Y, z + H(z, 4) * 3, H(z, 5) * 3);
-        if (H(z, 6) > 0.8) put('pothole', st.cx - side * (0.8 + H(z, 7) * 3.5), ROAD_Y + 0.001, z + 1.5, H(z, 8) * 3);
-        if (H(z, 9) > 0.78) put('patch', st.cx + (H(z, 10) - 0.5) * 6, ROAD_Y - 0.001, z - 2, H(z, 11) > 0.5 ? 0 : Math.PI / 2);
-        if (H(z, 12) > 0.88) put('puddleB', st.cx + side * (2 + H(z, 13) * 2.5), ROAD_Y + 0.002, z - 3, H(z, 14) * 3, undefined, undefined, H(z, 15) > 0.5);
-      }
-      // Sidewalk dressing: litter, gum, utility covers, cellar hatches by the shop fronts.
-      const walkX = st.cx === 0 ? [7.6, -7.6] : [SECOND_E - 1.75, SECOND_W + 1.75];
-      for (let z = st.z0 - 2; z > st.z1; z -= 3.7) {
-        for (const wx of walkX) {
-          if (st.cx === 0 && z < CROSS_Z0 + 1 && z > CROSS_Z1 - 1) continue;
-          if (st.cx !== 0 && z < ALLEY_S + 1 && z > ALLEY_N - 1) continue;
-          const h = H(z, wx);
-          if (h < 0.2) put(h < 0.1 ? 'paperA' : 'paperB', wx + (H(z, 21) - 0.5) * 2.2, WALK_Y + 0.002, z, H(z, 22) * 6, 0.45, 0.45);
-          else if (h < 0.32) put('gum', wx + (H(z, 23) - 0.5) * 2, WALK_Y + 0.001, z, 0);
-          else if (h < 0.38) put('utility', wx + (H(z, 24) - 0.5) * 1.2, WALK_Y + 0.001, z, 0);
-          else if (h > 0.93) put('cellar', wx + Math.sign(wx - st.cx) * 0.55, WALK_Y + 0.001, z, 0);
-          else if (h > 0.86) put('leaves', wx + (H(z, 25) - 0.5) * 2, WALK_Y + 0.002, z, H(z, 26) * 6);
-          else if (h > 0.82) put('can', wx + (H(z, 27) - 0.5) * 2.4, WALK_Y + 0.002, z, H(z, 28) * 6);
-        }
+    for (const [wx, z0, z1, skip] of walks) {
+      for (let z = z0; z > z1; z -= 4.3) {
+        if (skip.some(([a, c]) => z <= a && z >= c)) continue;
+        const h = H(z, wx);
+        const x = wx + (H(z, 21) - 0.5) * 2.4;
+        if (h < 0.16) put(h < 0.07 ? 'paperA' : h < 0.12 ? 'paperB' : 'paperC', x, WALK_Y + 0.002, z, Math.round(H(z, 22) * 15) * 0.4);
+        else if (h < 0.24) put('gum', x, WALK_Y + 0.001, z, 0);
+        else if (h < 0.29) put('utility', x, WALK_Y + 0.001, z, 0);
+        else if (h > 0.9) put('leaves', x, WALK_Y + 0.002, z, H(z, 26) * 6);
+        else if (h > 0.84) put(h > 0.87 ? 'can' : 'bottle', x, WALK_Y + 0.004, z, H(z, 28) * 6);
       }
     }
-    // Before the intersection: SLOW and a lane arrow (readable heading north, −Z).
-    put('slow', -3, ROAD_Y + 0.003, CROSS_Z0 + 16, 0, 2.4, 1.2);
-    put('arrow', -3, ROAD_Y + 0.003, CROSS_Z0 + 9, 0, 1.2, 1.2);
-    put('slow', 3, ROAD_Y + 0.003, CROSS_Z1 - 14, Math.PI, 2.4, 1.2);
-    put('slow', SECOND_X - 3, ROAD_Y + 0.003, -120, 0, 2.4, 1.2);
-    // The cross street (x −60…60 at z −88…−102): drains, oil, a long tar snake patch.
-    for (let x = -56; x <= 56; x += 9) {
-      if (Math.abs(x) < 8) continue;
-      put('oil', x, ROAD_Y, (CROSS_Z0 + CROSS_Z1) / 2 + (H(x, 31) - 0.5) * 8, H(x, 32) * 3);
-      if (H(x, 33) > 0.6) put('patch', x + 3, ROAD_Y - 0.001, (CROSS_Z0 + CROSS_Z1) / 2 + (H(x, 34) - 0.5) * 6, Math.PI / 2);
-    }
-    // The alley (x −48…−10, z −151.5…−158.5): puddles, oil, litter, a drain down the middle.
-    for (let x = -46; x < -10; x += 4.3) {
+    // The alley: a long puddle in the tar, litter along the walls.
+    for (let x = -46; x < -12; x += 5.1) {
       const h = H(x, 41);
-      const z = (ALLEY_S + ALLEY_N) / 2 + (H(x, 42) - 0.5) * 5;
-      if (h < 0.3) put('puddleB', x, ROAD_Y + 0.002, z, H(x, 43) * 3);
-      else if (h < 0.55) put('oil', x, ROAD_Y, z, H(x, 44) * 3);
-      else if (h < 0.8) put(h < 0.68 ? 'paperA' : 'paperC', x, 0.026, z, H(x, 45) * 6, 0.45, 0.45);
-      else put('leaves', x, 0.026, z, H(x, 46) * 6);
+      const z = h > 0.5 ? ALLEY_S - 1.2 - H(x, 42) : ALLEY_N + 1.2 + H(x, 42);
+      if (h < 0.25 || h > 0.8) put(h < 0.25 ? 'paperA' : 'paperC', x, 0.026, z, Math.round(H(x, 45) * 15) * 0.4);
+      else if (h < 0.5) put('leaves', x, 0.026, z, H(x, 46) * 6);
+      else if (h < 0.62) put('bottle', x, 0.026, z, H(x, 47) * 6);
     }
-    put('drain', -29, ROAD_Y, (ALLEY_S + ALLEY_N) / 2, 0);
-    put('manhole', -38, ROAD_Y + 0.002, (ALLEY_S + ALLEY_N) / 2 + 1, 0.4);
-    // The town square: puddles in the low flags, leaves round the trees, litter, blood by the butcher's.
-    for (let i = 0; i < 26; i++) {
+    put('puddleD', -20.5, ROAD_Y + 0.002, ALLEY_S - 2.2, Math.PI / 2);
+    // The town square: rain standing in the low flags off the path, leaves round the trees, litter.
+    for (let i = 0; i < 22; i++) {
       const x = SQ_X0 + 2 + H(i, 51) * (SQ_X1 - SQ_X0 - 4);
       const z = SQ_Z0 - 2 - H(i, 52) * (SQ_Z0 - SQ_Z1 - 4);
       const h = H(i, 53);
-      const name: Z1DecalName = h < 0.25 ? 'puddleC' : h < 0.45 ? 'leaves' : h < 0.7 ? 'paperA' : h < 0.85 ? 'paperB' : 'gum';
-      put(name, x, 0.022, z, H(i, 54) * 6, name.startsWith('paper') ? 0.45 : undefined, name.startsWith('paper') ? 0.45 : undefined);
+      // (Nothing new on the path the horde walks.)
+      if (Math.abs(x - SECOND_X) < 3.4) continue;
+      const name: Z1DecalName = h < 0.14 ? 'puddleB' : h < 0.42 ? 'leaves' : h < 0.66 ? 'paperA' : h < 0.8 ? 'paperB' : h < 0.9 ? 'bottle' : 'gum';
+      put(name, x, 0.022, z, name === 'puddleB' ? 0 : H(i, 54) * 6);
     }
-    put('blood', -58, 0.024, -298.5, 0.3, 2.4, 1.8);
-    put('bloodTrail', -55.5, 0.025, -295.5, -0.6, 2.2, 1.2);
-    put('bloodTrail', -53.6, 0.025, -294.2, -0.6, 2.2, 1.2, true);
   }
+}
+
+/** In the alley (walked westward), for the way decals with mirrored lights lie. */
+function inAlley(x: number, z: number): boolean {
+  return x < -MAIN_FACADE + 0.5 && x > SECOND_E - 3.5 && z < ALLEY_S && z > ALLEY_N;
 }
 
 /** On a sidewalk slab (Main Street / Second Street sidewalks), for decal heights. */

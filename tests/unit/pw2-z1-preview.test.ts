@@ -13,6 +13,7 @@ import { nullHud } from './sim';
 import { encodePng } from './pwPng';
 import { pwPreview, type PvCam } from './pw2Preview';
 import { z1GroundLookdev } from '../../src/content/pixelworld/z1road';
+import { z1ApronTile, z1ForecourtTile, z1GroundDecals, z1SquareFieldTile, z1SquarePathTile } from '../../src/content/pixelworld/z1ground';
 
 /**
  * z1 MAIN STREET look-dev (skipped unless PW_PREVIEW is set):
@@ -35,6 +36,11 @@ const VIEWS: Record<string, PvCam> = {
   square: { pos: [-58, 1.62, -268], yaw: 8, pitch: 5 },
   butcher: { pos: [-58, 1.62, -283], yaw: 0 },
   alley: { pos: [-22, 1.62, -155], yaw: 90, pitch: -4 },
+  slow: { pos: [-2, 1.62, -64.5], yaw: 0, pitch: -14 },
+  barricade: { pos: [0, 1.62, 2], yaw: 0, pitch: -10 },
+  bus: { pos: [-58, 1.62, -236], yaw: 0, pitch: -10 },
+  junction: { pos: [0, 1.62, -80], yaw: 0, pitch: -6 },
+  top: { pos: [0, 30, -95], yaw: 0, pitch: -89.9, fov: 50 },
   feet: { pos: [0.6, 1.62, -30], yaw: 0, pitch: -24 },
   kerb: { pos: [3.2, 1.62, -52], yaw: -38, pitch: -14 },
   second: { pos: [-58, 1.62, -205], yaw: 0, pitch: -6 },
@@ -49,7 +55,7 @@ describe.skipIf(!OUT)('z1 ground look-dev', () => {
     if (process.env.PW_TILES !== '0') {
       const atlas = new PwAtlas('z1-lookdev');
       const pal = new PwPalette();
-      const tiles: PwTile[] = z1GroundLookdev(atlas);
+      const tiles: PwTile[] = [...z1GroundLookdev(atlas), z1SquareFieldTile(atlas), z1SquarePathTile(atlas), z1ApronTile(atlas), z1ForecourtTile(atlas), z1GroundDecals(atlas)];
       const defs = (atlas as unknown as { tiles: Map<string, { paint: PwPainter }> }).tiles;
       const only = process.env.PW_ONLY;
       let total = 0;

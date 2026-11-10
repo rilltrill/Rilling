@@ -74,9 +74,10 @@ export interface Blob {
 /**
  * A lobed blob filling about a `w` × `h` box: a few overlapping ellipses strung along a wandering
  * spine, then one majority pass so no single texel sticks out — an outline with bays and
- * tongues, the way spilled or worn things are drawn. `lobes` 1 = an egg, 6 = a long ragged pool.
+ * tongues, the way spilled or worn things are drawn. `lobes` 1 = an egg, 6 = a long ragged pool;
+ * `smooth` 1…4 rounds the bays off (standing water, a stain that has spread).
  */
-export function blob(rng: PwRng, w: number, h: number, lobes = 4, round = 0.5): Blob {
+export function blob(rng: PwRng, w: number, h: number, lobes = 4, round = 0.5, smooth = 0): Blob {
   w = Math.max(2, Math.round(w));
   h = Math.max(2, Math.round(h));
   const m = new Uint8Array(w * h);
@@ -104,6 +105,24 @@ export function blob(rng: PwRng, w: number, h: number, lobes = 4, round = 0.5): 
       }
     }
   }
+  // `smooth` passes of a 5 × 5 majority melt the lobes into one outline (a sheet of water, not a cloud).
+  for (let p = 0; p < smooth && w > 8 && h > 8; p++) {
+    const o = m.slice();
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let n = 0;
+        for (let j = -2; j <= 2; j++) {
+          const yy = y + j;
+          if (yy < 0 || yy >= h) continue;
+          for (let i = -2; i <= 2; i++) {
+            const xx = x + i;
+            if (xx >= 0 && xx < w) n += o[yy * w + xx];
+          }
+        }
+        m[y * w + x] = n >= 13 ? 1 : 0;
+      }
+    }
+  }
   if (w > 4 && h > 4) {
     // Majority of the 3 × 3: fills pinholes, takes off single-texel spikes.
     const o = m.slice();
@@ -114,6 +133,32 @@ export function blob(rng: PwRng, w: number, h: number, lobes = 4, round = 0.5): 
         if (o[i] && n <= 2) m[i] = 0;
         else if (!o[i] && n >= 6) m[i] = 1;
       }
+    }
+  }
+  return { m, w, h };
+}
+
+/**
+ * A shore: one closed outline with a few broad bays and points (a puddle, a pool of oil or blood, a
+ * scorch) — an ellipse whose radius swells and shrinks round the compass in two to five slow
+ * waves, `rough` 0…1 their depth. Where `blob` reads as lobes run together, this reads as one
+ * sheet lying on a surface.
+ */
+export function shore(rng: PwRng, w: number, h: number, rough = 0.5): Blob {
+  w = Math.max(3, Math.round(w));
+  h = Math.max(3, Math.round(h));
+  const m = new Uint8Array(w * h);
+  const ph = [rng.next() * 6.283, rng.next() * 6.283, rng.next() * 6.283, rng.next() * 6.283];
+  const am = [0.16 + rng.next() * 0.1, 0.1 + rng.next() * 0.08, 0.06 + rng.next() * 0.05, 0.04 + rng.next() * 0.03];
+  // (The outline is kept inside the box: the base radius leaves room for the largest swell.)
+  const base = 1 / (1 + rough * (am[0] + am[1] + am[2] + am[3]));
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const u = (x + 0.5 - w / 2) / (w / 2);
+      const v = (y + 0.5 - h / 2) / (h / 2);
+      const a = Math.atan2(v, u);
+      const r = base * (1 + rough * (am[0] * Math.sin(a * 2 + ph[0]) + am[1] * Math.sin(a * 3 + ph[1]) + am[2] * Math.sin(a * 5 + ph[2]) + am[3] * Math.sin(a * 8 + ph[3])));
+      if (u * u + v * v <= r * r) m[y * w + x] = 1;
     }
   }
   return { m, w, h };
@@ -272,9 +317,11 @@ export class Brush2 {
       for (let x = 0; x < w; x++) {
         if (!m[y * w + x]) continue;
         const i = this.at(ox + x, oy + y);
-        if (i < 0 || !this.R[i] || (only && this.R[i] !== only)) continue;
+        // (A shape with its own `ramp` is painted on bare canvas too: a decal, a cut-out.)
+        if (i < 0 || (!this.R[i] && !(o.ramp && o.tone !== undefined)) || (only && this.R[i] !== only)) continue;
         if (o.ramp) {
           this.R[i] = o.ramp;
+          this.F[i] = 0;
           if (o.tone !== undefined) this.T[i] = o.tone;
         }
         let dt = o.fill ?? 0;
