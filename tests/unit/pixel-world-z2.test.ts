@@ -58,7 +58,7 @@ describe('z2 ST. MERCY HOSPITAL in PIXEL WORLD', () => {
         `${(bytes / 1048576).toFixed(1)} MB, paint ${paint.toFixed(0)} ms, ${meshes.length} PW meshes`,
     );
     // Atlas memory (world + sky, all levels) within the per-stage budget.
-    expect(bytes).toBeLessThanOrEqual(24 * 1048576);
+    expect(bytes).toBeLessThanOrEqual(48 * 1048576);
     // PixelWorld meshes are scenery: never occluders, never raycast.
     const occ = new Set(px.env!.occluders ?? []);
     for (const m of meshes) {

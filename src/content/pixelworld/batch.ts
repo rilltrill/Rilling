@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Kit } from '../kit/ModelKit';
-import type { PwAtlas, PwTile } from './atlas';
+import { pwRect, type PwAtlas, type PwTile } from './atlas';
 import { pwMaterial, type PwMaterialOptions } from './material';
 
 /**
@@ -8,8 +8,9 @@ import { pwMaterial, type PwMaterialOptions } from './material';
  * tiles, in any transform (`matrix`), and builds ONE mesh (one draw call) for
  * them after the atlas is painted.
  *
- * Vertex layout (UV mode, 32 B): position f32×3, `pwUv` f32×2 (texel coords,
- * unwrapped), `pwRect` i16×4 (atlas rect; w < 0 = clamp), `color` u8×3 (tint).
+ * Vertex layout (UV mode, 32 B): position f32×3, `pwUv` f32×2 (painted texel
+ * coords, unwrapped), `pwRect` i16×4 (`pwRect(tile)`: atlas rect; w < 0 = clamp,
+ * h < 0 = stored at 2×), `color` u8×3 (tint).
  * Normals are not stored — the material is flat-shaded from screen derivatives.
  *
  * Mapping helpers:
@@ -341,10 +342,7 @@ export class PwBatch {
     for (let i = 0; i < n; i++) {
       const t = this.tiles[this.tileIdx[i]];
       if (t.x < 0) throw new Error(`pixelworld: tile '${t.key}' is not in atlas ${this.atlas.name}`);
-      rect[i * 4] = t.x;
-      rect[i * 4 + 1] = t.y;
-      rect[i * 4 + 2] = t.wrap ? t.w : -t.w;
-      rect[i * 4 + 3] = t.h;
+      rect.set(pwRect(t), i * 4);
     }
     geo.setAttribute('pwRect', new THREE.BufferAttribute(rect, 4));
     const col = new Uint8Array(n * 3);

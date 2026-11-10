@@ -78,7 +78,7 @@ export function d1WaterTile(atlas: PwAtlas, o: { hex: number; deep: number }): P
       }
       c.set(x, y, r, t);
     });
-  }, { wrap: true });
+  }, { wrap: true, frames: F });
 }
 
 /** Rivers drawn with `d1RiverTile` span this many texels across (density 16: 13 m). */
@@ -241,7 +241,7 @@ export function d1RiverTile(atlas: PwAtlas, o: { body: number; deep: number; sha
         }
       }
     }
-  }, { wrap: true, density: 16 });
+  }, { wrap: true, density: 16, frames: F });
 }
 
 /**
@@ -278,7 +278,7 @@ export function d1EddyDecal(atlas: PwAtlas, o: { hex: number }): PwTile {
         if (Math.abs(dx) < spread && dy < 26 && hash2(x, v >> 1, 7) > 0.94) c.set(x, y, fm, 4);
       }
     });
-  });
+  }, { frames: F });
 }
 
 /** White water along a bank (wrap 16 × 32 a frame, cut out): lapping foam clusters riding the current. */
@@ -295,7 +295,7 @@ export function d1FoamEdgeTile(atlas: PwAtlas, o: { hex: number; mirror?: boolea
       if (x > lap - 2 && bayer(x, v) < 0.5) return;
       c.set(xx, y, fm, x < 2 ? 2.8 : hash2(x >> 1, v >> 1, 5) > 0.6 ? 4.4 : 3.6);
     });
-  }, { wrap: true });
+  }, { wrap: true, frames: F });
 }
 
 /**
@@ -355,7 +355,7 @@ export function d1FallTile(atlas: PwAtlas, o: { hex: number; deep: number; rock:
       }
       c.set(x, y, r, t);
     });
-  }, { wrap: true, density: 16 });
+  }, { wrap: true, density: 16, frames: F });
 }
 
 /**
@@ -384,7 +384,7 @@ export function d1FallLipModule(atlas: PwAtlas, o: { hex: number; deep: number }
         if (hash2(x >> 1, v >> 2, 41) > 0.45) c.set(x, y, w, (x & 3) === 1 ? 4.6 : 3.6);
       }
     });
-  });
+  }, { frames: F });
 }
 
 /** Splash / spray where the fall hits the pool (module 64 × 32 a frame, cut out): churning foam heaps, flying droplets. */
@@ -405,7 +405,7 @@ export function d1SplashModule(atlas: PwAtlas, o: { hex: number }): PwTile {
       const edge = crest - vt < 2;
       c.set(x, y, fm, edge ? 4.8 : lump > 0.6 ? 4.2 : lump < 0.3 ? 2.6 : 3.4);
     });
-  });
+  }, { frames: F });
 }
 
 /**
@@ -436,7 +436,7 @@ export function d1FlameModule(atlas: PwAtlas): PwTile {
       else if (h > top - 0.22 || d > 0.78 || lick) c.set(x, y, red, 2.6);
       else c.set(x, y, fire, d < 0.55 ? 3.4 : 3);
     });
-  });
+  }, { frames: F });
 }
 
 /**

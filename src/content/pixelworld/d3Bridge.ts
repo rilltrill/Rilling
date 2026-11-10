@@ -77,5 +77,5 @@ export function d3FoamModule(atlas: PwAtlas, o: { hex: number }): PwTile {
       if (d > 1 || n < d * 0.9) return;
       c.set(x, y, fm, n > 0.8 ? 4.4 : n > 0.5 ? 3.6 : 2.6);
     });
-  });
+  }, { frames: F });
 }

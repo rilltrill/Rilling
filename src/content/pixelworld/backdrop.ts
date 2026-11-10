@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Kit } from '../kit/ModelKit';
-import type { PwAtlas, PwTile } from './atlas';
+import { pwRect, type PwAtlas, type PwTile } from './atlas';
 import { pwBackdropMaterial } from './material';
 
 /**
@@ -84,7 +84,7 @@ function finish(pos: number[], uv: number[], idx: number[], tile: PwTile): THREE
   g.setAttribute('pwUv', new THREE.Float32BufferAttribute(uv, 2));
   const rect = new Int16Array(n * 4);
   const col = new Uint8Array(n * 3).fill(255);
-  for (let i = 0; i < n; i++) rect.set([tile.x, tile.y, tile.wrap ? tile.w : -tile.w, tile.h], i * 4);
+  for (let i = 0; i < n; i++) rect.set(pwRect(tile), i * 4);
   g.setAttribute('pwRect', new THREE.BufferAttribute(rect, 4));
   g.setAttribute('color', new THREE.BufferAttribute(col, 3, true));
   g.setIndex(idx);

@@ -1,5 +1,5 @@
-import type { PwAtlasData, PwTile } from './atlas';
-import { PW_LEVELS, type PwCanvas } from './canvas';
+import { pwTileLevel, type PwAtlasData, type PwTile } from './atlas';
+import { PW_LEVELS, pwPalAt, type PwCanvas } from './canvas';
 
 /**
  * HIGHWAY TO HELL (z3) — letters that survive the distance.
@@ -12,8 +12,10 @@ import { PW_LEVELS, type PwCanvas } from './canvas';
  * of those tiles so that a 2×2 holding two or more ink texels stays ink (the
  * ink texel nearest the ink's own average: a real colour of the letters, never
  * a blend), and the ink mask itself goes down the levels the same way. Boards,
- * dirt and bolts keep the toolkit's pick. Runs once per painted atlas (the
- * atlas cache keeps the result: a RETRY / RESTART reuses it).
+ * dirt and bolts keep the toolkit's pick. Levels are the tile's PAINTED levels
+ * (`pwTileLevel`: the upscaler's copy of a tile stored at 2× is not touched).
+ * Runs once per painted atlas (the atlas cache keeps the result: a RETRY /
+ * RESTART reuses it).
  */
 
 /** Ink masks by tile key (row 0 = the tile's top row, as painted). */
@@ -43,10 +45,12 @@ export function z3Ink(key: string, c: PwCanvas, ramps: readonly number[]) {
   INK.set(key, m);
 }
 
-function dist2(S: Uint8Array | Uint8ClampedArray, i: number, r: number, g: number, b: number): number {
-  const dr = S[i] - r;
-  const dg = S[i + 1] - g;
-  const db = S[i + 2] - b;
+/** Squared distance of a texel's painted colour (palette `P`) to (r, g, b). */
+function dist2(P: Uint8Array, t: number, r: number, g: number, b: number): number {
+  const q = pwPalAt(t);
+  const dr = P[q] - r;
+  const dg = P[q + 1] - g;
+  const db = P[q + 2] - b;
   return dr * dr + dg * dg + db * db;
 }
 
@@ -58,6 +62,7 @@ export function z3InkLevels(d: PwAtlasData, tiles: Iterable<PwTile>, levels = PW
   Z3_INK_DEBUG.clear();
   done.add(d);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const P = d.pal;
   for (const t of tiles) {
     const m0 = INK.get(t.key);
     if (!m0 || t.x < 0) continue;
@@ -69,19 +74,16 @@ export function z3InkLevels(d: PwAtlasData, tiles: Iterable<PwTile>, levels = PW
     for (let y = 0; y < h; y++) mask.set(m0.subarray((h - 1 - y) * w, (h - y) * w), y * w);
     const dbg = debug ? [{ w, h, mask }] : null;
     if (dbg) Z3_INK_DEBUG.set(t.key, dbg);
-    for (let l = 1; l < Math.min(levels, d.levels.length); l++) {
-      const src = d.levels[l - 1];
-      const dst = d.levels[l];
+    for (let l = 1; l < levels; l++) {
+      const src = pwTileLevel(d, t, l - 1);
+      const dst = pwTileLevel(d, t, l);
+      if (!src || !dst) break;
       const lw = w >> 1;
       const lh = h >> 1;
       if (lw < 1 || lh < 1) break;
       const next = new Uint8Array(lw * lh);
-      const sx0 = t.x >> (l - 1);
-      const sy0 = t.y >> (l - 1);
-      const dx0 = t.x >> l;
-      const dy0 = t.y >> l;
-      const S = src.data;
-      const D = dst.data;
+      const S = src.idx;
+      const D = dst.idx;
       const sw = src.width;
       for (let y = 0; y < lh; y++) {
         for (let x = 0; x < lw; x++) {
@@ -93,48 +95,49 @@ export function z3InkLevels(d: PwAtlasData, tiles: Iterable<PwTile>, levels = PW
           if (k0 + k1 + k2 + k3 < 2) continue;
           next[y * lw + x] = 1;
           // The ink texel nearest the ink's average colour (inline: no closures in the hot loop).
-          const i0 = ((sy0 + y * 2) * sw + sx0 + x * 2) * 4;
-          const i1 = i0 + 4;
-          const i2 = i0 + sw * 4;
-          const i3 = i2 + 4;
-          const u0 = k0 && S[i0 + 3] ? 1 : 0;
-          const u1 = k1 && S[i1 + 3] ? 1 : 0;
-          const u2 = k2 && S[i2 + 3] ? 1 : 0;
-          const u3 = k3 && S[i3 + 3] ? 1 : 0;
+          const i0 = (src.y + y * 2) * sw + src.x + x * 2;
+          const s0 = S[i0];
+          const s1 = S[i0 + 1];
+          const s2 = S[i0 + sw];
+          const s3 = S[i0 + sw + 1];
+          const u0 = k0 && s0 ? 1 : 0;
+          const u1 = k1 && s1 ? 1 : 0;
+          const u2 = k2 && s2 ? 1 : 0;
+          const u3 = k3 && s3 ? 1 : 0;
           const n = u0 + u1 + u2 + u3;
           if (!n) continue;
-          const r = (u0 * S[i0] + u1 * S[i1] + u2 * S[i2] + u3 * S[i3]) / n;
-          const g = (u0 * S[i0 + 1] + u1 * S[i1 + 1] + u2 * S[i2 + 1] + u3 * S[i3 + 1]) / n;
-          const b = (u0 * S[i0 + 2] + u1 * S[i1 + 2] + u2 * S[i2 + 2] + u3 * S[i3 + 2]) / n;
-          let best = -1;
+          const q0 = pwPalAt(s0);
+          const q1 = pwPalAt(s1);
+          const q2 = pwPalAt(s2);
+          const q3 = pwPalAt(s3);
+          const r = (u0 * P[q0] + u1 * P[q1] + u2 * P[q2] + u3 * P[q3]) / n;
+          const g = (u0 * P[q0 + 1] + u1 * P[q1 + 1] + u2 * P[q2 + 1] + u3 * P[q3 + 1]) / n;
+          const b = (u0 * P[q0 + 2] + u1 * P[q1 + 2] + u2 * P[q2 + 2] + u3 * P[q3 + 2]) / n;
+          let best = 0;
           let bd = Infinity;
           if (u0) {
-            const dd = dist2(S, i0, r, g, b);
+            const dd = dist2(P, s0, r, g, b);
             if (dd < bd) {
               bd = dd;
-              best = i0;
+              best = s0;
             }
           }
           if (u1) {
-            const dd = dist2(S, i1, r, g, b);
+            const dd = dist2(P, s1, r, g, b);
             if (dd < bd) {
               bd = dd;
-              best = i1;
+              best = s1;
             }
           }
           if (u2) {
-            const dd = dist2(S, i2, r, g, b);
+            const dd = dist2(P, s2, r, g, b);
             if (dd < bd) {
               bd = dd;
-              best = i2;
+              best = s2;
             }
           }
-          if (u3 && dist2(S, i3, r, g, b) < bd) best = i3;
-          const di = ((dy0 + y) * dst.width + dx0 + x) * 4;
-          D[di] = S[best];
-          D[di + 1] = S[best + 1];
-          D[di + 2] = S[best + 2];
-          D[di + 3] = S[best + 3];
+          if (u3 && dist2(P, s3, r, g, b) < bd) best = s3;
+          D[(dst.y + y) * dst.width + dst.x + x] = best;
         }
       }
       mask = next;

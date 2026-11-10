@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { QualityLevel, RetroMode } from './types';
+import { PW_DEBUG_FLOOR, PW_DEBUG_KEY, pwDebug } from './debugView';
 
 /** Vertical resolution of the arcade "board" per quality level (Sega Model 2 ran at 384 lines). */
 const LINES: Record<QualityLevel, number> = { low: 224, medium: 288, high: 360 };
@@ -27,6 +28,9 @@ const FRAG = /* glsl */ `
   uniform float uExposure;
   uniform float uLevels;  // colour levels per channel after quantisation
   uniform float uTime;
+  #ifdef PW_DEBUG
+    uniform float uPwDebug;
+  #endif
 
   vec3 aces(vec3 x) {
     const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
@@ -61,6 +65,15 @@ const FRAG = /* glsl */ `
       return;
     }
     vec2 px = uv * uRes;
+    #ifdef PW_DEBUG
+      // A PixelWorld debug view (core/debugView.ts): only the keyed pixels, at their own hue; the rest black.
+      if (uPwDebug > 0.5) {
+        vec3 k = sampleScene(uv);
+        float m = max(k.r, max(k.g, k.b));
+        gl_FragColor = vec4(m >= ${PW_DEBUG_FLOOR.toFixed(1)} ? k / m : vec3(0.0), 1.0);
+        return;
+      }
+    #endif
     // Slight convergence error toward the edges (CRT only).
     vec2 ca = (uv - 0.5) * (0.9 * uCrt) / uRes;
     vec3 col;
@@ -127,7 +140,9 @@ export class RetroPass {
         uExposure: { value: 1.05 },
         uLevels: { value: 31 },
         uTime: { value: 0 },
+        uPwDebug: pwDebug.view,
       },
+      defines: pwDebug.compiled ? { PW_DEBUG: '' } : {},
       depthTest: false,
       depthWrite: false,
       toneMapped: false,
@@ -192,6 +207,8 @@ export class RetroPass {
     u.uOut.value.copy(out);
     u.uTime.value = this.time;
     u.uExposure.value = r.toneMappingExposure;
+    // (Debug views are keyed through the float target; an 8-bit one would clamp the key away.)
+    if (pwDebug.compiled) pwDebug.gain.value = this.hdr ? PW_DEBUG_KEY : 1;
     r.setRenderTarget(rt);
     r.clear();
     r.render(scene, camera);

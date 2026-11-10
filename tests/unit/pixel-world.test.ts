@@ -3,7 +3,12 @@ import * as THREE from 'three';
 import { ART_NAMES, ART_STYLES, artCast, artWorld, envPending, isArtStyle, nextArt, pixelWorld } from '../../src/core/art';
 import { DEFAULT_SETTINGS } from '../../src/core/types';
 import { migrateArt, Save } from '../../src/core/Save';
-import { PW_ALIGN, PW_GLOW_A, PW_LEVELS, PW_TPM, PWF, PwCanvas, PwPalette } from '../../src/content/pixelworld/canvas';
+import {
+  extendRamp, PW_ALIGN, PW_GLOW_A, PW_LEVELS, PW_PAL_BRIGHT, PW_PAL_DEEP, PW_PAL_W, PW_TONES, PW_TPM, PW_TPM_CLOSE, PW_TPM_FAR, PW_TPM_MID, PW_TPM_NEAR, PWF, PWI, PwCanvas,
+  PwPalette, pwDensityFor, pwPalAt,
+} from '../../src/content/pixelworld/canvas';
+import { pwUpscale2x } from '../../src/content/pixelworld/upscale';
+import { hexToOklch } from '../../src/gameplay/pixel/materials';
 import {
   clearPwCache,
   paintTile,
@@ -18,6 +23,10 @@ import {
   PW_DEBUG_TILES,
   PW_STATS,
   PwAtlas,
+  pwRect,
+  pwTileLevel,
+  pwUpscale,
+  type PwTile,
 } from '../../src/content/pixelworld/atlas';
 import { pwStoreFlush, pwStorePrefetch } from '../../src/content/pixelworld/store';
 import { PwBatch, planarUv } from '../../src/content/pixelworld/batch';
@@ -121,6 +130,194 @@ describe('PixelWorld painting', () => {
     expect(pwLevelFor(rho(60), PW_LEVELS)).toBe(3);
     expect(pwLevelFor(rho(500), PW_LEVELS)).toBe(PW_LEVELS - 1);
     expect(PW_MIP_BIAS).toBe(0.5);
+    // PIXEL WORLD 2 tiers: the density that keeps a texel under ~1.5 frame pixels at the nearest normal view.
+    expect([PW_TPM_FAR, PW_TPM_MID, PW_TPM_NEAR, PW_TPM_CLOSE]).toEqual([32, 64, 96, 128]);
+    expect([8, 6, 4, 3, 2, 1.8, 1].map(pwDensityFor)).toEqual([32, 32, 64, 64, 96, 96, 128]);
+    const pxPerTexel = (density: number, d: number) => 1 / (pxM(d) * density);
+    for (const [d, lo] of [[6, 32], [3, 64], [1.8, 96]] as const) expect(pxPerTexel(pwDensityFor(d), lo === 32 ? 6 : d)).toBeLessThan(1.6);
+    // A tile stored at 2× picks its level for the stored texels: the upscaler's copy (level 0) only
+    // where a painted texel is magnified past √2 pixels, the painted texels (level 1) where the first pass showed them.
+    expect(pwLevelFor(rho(4), PW_LEVELS + 1, PW_MIP_BIAS, 2)).toBe(0);
+    expect(pwLevelFor(rho(8), PW_LEVELS + 1, PW_MIP_BIAS, 2)).toBe(1);
+    expect(pwLevelFor(rho(20), PW_LEVELS + 1, PW_MIP_BIAS, 2)).toBe(pwLevelFor(rho(20), PW_LEVELS) + 1);
+    expect(pwLevelFor(rho(500), PW_LEVELS + 1, PW_MIP_BIAS, 2)).toBe(PW_LEVELS);
+  });
+
+  it('stored texels are indices: ramp, tone, glow in 16 bits; the palette row extends each ramp both ways', () => {
+    const pal = new PwPalette();
+    const brick = pal.add(0x7a3a2c);
+    const neon = pal.add(0xff2c2c);
+    const c = new PwCanvas(4, 1);
+    c.set(0, 0, brick, 3);
+    c.set(1, 0, neon, 5, PWF.GLOW);
+    c.set(2, 0, brick, 0);
+    const t = c.index();
+    expect([...t]).toEqual([brick | (3 << PWI.TONE_SHIFT), neon | (5 << PWI.TONE_SHIFT) | PWI.GLOW, brick, 0]);
+    // The painted colour of a texel is its palette entry; `resolve` is the same through RGBA.
+    const px = c.resolve(pal);
+    const q = pwPalAt(t[0]);
+    expect([px[0], px[1], px[2], px[3]]).toEqual([pal.rgba[q], pal.rgba[q + 1], pal.rgba[q + 2], 255]);
+    expect(rgbAt(px, 4, 0, 0)).toBe(pal.ramps[brick - 1][3]);
+    expect(px[7]).toBe(PW_GLOW_A);
+    expect(px[15]).toBe(0);
+    expect(PW_PAL_W).toBe(PW_PAL_DEEP + PW_TONES + PW_PAL_BRIGHT);
+    expect(pal.rows().length).toBe(3 * PW_PAL_W * 4);
+    // Every ramp of a spread of materials: the six painted tones in the middle, lightness strictly rising
+    // across all sixteen... the deep end blue-violet and never black, the bright end warm and never pure white.
+    for (const hex of [0x7a3a2c, 0x2c2f37, 0x8a7454, 0x4f8a2e, 0x2f7fd0, 0xff2c2c, 0xe8f8f0, 0xffd23a, 0x86827a, 0x45301f, 0x1f3a6a, 0x9a7a52]) {
+      const ramp = pal.ramps[pal.add(hex) - 1];
+      const row = extendRamp(ramp);
+      expect(row.length).toBe(PW_PAL_W);
+      expect(row.slice(PW_PAL_DEEP, PW_PAL_DEEP + PW_TONES)).toEqual(ramp);
+      const lch = row.map((v) => hexToOklch(v));
+      // (Within one 8-bit step: the deep end of a dark ramp parts its tones by hue where there is no lightness left.)
+      for (let i = 1; i < PW_PAL_W; i++) expect(lch[i][0], `${hex.toString(16)} step ${i}`).toBeGreaterThanOrEqual(lch[i - 1][0] - 0.006);
+      expect(lch[PW_PAL_DEEP][0]).toBeGreaterThan(lch[0][0]);
+      // Deep: distinct colours all the way down, the deepest a blue-violet (hue 250°…320°) with real chroma, not black.
+      expect(new Set(row.slice(0, PW_PAL_DEEP + 1)).size, hex.toString(16)).toBe(PW_PAL_DEEP + 1);
+      expect(lch[0][0]).toBeGreaterThan(0.07);
+      expect(lch[0][1]).toBeGreaterThan(0.03);
+      expect(lch[0][2]).toBeGreaterThan(250);
+      expect(lch[0][2]).toBeLessThan(320);
+      expect(row[0] & 0xff).toBeGreaterThan((row[0] >> 16) & 0xff);
+      // Bright: never pure white, warm (red ≥ blue) at the top.
+      const top = row[PW_PAL_W - 1];
+      expect(top).not.toBe(0xffffff);
+      expect(lch[PW_PAL_W - 1][0]).toBeLessThan(0.985);
+      expect((top >> 16) & 0xff).toBeGreaterThanOrEqual(top & 0xff);
+    }
+  });
+
+  it('the pixel-art upscaler: shapes smoothed on equal texels, in-between tones on one ramp, crisp cut-outs, glow kept, dither redone finer', () => {
+    const pal = new PwPalette();
+    const a = pal.add(0x7a3a2c);
+    const b = pal.add(0x2f7fd0);
+    const tx = (r: number, tone: number, glow = false) => r | (tone << PWI.TONE_SHIFT) | (glow ? PWI.GLOW : 0);
+    const at = (up: Uint16Array, w: number, x: number, y: number) => up[y * w * 2 + x];
+    // A flat field stays flat; every painted texel survives in its own 2 × 2 block.
+    {
+      const c = new PwCanvas(8, 8);
+      c.rect(0, 0, 8, 8, a, 3);
+      c.rect(2, 2, 3, 3, b, 2);
+      const up = pwUpscale2x(c, false);
+      const src = c.index();
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        const block = [at(up, 8, x * 2, y * 2), at(up, 8, x * 2 + 1, y * 2), at(up, 8, x * 2, y * 2 + 1), at(up, 8, x * 2 + 1, y * 2 + 1)];
+        expect(block).toContain(src[y * 8 + x]);
+      }
+      // (EPX takes the one corner sub-texel off a convex corner: a rectangle comes out with its corners eased, sides straight.)
+      expect(at(up, 8, 4, 4)).toBe(tx(a, 3));
+      expect(at(up, 8, 5, 4)).toBe(tx(b, 2));
+      expect(at(up, 8, 4, 5)).toBe(tx(b, 2));
+      expect(at(up, 8, 3, 3)).toBe(tx(a, 3));
+      for (let k = 5; k < 9; k++) expect([at(up, 8, k, 4), at(up, 8, 4, k), at(up, 8, k, 9), at(up, 8, 9, k)]).toEqual([tx(b, 2), tx(b, 2), tx(b, 2), tx(b, 2)]);
+    }
+    // A staircase of another ramp becomes a diagonal (EPX: the corner between two equal neighbours is theirs).
+    {
+      const c = new PwCanvas(6, 6);
+      c.rect(0, 0, 6, 6, a, 3);
+      for (let i = 0; i < 6; i++) c.rect(0, i, i + 1, 1, b, 2);
+      const up = pwUpscale2x(c, false);
+      // Texel (2, 1) is ground with blob to its left and below: its bottom-left corner turns blob.
+      expect(at(up, 6, 4, 3)).toBe(tx(b, 2));
+      expect(at(up, 6, 5, 2)).toBe(tx(a, 3));
+      // Only texels of the two ramps at their painted tones (no blend across ramps).
+      expect(new Set(up)).toEqual(new Set([tx(a, 3), tx(b, 2)]));
+    }
+    // The same staircase between two tones of ONE ramp three steps apart: the corner takes a tone in between.
+    {
+      const c = new PwCanvas(6, 6);
+      c.rect(0, 0, 6, 6, a, 4);
+      for (let i = 0; i < 6; i++) c.rect(0, i, i + 1, 1, a, 1);
+      const up = pwUpscale2x(c, false);
+      expect(at(up, 6, 4, 3)).toBe(tx(a, 3));
+      expect([...new Set(up)].sort()).toEqual([tx(a, 1), tx(a, 2), tx(a, 3), tx(a, 4)].sort());
+      // One step apart there is no in-between: plain EPX.
+      const d = new PwCanvas(6, 6);
+      d.rect(0, 0, 6, 6, a, 3);
+      for (let i = 0; i < 6; i++) d.rect(0, i, i + 1, 1, a, 2);
+      expect(new Set(pwUpscale2x(d, false))).toEqual(new Set([tx(a, 3), tx(a, 2)]));
+    }
+    // Cut-out: corners are cut or filled whole (empty or the painted texel, nothing else); glow is copied, never toned.
+    {
+      const c = new PwCanvas(6, 6);
+      for (let i = 0; i < 6; i++) c.rect(0, i, i + 1, 1, a, 4);
+      c.set(5, 0, a, 1, PWF.GLOW);
+      c.set(4, 1, a, 1, PWF.GLOW);
+      const up = pwUpscale2x(c, false);
+      expect(new Set(up)).toEqual(new Set([0, tx(a, 4), tx(a, 1, true)]));
+      expect(at(up, 6, 4, 3)).toBe(tx(a, 4));
+    }
+    // A hand-made one-texel checker stays a one-texel checker at 2×; a DITHER band is re-dithered on the 2× grid.
+    {
+      const c = new PwCanvas(8, 8);
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) c.set(x, y, a, (x + y) & 1 ? 2 : 4);
+      const up = pwUpscale2x(c, true);
+      let same = 0;
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 15; x++) if (at(up, 8, x, y) === at(up, 8, x + 1, y)) same++;
+      expect(same).toBe(0);
+      const g = new PwCanvas(8, 8);
+      g.rect(0, 0, 8, 8, a, 2.5, PWF.DITHER);
+      const ug = pwUpscale2x(g, true);
+      same = 0;
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 15; x++) if (at(ug, 8, x, y) === at(ug, 8, x + 1, y)) same++;
+      expect(same).toBe(0);
+      expect(new Set(ug)).toEqual(new Set([tx(a, 2), tx(a, 3)]));
+      // A band from tone 1 to 4 across the tile: the 2× copy steps through the same tones, in order, finer.
+      const band = new PwCanvas(16, 4);
+      band.rect(0, 0, 16, 4, a, (x) => 1 + (x / 15) * 3, PWF.DITHER);
+      const ub = pwUpscale2x(band, false);
+      const mean = (x0: number) => {
+        let s = 0;
+        for (let y = 0; y < 8; y++) for (let x = x0; x < x0 + 8; x++) s += (at(ub, 16, x, y) & PWI.TONE) >> PWI.TONE_SHIFT;
+        return s / 64;
+      };
+      expect(mean(0)).toBeLessThan(mean(8));
+      expect(mean(8)).toBeLessThan(mean(16));
+      expect(mean(16)).toBeLessThan(mean(24));
+    }
+    // Every toolkit tile: a texel outside a dithered band survives in its own 2 × 2 block; inside one, the block keeps
+    // its ramp at a tone next to its own; no texel of the copy is anything the tile (or the in-between rule) could not give.
+    {
+      const lookdev = new PwAtlas('up-all', { upscale: false });
+      for (const t of lookdevTiles(lookdev)) {
+        const def = (lookdev as unknown as { tiles: Map<string, { paint: Parameters<typeof paintTile>[3] }> }).tiles.get(t.key)!;
+        const c = paintTile(t.key, t.w, t.h, def.paint, pal);
+        const src = c.index();
+        const up = pwUpscale2x(c, t.wrap);
+        const ramps = new Set(src.map((v) => v & (PWI.RAMP | PWI.GLOW)));
+        let lost = 0;
+        let foreign = 0;
+        for (let y = 0; y < t.h; y++) {
+          for (let x = 0; x < t.w; x++) {
+            const i = y * t.w + x;
+            const blk = [at(up, t.w, x * 2, y * 2), at(up, t.w, x * 2 + 1, y * 2), at(up, t.w, x * 2, y * 2 + 1), at(up, t.w, x * 2 + 1, y * 2 + 1)];
+            if (c.flag[i] & PWF.DITHER && c.ramp[i]) {
+              const ok = blk.some((v) => (v & PWI.RAMP) === c.ramp[i] && Math.abs(((v & PWI.TONE) >> PWI.TONE_SHIFT) - c.tone[i]) <= 1.5);
+              if (!ok) lost++;
+            } else if (!blk.includes(src[i])) lost++;
+            for (const v of blk) if (!ramps.has(v & (PWI.RAMP | PWI.GLOW)) || ((v & PWI.TONE) >> PWI.TONE_SHIFT) > 5) foreign++;
+          }
+        }
+        expect(lost, t.key).toBe(0);
+        expect(foreign, t.key).toBe(0);
+      }
+    }
+    // Wrap tiles stay seamless: the 2× copy of a tile laid twice is the copy laid twice.
+    {
+      const atlas = new PwAtlas('up-seam', { upscale: false });
+      const t = brickTile(atlas, { hex: 0x7a3a2c });
+      const def = (atlas as unknown as { tiles: Map<string, { paint: Parameters<typeof paintTile>[3] }> }).tiles.get(t.key)!;
+      const one = paintTile(t.key, t.w, t.h, def.paint, pal);
+      const two = new PwCanvas(t.w * 2, t.h);
+      two.blit(one, 0, 0);
+      two.blit(one, t.w, 0);
+      const u1 = pwUpscale2x(one, true);
+      const u2 = pwUpscale2x(two, true);
+      let bad = 0;
+      for (let y = 0; y < t.h * 2; y++) for (let x = 0; x < t.w * 4; x++) if (u2[y * t.w * 4 + x] !== u1[y * t.w * 2 + (x % (t.w * 2))]) bad++;
+      expect(bad).toBe(0);
+    }
   });
 
   it('painters are deterministic and node-safe (no DOM / GL), ramps only', { timeout: 60_000 }, () => {
@@ -178,26 +375,180 @@ describe('PixelWorld painting', () => {
     const atlas = new PwAtlas('pack');
     const tiles = lookdevTiles(atlas);
     const d = atlas.build();
+    // First-pass tiles (32 texels a metre) are stored at 2×: one level more, rects aligned for it.
+    expect(d.mips).toBe(PW_LEVELS + 1);
+    expect(atlas.levels).toBe(PW_LEVELS + 1);
+    expect(d.up).toBe(tiles.length);
     for (const t of tiles) {
-      expect(t.x % PW_ALIGN, t.key).toBe(0);
-      expect(t.y % PW_ALIGN, t.key).toBe(0);
-      expect(t.x + t.w).toBeLessThanOrEqual(d.w);
-      expect(t.y + t.h).toBeLessThanOrEqual(d.h);
+      expect(t.scale, t.key).toBe(2);
+      expect(t.x % (PW_ALIGN * 2), t.key).toBe(0);
+      expect(t.y % (PW_ALIGN * 2), t.key).toBe(0);
+      expect(t.x + t.w * 2).toBeLessThanOrEqual(d.w);
+      expect(t.y + t.h * 2).toBeLessThanOrEqual(d.h);
+      expect(pwRect(t)).toEqual([t.x, t.y, t.wrap ? t.w : -t.w, -t.h]);
     }
-    expect(d.levels.length).toBeGreaterThanOrEqual(PW_LEVELS);
-    // Every level-1 colour of a tile exists at level 0 (texels are picked, never blended).
-    const t = tiles[0];
-    const l0 = d.levels[0];
-    const l1 = d.levels[1];
-    const colours = new Set<number>();
-    for (let y = t.y; y < t.y + t.h; y++) for (let x = t.x; x < t.x + t.w; x++) colours.add(rgbAt(l0.data, l0.width, x, y));
-    let missing = 0;
-    for (let y = t.y >> 1; y < (t.y + t.h) >> 1; y++) for (let x = t.x >> 1; x < (t.x + t.w) >> 1; x++) if (!colours.has(rgbAt(l1.data, l1.width, x, y))) missing++;
-    expect(missing).toBe(0);
+    expect(d.levels.length).toBeGreaterThanOrEqual(PW_LEVELS + 1);
+    // Two bytes a texel at every level, plus the palette (a row a ramp and the unused row 0).
+    expect(d.levels[0].data.length).toBe(d.w * d.h * 2);
+    expect(d.levels[0].idx.buffer).toBe(d.levels[0].data.buffer);
+    expect(d.bytes).toBe(d.levels.reduce((s, l) => s + l.data.length, 0) + d.pal.length);
+    expect(d.pal.length % (PW_PAL_W * 4)).toBe(0);
+    const ramps = d.pal.length / (PW_PAL_W * 4) - 1;
+    expect(ramps).toBeGreaterThan(20);
+    expect(PW_STATS.get('pack')!.ramps).toBe(ramps);
+    for (const t of tiles) {
+      const w = t.w;
+      const h = t.h;
+      const texels = (k: number) => {
+        const lv = pwTileLevel(d, t, k)!;
+        const out: number[] = [];
+        for (let y = 0; y < h >> k; y++) for (let x = 0; x < w >> k; x++) out.push(lv.idx[(lv.y + y) * lv.width + lv.x + x]);
+        return out;
+      };
+      // Every texel is a ramp of the palette at a painted tone.
+      const l0 = texels(0);
+      for (const v of l0) {
+        expect(v & PWI.RAMP).toBeLessThanOrEqual(ramps);
+        if (v) expect((v & PWI.TONE) >> PWI.TONE_SHIFT).toBeLessThan(PW_TONES);
+      }
+      // Every level texel of a tile exists one level up (texels are picked, never blended), all the way down.
+      let above = new Set(l0);
+      for (let k = 1; k < PW_LEVELS; k++) {
+        const here = texels(k);
+        let missing = 0;
+        for (const v of here) if (!above.has(v)) missing++;
+        expect(missing, `${t.key} level ${k}`).toBe(0);
+        above = new Set(here);
+      }
+      // The upscaler's copy (stored level 0, rows bottom-up like every level) keeps each painted texel's ramp in
+      // its own 2 × 2 block and brings in no ramp the tile was not painted with.
+      const up = d.levels[0];
+      const rampsOf = new Set(l0.map((v) => v & PWI.RAMP));
+      let lost = 0;
+      let foreign = 0;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const o = (t.y + y * 2) * up.width + t.x + x * 2;
+          const blk = [up.idx[o], up.idx[o + 1], up.idx[o + up.width], up.idx[o + up.width + 1]];
+          if (!blk.some((v) => (v & PWI.RAMP) === (l0[y * w + x] & PWI.RAMP))) lost++;
+          for (const v of blk) if (!rampsOf.has(v & PWI.RAMP)) foreign++;
+        }
+      }
+      expect(lost, t.key).toBe(0);
+      expect(foreign, t.key).toBe(0);
+    }
     const again = new PwAtlas('pack');
     lookdevTiles(again);
     again.build();
     expect(PW_STATS.get('pack')!.cached).toBe(true);
+  });
+
+  it('density and the 2× fallback: native tiles are stored as painted, opt-outs and one-level atlases too; `pwUpscale(false)` is the first pass', () => {
+    clearPwCache();
+    const paint = (c: PwCanvas, k: { ramp(hex: number): number }) => c.rect(0, 0, c.w, c.h, k.ramp(0x806040), 2);
+    const atlas = new PwAtlas('tiers');
+    const far = atlas.tile('far', 32, 32, paint, { wrap: true });
+    const optOut = atlas.tile('far-only', 32, 32, paint, { wrap: true, upscale: false });
+    const mid = atlas.tile('mid', 64, 64, paint, { wrap: true, density: PW_TPM_MID });
+    const near = atlas.tile('near', 96, 96, paint, { density: PW_TPM_NEAR });
+    const close = atlas.tile('close', 128, 128, paint, { wrap: true, density: PW_TPM_CLOSE });
+    expect([far.scale, optOut.scale, mid.scale, near.scale, close.scale]).toEqual([2, 1, 1, 1, 1]);
+    // A native wrap tile needs every one of its six levels whole.
+    expect(() => atlas.tile('bad', 48, 48, paint, { wrap: true, density: PW_TPM_MID })).toThrow(/multiple of 32/);
+    const d = atlas.build();
+    expect(d.mips).toBe(PW_LEVELS + 1);
+    expect(d.up).toBe(1);
+    for (const t of [far, optOut, mid, near, close]) {
+      expect(t.x % 32).toBe(0);
+      expect(t.y % 32).toBe(0);
+      expect(pwRect(t)[3]).toBe(t.scale === 2 ? -t.h : t.h);
+    }
+    // The batch lays a wrap tile at its own density (painted texels) and carries the tile's rect.
+    const batch = new PwBatch(atlas);
+    for (const t of [far, mid, close]) batch.rect(new THREE.Vector3(), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), 2, 1, t);
+    const mesh = batch.build()!;
+    const uv = mesh.geometry.getAttribute('pwUv');
+    const rect = mesh.geometry.getAttribute('pwRect');
+    expect([uv.getX(2), uv.getY(2), uv.getX(6), uv.getY(6), uv.getX(10), uv.getY(10)]).toEqual([64, 32, 128, 64, 256, 128]);
+    expect([rect.getW(0), rect.getW(4), rect.getW(8)]).toEqual([-32, 64, 128]);
+    mesh.geometry.dispose();
+    Kit.disposeAll();
+    // One-level atlases (backdrops) are never upscaled; neither is anything with the fallback off.
+    const sky = new PwAtlas('tiers-sky', { levels: 1 });
+    expect(sky.tile('s', 64, 64, paint, { wrap: true }).scale).toBe(1);
+    expect(sky.levels).toBe(1);
+    pwUpscale(false);
+    try {
+      const v1 = new PwAtlas('tiers-v1');
+      const t = v1.tile('far', 32, 32, paint, { wrap: true });
+      expect(t.scale).toBe(1);
+      const dv = v1.build();
+      expect(dv.mips).toBe(PW_LEVELS);
+      expect(t.x % PW_ALIGN).toBe(0);
+      expect(dv.up).toBe(0);
+      expect(v1.signature()).not.toBe(new PwAtlas('tiers-v1').signature());
+    } finally {
+      pwUpscale(true);
+    }
+    clearPwCache();
+  });
+
+  it('the 2× fallback is a safety net only: every painted level of every stage tile is texel for texel what it is without it', { timeout: 600_000 }, () => {
+    const grab = (id: string) => {
+      clearPwCache();
+      const out = new Map<string, { d: ReturnType<PwAtlas['build']>; tiles: PwTile[] }>();
+      const build = PwAtlas.prototype.build;
+      PwAtlas.prototype.build = function (this: PwAtlas) {
+        const d = build.call(this);
+        out.set(this.name, { d, tiles: [...(this as unknown as { tiles: Map<string, { tile: PwTile }> }).tiles.values()].map((t) => ({ ...t.tile })) });
+        return d;
+      };
+      try {
+        const w = new World(new THREE.PerspectiveCamera(), new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS, art: 'pixel' }, 7);
+        new StageRunner(w, stage(id)).start();
+        w.dispose();
+      } finally {
+        PwAtlas.prototype.build = build;
+      }
+      Kit.disposeAll();
+      return out;
+    };
+    for (const id of ['z1', 'z2', 'z3', 'd1', 'd2', 'd3']) {
+      pwUpscale(false);
+      let plain: ReturnType<typeof grab>;
+      try {
+        plain = grab(id);
+      } finally {
+        pwUpscale(true);
+      }
+      const up = grab(id);
+      expect([...up.keys()]).toEqual([...plain.keys()]);
+      let stored2x = 0;
+      for (const [name, A] of plain) {
+        const B = up.get(name)!;
+        expect(B.tiles.length).toBe(A.tiles.length);
+        // The same ramps in the same order (the palette does not depend on how tiles are stored).
+        expect(Buffer.compare(Buffer.from(A.d.pal), Buffer.from(B.d.pal)), `${name} palette`).toBe(0);
+        let differ = 0;
+        A.tiles.forEach((ta, i) => {
+          const tb = B.tiles[i];
+          expect(ta.scale).toBe(1);
+          if (tb.scale === 2) stored2x++;
+          for (let k = 0; ; k++) {
+            const la = pwTileLevel(A.d, ta, k);
+            const lb = pwTileLevel(B.d, tb, k);
+            // (A tile left as painted in an atlas that holds 2× tiles has one level more than the first pass.)
+            if (!la || !lb) break;
+            const w = ta.w >> k;
+            const h = ta.h >> k;
+            for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (la.idx[(la.y + y) * la.width + la.x + x] !== lb.idx[(lb.y + y) * lb.width + lb.x + x]) differ++;
+          }
+        });
+        expect(differ, `${id} ${name}`).toBe(0);
+      }
+      expect(stored2x, id).toBeGreaterThan(50);
+    }
+    clearPwCache();
   });
 
   it('deferred paint (stage loads): same texels as painting at once, post passes after, texture re-uploaded, cancel spares the title', { timeout: 60_000 }, () => {
@@ -265,6 +616,9 @@ describe('PixelWorld painting', () => {
     expect([...d2.rects]).toEqual([...ref.rects]);
     expect(d2.levels.length).toBe(ref.levels.length);
     for (let i = 0; i < ref.levels.length; i++) expect(Buffer.compare(Buffer.from(d2.levels[i].data), Buffer.from(ref.levels[i].data)), `level ${i}`).toBe(0);
+    // … and the same palette, uploaded with the levels (a palette texture made before the paint has every row and is filled then).
+    expect(Buffer.compare(Buffer.from(d2.pal), Buffer.from(ref.pal))).toBe(0);
+    expect(d2.pal.length).toBeGreaterThan(PW_PAL_W * 4);
   });
 
   it('session cache keeps the stage being played (and the title), the store is a no-op without IndexedDB', async () => {
@@ -354,7 +708,7 @@ describe('PixelWorld stages (budgets, gameplay unchanged)', () => {
       const ms = performance.now() - t0;
       const meshes = pwMeshes(px);
       expect(meshes.length).toBeGreaterThan(0);
-      // Budgets: atlas memory (all PixelWorld atlases of the stage) ≤ 24 MB; painting time recorded.
+      // Budgets: atlas memory (all PixelWorld atlases of the stage) ≤ 48 MB; painting time recorded.
       const stats = [...PW_STATS.values()];
       const bytes = stats.reduce((s, a) => s + a.bytes, 0);
       const paint = stats.reduce((s, a) => s + a.ms, 0);
@@ -372,7 +726,8 @@ describe('PixelWorld stages (budgets, gameplay unchanged)', () => {
         for (const [name, st] of PW_STATS) console.log(name, st);
         console.log(PW_DEBUG_TILES().slice(0, 60).join('\n'));
       }
-      expect(bytes).toBeLessThanOrEqual(24 * 1048576);
+      expect(bytes).toBeLessThanOrEqual(48 * 1048576);
+      for (const a of stats) expect(Math.max(a.w, a.h)).toBeLessThanOrEqual(4096);
       // Warm (second load in the session, painted again from scratch): the JIT-warmed painting cost.
       clearPwCache();
       PW_STATS.clear();
@@ -412,8 +767,9 @@ describe('PixelWorld stages (budgets, gameplay unchanged)', () => {
       if (t.key.startsWith('volcano|')) expect(t.w).toBe(Math.round((volcanoSpan({ halfWidth: 26 }) * 2048) / 360 / 16) * 16);
       else expect(t.w).toBe(2048);
     }
-    // No mip chain for panoramas (painted at the screen's own density).
-    expect(d.bytes).toBe(d.w * d.h * 4);
+    // No mip chain for panoramas (painted at the screen's own density), never stored at 2×: two bytes a texel and the palette.
+    expect(d.up).toBe(0);
+    expect(d.bytes).toBe(d.w * d.h * 2 + d.pal.length);
   });
 
   it('z1 in PIXEL WORLD plays exactly like PIXEL CAST (stage simulator)', { timeout: 300_000 }, () => {
@@ -526,7 +882,7 @@ describe('d2 RESEARCH LABS in PIXEL WORLD (budgets, gameplay unchanged)', () => 
     const stats = [...PW_STATS.values()];
     const bytes = stats.reduce((s, a) => s + a.bytes, 0);
     console.log(`d2 PIXEL WORLD: ${[...PW_STATS].map(([n, a]) => `${n} ${a.w}×${a.h} ${(a.bytes / 1048576).toFixed(2)} MB ${a.ms.toFixed(0)} ms`).join(', ')}, ${meshes.length} PW meshes`);
-    expect(bytes).toBeLessThanOrEqual(24 * 1048576);
+    expect(bytes).toBeLessThanOrEqual(48 * 1048576);
     // PixelWorld meshes are scenery: never occluders, never raycast.
     const occ = new Set(px.env!.occluders ?? []);
     for (const m of meshes) expect(occ.has(m)).toBe(false);

@@ -693,6 +693,9 @@ Junk falls back to the default.
   (`PWF.GLOW` unlit, `PWF.DITHER` ordered dither between two steps; without it a fractional
   tone ROUNDS). Primitives: `set / rect / hline / vline / line / ellipse / poly / scatter`
   (hand-shaped clusters, `CLUSTERS`), `PwRng` seeded by the tile key. Pure CPU, node-safe.
+  `index()` gives the canvas as STORED TEXELS (16 bits: ramp, tone step, glow — never a
+  colour; see *PIXEL WORLD 2 pipeline*), `resolve(pal)` the same through the palette as RGBA
+  (look-dev, tests).
 - **Atlas** (`atlas.ts`): tiles are REGISTERED while the stage builds (`atlas.tile(key, w,
   h, paint, { wrap })` → a handle; the same key returns the same tile), LAID OUT in `build()`
   (rects known at once: meshes can be built) and PAINTED — at once (tests, tools), or, when
@@ -702,19 +705,23 @@ Junk falls back to the default.
   calm levels, z3 ink levels, z1 flame coverage) register with `atlas.post(fn)` right after
   `build()`: they run when the paint ends. Deterministic either way, cached by tile list for
   the session (`pwCacheKeep` drops other stages' copies: one stage's worth of CPU data) and
-  persisted (`store.ts`, below), packed into one RGBA8 texture with 5 hand-made levels. Mips are palette-faithful: each texel of a level is a real texel
-  of the four below it (the one nearest their average, within the class most of them
-  share) — never a blend; glow wins ties and survives over cut-out, so neon, stars and lit
-  windows keep reading at a distance. Alpha classes: 0 = cut out (discarded), 160
-  (`PW_GLOW_A`) = unlit glow, 255 = lit. Rects are 16-texel aligned (`PW_ALIGN`); wrap tiles
-  must be multiples of 16. `PW_STATS` holds bytes / paint ms / cached / stored per atlas
-  (`window.__pixelWorld`), `PW_PAINT_STATS` the longest single paint step.
+  persisted (`store.ts`, below), packed into one INDEXED texture (two bytes a texel) with
+  hand-made levels, beside a small palette texture (*PIXEL WORLD 2 pipeline*, below). Mips
+  are palette-faithful: each texel of a level is a real texel of the four below it (the one
+  nearest their average colour, within the class most of them share) — never a blend; glow
+  wins ties and survives over cut-out, so neon, stars and lit windows keep reading at a
+  distance. Texel classes: cut out (discarded), glow (unlit), lit. Rects are aligned so every
+  level stays inside its own rect (`PW_ALIGN` = 16 painted texels); wrap tiles must be
+  multiples of 16. `PW_STATS` holds size / bytes / paint ms / tiles stored at 2× / levels /
+  ramps / cached / stored per atlas (`window.__pixelWorld`), `PW_PAINT_STATS` the longest
+  single paint step.
 - **Store** (`store.ts`): painted atlases persist in IndexedDB (`overrun-pixelworld`), one
   record per atlas NAME under `<version>|<name>` — `version` a hash of every source file
   (`__PW_VERSION__`, injected by vite.config.ts: any code change repaints once; other
   versions' records are deleted by key range when the store opens). A record holds the tile
-  list it was painted for (checked on use), every level after its `post()` passes, and the
-  rects. Game opens the store at boot, `pwStorePrefetch(stageId)` reads a stage's records
+  list it was painted for (checked on use), every indexed level after its `post()` passes,
+  the palette, the rects and the texel format (`PW_FORMAT`: a record in another format is
+  not used). Game opens the store at boot, `pwStorePrefetch(stageId)` reads a stage's records
   while its intro card paints (the build waits ≤ 1.5 s for it), and `pwStoreFlush(1)` hands
   freshly painted atlases over one a frame, still behind the card (the data is cloned at the
   call; the disk write runs in the background). No IndexedDB (node, a sandboxed frame), a
@@ -723,11 +730,13 @@ Junk falls back to the default.
   `define` would not follow edits): `&pwstore=<tag>` turns it on for benchmarks.
 - **Material** (`material.ts`): flat-shaded Lambert (stage lights, flashlight, fog, tone
   mapping exactly like the 3D scenery) whose colour is fetched texel by texel
-  (`texelFetch`, level = log2(texels per pixel) + bias): hard texels, the hand-made levels
-  take over before anything crawls. Per vertex: the tile rect (w < 0 = module, clamped;
-  w > 0 = tileable, wrapped inside its rect), texel UV (or PLANAR: projected world
-  position, 24 B a vertex for big bakes), vertex colour (tint / painted AO). `gain` matches
-  the stage's scenery brightness; `anim` plays vertical strip tiles (water, flicker).
+  (`texelFetch` of the index, then of its palette entry; level = log2(texels per pixel) +
+  bias, picked per texel axis): hard texels, the hand-made levels take over before anything
+  crawls. Per vertex: the tile rect (`pwRect(tile)`: w < 0 = module, clamped; w > 0 =
+  tileable, wrapped inside its rect; h < 0 = stored at 2×), PAINTED-texel UV (or PLANAR:
+  projected world position, 24 B a vertex for big bakes), vertex colour (tint / painted AO).
+  `gain` matches the stage's scenery brightness; `anim` plays vertical strip tiles (water,
+  flicker).
 - **Batch** (`batch.ts`): `PwBatch` collects quads into ONE mesh per batch (one draw):
   `rect` (wrap tiles map at `PW_TPM` from `u0/v0`, modules stretch, `sub` / `flipU`,
   `tintRGB` for NEUTRAL tiles), `box`, `ribbon` (a strip along points with v running along
@@ -766,8 +775,10 @@ Junk falls back to the default.
 
 ### Style guide (keep stages consistent)
 
-1. **Density**: world surfaces are painted at `PW_TPM` = 32 texels a metre (≈ 1 texel a
-   retro pixel at 8 m); signs and modules at the same density; backdrops 2048 texels round.
+1. **Density**: the first pass painted world surfaces at `PW_TPM` = 32 texels a metre (≈ 1
+   texel a retro pixel at 8 m), signs and modules at the same density; backdrops 2048 texels
+   round. The second pass picks a tile's density from its nearest normal view (64 / 96 / 128:
+   docs/PIXELWORLD2.md §3; what is still at 32 is stored at 2× by the upscaler, below).
    Never scale a tile to fit: lay wrap tiles at density, size modules in whole texels.
 2. **Palette**: colours come from the stage's existing material colours through
    `k.ramp(hex, …)` (6-step hue-shifted ramps) — the environment shares the cast's palette
@@ -844,6 +855,147 @@ first render, on the first frames of play whenever the load finished late (the s
 below now waits for it on a fence). Next steps: a Worker for the cold paint (painters are
 DOM-free and node-safe), and splitting the world build itself (d1's 0.9–1.2 s, shared with
 PIXEL CAST) over frames.
+
+### PIXEL WORLD 2 pipeline (formats, density, the 2× fallback, tools)
+
+The second pass over the environments (art direction: `docs/PIXELWORLD2.md`) needs every
+texel drawn at about one frame pixel and light that moves paint along its own ramp. This is
+the plumbing for it; everything above (registering, painting, batches, re-texturing,
+backdrops, the store, deferred paint) works as described, on new formats.
+
+- **Stored texel = an index** (`PWI`, canvas.ts), 16 bits: bits 0–11 the ramp id (0 = cut
+  out, 4095 ramps an atlas), 12–14 the painted tone (0…5), 15 glow. `PwCanvas.index()`
+  resolves a canvas to it (tone rounded, or ordered-dithered where `PWF.DITHER`). The atlas
+  texture is RG8 (low byte, high byte; `NoColorSpace`, nearest, the hand-made levels as
+  mips), two bytes a texel. On the CPU a level is `{ data: Uint8Array, idx: Uint16Array }`
+  over the same memory (`data` is what is uploaded and stored; little-endian hosts).
+- **Palette texture** per atlas (`atlas.palette()`): RGBA8 sRGB, `PW_PAL_W` = 16 texels a
+  row, row = ramp id. A row is the ramp EXTENDED (`extendRamp`): the six painted tones in
+  columns 5…10 (`PW_PAL_DEEP` + tone), five deeper steps before them and five brighter
+  after, by `makeRamp`'s recipe from the ramp's own colours — the deep end turns to
+  blue-violet in even steps while its lightness sinks only to a deep indigo (0.10–0.17
+  OKLab L: lighter for a light material; where a dark ramp has no lightness left the steps
+  part by hue, never grey-black); the bright end climbs straight through the colour space
+  to a warm white (#fdf6e3-ish, never #ffffff), gently where a capped ramp's top steps are
+  small. A palette texture made while its atlas is still being painted (deferred loads) has
+  all 4096 rows and is filled when the paint ends; otherwise it has exactly its rows.
+- **Shader** (`PW_FETCH` in material.ts, shared by the lit material, the backdrop material,
+  z2's billboards and z3's sprites): `pwTexel(ip, lv)` fetches the two bytes, rebuilds ramp /
+  tone / glow (samplers declared `highp`), and looks the colour up at column 5 + tone —
+  rgb = the painted colour, a = the class (0 cut, 0.5 glow, 1 lit). The lighting is still
+  the first pass's: palette colour of the PAINTED tone × Lambert, glow emitted, fog, tone
+  mapping (the extended columns are for the ramp-step lighting that comes next). Vertex
+  tints (NEUTRAL tiles, painted AO) multiply after the lookup, as before.
+- **Levels and the passes that re-make them** work on texels: `reduceRect` picks, per 2 × 2,
+  the texel nearest the block's mean COLOUR (through the palette) within its majority class —
+  the same choice as the RGBA version made. `pwTileLevel(d, tile, k)` gives level `k` of a
+  tile at its PAINTED scale wherever the atlas keeps it (the calm / ink / flame passes of
+  d2 · z2 · d3 / z3 / z1 use it: unchanged results); `pwLevelRgba(d, l)` a level as RGBA for
+  dumps; `pwPalAt(texel)` the palette offset of a texel's painted colour.
+- **Density** is per tile (`atlas.tile(key, w, h, paint, { density })`, PAINTED texels a
+  metre; batches lay wrap tiles at it, modules are sized `tile.w / tile.density`). Tiers
+  (docs/PIXELWORLD2.md §3): `PW_TPM_FAR` 32 (nearest normal view ≥ 6 m), `PW_TPM_MID` 64
+  (3–6 m), `PW_TPM_NEAR` 96 (1.8–3 m), `PW_TPM_CLOSE` 128 (< 1.8 m); `pwDensityFor(metres)`.
+  A tile registered at 64 or more is stored as painted; its wrap sizes must be multiples of
+  32. An atlas holding any dense tile (native, or stored at 2×) carries one level more than
+  its painted ones (6 for the default 5): rects are then aligned to 32 stored texels.
+- **The 2× fallback**: a tile painted below 64 texels a metre is STORED AT 2× (`tile.scale`
+  2) — level 0 is the pixel-art upscaler's copy, level 1 the texels exactly as painted, the
+  rest the usual reduction of those. Nothing else changes: UVs, tile sizes and densities stay
+  in painted texels; `pwRect(tile)` marks such a tile by a negative height and the shader
+  doubles the coords at the fetch and picks the level for the stored texels (so the copy
+  shows only where a painted texel would be drawn larger than √2 pixels; further away the
+  frame is the first pass's, texel for texel — `pixel-world.test.ts` checks every painted
+  level of every stage tile against a build without the fallback). Opt out per tile
+  (`{ upscale: false }`: far-only tiles) or per atlas (`new PwAtlas(name, { upscale:
+  false })`); one-level atlases (backdrops) are never upscaled. Animated strips pass
+  `{ frames }` so each frame is smoothed on its own. Hand-built `pwRect` attributes must
+  come from `pwRect(tile, wrap?)`.
+- **The upscaler** (`upscale.ts`, on the painted canvas — ramp, fractional tone, flags —
+  before it is resolved): shapes smoothed as EPX / Scale2x (a corner goes to its two
+  neighbours when they are the same stored texel and the opposite ones differ); where such
+  a corner lies between two tones of ONE ramp two or more steps apart it takes the tone in
+  between (anti-aliasing; never across ramps, never on glow); cut-out corners are cut or
+  filled whole; `PWF.DITHER` bands keep their fractional tone (carried a quarter of the way
+  toward same-band neighbours) and are re-dithered on the 2× grid; a hand-made one-texel
+  checker becomes the same checker at 2×. ≈ 65 ms for z1's 1.79 M painted texels.
+- **Per-axis level pick** (`pwFetchAxes`, lit material only): the level is chosen for u and
+  for v separately instead of once for the squeezed axis. On a plane seen at a grazing
+  angle (a road, a corridor wall) the fetch is the finer of the two levels (at most two
+  apart) and the 2 or 4 texels of the block the coarser one would have made of them along
+  the squeezed axis are reduced in the shader the way levels are made (majority class,
+  glow wins ties, the texel nearest their mean): texels stay at pixel size ACROSS the view
+  instead of being drawn two to six pixels wide, and the pick is the same anywhere inside
+  the block: it does not slide with the sample. Measured on a moving rail, the share of
+  world pixels whose painted tone changes from one 1/60 s step to the next: z1 13.9 → 15.1 %,
+  z2 12.5 → 11.8 %; d2's chequer floors 13.6 → 15.5–16.9 % — a fine regular pattern now
+  shows further out instead of melting into its calm far level as soon as the view
+  foreshortens it (`pwMaterial(atlas, { axes: false })` gives a material the old rule back).
+  Costs up to 3 more texel fetches (and palette lookups) on such pixels, none elsewhere.
+  Without it neither the 2× copy nor a natively dense tile shows on foreshortened planes at
+  all. A material's `bias` still applies per axis: z2 / d2 keep their first-pass biases of
+  1.0 (walls) and 1.5 (floors), i.e. texels of 1.4–2.8 pixels — lower them when those
+  stages are repainted.
+- **Flags**: `&pwup=0` (no 2× storage) and `&pwaniso=0` (one level for both axes) together
+  give the first pass's frames from the new formats (the parity check: 7 of the 9 reference
+  shots identical to the pixel, the other two within the run-to-run flicker of a lamp and
+  a fire); `pwUpscale(on)` / `pwAxisLevels(on)` are read when tiles are registered /
+  materials made.
+- **Debug views** (`core/debugView.ts`; `&pwdebug=mag|lvl|tone|ramp` compiles them in,
+  `window.__pwDebug(view)` switches on the same frame): `mag` = frame pixels across the
+  widest side of one stored texel (green ≤ 1.25, yellow ≤ 1.5, orange ≤ 2, red > 2), `lvl`
+  = the same for the texel actually drawn (its level per axis), `tone` = the painted tone
+  (0 blue … 5 orange, glow magenta), `ramp` = a hue per ramp id. View colours are written
+  × 4096 into the float scene target and the monitor pass keeps only those pixels, at their
+  own hue: the cast, classic scenery and backdrops are black, rain and light pools do not
+  tint the view. FLORA billboards take part in `mag` / `lvl`.
+- **Audit** (`node scripts/pixel-audit.mjs --base <dev url> --out <dir> [--shots …]`; 24
+  default shots: three views a stage and its boss): the exact 624 × 288 art frame, as drawn
+  and in `mag` / `lvl`, on one frozen frame. Per shot: share of world pixels with a texel
+  wider than 1.5 / 2 pixels (and > 2 in the middle 80 % of the frame), the same for the
+  drawn texel, share of 16 × 16 world blocks that are flat (≤ 2 colours, or fewer than 12
+  of 480 adjacent pairs more than two monitor steps apart), distinct colours, share of
+  adjacent world pairs exactly one step of the monitor's 15-bit colour apart (smooth
+  gradients, screen-door dither). Pass marks: > 1.5 ≤ 5 %, > 2 mid ≤ 1 %, flat ≤ 4 %, one-step
+  pairs ≤ 20 %. Writes 3× PNGs (frame, views, flat blocks boxed) and a JSON. The first
+  pass's numbers (`/tmp/pw2/audit-v1.json` when it was measured): > 1.5: 20.9 %, > 2 mid:
+  6.3 %, drawn > 2: 37.1 %, flat 12.7 %, one-step pairs 65.1 %, 1293 colours (means of the
+  24 shots). With the foundation alone (the same paint: the 2× fallback and the per-axis pick): > 1.5:
+  6.4 %, > 2 mid: 1.0 %, drawn > 2: 7.0 %, flat 10.1 %, one-step pairs 63.9 %, 1325 colours
+  (`/tmp/pw2/audit-found.json`); 12 of the 24 shots are inside both density marks (none
+  were). What is left over the marks: z2 / d2's first-pass level biases, tiles painted
+  below 32 on purpose (d1's river at 16), FLORA plants close to the camera (their own atlas,
+  not upscaled) — and everything `flat` and `tiny` measure, which is paint and light.
+- **Budgets** (per stage, all atlases, all levels; the bytes are the same on the GPU and in
+  the CPU copy): ≤ 48 MB, every atlas ≤ 4096 on a side, cold paint ≤ 1.2 s on the test box.
+
+  | stage | atlases as stored (MB) | total | paint, JIT-warm (node, min of 4) | cold load: build / paint in frames / total | warm total |
+  |---|---|---|---|---|---|
+  | z1 | z1 4096×2272 23.7 · sky 2048×368 1.4 · fire 512×896 1.2 | 26.3 MB | 262 ms (196 without the fallback) | 691 / 439 ms in 25 / 3541 ms | 2494 ms |
+  | z2 | z2 4096×1376 14.4 · sky 1024×416 0.8 | 15.2 MB | 167 (119) | 665 / 418 in 20 / 2506 | 2467 |
+  | z3 | z3 4096×1856 19.4 · sky 2048×464 1.8 · fx 512×896 1.2 · truck 512×416 0.5 | 22.9 MB | 187 (195) | 642 / 294 in 18 / 2193 | 1836 |
+  | d1 | d1 2048×1696 8.8 · sky 2048×576 2.3 · jeep 512×480 0.6 | 11.7 MB | 203 (185) | 1261 / 425 in 20 / 3752 | 2316 |
+  | d2 | d2 4096×1440 15.0 · sky 256×272 0.1 | 15.2 MB | 218 (82) | 1032 / 354 in 20 / 2600 | 2473 |
+  | d3 | d3 2048×2112 11.0 · sky 2048×352 1.4 · jeep 512×512 0.7 | 13.1 MB | 152 (123) | 1042 / 353 in 17 / 3818 | 2132 |
+  | title | city 2048×1216 6.3 · fire 1.2 · sky 2.0 — jungle 1024×768 2.0 · fx 0.3 · sky 2.4 | 9.5 + 4.6 MB | | | |
+
+  (Every first-pass tile at 2×, nothing repainted yet, nothing opted out but the backdrops:
+  an atlas at 4096 wide is 2.0 MB per 256 rows with its levels, so the 48 MB budget is about
+  one atlas 4096 × 4096 plus backdrops — a stage that outgrows it opts far-only tiles out or
+  splits an atlas, at one draw call more for each mesh that then spans two. Without the
+  fallback the indexed atlases are 3.9–7.7 MB a stage, half the first pass's RGBA.) Loads:
+  production build, `scripts/load-bench.mjs --intro --warm 1 --play 6`, SwiftShader on the
+  shared 4-core box; the same build with `&pwup=0&pwaniso=0` measured 2.6–4.7 s cold and
+  2.2–2.9 s warm in the next run, i.e. the two are inside the box's run-to-run spread. Store
+  reads are 21–36 MB in 86–147 ms (title included), writes 33–70 ms, the longest paint step
+  43–85 ms (a sky band), no long task in play in any of the 12 loads; draw calls and
+  triangles are exactly the first pass's (same meshes; 2–4 more textures: the palettes).
+
+  The CPU copy is kept after the upload: a restored WebGL context re-uploads every texture
+  from it (three.js; checked with `WEBGL_lose_context`), and a RETRY / RESTART rebuilds the
+  stage's textures from the session cache without touching IndexedDB; dropping it would
+  make both an asynchronous 15–35 MB store read (or, where there is no store, a repaint).
+  It is two bytes a texel instead of four.
 
 ### How to convert a stage
 
@@ -1333,6 +1485,9 @@ render / settle / total ms (`scripts/load-bench.mjs`).
 
 `?stage=z1` jump into a stage · `&art=3d|sprites|pixel` ART: CLASSIC / PIXEL CAST / PIXEL WORLD (default) ·
 `&pwstore=<tag>` persist painted atlases on the dev server (version `dev-<tag>`; `0` = off) ·
+`&pwdebug=mag|lvl|tone|ramp` PixelWorld debug views (`1` = compiled in, off until
+`__pwDebug(view)`) · `&pwup=0` no 2× fallback · `&pwaniso=0` one level for both texel axes
+(both off = the first pass's frames) ·
 `&spriteLook=pal:0,dirs:8` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
 overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor

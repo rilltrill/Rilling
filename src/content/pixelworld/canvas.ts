@@ -1,4 +1,5 @@
 import { FloraPalette, FloraRng, type FloraRampOptions } from '../pixel/floraPaint';
+import { hexToOklch, oklchToHex } from '../../gameplay/pixel/materials';
 
 /**
  * PixelWorld painting canvas (pure CPU, node-safe — no DOM, no GL).
@@ -22,14 +23,48 @@ import { FloraPalette, FloraRng, type FloraRampOptions } from '../pixel/floraPai
  * the bottom / right reveal catches the light.
  */
 
-/** World texel density: texels per metre on every PixelWorld world surface. */
+/** World texel density of the first pass: texels per metre (one texel a frame pixel at 8 m). */
 export const PW_TPM = 32;
-/** Painted mip levels (level 0 = full size). */
+/**
+ * Density tiers (texels a metre; docs/PIXELWORLD2.md §3): pick a tile's `density` from the nearest
+ * distance at which it is normally on screen — pixels per texel = 260 / (density × metres).
+ * A tile painted below `PW_TPM_MID` is stored at 2× by the pixel-art upscaler (`upscale.ts`)
+ * unless it opts out; one registered at `PW_TPM_MID` or more is stored as painted.
+ */
+export const PW_TPM_FAR = 32; // ≥ 6 m: upper storeys, the far side of a street, distant structures
+export const PW_TPM_MID = 64; // 3–6 m: ground along the rail, ground-floor fronts, vehicles, big props
+export const PW_TPM_NEAR = 96; // 1.8–3 m: corridor walls and floors, counters, doors you pass
+export const PW_TPM_CLOSE = 128; // < 1.8 m: the player's vehicle, things brushing past the camera
+/** The tier for a surface whose nearest normal view is `metres` away. */
+export function pwDensityFor(metres: number): number {
+  return metres >= 6 ? PW_TPM_FAR : metres >= 3 ? PW_TPM_MID : metres >= 1.8 ? PW_TPM_NEAR : PW_TPM_CLOSE;
+}
+/** Painted mip levels of a tile at its painted size (level 0 = full size). */
 export const PW_LEVELS = 5;
-/** Atlas rect alignment (texels): every level of every rect stays inside its own rect. */
+/** Tile alignment in PAINTED texels: every level of every rect stays inside its own rect. */
 export const PW_ALIGN = 1 << (PW_LEVELS - 1);
-/** Alpha byte of an unlit (glowing) texel; 255 = lit surface, 0 = cut out. */
+/** Alpha byte of an unlit (glowing) texel in a RESOLVED canvas (look-dev, tests); 255 = lit surface, 0 = cut out. */
 export const PW_GLOW_A = 160;
+
+/**
+ * The stored texel: 16 bits of INDEX, never a colour — bits 0…11 the ramp id (0 = cut out), bits
+ * 12…14 the painted tone (0…5), bit 15 glow (unlit). The colour comes from the atlas's palette:
+ * a row a ramp, `PW_PAL_W` tones wide — the six painted tones in the middle (`PW_PAL_DEEP` …),
+ * `PW_PAL_DEEP` deeper steps before them and `PW_PAL_BRIGHT` brighter ones after (`extendRamp`),
+ * so light can move a texel along its own ramp by whole steps and stay a palette colour.
+ */
+export const PW_TONES = 6;
+export const PW_PAL_DEEP = 5;
+export const PW_PAL_BRIGHT = 5;
+export const PW_PAL_W = PW_PAL_DEEP + PW_TONES + PW_PAL_BRIGHT;
+/** Ramp ids 1…4095 (12 bits of the texel). */
+export const PW_MAX_RAMPS = 4095;
+export const PWI = {
+  RAMP: 0x0fff,
+  TONE_SHIFT: 12,
+  TONE: 0x7000,
+  GLOW: 0x8000,
+} as const;
 /** Backdrop texels per degree of view (2048 texels around the horizon ≈ 1 texel per retro pixel). */
 export const PW_BACKDROP_TPD = 2048 / 360;
 
@@ -52,8 +87,14 @@ export const PWF = {
  */
 export class PwPalette {
   private inner = new FloraPalette();
+  /** The six painted tones of each ramp (index = id − 1). */
   readonly ramps: number[][] = [];
   private keys = new Map<string, number>();
+  /**
+   * The palette as the atlas stores and uploads it: RGBA8 (sRGB), `PW_PAL_W` texels a row, row
+   * `id` = that ramp extended (row 0 unused). Grows with the ramps: read it afresh after an `add`.
+   */
+  rgba = new Uint8Array(64 * PW_PAL_W * 4);
   add(hex: number, o: FloraRampOptions = {}): number {
     const key = `${hex}|${o.dark ?? ''}|${o.light ?? ''}|${o.shift ?? ''}|${o.sat ?? ''}|${o.shadowHue ?? ''}|${o.cap ?? ''}`;
     let id = this.keys.get(key);
@@ -63,11 +104,87 @@ export class PwPalette {
       const r = this.inner.ramps[this.inner.add(hex, o) - 1];
       this.ramps.push(r);
       id = this.ramps.length;
-      if (id > 65535) throw new Error('pixelworld palette full');
+      if (id > PW_MAX_RAMPS) throw new Error(`pixelworld palette full (${PW_MAX_RAMPS} ramps an atlas): reuse ramps or split the atlas`);
       this.keys.set(key, id);
+      if ((id + 1) * PW_PAL_W * 4 > this.rgba.length) {
+        const grown = new Uint8Array(this.rgba.length * 2);
+        grown.set(this.rgba);
+        this.rgba = grown;
+      }
+      const row = extendRamp(r);
+      for (let i = 0; i < PW_PAL_W; i++) {
+        const q = (id * PW_PAL_W + i) * 4;
+        this.rgba[q] = (row[i] >> 16) & 255;
+        this.rgba[q + 1] = (row[i] >> 8) & 255;
+        this.rgba[q + 2] = row[i] & 255;
+        this.rgba[q + 3] = 255;
+      }
     }
     return id;
   }
+
+  /** The stored palette, cut to its rows (a copy). */
+  rows(): Uint8Array {
+    return this.rgba.slice(0, (this.ramps.length + 1) * PW_PAL_W * 4);
+  }
+}
+
+/** Hue `h` moved a fraction `t` of the way (the short way round) toward `target`, degrees. */
+function hueToward(h: number, target: number, t: number): number {
+  const d = ((target - h + 540) % 360) - 180;
+  return (h + d * t + 360) % 360;
+}
+
+/** Where the deep end of every ramp heads: the night's own blue-violet (OKLCH chroma / hue), dark but never black. */
+const DEEP_C = 0.058;
+const DEEP_H = 285;
+/** Where the bright end heads: a warm white a little short of white (OKLab L, a, b). */
+const BRIGHT_L = 0.975;
+const BRIGHT_A = 0.0;
+const BRIGHT_B = 0.028;
+
+/**
+ * A painted six-tone ramp continued both ways into a `PW_PAL_W`-tone palette row, by the recipe
+ * `makeRamp` built it with (gameplay/pixel/materials.ts: shadows cooler and richer, highlights
+ * warmer and paler). Works from the ramp's own colours, so capped ramps (night plants) and custom
+ * shadow hues continue from where they are.
+ *  - Below tone 0 (the outline shade: already near the dark limit of most ramps) five even
+ *    steps turn the hue round to blue-violet while the lightness sinks only as far as a deep
+ *    indigo, lighter for a light material than for a dark one: night tones that stay apart by
+ *    their colour where there is no lightness left to part them, never a grey-black.
+ *  - Above tone 5 the steps climb toward a warm white, straight through the colour space (a
+ *    sky blue pales to white before it warms, it does not turn mint on the way), each no more
+ *    than a third of what is left — never pure white — and starting gently where the ramp's own
+ *    top steps are small (a capped ramp).
+ */
+export function extendRamp(ramp: readonly number[]): number[] {
+  const out: number[] = new Array(PW_PAL_W);
+  for (let i = 0; i < PW_TONES; i++) out[PW_PAL_DEEP + i] = ramp[Math.min(i, ramp.length - 1)];
+  const [L0, C0, h0] = hexToOklch(out[PW_PAL_DEEP]);
+  // The deepest tone: 0.10 (a dark material) … 0.17 (a light one), always under tone 0.
+  const deepL = Math.min(L0 * 0.92, Math.max(0.1, Math.min(0.17, L0 * 0.7)));
+  for (let k = 1; k <= PW_PAL_DEEP; k++) {
+    const t = k / PW_PAL_DEEP;
+    const L = L0 + (deepL - L0) * t;
+    const C = C0 + (DEEP_C - C0) * t;
+    const h = C0 < 0.02 ? DEEP_H : hueToward(h0, DEEP_H, t * 0.92);
+    out[PW_PAL_DEEP - k] = oklchToHex(L, C, h);
+  }
+  const top = PW_PAL_DEEP + PW_TONES - 1;
+  const [L5, C5, h5] = hexToOklch(out[top]);
+  const [L4] = hexToOklch(out[top - 1]);
+  let L = L5;
+  let A = C5 * Math.cos((h5 * Math.PI) / 180);
+  let B = C5 * Math.sin((h5 * Math.PI) / 180);
+  let step = Math.max(0.018, L5 - L4);
+  for (let k = 1; k <= PW_PAL_BRIGHT; k++) {
+    step = Math.min((BRIGHT_L - L) * 0.34, Math.max(0.03, step * 1.7));
+    L += step;
+    A += (BRIGHT_A - A) * 0.4;
+    B += (BRIGHT_B - B) * 0.4;
+    out[top + k] = oklchToHex(L, Math.hypot(A, B), ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360);
+  }
+  return out;
 }
 
 /** Deterministic painter RNG (mulberry32) — painters never touch `world.rng`. */
@@ -421,31 +538,56 @@ export class PwCanvas {
   }
 
   /**
-   * Resolve to RGBA8, rows top-down: tone → the nearest ramp step, or (texels
-   * flagged DITHER) a 4×4 ordered dither between the two steps around it.
-   * Alpha: 0 = cut out, PW_GLOW_A = unlit glow, 255 = lit surface.
+   * The canvas as stored texels (`PWI`: ramp, tone step, glow), rows top-down: a tone goes to the
+   * nearest ramp step, or (texels flagged DITHER) a 4×4 ordered dither between the two steps
+   * around it. 0 = cut out. What the atlas packs; the palette turns it into colour.
    */
-  resolve(pal: PwPalette, out = new Uint8Array(this.w * this.h * 4)): Uint8Array {
-    const { w, h } = this;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        const r = this.ramp[i];
-        const q = i * 4;
+  index(out = new Uint16Array(this.w * this.h)): Uint16Array {
+    const { w, h, ramp, tone, flag } = this;
+    for (let y = 0, i = 0; y < h; y++) {
+      for (let x = 0; x < w; x++, i++) {
+        const r = ramp[i];
         if (!r) {
-          out[q] = out[q + 1] = out[q + 2] = out[q + 3] = 0;
+          out[i] = 0;
           continue;
         }
-        const ramp = pal.ramps[r - 1];
-        let s = this.flag[i] & PWF.DITHER ? Math.floor(this.tone[i] + bayer(x, y)) : Math.floor(this.tone[i] + 0.5);
+        const f = flag[i];
+        let s = f & PWF.DITHER ? Math.floor(tone[i] + BAYER[(y & 3) * 4 + (x & 3)]) : Math.floor(tone[i] + 0.5);
         s = s < 0 ? 0 : s > 5 ? 5 : s;
-        const c = ramp[s];
-        out[q] = (c >> 16) & 255;
-        out[q + 1] = (c >> 8) & 255;
-        out[q + 2] = c & 255;
-        out[q + 3] = this.flag[i] & PWF.GLOW ? PW_GLOW_A : 255;
+        out[i] = r | (s << PWI.TONE_SHIFT) | (f & PWF.GLOW ? PWI.GLOW : 0);
       }
     }
     return out;
   }
+
+  /**
+   * Resolve to RGBA8, rows top-down (look-dev dumps, tests): the stored texels through the
+   * palette. Alpha: 0 = cut out, PW_GLOW_A = unlit glow, 255 = lit surface.
+   */
+  resolve(pal: PwPalette, out = new Uint8Array(this.w * this.h * 4)): Uint8Array {
+    return pwIndexToRgba(this.index(), pal.rgba, out);
+  }
+}
+
+/** Stored texels → RGBA8 at their painted tone (alpha classes as `PwCanvas.resolve`): `pal` = palette rows (`PwPalette.rgba`). */
+export function pwIndexToRgba(idx: Uint16Array, pal: Uint8Array, out = new Uint8Array(idx.length * 4)): Uint8Array {
+  for (let i = 0; i < idx.length; i++) {
+    const t = idx[i];
+    const q = i * 4;
+    if (!(t & PWI.RAMP)) {
+      out[q] = out[q + 1] = out[q + 2] = out[q + 3] = 0;
+      continue;
+    }
+    const p = pwPalAt(t);
+    out[q] = pal[p];
+    out[q + 1] = pal[p + 1];
+    out[q + 2] = pal[p + 2];
+    out[q + 3] = t & PWI.GLOW ? PW_GLOW_A : 255;
+  }
+  return out;
+}
+
+/** Byte offset in a palette (`PwPalette.rgba` / `PwAtlasData.pal`) of a stored texel's painted colour. */
+export function pwPalAt(t: number): number {
+  return ((t & PWI.RAMP) * PW_PAL_W + PW_PAL_DEEP + ((t & PWI.TONE) >> PWI.TONE_SHIFT)) * 4;
 }

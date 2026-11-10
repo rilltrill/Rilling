@@ -1,4 +1,5 @@
-import type { PwAtlasData, PwTile } from './atlas';
+import { pwTileLevel, type PwAtlasData, type PwTile } from './atlas';
+import { PWI, pwPalAt } from './canvas';
 
 /**
  * RESEARCH LABS — calm far levels for tileable surfaces.
@@ -17,6 +18,9 @@ import type { PwAtlasData, PwTile } from './atlas';
  *
  * Runs once per painted atlas (the atlas cache keeps the result: a RETRY /
  * RESTART reuses it). Only opaque wrap tiles (no cut-out / glow texels).
+ * Levels are the tile's PAINTED levels (`pwTileLevel`: a tile stored at 2×
+ * keeps the upscaler's copy above them, untouched here); colours come from the
+ * atlas palette, the result is written back as texels of the tile's own.
  * Reads level 1 (a quarter of level 0's data); allocation-light: one set of
  * scratch buffers for the whole pass.
  */
@@ -26,7 +30,7 @@ const done = new WeakSet<PwAtlasData>();
 /** Bench hook: ms spent by the last calm-levels pass (0 when the cached atlas was already done). */
 export const D2_LEVEL_STATS = { ms: 0 };
 
-/** Snap memo: 15-bit colour key → palette colour, stamped per tile (no clearing). */
+/** Snap memo: 15-bit colour key → a texel of that colour, stamped per tile (no clearing). */
 const memoVal = new Int32Array(32768);
 const memoGen = new Int32Array(32768);
 let gen = 0;
@@ -36,11 +40,8 @@ export function d2CalmLevels(d: PwAtlasData, tiles: Iterable<PwTile>) {
   if (done.has(d)) return;
   done.add(d);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  if (d.levels.length < 3) return;
-  // Source: the toolkit's level 1 (real texels of the tile, a quarter of level 0's data).
-  const L1 = d.levels[1];
-  const src = L1.data;
-  const W1 = L1.width;
+  if (d.mips < 3) return;
+  const P = d.pal;
   let cap = 0;
   let R = new Float32Array(0);
   let G = new Float32Array(0);
@@ -48,6 +49,7 @@ export function d2CalmLevels(d: PwAtlasData, tiles: Iterable<PwTile>) {
   let R2 = new Float32Array(0);
   let G2 = new Float32Array(0);
   let B2 = new Float32Array(0);
+  /** The tile's own colours (≤ 256): a texel of each, and its RGB. */
   const pal = new Int32Array(256);
   const pr = new Float32Array(256);
   const pg = new Float32Array(256);
@@ -55,32 +57,39 @@ export function d2CalmLevels(d: PwAtlasData, tiles: Iterable<PwTile>) {
   const seen = new Map<number, number>();
   for (const t of tiles) {
     if (!t.wrap || t.x < 0) continue;
+    // Source: the toolkit's level 1 (real texels of the tile, a quarter of level 0's data).
+    const L1 = pwTileLevel(d, t, 1);
+    if (!L1) continue;
+    const src = L1.idx;
+    const W1 = L1.width;
     const w = t.w >> 1;
     const h = t.h >> 1;
-    const ox = t.x >> 1;
-    const oy = t.y >> 1;
+    const ox = L1.x;
+    const oy = L1.y;
     // Opaque only; the tile's own colours (the palette the levels snap to, ≤ 256).
     seen.clear();
     let np = 0;
     let ok = true;
     for (let y = 0; y < h && ok; y++) {
-      let i = ((oy + y) * W1 + ox) * 4;
-      for (let x = 0; x < w; x++, i += 4) {
-        if (src[i + 3] !== 255) {
+      let i = (oy + y) * W1 + ox;
+      for (let x = 0; x < w; x++, i++) {
+        const tx = src[i];
+        if (!(tx & PWI.RAMP) || tx & PWI.GLOW) {
           ok = false;
           break;
         }
-        const rgb = (src[i] << 16) | (src[i + 1] << 8) | src[i + 2];
+        const q = pwPalAt(tx);
+        const rgb = (P[q] << 16) | (P[q + 1] << 8) | P[q + 2];
         if (seen.has(rgb)) continue;
         if (np === 256) {
           ok = false;
           break;
         }
         seen.set(rgb, np);
-        pal[np] = rgb;
-        pr[np] = src[i];
-        pg[np] = src[i + 1];
-        pb[np] = src[i + 2];
+        pal[np] = tx;
+        pr[np] = P[q];
+        pg[np] = P[q + 1];
+        pb[np] = P[q + 2];
         np++;
       }
     }
@@ -99,17 +108,20 @@ export function d2CalmLevels(d: PwAtlasData, tiles: Iterable<PwTile>) {
       G2 = new Float32Array(cap);
       B2 = new Float32Array(cap);
     }
-    const row = W1 * 4;
     for (let y = 0; y < ch; y++) {
-      let i = ((oy + y * 2) * W1 + ox) * 4;
+      let i = (oy + y * 2) * W1 + ox;
       let j = y * cw;
-      for (let x = 0; x < cw; x++, i += 8, j++) {
-        R[j] = (src[i] + src[i + 4] + src[i + row] + src[i + row + 4]) * 0.25;
-        G[j] = (src[i + 1] + src[i + 5] + src[i + row + 1] + src[i + row + 5]) * 0.25;
-        B[j] = (src[i + 2] + src[i + 6] + src[i + row + 2] + src[i + row + 6]) * 0.25;
+      for (let x = 0; x < cw; x++, i += 2, j++) {
+        const q0 = pwPalAt(src[i]);
+        const q1 = pwPalAt(src[i + 1]);
+        const q2 = pwPalAt(src[i + W1]);
+        const q3 = pwPalAt(src[i + W1 + 1]);
+        R[j] = (P[q0] + P[q1] + P[q2] + P[q3]) * 0.25;
+        G[j] = (P[q0 + 1] + P[q1 + 1] + P[q2 + 1] + P[q3 + 1]) * 0.25;
+        B[j] = (P[q0 + 2] + P[q1 + 2] + P[q2 + 2] + P[q3 + 2]) * 0.25;
       }
     }
-    for (let l = 2; l < d.levels.length; l++) {
+    for (let l = 2; ; l++) {
       if (l > 2) {
         const lw = cw >> 1;
         const lh = ch >> 1;
@@ -135,18 +147,18 @@ export function d2CalmLevels(d: PwAtlasData, tiles: Iterable<PwTile>) {
         cw = lw;
         ch = lh;
       }
-      const lv = d.levels[l];
-      const x0 = t.x >> l;
-      const y0 = t.y >> l;
-      // Only levels the atlas painted (blank levels past PW_LEVELS stay blank).
-      if (lv.data[(y0 * lv.width + x0) * 4 + 3] === 0) break;
-      const out = lv.data;
+      // Only levels the atlas painted (the blank ones past them stay blank).
+      const lv = pwTileLevel(d, t, l);
+      if (!lv) break;
+      const x0 = lv.x;
+      const y0 = lv.y;
+      const out = lv.idx;
       for (let y = 0; y < ch; y++) {
         const ym = ((y - 1 + ch) % ch) * cw;
         const yc = y * cw;
         const yp = ((y + 1) % ch) * cw;
-        let di = ((y0 + y) * lv.width + x0) * 4;
-        for (let x = 0; x < cw; x++, di += 4) {
+        let di = (y0 + y) * lv.width + x0;
+        for (let x = 0; x < cw; x++, di++) {
           const xm = x === 0 ? cw - 1 : x - 1;
           const xp = x === cw - 1 ? 0 : x + 1;
           // 1-2-1 tent (wrapped): the block and its neighbours.
@@ -175,10 +187,7 @@ export function d2CalmLevels(d: PwAtlasData, tiles: Iterable<PwTile>) {
             memoGen[key] = gen;
             memoVal[key] = c;
           }
-          out[di] = (c >> 16) & 255;
-          out[di + 1] = (c >> 8) & 255;
-          out[di + 2] = c & 255;
-          out[di + 3] = 255;
+          out[di] = c;
         }
       }
     }

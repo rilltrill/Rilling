@@ -75,7 +75,7 @@ describe('d3 TYRANT CHASE in PIXEL WORLD', () => {
     const stats = [...PW_STATS.values()];
     const bytes = stats.reduce((s, a) => s + a.bytes, 0);
     console.log(`d3 PIXEL WORLD: ${[...PW_STATS].map(([n, a]) => `${n} ${a.w}×${a.h} ${(a.bytes / 1048576).toFixed(2)} MB ${a.ms.toFixed(0)} ms ${a.tiles} tiles`).join(', ')}; total ${(bytes / 1048576).toFixed(2)} MB`);
-    expect(bytes).toBeLessThanOrEqual(24 * 1048576);
+    expect(bytes).toBeLessThanOrEqual(48 * 1048576);
     expect(PW_STATS.has('d3')).toBe(true);
     expect(PW_STATS.has('d3-sky')).toBe(true);
     expect(PW_STATS.has('d3-jeep')).toBe(true);

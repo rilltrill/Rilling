@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { Kit } from '../kit/ModelKit';
 import { PwAtlas, type PwPainter, type PwTile } from './atlas';
 import { bayer, PWF, type PwCanvas } from './canvas';
+import { PW_DEBUG_DECL, pwDebugPatch, pwDebugSetup } from '../../core/debugView';
+import { PW_FETCH, pwAtlasUniforms } from './material';
 import { hash2 } from './surfaces';
 import { z1FlameTile, Z1_FLAME_FRAMES, Z1_FLAME_H, Z1_FLAME_W } from './z1fire';
 
@@ -161,7 +163,7 @@ export class Z3FxAtlas {
       this.atlas.tile(`${src.key}|z3lick`, src.w, src.h, (c, k) => {
         paint(c, k);
         taperDetached(c, Z1_FLAME_H);
-      }),
+      }, { frames: Z1_FLAME_FRAMES }),
     ];
     this.puff = z3PuffTile(this.atlas);
   }
@@ -175,21 +177,25 @@ export class Z3FxAtlas {
  * `cells` side-by-side variants picked per instance). `glow` = unlit at the painted colour.
  */
 export function pwSpriteMaterial(atlas: PwAtlas, tile: PwTile, o: { frames?: number; fps?: number; cells?: number; cols?: number; glow?: boolean; fog?: boolean; gain?: number }): THREE.MeshBasicMaterial {
-  const tex = atlas.texture();
   const frames = o.frames ?? 1;
   const cells = o.cells ?? 1;
   const cols = o.cols ?? cells;
   const rows = Math.ceil(cells / cols);
-  const uniforms = {
-    uPwAtlas: { value: tex },
+  const uniforms: Record<string, { value: unknown }> = {
+    ...pwAtlasUniforms(atlas),
     uPwTime: { value: 0 },
+    // (x, y in stored texels; the cell size in painted texels, × `uPwScale` at the fetch.)
     uPwRect: { value: new THREE.Vector4(tile.x, tile.y, tile.w / cols, tile.h / frames / rows) },
+    uPwScale: { value: tile.scale },
     uPwCols: { value: cols },
     uPwAnim: { value: new THREE.Vector3(frames, o.fps ?? 0, cells) },
     uPwMaxLv: { value: atlas.levels - 1 },
     uPwGain: { value: o.gain ?? 1 },
   };
   const m = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: o.fog ?? true });
+  const defines: Record<string, string> = {};
+  pwDebugSetup(defines, uniforms);
+  m.defines = defines;
   m.userData.pw = uniforms;
   m.userData.pixelWorld = true;
   m.onBeforeCompile = (shader) => {
@@ -226,9 +232,11 @@ export function pwSpriteMaterial(atlas: PwAtlas, tile: PwTile, o: { frames?: num
       .replace(
         '#include <common>',
         `#include <common>
-        uniform sampler2D uPwAtlas;
+        ${PW_DEBUG_DECL}
+        ${PW_FETCH}
         uniform float uPwTime;
         uniform vec4 uPwRect;
+        uniform float uPwScale;
         uniform vec3 uPwAnim;
         uniform float uPwMaxLv;
         uniform float uPwGain;
@@ -242,21 +250,24 @@ export function pwSpriteMaterial(atlas: PwAtlas, tile: PwTile, o: { frames?: num
         `{
           vec2 pu = vPwUv * uPwRect.zw;
           vec2 pg = max(abs(dFdx(pu)), abs(dFdy(pu)));
-          int lv = int(clamp(floor(log2(max(max(pg.x, pg.y), 1e-3)) + 0.5), 0.0, uPwMaxLv));
+          int lv = pwLevel(max(pg.x, pg.y), uPwScale, 0.5, uPwMaxLv);
           float frame = floor(mod(uPwTime * uPwAnim.y + vPwSeed * uPwAnim.x, uPwAnim.x));
           float cell = vPwCell >= 0.0 ? vPwCell : floor(vPwSeed * 7.0 * uPwAnim.z);
           cell = mod(cell, uPwAnim.z);
           vec2 t = clamp(pu, vec2(0.0), uPwRect.zw - 0.001);
           t.x += mod(cell, uPwCols) * uPwRect.z;
           t.y += (floor(cell / uPwCols) + frame) * uPwRect.w;
-          ivec2 ip = (ivec2(uPwRect.xy) + ivec2(floor(t))) >> lv;
-          vec4 pc = texelFetch(uPwAtlas, ip, lv);
+          vec4 pc = pwFetch(uPwRect.xy, t, uPwScale, lv);
           if (pc.a < 0.25) discard;
           diffuseColor.rgb *= pc.rgb * uPwGain;
+          #ifdef PW_DEBUG
+            pwDbg = uPwDebug > 2.5 ? pwDbgTexel : pwDbgMag(pu, uPwScale, ivec2(lv));
+          #endif
         }`,
       );
+    shader.fragmentShader = pwDebugPatch(shader.fragmentShader);
   };
-  m.customProgramCacheKey = () => 'z3pwSprite3';
+  m.customProgramCacheKey = () => 'z3pwSprite4';
   m.name = 'pw:z3-sprite';
   void o.glow;
   void PWF;
