@@ -361,7 +361,7 @@ const ZEYE2: StampDef[] = [
   { rows: ['22', '3A'], ax: 1, ay: 1 },
   { rows: ['222', '3A3'], ax: 1, ay: 1 },
   { rows: ['2222', '33A3', '.11.'], ax: 2, ay: 1 },
-  { rows: ['.33333.', '3333AA3', '3333AA3', '.33333.', '..111..'], ax: 4, ay: 1 },
+  { rows: ['.3333.', '333AA3', '333AA3', '.3333.', '..11..'], ax: 3, ay: 1 },
 ];
 /** Zombie mouth [closed snarl / open / gaping][size]: interior slot 0, teeth slot 1 (two tones: separate teeth). */
 const ZMOUTH2: StampDef[][] = [
@@ -398,35 +398,37 @@ const NOSE2: StampDef[] = [
  * strain (squeezed shut toward the nose, brows knitted).
  */
 const LEYE2: Record<'calm' | 'scream' | 'terror' | 'relief' | 'strain', StampDef[]> = {
+  // (XS and S carry NO pure white: a lone white pixel on a small dark face reads as a
+  // zombie's glowing pin. Whites start at M; an eye is never wider than ~28 % of the head.)
   calm: [
-    { rows: ['tt', 'ln'], ax: 1, ay: 1 },
-    { rows: ['ttt', 'lnl'], ax: 1, ay: 1 },
-    { rows: ['tttt.', 'nnnnn', 'llnnl', '.111.'], ax: 2, ay: 2 },
-    { rows: ['.ttttt.', '.......', '.nnnnn.', 'nllnnln', '.llnnl.', '..111..'], ax: 3, ay: 3 },
+    { rows: ['n'], ax: 0, ay: 0 },
+    { rows: ['ttt', '...', '.n.'], ax: 1, ay: 2 },
+    { rows: ['tttt', '....', '.nn.', 'lnnl', '.11.'], ax: 2, ay: 3 },
+    { rows: ['tttt.', '.....', 'nnnnn', 'llnnl', '.111.'], ax: 2, ay: 3 },
   ],
   scream: [
-    { rows: ['tt', '..', 'ln', 'll'], ax: 1, ay: 2 },
-    { rows: ['ttt', '...', 'lnl', 'lll'], ax: 1, ay: 2 },
+    { rows: ['t', '.', 'n', 'n'], ax: 0, ay: 2 },
+    { rows: ['.tt', 't..', 'ini', '.n.'], ax: 1, ay: 2 },
+    { rows: ['.tt.', 't..t', '....', 'lnnl', 'lnnl', '.ll.'], ax: 2, ay: 3 },
     { rows: ['.ttt.', 't...t', '.nnn.', 'nlnln', 'nllln', '.111.'], ax: 2, ay: 3 },
-    { rows: ['..ttt..', '.t...t.', '.......', '.nnnnn.', 'nllnlln', 'nllnlln', '.lllll.'], ax: 3, ay: 4 },
   ],
   terror: [
-    { rows: ['.t', 't.', 'ln', 'll'], ax: 1, ay: 2 },
-    { rows: ['..t', 'tt.', 'lnl', 'lll'], ax: 1, ay: 2 },
+    { rows: ['t', 'n', 'n'], ax: 0, ay: 1 },
+    { rows: ['..t', 'tt.', 'ini', 'ini'], ax: 1, ay: 2 },
+    { rows: ['..tt', 'tt..', '.nn.', 'llnl', 'llnl', '.ll.'], ax: 2, ay: 4 },
     { rows: ['...tt', 'ttt..', '.nnn.', 'nllln', 'nlnln', '.lll.'], ax: 2, ay: 4 },
-    { rows: ['....ttt', 'tttt...', '.nnnnn.', 'nllllln', 'nllnlln', 'nllllln', '.11111.'], ax: 3, ay: 4 },
   ],
   relief: [
-    { rows: ['tt', '22'], ax: 1, ay: 1 },
-    { rows: ['ttt', '.2.', '2.2'], ax: 1, ay: 1 },
+    { rows: ['nn'], ax: 0, ay: 0 },
+    { rows: ['ttt', '...', '.n.', 'n.n'], ax: 1, ay: 2 },
+    { rows: ['tttt', '....', '.nn.', 'n..n'], ax: 2, ay: 2 },
     { rows: ['.ttt.', '.....', '.222.', '2...2'], ax: 2, ay: 2 },
-    { rows: ['.ttttt.', '.......', '..222..', '.2...2.', '2.....2'], ax: 3, ay: 2 },
   ],
   strain: [
-    { rows: ['tt', '22'], ax: 1, ay: 1 },
-    { rows: ['tt.', '..t', '22.', '..2'], ax: 1, ay: 2 },
+    { rows: ['nn'], ax: 0, ay: 0 },
+    { rows: ['tt.', '..t', 'nn.', '..n'], ax: 1, ay: 2 },
+    { rows: ['tt..', '..tt', 'nn..', '..nn', 'nn..'], ax: 2, ay: 3 },
     { rows: ['tt...', '..ttt', '22...', '..222', '22...'], ax: 2, ay: 3 },
-    { rows: ['ttt....', '...tttt', '222....', '...2222', '222....'], ax: 3, ay: 3 },
   ],
 };
 /** Living mouths [size]: calm (a worried line), scream (an open O, teeth on top), gasp, smile, gritted teeth. Interior slot 0, teeth slot 1. */
@@ -463,6 +465,31 @@ const LMOUTH3: Record<'calm' | 'scream' | 'gasp' | 'smile' | 'grit', StampDef[]>
   ],
 };
 
+
+// ─── PIXEL CAST 2: big hands ────────────────────────────────────────────────
+// Hands of 11 texels and more are stamps too (they were jointed cone fingers): a palm,
+// fingers two texels wide with their separations drawn, a knuckle shadow, dark nails on
+// the dead. [pose][size]: L (about 12 cells), XL (about 16); authored like HANDS (pointing
+// RIGHT and UP-RIGHT, anchor = the wrist cell). Fists and thumbs-up have the L size only.
+const HANDS_L: { right: StampDef[]; diag: StampDef[] }[] = [
+  {
+    right: [{ rows: ['....dd.......', '...ddd..ddb..', '..ddd..ddd.b.', '.ddd.dddd....', 'ddddddd.dddb.', 'ddeddddddd.b.', 'dddddcd......', 'dddddddddddb.', 'cddddcdddd.b.', 'cdddd........', '.cddddddddb..', '..ccdcddd.b..', '.....c.......'], ax: 0, ay: 6 }, { rows: ['.....ddd.........', '....dddd...dddb..', '...dddd...dddd.b.', '..dddd..ddddd..b.', '.dddd.dddddd.....', 'ddddddddd..ddddb.', 'dddedddddddddd.bb', 'ddeeddddcdddd..b.', 'dddddddcd........', 'dddddddddddddddb.', 'cddddddcdddddd.bb', 'cdddddcddddd...b.', 'cdddddd..........', '.cdddddddddddb...', '.ccddddcddddd.b..', '..cccdcddd....b..', '......c..........'], ax: 0, ay: 8 }],
+    diag: [{ rows: ['.......b..bb.', '......dd..d..', '..b..dd..dd.b', '..dd.dd.dd.dd', '...dddddd.dd.', '.b.ddddddd...', '.dddddeddd...', '..ddddddd....', '..dddddd.....', '.dddddc......', 'ddddcc.......', 'dddc.........', 'cc...........'], ax: 0, ay: 12 }, { rows: ['.........bb...bb.', '........dd....dd.', '...b...ddd...dd..', '...dd..dd...ddd.b', '...ddd.dd..ddd.bb', '....dddddd.dd.dd.', '.bb.dddddddd.ddd.', '.ddd.ddddddddd...', '..ddddddeedddd...', '...ddddddedddd...', '...dddddddddd....', '..ddddddddddd....', '.dddddddddcc.....', 'ddddddddcc.......', 'dddddddc.........', 'cddddc...........', '.ccc.............'], ax: 0, ay: 16 }],
+  },
+  {
+    right: [{ rows: ['...ddde.....', '.dddddddddd.', 'ddddddcccccc', 'ddeddddddddd', 'dddddccccccc', 'dddddddddddd', 'cdddccccccc.', '.cdddddddd..'], ax: 0, ay: 4 }, { rows: ['....dddde.......', '...ddddd........', '.ddddddddddddde.', 'ddddddddddddddde', 'dddddddccccccccc', 'ddedddddddddddde', 'ddeeddddcccccccc', 'dddddddddddddde.', 'cdddddddcccccc..', 'cddddddddddddd..', '.cccdddddddd....'], ax: 0, ay: 6 }],
+    diag: [{ rows: ['.......de...', '......dcde..', '.....dcdcde.', '.e..dcdcdcd.', '.dd.dddcdc..', '.dddddddcd..', '..dddedddc..', '..ddddddc...', '.ddddddc....', 'dddddc......', 'ddddc.......', 'cdc.........'], ax: 0, ay: 11 }, { rows: ['..........dde...', '.........ddcde..', '........ddcddde.', '.......ddcddcde.', '.e....ddcddcddd.', '.dd...dddddcddc.', '.ddd.ddddddddc..', '.dddddddddddcd..', '..dddddeedddc...', '..ddddddedddc...', '..dddddddddc....', '.dddddddddc.....', 'dddddddddc......', 'dddddddcc.......', 'cdddddc.........', '.cccc...........'], ax: 0, ay: 15 }],
+  },
+  {
+    right: [{ rows: ['..dddd.....', '.ddeddded..', 'dddddddcde.', 'ddedddddcd.', 'ddddddddde.', 'ddddddddcd.', 'cddddddde..', 'cddcdddcd..', '.ccccccc...'], ax: 0, ay: 4 }],
+    diag: [{ rows: ['....ded....', '...ddcded..', '..dddddcde.', '.ddeddddcd.', '.ddddddddd.', 'ddddddddd..', 'dddddddc...', 'cddddcc....', '.cddc......', '.cc........'], ax: 0, ay: 9 }],
+  },
+  {
+    right: [{ rows: ['.....de....', '.....dd....', '.....dd....', '.....dd....', '..dddddd...', '.ddedddded.', 'dddddddcde.', 'ddedddddcd.', 'ddddddddde.', 'cdddddddcd.', 'cddcdddcd..', '.ccccccc...'], ax: 0, ay: 8 }],
+    diag: [{ rows: ['....de.....', '....dd.....', '....dd.....', '....ddded..', '...ddddcde.', '..ddeddddd.', '.dddddddcd.', '.ddddddddd.', 'dddddddd...', 'dddddddc...', 'cddddcc....', '.cddc......', '.cc........'], ax: 0, ay: 12 }],
+  },
+];
+
 /** PIXEL CAST 2 face stamps (ids): [size] for eyes / nose, [state][size] for the zombie mouth. */
 export const CEL_STAMP = {
   zeye: ZEYE2.map(add),
@@ -483,6 +510,28 @@ export const CEL_STAMP = {
     grit: LMOUTH3.grit.map(add),
   },
 };
+
+/** The size between the old stamps (7 cells) and L: about 10 cells — claw (three fingers and a thumb at this size) and open hand. */
+const HANDS_M: { right: StampDef; diag: StampDef }[] = [
+  {
+    right: { rows: ['...dd.....', '..ddd.ddb.', '.ddd.ddd.b', 'ddddddd...', 'ddeddddddb', 'dddddddd.b', 'cdddd.....', 'cdddddddb.', '.cddddd..b', '..cc......'], ax: 0, ay: 5 },
+    diag: { rows: ['......b.b.', '.....dd.d.', '..b.dd.dd.', '..dddd.d.b', '...dddddd.', '.b.ddddd..', '.ddddedd..', '..ddddd...', '.ddddc....', 'dddcc.....'], ax: 0, ay: 9 },
+  },
+  {
+    right: { rows: ['..ddde....', '.ddddddde.', 'ddddcccccc', 'ddeddddddd', 'dddddccccc', 'cdddddddd.', '.ccccc....'], ax: 0, ay: 3 },
+    diag: { rows: ['.....de..', '....dcde.', '...dcdcd.', '.e.ddcdc.', '.ddddddd.', '..ddeddc.', '.dddddc..', 'ddddc....', 'cdc......'], ax: 0, ay: 8 },
+  },
+];
+
+/**
+ * PIXEL CAST 2 big hands (ids): [pose `HAND.*`][0 = M (≈ 10 cells), 1 = L (≈ 12), 2 = XL (≈ 16)][dir8].
+ * (Fists and thumbs-up are drawn once, at about 11 cells: every size maps to it.)
+ */
+export const CEL_HAND: number[][][] = HANDS_L.map((p, i) => {
+  const l = hand8(p.right[0], p.diag[0]);
+  const m = HANDS_M[i] ? hand8(HANDS_M[i].right, HANDS_M[i].diag) : l;
+  return [m, l, p.right[1] ? hand8(p.right[1], p.diag[1]) : l];
+});
 
 /** PIXEL CAST 2 face size class (0 XS … 3 L) for a head `headPx` texels tall. */
 export function celSize(headPx: number): number {

@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 /**
- * PIXEL CAST 2 look-dev sheets: the SAME frozen instant painted in every cast look
- * (`castlook` 0 = the look before, a / b / c = the candidates), as RAW SPRITE TEXELS
+ * PIXEL CAST 2 look-dev sheets: the SAME frozen instant painted in each cast look
+ * (`castlook` 0 = the look before, b = the cel look), as RAW SPRITE TEXELS
  * (each texel × zoom, no scene, no CRT) — rows = subjects, columns = looks, labelled.
+ * With `--cols N` and one look, the subjects are laid out N to a row instead (view
+ * sheets: one outfit per row, front / three-quarter / side / back across).
  *
  *   node scripts/cast-look.mjs --base http://localhost:5802 --out /tmp/pw2/castlook/walkers \
  *     --place "walker@office:-1.4:3.2,walker@worker:0.2:4.5:20:windup=0.8,civ@worker:1.6:4::pose=cower" \
- *     [--looks 0,a,b,c] [--stage "zoo&zooEnv=night"] [--zoom 4] [--settle 500] [--bg "#7a8a96"] [--frames]
+ *     [--looks 0,b] [--cols 4] [--stage "zoo&zooEnv=night"] [--zoom 4] [--settle 500] [--bg "#7a8a96"] [--frames]
  *   node scripts/cast-look.mjs --shot z1:13:420 --pick 2 …      (a real stage instant: its biggest sprites)
  *
  * A placement is  id[@variant]:right:forward[:yawDeg][:action=arg;…]  (as scripts/pixel-look.mjs;
@@ -27,7 +29,7 @@ const args = Object.fromEntries(
 );
 const base = args.base ?? 'http://localhost:5802';
 const out = args.out ?? '/tmp/pw2/castlook/sheet';
-const looks = (args.looks ?? '0,a,b,c').split(',');
+const looks = (args.looks ?? '0,b').split(',');
 const zoom = Number(args.zoom ?? 4);
 const settle = Number(args.settle ?? 500);
 const stage = args.stage ?? 'zoo';
@@ -243,13 +245,13 @@ if (args.notiles) {
   console.log(JSON.stringify({ labels, errors: errors.slice(0, 6) }));
   process.exit(0);
 }
-writeFileSync(`${out}-tiles.json`, JSON.stringify({ looks, labels, zoom, bg: args.bg ?? '#7a8a96', tiles }));
+writeFileSync(`${out}-tiles.json`, JSON.stringify({ looks, labels, zoom, cols: Number(args.cols ?? 0), bg: args.bg ?? '#7a8a96', tiles }));
 const py = `
 import json, base64, sys
 from PIL import Image, ImageDraw
 d = json.load(open('${out}-tiles.json'))
 looks, labels, Z = d['looks'], d['labels'], d['zoom']
-NAMES = {'0': '0  BEFORE (contour)', 'a': 'A  STRICT CEL', 'b': 'B  CEL + ACCENTS', 'c': 'C  DRAWN + TEXTURED'}
+NAMES = {'0': '0  BEFORE (contour)', 'b': 'B  CEL'}
 bg = tuple(int(d['bg'][i:i+2], 16) for i in (1, 3, 5))
 def tile(t):
     if t is None: return Image.new('RGB', (8, 8), bg)
@@ -260,23 +262,35 @@ def tile(t):
     out.paste(im.convert('RGB'), (0, 0), a)
     return out.resize((out.width * Z, out.height * Z), Image.NEAREST)
 rows = []
-for i, lab in enumerate(labels):
-    rows.append([tile(d['tiles'][l][i]) for l in looks])
+rlab = []
+N = d.get('cols', 0)
+if N and len(looks) == 1:
+    ts = [tile(t) for t in d['tiles'][looks[0]]]
+    for i in range(0, len(ts), N):
+        rows.append(ts[i:i + N] + [Image.new('RGB', (8, 8), bg)] * (N - len(ts[i:i + N])))
+        rlab.append('   |   '.join(labels[i:i + N]))
+    heads = [NAMES.get(looks[0], looks[0])] + [''] * (N - 1)
+else:
+    for i, lab in enumerate(labels):
+        rows.append([tile(d['tiles'][l][i]) for l in looks])
+        rlab.append(lab)
+    heads = [NAMES.get(l, l) for l in looks]
 pad = 14
-colw = [max(r[c].width for r in rows) for c in range(len(looks))]
+nc = len(rows[0])
+colw = [max(r[c].width for r in rows) for c in range(nc)]
 rowh = [max(t.height for t in r) for r in rows]
-W = sum(colw) + pad * (len(looks) + 1)
+W = sum(colw) + pad * (nc + 1)
 H = sum(rowh) + (pad + 14) * len(rows) + 30
 sheet = Image.new('RGB', (W, H), bg)
 dr = ImageDraw.Draw(sheet)
 x = pad
-for c, l in enumerate(looks):
-    dr.text((x, 8), NAMES.get(l, l), fill=(255, 255, 255))
+for c, l in enumerate(heads):
+    dr.text((x, 8), l, fill=(255, 255, 255))
     x += colw[c] + pad
 y = 30
 for r, row in enumerate(rows):
     x = pad
-    dr.text((pad, y), labels[r], fill=(20, 24, 30))
+    dr.text((pad, y), rlab[r], fill=(20, 24, 30))
     y += 14
     for c, t in enumerate(row):
         sheet.paste(t, (x, y + rowh[r] - t.height))

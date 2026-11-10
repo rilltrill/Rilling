@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { MAX_LAYERS, MAX_PRIMS, MAX_WIDE, PRIM_FLOATS, type PixelFigure } from './figure';
-import { MAT_COLS, STEPS, materialTable } from './materials';
+import { MAT_COLS, STEPS, materialTable, materialTableCel } from './materials';
 import { STAMP_ATLAS, stampAtlas } from './stamps';
 import { castStyle } from './look';
 
@@ -24,11 +24,11 @@ import { castStyle } from './look';
  *    display-space colour with packed depth in alpha — the same sprite format the
  *    impostor bake produces, so SpriteArt's billboards draw both.
  *
- * PIXEL CAST 2 (`look.ts`, `castlook` a / b / c) runs the same two draws through
- * the paint source compiled with `CEL` (flat tones: no light, a whole-step tone
- * offset and the width of the form's shadow band) and `RESOLVE_CEL_FRAG` (the one
- * shadow shape, coloured ink, seams, accents, stage steps and rim). Look `0`
- * keeps the passes above untouched.
+ * PIXEL CAST 2 (`look.ts`, `castlook=b`) runs the same two draws through the
+ * paint source compiled with `CEL` (flat tones: no light, a whole-step tone
+ * offset and the width of the form's shadow band) and `RESOLVE_CEL_FRAG` (shadow
+ * shapes, coloured ink, lighter interior lines, accents, stage steps), reading
+ * the cel ramps (`materialTableCel`). Look `0` keeps the passes above untouched.
  */
 
 const VERT = /* glsl */ `
@@ -69,7 +69,7 @@ const PAINT_FRAG = /* glsl */ `
   uniform vec3 uLight;
   uniform vec4 uShade;   // ambient, diffuse, wrap, specular gain
   #ifdef CEL
-  uniform vec4 uCel;     // x = designed texture (0 / 1), y = shadow band width per texel of radius, z = preset (1..3)
+  uniform vec4 uCel;     // y = automatic shadow band width per texel of a primitive's mean radius
   #endif
   ${NOISE}
 
@@ -154,6 +154,18 @@ const PAINT_FRAG = /* glsl */ `
     }
   }
 
+  #ifdef CEL
+  // Shade-only decals of one texel combine: a drawn shadow shape (tone < −0.85) is never
+  // erased by a later crease or socket — the later mark deepens it.
+  float addShade(float cur, float nw) {
+    bool dc = cur < -0.85, dn = nw < -0.85;
+    if (dc && dn) return min(cur, nw);
+    if (dc) return max(cur + min(nw, 0.0), -1.45);
+    if (dn) return max(nw + min(cur, 0.0), -1.45);
+    return nw;
+  }
+  #endif
+
   void main() {
     vec2 p = gl_FragCoord.xy;
     // Visible (nearest covered) layer so far.
@@ -162,6 +174,7 @@ const PAINT_FRAG = /* glsl */ `
     vec3 bN = vec3(0.0, 0.0, 1.0);
     #ifdef CEL
     float bR = 0.0;
+    bool bDecal = false;
     #endif
     for (int L = 0; L < ${MAX_LAYERS}; L++) {
       if (L >= uLayers) break;
@@ -173,10 +186,19 @@ const PAINT_FRAG = /* glsl */ `
       float lD = 1e9, lR = 1.0, lZ = 0.0, lQ = 1.0;
       vec2 lG = vec2(0.0, 1.0);
       float cD = 1e9, cZ = 1e9, cMat = 0.0, cU = 0.0, cV = 0.0, cTone = 0.0, cSeed = 0.0, cT = 0.0, cAbs = -1.0, cFore = 1.0;
+      #ifdef CEL
+      // Mean radius of the primitive that shows here: its shadow band has ONE width along it.
+      float cR = 0.0;
+      #endif
       bool cCov = false;
       int cFlags = 0;
       float dMat = -1.0, dTone = 0.0, dAbs = -1.0;
       int dFlags = 0;
+      #ifdef CEL
+      // Shade-only decals (drawn shadow / light shapes, creases) are kept apart from the
+      // material decals, so a shadow shape lies OVER a tie or a badge instead of erasing it.
+      float lS = 0.0;
+      #endif
       for (int i = i0; i < i1; i++) {
         // Texel bounding box first: a primitive out of reach costs one fetch.
         vec4 B = texelFetch(uPrims, ivec2(5, i), 0);
@@ -199,6 +221,12 @@ const PAINT_FRAG = /* glsl */ `
           int sf;
           stampCode(c, T2, T4, sm, sab, sdt, sf);
           if (decal) {
+            #ifdef CEL
+            if ((sf & 128) != 0) {
+              lS = addShade(lS, sdt);
+              continue;
+            }
+            #endif
             dMat = sm;
             dTone = sdt;
             dAbs = sab;
@@ -235,6 +263,12 @@ const PAINT_FRAG = /* glsl */ `
           if (decal) {
             // A triangle painted ON the layer (lapels, collar points, patches, drawn shadow shapes).
             if (d < 0.0) {
+              #ifdef CEL
+              if ((flags & 128) != 0) {
+                lS = addShade(lS, T4.z);
+                continue;
+              }
+              #endif
               dMat = T2.x;
               dTone = T4.z;
               dAbs = -1.0;
@@ -252,13 +286,13 @@ const PAINT_FRAG = /* glsl */ `
             lZ = z;
             lQ = 1.0;
           } else lZ = mix(lZ, z, wb);
-          #ifdef CEL
-          // (A flat panel carries a shadow band like a mid-sized limb.)
-          lR = lD > 1e8 ? 4.0 : mix(lR, 4.0, wb);
-          #endif
           lD = min(lD, d) - hh * hh * k * 0.25;
           bool covers = d < 0.0;
           if (covers ? (!cCov || z < cZ) : (!cCov && d < cD)) {
+            #ifdef CEL
+            // (A flat panel carries a shadow band like a mid-sized limb.)
+            cR = 4.0;
+            #endif
             cCov = covers;
             cZ = z;
             cD = d;
@@ -280,9 +314,12 @@ const PAINT_FRAG = /* glsl */ `
         float len = length(T0.zw - T0.xy);
         if ((flags & 6144) != 0) {
           // Flat caps (PF.CUT_A / CUT_B): cut square across the axis — cuffs, hems, shoulders, soles.
+          // (Bits 14+: how much of its round cap an end keeps — the end section's extent along
+          // the axis as seen: none side-on, all of it face-on.)
           float al = dot(p - T0.xy, T0.zw - T0.xy) / max(len, 1e-3);
-          if ((flags & 2048) != 0) d = max(d, -al);
-          if ((flags & 4096) != 0) d = max(d, al - len);
+          float fore = float(flags >> 14) / 63.0;
+          if ((flags & 2048) != 0) d = max(d, -al - T1.x * fore);
+          if ((flags & 4096) != 0) d = max(d, al - len - T1.y * fore);
         }
         if (T3.z > 0.0) {
           // Ragged edge: value noise along the outline (sticks to the part).
@@ -303,6 +340,12 @@ const PAINT_FRAG = /* glsl */ `
         float mat = t > T2.z ? T2.y : T2.x;
         if (decal) {
           if (d < 0.0) {
+            #ifdef CEL
+            if ((flags & 128) != 0) {
+              lS = addShade(lS, T4.z);
+              continue;
+            }
+            #endif
             dMat = mat;
             dTone = T4.z;
             dAbs = -1.0;
@@ -335,6 +378,9 @@ const PAINT_FRAG = /* glsl */ `
         float zf = (flags & 64) != 0 ? z : z - R * q * z / uTexS * sqrt(max(0.0, 1.0 - xr * xr));
         bool covers = d < 0.0;
         if (covers ? (!cCov || zf < cZ) : (!cCov && d < cD)) {
+          #ifdef CEL
+          cR = 0.5 * (T1.x + T1.y);
+          #endif
           cCov = covers;
           cZ = zf;
           cD = d;
@@ -377,6 +423,16 @@ const PAINT_FRAG = /* glsl */ `
           bTone = cTone;
           bFlags = cFlags;
           bAbs = cAbs;
+          #ifdef CEL
+          bDecal = dMat >= 0.0;
+          if (bDecal) {
+            bMat = dMat;
+            bFlags = dFlags;
+            bAbs = dAbs;
+            bTone = dTone;
+          }
+          bTone += lS;
+          #else
           if (dMat >= 0.0) {
             if ((dFlags & 128) == 0) {
               bMat = dMat;
@@ -385,13 +441,14 @@ const PAINT_FRAG = /* glsl */ `
             }
             bTone += dTone;
           }
+          #endif
           bU = cU;
           bV = cV;
           bSeed = cSeed;
           bT = cT;
           bFore = cFore;
           #ifdef CEL
-          bR = lR;
+          bR = cR;
           #endif
         }
       }
@@ -402,16 +459,17 @@ const PAINT_FRAG = /* glsl */ `
     }
     #ifdef CEL
     // ── PIXEL CAST 2: flat tones. No light here — this pass writes the material, a
-    // whole-step tone offset (painter bias, drawn marks) and the width of the shadow
-    // band this texel's form wants; the resolve pass lays the ONE shadow shape, the
-    // ink and the accents. Patterns are DESIGNED marks (a check, a stripe, a blotch
-    // with its own colour), never per-texel tone noise.
+    // whole-step tone offset (painter bias, drawn marks) and the width of the automatic
+    // shadow band this texel's form wants; the resolve pass lays the shadow shapes, the
+    // ink and the accents. Patterns are DESIGNED marks (a check, a stripe, a blotch with
+    // its own colour), never per-texel tone noise, dot lattices or hatching.
     float mat = bMat;
     float dl = bTone;
+    float mk = 0.0;
     int mark = 0;
     bool isAbs = bAbs >= 0.0;
-    // A SHADE_ONLY decal with tone −1 is a DRAWN SHADOW SHAPE: it joins the one shadow tone
-    // (whatever depth the look gives it) instead of darkening by steps.
+    // A SHADE_ONLY decal with tone −1 is a DRAWN SHADOW SHAPE: it joins the shadow tone
+    // (one hard edge with the cast shadows) instead of stacking on it; −1.2 = a deep recess.
     bool drawn = dl < -0.85;
     if (drawn) dl += 1.0;
     if (!isAbs) {
@@ -423,17 +481,8 @@ const PAINT_FRAG = /* glsl */ `
       float sec = floor(m1.a * 255.0 + 0.5);
       float ter = floor(m2.a * 255.0 + 0.5);
       vec2 uv = vec2(bU, bV);
-      vec2 ip = floor(p);
       float sd = bSeed * 1.37;
-      bool tex = uCel.x > 0.5;
-      if (pat == 1) {
-        // WEAVE: a flat field (stains and wounds are the painter's drawn shapes, never a
-        // noise blotch); (texture) short weave ticks in worn patches.
-        if (tex && vnoise(uv * 5.0 + sd) < 0.34 && mod(ip.x + ip.y * 2.0, 5.0) < 0.5) dl -= 0.2;
-      } else if (pat == 2) {
-        // DENIM: (texture) twill hatching — diagonal 1-texel strokes, a step lighter, on the worn patches.
-        if (tex && vnoise(uv * 4.0 + sd) > 0.6 && mod(ip.x + ip.y, 4.0) < 0.5) dl += 0.2;
-      } else if (pat == 3) {
+      if (pat == 3) {
         // PLAID: buffalo check stuck to the body (the crossings in their own dark colour).
         vec2 c = floor(uv / scale + vec2(sd, 0.0));
         float a = mod(c.x, 2.0), b2 = mod(c.y, 2.0);
@@ -441,27 +490,8 @@ const PAINT_FRAG = /* glsl */ `
           mat = sec;
           mark = 4;
         } else if (a + b2 > 0.5) {
-          dl -= 0.2;
+          mk = -1.0;
           mark = 4;
-        }
-      } else if (pat == 4) {
-        // ROT: a few rot patches (secondary) and bruises (tertiary) as flat blotches; (texture) a vein.
-        float n = vnoise(uv * 7.0 + sd);
-        float n2 = vnoise(uv * 9.0 + sd + 9.0);
-        if (sec > 0.5 && n > 1.15 - 0.5 * str) {
-          mat = sec;
-          mark = 4;
-        } else if (ter > 0.5 && n2 > 1.24 - 0.5 * str) {
-          mat = ter;
-          mark = 4;
-        } else if (tex && abs(vnoise(uv * 5.0 + sd + 3.0) - 0.5) < 0.016) dl -= 0.2;
-      } else if (pat == 10) {
-        // SCALES: (texture) a row of scute dots along the back only — the hide stays a flat field.
-        if (tex && bN.y > 0.45) {
-          vec2 q = uv / (scale * 0.3);
-          q.x += mod(floor(q.y), 2.0) * 0.5;
-          vec2 f = fract(q);
-          if (f.x < 0.3 && f.y < 0.34) dl -= 0.2;
         }
       } else if (pat == 11) {
         // STRIPES: bold chevrons slanting back and down from the spine, uneven and broken,
@@ -474,13 +504,8 @@ const PAINT_FRAG = /* glsl */ `
         float fade = step(-0.25, vert) * step(0.5, bFore);
         if (fract(s) < wid * fade && brk > 0.15) {
           if (ter > 0.5) mat = ter;
-          else dl -= 0.4;
+          else mk = -1.0;
           mark = 4;
-        } else if (tex && vert > 0.5) {
-          vec2 q = uv / 0.05;
-          q.x += mod(floor(q.y), 2.0) * 0.5;
-          vec2 f = fract(q);
-          if (f.x < 0.3 && f.y < 0.34) dl -= 0.2;
         }
         if (sec > 0.5 && bN.y < -0.42 && length(bN.xy) > 0.5) {
           mat = sec;
@@ -493,21 +518,18 @@ const PAINT_FRAG = /* glsl */ `
         float n = vnoise(q + sd);
         if (n > 0.64 + 0.3 * (1.0 - step(-0.2, vert))) {
           if (ter > 0.5) mat = ter;
-          else dl -= 0.4;
+          else mk = -1.0;
           mark = 4;
         }
         if (sec > 0.5 && bN.y < -0.42 && length(bN.xy) > 0.5) {
           mat = sec;
           mark = 4;
         }
-      } else if (pat == 12) {
-        // GOWN: little print dots (the garment's print; the strict preset keeps it plain).
-        if (uCel.z > 1.5 && mod(ip.x + floor(ip.y / 3.0) * 2.0, 4.0) < 0.5 && mod(ip.y, 3.0) < 0.5) dl -= 0.2;
       } else if (pat == 13) {
         // CAMO: hard blotches, a step down / a step up.
         float n = vnoise(uv / scale + sd);
-        if (n > 0.62) dl -= 0.2;
-        else if (n < 0.3) dl += 0.2;
+        if (n > 0.62) mk = -1.0;
+        else if (n < 0.3) mk = 1.0;
         mark = 4;
       } else if (pat == 14) {
         // RIBS: bone bars across the wound.
@@ -516,11 +538,8 @@ const PAINT_FRAG = /* glsl */ `
           mat = sec;
           mark = 4;
         }
-      } else if (pat == 15) {
-        // PLATE: rivets near the ends (the highlight streak is the resolve pass's accent).
-        if (abs(bV) > 0.0 && fract(bU / scale) < 0.08 && hash12(vec2(floor(bU / scale), sd)) > 0.4 && abs(abs(bV) - 0.04) < 0.012) dl += 0.25;
       } else if (pat == 17) {
-        // MEAT: big blotches (secondary), bruises (tertiary); (texture) creases.
+        // MEAT: big blotches (secondary), bruises (tertiary).
         vec2 q = uv / scale;
         float n = vnoise(q + sd);
         float n2 = vnoise(q * 1.4 + sd + 9.0);
@@ -530,21 +549,30 @@ const PAINT_FRAG = /* glsl */ `
         } else if (ter > 0.5 && n2 > 1.2 - 0.5 * str) {
           mat = ter;
           mark = 4;
-        } else if (tex && abs(vnoise(q * 0.55 + sd + 3.0) - 0.5) < 0.02) dl -= 0.2;
+        }
       }
+      // (WEAVE, DENIM, ROT, SCALES, GOWN, PLATE: flat fields. Stains, rot and wounds are the
+      // painter's drawn shapes.)
     }
     bool glow = (bFlags & 2) != 0 || texelFetch(uMats, ivec2(${STEPS + 1}, int(mat + 0.5)), 0).r > 0.5;
-    int fl = (glow ? 1 : 0) | ((bFlags & 4) != 0 ? 2 : 0) | mark;
+    // Flags: 1 glow, 2 never outlined, 4 a pattern mark, 8 painted by a decal (a mark ON the
+    // layer: the silhouette's ink still runs over it).
+    int fl = (glow ? 1 : 0) | ((bFlags & 4) != 0 ? 2 : 0) | mark | (bDecal ? 8 : 0);
     // Tone byte: [band width 0..7 : 3][absolute : 1][step value : 3].
     int val;
     int bw = 0;
     if (isAbs) {
-      val = int(clamp(floor(bAbs * 5.0 + 0.5) + floor(min(bTone, 0.0) * 6.25 + 0.5), 0.0, 5.0));
+      // (A stamp cell keeps its authored step; a shadow shape over it lowers it by one.)
+      val = int(clamp(floor(bAbs * 5.0 + 0.5) + (drawn ? -1.0 : floor(min(bTone, 0.0) * 6.25 + 0.5)), 0.0, 5.0));
     } else {
-      val = int(clamp(floor(dl * 6.25 + 0.5), -3.0, 3.0)) + 3;
-      // A form casts its own shadow band on the side away from the light: wider on broad
-      // forms, none on 1–2 texel features (fingers, claws, straps keep their colour).
-      if ((bFlags & 4) == 0) bw = bR < 1.6 ? 0 : int(clamp(floor(bR * uCel.y + 0.5), 1.0, 6.0));
+      // Painter tone biases are whole steps and never ladders: a small bias is ONE step
+      // (down: the shadow tone; up: a light shape), a big one (|tone| ≥ 0.5) two.
+      float stp = dl <= -0.5 ? -2.0 : dl < -0.06 ? -1.0 : dl >= 0.5 ? 2.0 : dl > 0.06 ? 1.0 : 0.0;
+      val = int(clamp(stp + mk, -2.0, 2.0)) + 3;
+      // A form's automatic shadow band on the side away from the light: one width along a
+      // primitive (its edge runs parallel to the form), none on slim parts or where the
+      // painter draws the shadows itself (PF.NO_BAND).
+      if ((bFlags & 4) == 0 && (bFlags & 8192) == 0) bw = bR < 2.5 ? 0 : int(clamp(floor(bR * uCel.y + 0.5), 1.0, 6.0));
       if (drawn) bw = 7;
     }
     gl_FragColor = vec4(mat / 255.0, float(bw * 16 + (isAbs ? 8 : 0) + val) / 255.0, packDepth(bZ), (bLayer * 16.0 + float(fl)) / 255.0);
@@ -795,15 +823,24 @@ const RESOLVE_FRAG = /* glsl */ `
 
 
 /**
- * PIXEL CAST 2 resolve: flat tones, ONE shadow shape, coloured ink.
+ * PIXEL CAST 2 resolve: flat tones, shadow SHAPES, coloured ink.
  *
- * The shadow shape is the classic sprite-artist construction: light from the upper
- * left, so a texel is in shadow when a short walk AWAY from the light (right and
- * down, as far as its form's band is wide) leaves its layer's silhouette — a clean
- * band down the right and under side of every limb, the trunk, the head — or when a
- * nearer layer stands between it and the light (the arm on the chest, the chin on the
- * neck). Both use the same single shadow tone, so they join into one shape with a
+ * Tones are whole steps of the material's cel ramp: the base, the shadow one step
+ * down, a light shape one step up (painter-drawn), two down only in deep recesses.
+ * A texel is in shadow when (a) the painter drew a shadow shape there, (b) a nearer
+ * layer stands between it and the light (the arm on the chest, the chin on the neck,
+ * a hem on a thigh), or (c) its form carries the automatic band and a short walk AWAY
+ * from the light (right and down, one fixed width along a primitive) leaves its
+ * layer's silhouette. All three use the same tone, so they join into one shape with a
  * hard edge; nothing follows a surface normal and nothing is dithered.
+ *
+ * Lines: dark coloured ink on the whole silhouette (every material, pale ones too)
+ * and round glowing parts; interior lines (seams between materials, part lines,
+ * inner contours) a step from the local tone — lighter than the fill on dark
+ * materials; full ink where a limb crosses the trunk on big figures; 1-texel runs
+ * are never inked. Stage light: whole steps for the whole figure, and short light
+ * accents just inside the top edges of the figure's outer hull that face a strong
+ * coloured source — never a rim down a limb.
  */
 const RESOLVE_CEL_FRAG = /* glsl */ `
   precision highp float;
@@ -812,14 +849,14 @@ const RESOLVE_CEL_FRAG = /* glsl */ `
   uniform sampler2D uMats;
   uniform vec2 uSize;
   uniform vec3 uTint;
-  uniform vec4 uRim;
-  uniform vec2 uRimDir;
+  uniform vec4 uRim;    // light accent colour, amount
+  uniform vec2 uRimDir; // toward the accent light (screen, y up)
   uniform vec4 uFog;
   uniform float uGap;
   uniform float uOutline;
-  uniform float uSmall;
+  uniform float uSmall; // 1 = a small figure: two tones, fewer interior lines
   uniform vec4 uTone;   // base step, shadow drop, line drop, highlight steps
-  uniform vec4 uInk;    // ink multiplier, selective outline, ink inside, saturation
+  uniform vec4 uInk;    // ink multiplier, -, full ink on inner contours (big figures), -
   uniform vec3 uStage;  // stage light in whole steps, cast-shadow reach (texels), floor luma of a base tone
 
   vec4 G(ivec2 q) {
@@ -827,6 +864,7 @@ const RESOLVE_CEL_FRAG = /* glsl */ `
     return texelFetch(uG, q, 0);
   }
   int layerOf(vec4 c) { return int(c.a * 255.0 + 0.5) >> 4; }
+  int flagsOf(vec4 c) { return int(c.a * 255.0 + 0.5) & 15; }
   vec3 ramp(float mat, float s) { return texelFetch(uMats, ivec2(int(s + 0.5), int(mat + 0.5)), 0).rgb; }
   bool empty(vec4 c) { return c.r < 0.5 / 255.0; }
 
@@ -856,27 +894,40 @@ const RESOLVE_CEL_FRAG = /* glsl */ `
     bool eR = empty(nR), eL = empty(nL), eU = empty(nU), eD = empty(nD);
     bool edge = eR || eL || eU || eD;
     bool thin = (eL && eR) || (eU && eD);
-    bool noOut = (fl & 2) != 0 || uOutline < 0.5;
+    // (A never-outlined DECAL — a face stamp, a button — still takes the silhouette's ink where
+    // it reaches the figure's edge: an eye never sticks out of a head.)
+    bool noOut = ((fl & 2) != 0 && !(edge && (fl & 8) != 0)) || uOutline < 0.5;
+    // (glow, dark material, specular, -)
+    vec4 mx = texelFetch(uMats, ivec2(${STEPS + 1}, int(mat)), 0);
+    bool darkM = mx.g > 0.5;
+    // Small figures: two tones (no light shapes).
+    if (uSmall > 0.5 && !isAbs && val > 3) val = 3;
     float st = isAbs ? float(val) : uTone.x + float(val - 3);
-    // 0 = a fill tone, 1 = exterior ink, 2 = inner contour, 3 = a lit-edge line.
+    // 0 = a fill tone, 1 = full ink, 2 = inner contour.
     int kind = 0;
     if (edge && !noOut) {
       // 1-texel runs (fingers, claws, quills) are their own line: a step down, never inked away.
       if (thin) st = max(st - 1.0, 1.0);
-      else if (uInk.y > 0.5 && (eU || eL) && !eD && !eR) kind = 3;
+      // 2-texel runs (a far figure's limbs, straps) keep their lit texel as colour: only the
+      // texel on the side away from the light is ink — a small figure is never all line.
+      else if ((eL && !eR && !eU && !eD && empty(G(p + ivec2(2, 0)))) || (eU && !eD && !eL && !eR && empty(G(p - ivec2(0, 2))))) kind = 0;
       else kind = 1;
     } else if (!noOut) {
-      // Inner contour: this texel's layer overlaps a farther one.
-      bool ct = (layerOf(nR) != L && nR.b - c.b > uGap) || (layerOf(nL) != L && nL.b - c.b > uGap) ||
-                (layerOf(nU) != L && nU.b - c.b > uGap) || (layerOf(nD) != L && nD.b - c.b > uGap);
-      if (ct) kind = 2;
+      // Weak points and glowing parts keep a dark ring at every size.
+      if (((flagsOf(nR) | flagsOf(nL) | flagsOf(nU) | flagsOf(nD)) & 1) != 0) kind = 1;
+      else {
+        // Inner contour: this texel's layer overlaps a farther one.
+        bool ct = (layerOf(nR) != L && nR.b - c.b > uGap) || (layerOf(nL) != L && nL.b - c.b > uGap) ||
+                  (layerOf(nU) != L && nU.b - c.b > uGap) || (layerOf(nD) != L && nD.b - c.b > uGap);
+        if (ct) kind = 2;
+      }
     }
-    if (kind == 0 && !(edge && !noOut)) {
+    bool sh = false;
+    if (kind == 0 && !(edge && !noOut && thin)) {
       vec4 s1 = G(p + ivec2(-1, 1));
       vec4 s2 = G(p + ivec2(-2, 2));
-      bool sh = false;
       if (!isAbs) {
-        // The form's own shadow band: walking away from the light leaves the silhouette.
+        // A drawn shadow shape, or the form's own band: walking away from the light leaves the silhouette.
         if (bw == 7) sh = true;
         else if (bw > 0) {
           vec4 q = G(p + ivec2(bw, -bw));
@@ -898,58 +949,54 @@ const RESOLVE_CEL_FRAG = /* glsl */ `
             sh = !empty(q) && layerOf(q) != L && c.b - q.b > uGap;
           }
         }
-        if (sh) st -= uTone.y;
+        // (A light shape does not survive in shadow.)
+        if (sh) st = min(st, uTone.x) - uTone.y;
       }
-      if (!noOut && (fl & 4) == 0) {
+      if (!noOut && (fl & 4) == 0 && !isAbs && uSmall < 0.5) {
         // Seam line: another material above / to the left on the same part (collar, cuff,
         // belt, hem, shoe on trouser, a wound's rim).
-        bool seamU = !eU && layerOf(nU) == L && abs(nU.r - c.r) > 0.5 / 255.0 && abs(nU.b - c.b) < uGap && (int(nU.a * 255.0 + 0.5) & 7) == 0;
-        bool seamL = !eL && layerOf(nL) == L && abs(nL.r - c.r) > 0.5 / 255.0 && abs(nL.b - c.b) < uGap && (int(nL.a * 255.0 + 0.5) & 7) == 0;
+        bool seamU = !eU && layerOf(nU) == L && abs(nU.r - c.r) > 0.5 / 255.0 && abs(nU.b - c.b) < uGap && (flagsOf(nU) & 7) == 0;
+        bool seamL = !eL && layerOf(nL) == L && abs(nL.r - c.r) > 0.5 / 255.0 && abs(nL.b - c.b) < uGap && (flagsOf(nL) & 7) == 0;
         // Part line: another layer at about the same depth to the right / below (the arm
         // hanging beside the trunk, one leg beside the other): the overlap is drawn.
-        bool part = (!eR && layerOf(nR) != L && abs(nR.b - c.b) <= uGap && (int(nR.a * 255.0 + 0.5) & 3) == 0) ||
-                    (!eD && layerOf(nD) != L && abs(nD.b - c.b) <= uGap && (int(nD.a * 255.0 + 0.5) & 3) == 0);
-        if (!isAbs && (seamU || seamL || part) && uSmall < 0.5) st -= uTone.z;
-        else if (!sh && !isAbs && uTone.w > 0.0) {
+        bool part = (!eR && layerOf(nR) != L && abs(nR.b - c.b) <= uGap && (flagsOf(nR) & 3) == 0) ||
+                    (!eD && layerOf(nD) != L && abs(nD.b - c.b) <= uGap && (flagsOf(nD) & 3) == 0);
+        // Interior lines are a step from the local tone: darker — or, on a dark material, lighter than its fill.
+        if (seamU || seamL || part) st += darkM ? 1.0 : -uTone.z;
+        else if (!sh && uTone.w > 0.0 && mx.b > 0.45) {
           // Highlight accent on what shines: one texel inside the lit edge of its material.
-          float spec = texelFetch(uMats, ivec2(${STEPS + 1}, int(mat)), 0).b;
-          if (spec > 0.45) {
-            bool in1 = !empty(s1) && layerOf(s1) == L && abs(s1.r - c.r) < 0.5 / 255.0;
-            bool in2 = !empty(s2) && layerOf(s2) == L && abs(s2.r - c.r) < 0.5 / 255.0;
-            if (in1 && !in2) st += uTone.w;
-          }
+          bool in1 = !empty(s1) && layerOf(s1) == L && abs(s1.r - c.r) < 0.5 / 255.0;
+          bool in2 = !empty(s2) && layerOf(s2) == L && abs(s2.r - c.r) < 0.5 / 255.0;
+          if (in1 && !in2) st += uTone.w;
         }
       }
     }
+    // The game reads first: a material whose base tone is under the stage's floor (a dark
+    // suit on a night street) does not step down with the stage.
+    float move = uStage.x;
+    if (move < 0.0 && dot(ramp(mat, uTone.x), vec3(0.299, 0.587, 0.114)) < uStage.z) move = 0.0;
     vec3 col;
-    if (kind == 1 || (kind == 2 && uInk.z > 0.5)) {
-      // Coloured ink: the local ramp's darkest step, pushed toward violet-black.
+    if (kind == 1 || (kind == 2 && uInk.z > 0.5 && !darkM)) {
+      // Coloured ink: the local ramp's line colour, pushed toward violet-black.
       col = ramp(mat, 0.0) * uInk.x + vec3(0.012, 0.008, 0.03);
     } else if (kind == 2) {
-      col = ramp(mat, 0.0);
-    } else if (kind == 3) {
-      // Selective outline: the lit edge is drawn with a dark shade of its own colour.
-      col = ramp(mat, clamp(1.0 + min(uStage.x, 0.0) * 0.5, 0.0, 1.0));
+      // A lighter interior line (on a dark material: lighter than the fill).
+      col = ramp(mat, darkM ? 4.0 : 0.0);
     } else {
-      float lo = isAbs ? 0.0 : (st < 0.5 ? 0.0 : 1.0);
-      float move = uStage.x;
-      // The game reads first: a material whose base tone is under the stage's floor (a black
-      // suit on a night street) does not step down with the stage, and a near-black one
-      // climbs a step up its own ramp.
-      float bl = dot(ramp(mat, uTone.x), vec3(0.299, 0.587, 0.114));
-      if (bl < uStage.z) move = max(move, 0.0) + (bl < uStage.z * 0.35 ? 1.0 : 0.0);
-      st = clamp(st + (isAbs && float(val) < 1.5 ? 0.0 : move), lo, ${STEPS - 1}.0);
+      st = clamp(st + (isAbs && float(val) < 1.5 ? 0.0 : move), isAbs ? 0.0 : 1.0, ${STEPS - 1}.0);
       col = ramp(mat, st);
+      // Light accent: just inside a top edge of the figure's outer hull that faces a strong
+      // coloured source — short by construction (head, shoulders, a raised arm), never a rim
+      // down a limb or on an edge that faces another part of the figure.
+      if (uRim.a > 0.0 && !isAbs && !edge && !sh) {
+        ivec2 d = ivec2(uRimDir.x > 0.38 ? 1 : uRimDir.x < -0.38 ? -1 : 0, uRimDir.y > 0.38 ? 1 : uRimDir.y < -0.38 ? -1 : 0);
+        vec4 q = G(p + d);
+        if (!empty(q) && layerOf(q) == L && empty(G(p + 2 * d)) && empty(G(p + ivec2(floor(uRimDir * 5.0 + 0.5)))) && empty(G(p + ivec2(floor(uRimDir * 10.0 + 0.5))))) {
+          col = mix(ramp(mat, min(st + 2.0, ${STEPS - 1}.0)), uRim.rgb, uRim.a);
+        }
+      }
     }
-    // The cast is a step more saturated than the world behind it.
-    float lum = dot(col, vec3(0.299, 0.587, 0.114));
-    col = clamp(mix(vec3(lum), col, uInk.w), 0.0, 1.0);
     col *= uTint;
-    // Coloured light rim: 1 texel on the silhouette edge facing the stage's strong light.
-    if (uRim.a > 0.0 && edge && !thin && !noOut && !isAbs) {
-      vec2 n = vec2((eR ? 1.0 : 0.0) - (eL ? 1.0 : 0.0), (eU ? 1.0 : 0.0) - (eD ? 1.0 : 0.0));
-      if (dot(n, uRimDir) > 0.72 * length(n) * length(uRimDir) && length(n) > 0.5) col = mix(col, uRim.rgb, uRim.a);
-    }
     col = mix(col, uFog.rgb, uFog.a);
     gl_FragColor = vec4(col, c.b);
   }
@@ -988,7 +1035,11 @@ export interface CastEnv {
   fogAmount: number;
   /** PIXEL CAST 2: stage light in whole tone steps (default 0). */
   step?: number;
-  /** PIXEL CAST 2: screen-space direction toward the rim light (x right, y up; default up-right, the back-lit edge). */
+  /**
+   * PIXEL CAST 2: `rim` / `rimAmount` are the stage's light ACCENT there (short strokes just
+   * inside the top hull edges facing the source); this is the screen-space direction toward
+   * that light (x right, y up; default up-right).
+   */
   rimDir?: readonly [number, number];
   /** PIXEL CAST 2: the darkest a material's base tone may be drawn (display luma 0..1; darker ones climb their ramp). */
   floor?: number;
@@ -1003,6 +1054,8 @@ export class PixelCast {
   private gbufWide: THREE.WebGLRenderTarget | null = null;
   private primTex: THREE.DataTexture;
   private matTex: THREE.DataTexture;
+  /** PIXEL CAST 2: the same material table with the cel ramps. */
+  private matCelTex: THREE.DataTexture;
   private stampTex: THREE.DataTexture;
   private matVersion = -1;
   private paintMat: THREE.ShaderMaterial;
@@ -1034,6 +1087,11 @@ export class PixelCast {
     this.matTex.minFilter = this.matTex.magFilter = THREE.NearestFilter;
     this.matTex.generateMipmaps = false;
     this.matTex.colorSpace = THREE.NoColorSpace;
+    const mc = materialTableCel();
+    this.matCelTex = new THREE.DataTexture(mc.data, mc.cols, mc.rows, THREE.RGBAFormat, THREE.UnsignedByteType);
+    this.matCelTex.minFilter = this.matCelTex.magFilter = THREE.NearestFilter;
+    this.matCelTex.generateMipmaps = false;
+    this.matCelTex.colorSpace = THREE.NoColorSpace;
     this.stampTex = new THREE.DataTexture(stampAtlas(), STAMP_ATLAS, STAMP_ATLAS, THREE.RedFormat, THREE.UnsignedByteType);
     this.stampTex.minFilter = this.stampTex.magFilter = THREE.NearestFilter;
     this.stampTex.generateMipmaps = false;
@@ -1087,7 +1145,7 @@ export class PixelCast {
       vertexShader: VERT,
       fragmentShader: PAINT_FRAG,
       defines: { CEL: 1 },
-      uniforms: { ...this.paintMat.uniforms, uCel: { value: new THREE.Vector4(0, 0.55, 2, 0) } },
+      uniforms: { ...this.paintMat.uniforms, uMats: { value: this.matCelTex }, uCel: { value: new THREE.Vector4(0, 0.5, 0, 0) } },
       depthTest: false,
       depthWrite: false,
       toneMapped: false,
@@ -1097,7 +1155,7 @@ export class PixelCast {
       fragmentShader: RESOLVE_CEL_FRAG,
       uniforms: {
         uG: { value: this.gbuf.texture },
-        uMats: { value: this.matTex },
+        uMats: { value: this.matCelTex },
         uSize: { value: new THREE.Vector2() },
         uTint: { value: new THREE.Color(1, 1, 1) },
         uRim: { value: new THREE.Vector4() },
@@ -1107,7 +1165,7 @@ export class PixelCast {
         uOutline: { value: 1 },
         uSmall: { value: 0 },
         uTone: { value: new THREE.Vector4(3, 1, 1, 2) },
-        uInk: { value: new THREE.Vector4(0.7, 1, 0, 1.15) },
+        uInk: { value: new THREE.Vector4(0.5, 0, 0, 0) },
         uStage: { value: new THREE.Vector3(0, 2, 0.12) },
       },
       depthTest: false,
@@ -1147,6 +1205,7 @@ export class PixelCast {
       if (mt.version !== this.matVersion) {
         this.matVersion = mt.version;
         this.matTex.needsUpdate = true;
+        this.matCelTex.needsUpdate = true;
       }
       this.primTex.needsUpdate = true;
       this.paintMat.uniforms.uLayers.value = 0;
@@ -1179,6 +1238,7 @@ export class PixelCast {
     if (mt.version !== this.matVersion) {
       this.matVersion = mt.version;
       this.matTex.needsUpdate = true;
+      this.matCelTex.needsUpdate = true;
     }
     this.primData.set(f.data);
     this.primTex.needsUpdate = true;
@@ -1204,24 +1264,30 @@ export class PixelCast {
     r.setRenderTarget(g);
     const style = castStyle();
     if (style.cel > 0) {
-      // PIXEL CAST 2: flat tones in, the shadow shape / ink / accents in the cel resolve.
-      (this.paintCelMat.uniforms.uCel.value as THREE.Vector4).set(style.texture, style.band, style.cel, 0);
+      // PIXEL CAST 2: flat tones in; shadow shapes, ink, lines and accents in the cel resolve.
+      (this.paintCelMat.uniforms.uCel.value as THREE.Vector4).set(0, style.band, 0, 0);
       this.quad.material = this.paintCelMat;
       r.render(this.scene, this.cam);
       const cu = this.resolveCelMat.uniforms;
       cu.uG.value = g.texture;
       (cu.uSize.value as THREE.Vector2).set(W, H);
       (cu.uTint.value as THREE.Color).copy(env.tint);
-      // (A far figure is a few texels wide: a day rim there is thinned so it doesn't bleach it.)
-      (cu.uRim.value as THREE.Vector4).set(env.rim.r, env.rim.g, env.rim.b, env.rimAmount * (H * f.kpx < 70 && (env.step ?? 0) >= 0 ? 0.55 : 1));
-      (cu.uRimDir.value as THREE.Vector2).set(env.rimDir?.[0] ?? 0.7, env.rimDir?.[1] ?? 0.7);
+      const tall = H * f.kpx;
+      (cu.uRim.value as THREE.Vector4).set(env.rim.r, env.rim.g, env.rim.b, env.rimAmount);
+      {
+        const rx = env.rimDir?.[0] ?? 0.7;
+        const ry = env.rimDir?.[1] ?? 0.7;
+        const rl = Math.hypot(rx, ry) || 1;
+        (cu.uRimDir.value as THREE.Vector2).set(rx / rl, ry / rl);
+      }
       (cu.uFog.value as THREE.Vector4).set(env.fog.r, env.fog.g, env.fog.b, env.fogAmount);
       cu.uGap.value = (L.gap / Math.max(f.d1 - f.d0, 1e-3)) * 254 / 255;
       cu.uOutline.value = L.outline;
-      const tall = H * f.kpx;
-      cu.uSmall.value = tall < 45 ? 1 : 0;
+      // Small figures: two tones and fewer interior lines; big ones: full ink where a limb crosses the trunk.
+      cu.uSmall.value = tall < style.small ? 1 : 0;
       (cu.uTone.value as THREE.Vector4).set(style.base, style.shadow, style.line, style.hi);
-      (cu.uInk.value as THREE.Vector4).set(style.ink, style.selOut ? 1 : 0, style.inkInside ? 1 : 0, style.sat);
+      // (A small figure's line is a touch lighter: at 40 px the ink is a third of the sprite.)
+      (cu.uInk.value as THREE.Vector4).set(tall < style.small ? Math.min(1, style.ink * 1.35) : style.ink, 0, tall >= style.big ? 1 : 0, 0);
       // Cast shadows reach further on bigger figures (1 texel far away, up to 4 close up).
       (cu.uStage.value as THREE.Vector3).set(env.step ?? 0, Math.min(4, Math.max(1, Math.round(H / 56))), env.floor ?? 0.12);
       dst.viewport.set(0, 0, W, H);
@@ -1269,7 +1335,7 @@ export class PixelCast {
 
   /** GPU bytes held (scratch G-buffer(s) + tables). */
   bytes(): number {
-    return SCRATCH * SCRATCH * 4 + (this.gbufWide ? MAX_WIDE * SCRATCH * 4 : 0) + MAX_PRIMS * PRIM_FLOATS * 4 + MAT_COLS * 256 * 4 + STAMP_ATLAS * STAMP_ATLAS;
+    return SCRATCH * SCRATCH * 4 + (this.gbufWide ? MAX_WIDE * SCRATCH * 4 : 0) + MAX_PRIMS * PRIM_FLOATS * 4 + MAT_COLS * 256 * 4 * 2 + STAMP_ATLAS * STAMP_ATLAS;
   }
 
   dispose() {
@@ -1277,6 +1343,7 @@ export class PixelCast {
     this.gbufWide?.dispose();
     this.primTex.dispose();
     this.matTex.dispose();
+    this.matCelTex.dispose();
     this.stampTex.dispose();
     this.paintMat.dispose();
     this.resolveMat.dispose();

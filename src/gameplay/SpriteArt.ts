@@ -567,9 +567,11 @@ const SHOW_FRAG = /* glsl */ `
 const SHADOW_VERT = /* glsl */ `
   varying vec2 vUv;
   varying float vAlpha;
+  varying float vSkirt;
   void main() {
     vUv = uv;
     vAlpha = instanceColor.r;
+    vSkirt = instanceColor.g;
     vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
     vAlpha *= 1.0 - smoothstep(22.0, 40.0, -mv.z);
     gl_Position = projectionMatrix * mv;
@@ -579,9 +581,10 @@ const SHADOW_FRAG = /* glsl */ `
   precision highp float;
   uniform float uPxScale; // target pixels per retro pixel (1 with the retro pass on)
   uniform vec4 uGround;   // PIXEL CAST 2 contact shadow: rgb (scene-linear), a = core opacity
-  uniform float uStyle;   // 0 = two-tone blob (first look), 1 = flat pixel ellipse, 2 = core + dashed skirt
+  uniform float uStyle;   // 0 = two-tone blob (first look), 1 = flat pixel ellipse, 2 = flat ellipse + dashed skirt (wet ground)
   varying vec2 vUv;
   varying float vAlpha;
+  varying float vSkirt;
   void main() {
     // Evaluate at the centre of the retro pixel (a no-op when drawing at retro resolution).
     vec2 f = gl_FragCoord.xy;
@@ -590,12 +593,14 @@ const SHADOW_FRAG = /* glsl */ `
     float r = length(uv * 2.0 - 1.0);
     if (uStyle > 0.5) {
       // A drawn contact shadow in the stage's deepest shadow colour: one flat tone with a
-      // hard edge; (2) its skirt broken into short horizontal dashes, the way the world's
-      // painted shadows end — never a soft blob.
+      // hard edge — never a soft blob. It fades the pixel-art way: the ellipse SHRINKS as
+      // the figure leaves the ground or dies (no pop, no translucent disc). On wet ground
+      // (2) a standing figure's shadow ends in a skirt of broken horizontal dashes.
       vec2 px = floor(f / uPxScale);
-      float a = r < 0.78 ? 1.0 : 0.0;
-      if (uStyle > 1.5 && r >= 0.78 && r < 1.0) a = mod(px.y, 2.0) < 1.0 && mod(px.x + px.y * 1.5, 6.0) < 4.0 ? 1.0 : 0.0;
-      a *= uGround.a * step(0.3, vAlpha);
+      float rr = r / clamp(vAlpha * 1.3, 0.001, 1.0);
+      float a = rr < 0.78 ? 1.0 : 0.0;
+      if (uStyle > 1.5 && vSkirt > 0.5 && rr >= 0.78 && rr < 1.0) a = mod(px.y, 2.0) < 1.0 && mod(px.x + px.y * 1.5, 6.0) < 4.0 ? 1.0 : 0.0;
+      a *= uGround.a;
       if (a < 0.01) discard;
       gl_FragColor = vec4(uGround.rgb, a);
       return;
@@ -1053,9 +1058,10 @@ export class SpriteArt {
     }
     {
       const st = castStyle();
-      this.shadowMat.uniforms.uStyle.value = st.ground;
+      this.shadowMat.uniforms.uStyle.value = 0;
       if (st.ground > 0) {
         const sl = castStageLight(this.world.stage?.id, this.night);
+        this.shadowMat.uniforms.uStyle.value = sl.skirt ? 2 : 1;
         const g = this.shadowMat.uniforms.uGround.value as THREE.Vector4;
         _sc.setHex(sl.ground);
         g.set(_sc.r, _sc.g, _sc.b, sl.groundAlpha);
@@ -1772,7 +1778,10 @@ export class SpriteArt {
     m.scale.set((2 * hx * D) / P[0], (2 * hy * D) / P[5], 1);
     const fb = f.foot;
     const foot = Math.max(fb.max.x - fb.min.x, fb.max.z - fb.min.z);
-    const want = THREE.MathUtils.clamp(foot * 0.42, 0.22, 7);
+    let want = THREE.MathUtils.clamp(foot * 0.42, 0.22, 7);
+    // PIXEL CAST 2: a body going down keeps the contact shadow it stood on — it does not
+    // spread into a disc under the fallen figure (the blood pool is the read there).
+    if (f.cel > 0 && s.shadowR > 0 && e instanceof Enemy && e.state === 'dying') want = Math.min(want, s.shadowR);
     s.shadowR = s.shadowR > 0 ? s.shadowR + (want - s.shadowR) * 0.35 : want;
     _v.setFromMatrixPosition(s.obj.matrixWorld);
     s.offset.subVectors(m.position, _v);
@@ -1803,15 +1812,16 @@ export class SpriteArt {
     const style = castStyle();
     let fogShare = 0.5;
     if (style.cel > 0) {
-      // PIXEL CAST 2: no multiplied tint. The stage moves the figure by whole tone steps
-      // along its own ramps and draws a 1-texel coloured rim on the side facing its light.
+      // PIXEL CAST 2: no multiplied tint and no rim. The stage moves the figure by whole tone
+      // steps along its own ramps.
       const sl = castStageLight(this.world.stage?.id, this.night);
       env.tint.setRGB(1, 1, 1);
       env.step = sl.step;
       env.floor = sl.floor;
-      env.rimDir = sl.rimDir;
-      env.rim.setRGB(((sl.rim >> 16) & 255) / 255, ((sl.rim >> 8) & 255) / 255, (sl.rim & 255) / 255);
-      env.rimAmount = style.rim === 2 || (style.rim === 1 && sl.step < 0) ? sl.rimAmount : 0;
+      // (The accent: short light strokes on the top hull edges facing a strong coloured source.)
+      env.rimDir = sl.accentDir;
+      env.rim.setRGB(((sl.accent >> 16) & 255) / 255, ((sl.accent >> 8) & 255) / 255, (sl.accent & 255) / 255);
+      env.rimAmount = sl.accentAmount;
       fogShare = sl.fog;
     } else {
       // Day ≈ 1, night ≈ 0.68: characters stay readable without glowing.
@@ -1872,7 +1882,10 @@ export class SpriteArt {
     _ss.set(r * 2, r * 2 * 0.8, 1);
     _m4.compose(_v, _sq, _ss);
     this.shadows.setMatrixAt(i, _m4);
-    this.shadows.setColorAt(i, _sc.setRGB(fade, 0, 0));
+    // (g: the wet-ground skirt, for standing figures big enough to carry it.)
+    const dying = e instanceof Enemy && e.state === 'dying';
+    if (dying && castStyle().ground > 0) fade *= 0.7;
+    this.shadows.setColorAt(i, _sc.setRGB(fade, !dying && dPx > 14 ? 1 : 0, 0));
     return true;
   }
 
