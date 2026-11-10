@@ -406,7 +406,10 @@ export class MenuPwCity {
       keep(own, m.material as THREE.Material);
     });
     this.puffs.own(own);
-    for (const a of [this.atlas, this.skyAtlas, this.fireAtlas]) keep(own, a.texture());
+    for (const a of [this.atlas, this.skyAtlas, this.fireAtlas]) {
+      keep(own, a.texture());
+      keep(own, a.palette());
+    }
     return { backdrop: this.backdrop, flameMat: this.flameMat, neon };
   }
 
@@ -533,7 +536,10 @@ export class MenuPwJungle {
       keep(own, m.material as THREE.Material);
     });
     this.puffs.own(own);
-    for (const a of [this.atlas, this.skyAtlas, this.fxAtlas]) keep(own, a.texture());
+    for (const a of [this.atlas, this.skyAtlas, this.fxAtlas]) {
+      keep(own, a.texture());
+      keep(own, a.palette());
+    }
     return { backdrop: this.backdrop };
   }
 
