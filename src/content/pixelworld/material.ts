@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Kit } from '../kit/ModelKit';
 import { PW_TPM } from './canvas';
 import type { PwAtlas } from './atlas';
+import { PW_DEBUG_DECL, pwDebugPatch, pwDebugSetup } from '../../core/debugView';
 
 /**
  * PixelWorld materials: a flat-shaded Lambert (stage lights, flashlight, fog,
@@ -100,6 +101,7 @@ const FRAG_DECL = /* glsl */ `
   #else
     varying vec2 vPwUv;
   #endif
+  ${PW_DEBUG_DECL}
 `;
 
 /** Atlas fetch: sets `pwCol` (painted colour, linear) and `pwGlowK` (1 = unlit glow), discards cut-outs. */
@@ -134,6 +136,9 @@ const FRAG_MAP = /* glsl */ `
     float glowK = pc.a < 0.85 ? 1.0 : 0.0;
     diffuseColor.rgb *= pc.rgb * (1.0 - glowK) * uPwGain;
     pwEmit = pc.rgb * glowK * uPwGlow;
+    #ifdef PW_DEBUG
+      pwDbg = pwDbgMag(pu, 1.0, lv);
+    #endif
   }
 `;
 
@@ -147,7 +152,7 @@ export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.Mes
   const hit = byKey.get(key);
   if (hit) return hit;
   const tex = atlas.texture();
-  const uniforms = {
+  const uniforms: Record<string, { value: unknown }> = {
     uPwAtlas: { value: tex },
     uPwBias: { value: o.bias ?? PW_MIP_BIAS },
     uPwGain: { value: o.gain ?? 1 },
@@ -161,6 +166,7 @@ export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.Mes
   const defines: Record<string, string> = {};
   if (o.planar) defines.PW_PLANAR = '';
   if (o.anim) defines.PW_ANIM = '';
+  pwDebugSetup(defines, uniforms);
   m.defines = defines;
   m.userData.pw = uniforms;
   // Bakers must leave PixelWorld meshes alone (their attributes would be stripped).
@@ -172,6 +178,7 @@ export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.Mes
       .replace('#include <common>', `#include <common>\n${FRAG_DECL}`)
       .replace('#include <map_fragment>', FRAG_MAP)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += pwEmit;');
+    shader.fragmentShader = pwDebugPatch(shader.fragmentShader);
   };
   m.customProgramCacheKey = () => `pixelWorld1|${o.planar ? 'p' : 'u'}|${o.anim ? 'a' : ''}`;
   m.name = `pw:${atlas.name}`;
@@ -187,7 +194,7 @@ export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.Mes
  */
 export function pwBackdropMaterial(atlas: PwAtlas, o: { gain?: number; depthWrite?: boolean; tag?: string } = {}): THREE.MeshBasicMaterial {
   const tex = atlas.texture();
-  const uniforms = {
+  const uniforms: Record<string, { value: unknown }> = {
     uPwAtlas: { value: tex },
     uPwBias: { value: PW_MIP_BIAS },
     uPwGain: { value: o.gain ?? 1 },
@@ -198,6 +205,9 @@ export function pwBackdropMaterial(atlas: PwAtlas, o: { gain?: number; depthWrit
     uPwAnim: { value: new THREE.Vector2(1, 0) },
   };
   const m = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true, fog: false, depthWrite: o.depthWrite ?? false, side: THREE.DoubleSide });
+  const defines: Record<string, string> = {};
+  pwDebugSetup(defines, uniforms);
+  m.defines = defines;
   m.userData.pw = uniforms;
   m.userData.pixelWorld = true;
   m.onBeforeCompile = (shader) => {
@@ -206,7 +216,9 @@ export function pwBackdropMaterial(atlas: PwAtlas, o: { gain?: number; depthWrit
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${FRAG_DECL}`)
       // Unlit: glow and lit texels alike are shown at their painted colour.
-      .replace('#include <map_fragment>', FRAG_MAP + '\n  diffuseColor.rgb = (diffuseColor.rgb + pwEmit);');
+      // (A backdrop is black in every debug view: painted at the screen's own density, never part of the audit.)
+      .replace('#include <map_fragment>', FRAG_MAP + '\n  diffuseColor.rgb = (diffuseColor.rgb + pwEmit);\n  #ifdef PW_DEBUG\n    pwDbg = vec3(0.0);\n  #endif');
+    shader.fragmentShader = pwDebugPatch(shader.fragmentShader);
   };
   m.customProgramCacheKey = () => 'pixelWorldBackdrop1';
   m.name = `pwBackdrop:${atlas.name}`;

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Kit } from '../kit/ModelKit';
 import { PwAtlas, type PwPainter, type PwTile } from './atlas';
 import { bayer, PWF, type PwCanvas } from './canvas';
+import { PW_DEBUG_DECL, pwDebugPatch, pwDebugSetup } from '../../core/debugView';
 import { hash2 } from './surfaces';
 import { z1FlameTile, Z1_FLAME_FRAMES, Z1_FLAME_H, Z1_FLAME_W } from './z1fire';
 
@@ -180,7 +181,7 @@ export function pwSpriteMaterial(atlas: PwAtlas, tile: PwTile, o: { frames?: num
   const cells = o.cells ?? 1;
   const cols = o.cols ?? cells;
   const rows = Math.ceil(cells / cols);
-  const uniforms = {
+  const uniforms: Record<string, { value: unknown }> = {
     uPwAtlas: { value: tex },
     uPwTime: { value: 0 },
     uPwRect: { value: new THREE.Vector4(tile.x, tile.y, tile.w / cols, tile.h / frames / rows) },
@@ -190,6 +191,9 @@ export function pwSpriteMaterial(atlas: PwAtlas, tile: PwTile, o: { frames?: num
     uPwGain: { value: o.gain ?? 1 },
   };
   const m = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: o.fog ?? true });
+  const defines: Record<string, string> = {};
+  pwDebugSetup(defines, uniforms);
+  m.defines = defines;
   m.userData.pw = uniforms;
   m.userData.pixelWorld = true;
   m.onBeforeCompile = (shader) => {
@@ -235,7 +239,8 @@ export function pwSpriteMaterial(atlas: PwAtlas, tile: PwTile, o: { frames?: num
         uniform float uPwCols;
         varying vec2 vPwUv;
         flat varying float vPwSeed;
-        flat varying float vPwCell;`,
+        flat varying float vPwCell;
+        ${PW_DEBUG_DECL}`,
       )
       .replace(
         '#include <map_fragment>',
@@ -253,8 +258,12 @@ export function pwSpriteMaterial(atlas: PwAtlas, tile: PwTile, o: { frames?: num
           vec4 pc = texelFetch(uPwAtlas, ip, lv);
           if (pc.a < 0.25) discard;
           diffuseColor.rgb *= pc.rgb * uPwGain;
+          #ifdef PW_DEBUG
+            pwDbg = pwDbgMag(pu, 1.0, lv);
+          #endif
         }`,
       );
+    shader.fragmentShader = pwDebugPatch(shader.fragmentShader);
   };
   m.customProgramCacheKey = () => 'z3pwSprite3';
   m.name = 'pw:z3-sprite';

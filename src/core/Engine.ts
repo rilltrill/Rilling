@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { QualityLevel, RetroMode } from './types';
 import { RetroPass, RETRO_MIN_SCALE } from './RetroPass';
 import { ResolutionGovernor } from './Resolution';
+import { pwDebug } from './debugView';
 
 export const QUALITY_PRESETS: Record<QualityLevel, { maxDpr: number; minDpr: number; antialias: boolean }> = {
   low: { maxDpr: 1, minDpr: 0.6, antialias: false },
@@ -211,7 +212,10 @@ export class Engine {
   render(scene: THREE.Scene, camera: THREE.Camera = this.camera) {
     if (this.contextLost) return;
     if (this.retro.enabled) this.retro.render(scene, camera, this.lastDt);
-    else this.renderer.render(scene, camera);
+    else {
+      if (pwDebug.compiled) pwDebug.gain.value = 1;
+      this.renderer.render(scene, camera);
+    }
   }
 
   /**

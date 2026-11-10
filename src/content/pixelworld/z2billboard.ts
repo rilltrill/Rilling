@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Kit } from '../kit/ModelKit';
 import type { PwAtlas, PwTile } from './atlas';
 import { PW_MIP_BIAS } from './material';
+import { PW_DEBUG_DECL, pwDebugPatch, pwDebugSetup } from '../../core/debugView';
 
 /**
  * PIXEL WORLD prop billboards for ST. MERCY HOSPITAL: small props painted as
@@ -45,6 +46,7 @@ const FRAG_DECL = /* glsl */ `
   uniform float uPwMaxLv;
   flat varying vec4 vPwRect;
   varying vec2 vPwUv;
+  ${PW_DEBUG_DECL}
 `;
 
 const FRAG_MAP = /* glsl */ `
@@ -62,6 +64,9 @@ const FRAG_MAP = /* glsl */ `
     float glowK = pc.a < 0.85 ? 1.0 : 0.0;
     diffuseColor.rgb *= pc.rgb * (1.0 - glowK) * uPwGain;
     pwEmit = pc.rgb * glowK * uPwGlow;
+    #ifdef PW_DEBUG
+      pwDbg = pwDbgMag(pu, 1.0, lv);
+    #endif
   }
 `;
 
@@ -73,7 +78,7 @@ export function z2BillboardMaterial(atlas: PwAtlas, gain = 1): THREE.MeshLambert
   if (!byGain) mats.set(atlas, (byGain = new Map()));
   const hit = byGain.get(gain);
   if (hit) return hit;
-  const uniforms = {
+  const uniforms: Record<string, { value: unknown }> = {
     uPwAtlas: { value: atlas.texture() },
     uPwBias: { value: PW_MIP_BIAS },
     uPwGain: { value: gain },
@@ -81,6 +86,9 @@ export function z2BillboardMaterial(atlas: PwAtlas, gain = 1): THREE.MeshLambert
     uPwMaxLv: { value: atlas.levels - 1 },
   };
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, flatShading: true, side: THREE.DoubleSide });
+  const defines: Record<string, string> = {};
+  pwDebugSetup(defines, uniforms);
+  m.defines = defines;
   m.userData.pw = uniforms;
   m.userData.pixelWorld = true;
   m.onBeforeCompile = (shader) => {
@@ -90,6 +98,7 @@ export function z2BillboardMaterial(atlas: PwAtlas, gain = 1): THREE.MeshLambert
       .replace('#include <common>', `#include <common>\n${FRAG_DECL}`)
       .replace('#include <map_fragment>', FRAG_MAP)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += pwEmit;');
+    shader.fragmentShader = pwDebugPatch(shader.fragmentShader);
   };
   m.customProgramCacheKey = () => 'z2Billboard1';
   m.name = `pwBill:${atlas.name}`;
