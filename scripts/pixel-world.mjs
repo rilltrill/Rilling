@@ -33,6 +33,11 @@ const hud = args.hud === 'true';
 // --noauto: nobody shoots (the hostiles close in and wind up: telegraph rings on screen with --hud).
 const noauto = args.noauto === 'true';
 const extra = args.extra ?? '';
+// --vw/--vh/--dsf: viewport (CSS px) and device pixel ratio. `--vw 624 --vh 288 --dsf 3 --retro pixel` shows the
+// 288-line art frame itself, every art pixel exactly 3×3 (no CRT, no uneven upscale): the view to judge pixel art in.
+const vw = Number(args.vw ?? 844);
+const vh = Number(args.vh ?? 390);
+const dsf = Number(args.dsf ?? 1);
 mkdirSync(out, { recursive: true });
 const shots = (args.shots ?? 'z1:1:240')
   .split(',')
@@ -48,7 +53,7 @@ const stats = [];
 for (const shot of shots) {
   const row = [];
   for (const mode of modes) {
-    const ctx = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+    const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: dsf, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     await page.routeWebSocket(/.*/, () => {});
     const errors = [];
