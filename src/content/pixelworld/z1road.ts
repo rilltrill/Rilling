@@ -843,7 +843,8 @@ export function flagCourses(b: Brush2, rng: PwRng, P: Z1GroundRamps, x0: number,
       if (w - x - sw < minW * 0.6) sw = w - x;
       const hr = hash2(ci, si, seed + 7);
       const ramp = stones[Math.floor(hr * stones.length)];
-      const tone = hash2(ci, si, seed + 9) > 0.82 ? 4 : 3;
+      // (A lighter stone only now and then: paving is the floor the horde is read against.)
+      const tone = hash2(ci, si, seed + 9) > 0.93 ? 4 : 3;
       for (let yy = 0; yy < ch; yy++) {
         for (let xx = 0; xx < sw; xx++) {
           const k = (y0 + y + yy) * W + x0 + x + xx;
@@ -1343,7 +1344,7 @@ export function z1CrosswalkTile(atlas: PwAtlas): PwTile {
     const tracks = [-TRACK_OUT, -TRACK_IN, TRACK_IN, TRACK_OUT].map((t) => W / 2 + t);
     // Rub the paint through in a lobe (a long hole down the travel line), leaving a ragged, lit-edged shore.
     const rub = (x: number, y: number, w: number, h: number, lobes: number) => {
-      const hole = blob(rng, w, h, lobes, 0.5, 1);
+      const hole = blob(rng, w, h, lobes, 0.5);
       for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (hole.m[yy * w + xx] && c.at(x + xx, y + yy) === P.white) c.ramp[(y + yy) * W + x + xx] = 0;
     };
     for (let bar = 0; bar < 11; bar++) {
@@ -1512,7 +1513,8 @@ function paintZ1Alley(c: PwCanvas, k: PwKit) {
   // tone than the setts; its broken edge has a thickness (dark rim on its far / left side, lit on the near).
   const tar = new Uint8Array(W * H);
   const island = (x: number, y: number, w: number, h: number, lobes: number) => {
-    const bl = blob(rng, w, h, lobes, 0.55, 3);
+    // (One smoothing pass: the edge is broken into bites below anyway.)
+    const bl = blob(rng, w, h, lobes, 0.55, 1);
     for (let yy = 0; yy < h; yy++) {
       for (let xx = 0; xx < w; xx++) {
         if (!bl.m[yy * w + xx]) continue;

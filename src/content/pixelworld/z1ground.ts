@@ -925,20 +925,27 @@ function paintDecals(c: PwCanvas, k: PwKit) {
     const cx = r.x + r.w / 2;
     const cy = r.y + r.h / 2;
     const ash = k.ramp(0x4a4a50, { light: 0.4, sat: 0.4 });
-    const wf = [0, 1, 2].map((q) => { const p = hash2(q, 9, 9) * 6.28; return (a: number) => Math.sin(a * 3 + p) * 0.05 + Math.sin(a * 7 + p * 2) * 0.03; });
+    // Three ring edges, each wobbling round the compass (tabulated per degree: this is a big decal).
+    const wf = [0, 1, 2].map((q) => {
+      const p = hash2(q, 9, 9) * 6.28;
+      const t = new Float32Array(361);
+      for (let d = 0; d <= 360; d++) t[d] = Math.sin((d * Math.PI * 3) / 180 + p) * 0.05 + Math.sin((d * Math.PI * 7) / 180 + p * 2) * 0.03;
+      return t;
+    });
     for (let y = 3; y < r.h - 3; y++) {
       for (let x = 3; x < r.w - 3; x++) {
         const u = (r.x + x + 0.5 - cx) / (r.w / 2 - 6);
         const v = (r.y + y + 0.5 - cy) / (r.h / 2 - 6);
         const d = Math.sqrt(u * u + v * v);
-        const a = Math.atan2(v, u);
-        if (d > 1 + wf[0](a)) {
+        if (d > 1.2) continue;
+        const a = Math.round((Math.atan2(v, u) * 180) / Math.PI + 180);
+        if (d > 1 + wf[0][a]) {
           // Soot thrown past the edge, as dashes.
-          if (d < 1.1 + wf[0](a) && dashAt(x, y, 2, 5, 2, 4) && y % 2 === 0) c.set(r.x + x, r.y + y, P.tar, 2);
+          if (d < 1.1 + wf[0][a] && dashAt(x, y, 2, 5, 2, 4) && y % 2 === 0) c.set(r.x + x, r.y + y, P.tar, 2);
           continue;
         }
-        if (d > 0.72 + wf[1](a)) c.set(r.x + x, r.y + y, P.tar, 2);
-        else if (d > 0.4 + wf[2](a)) c.set(r.x + x, r.y + y, P.tar, 1);
+        if (d > 0.72 + wf[1][a]) c.set(r.x + x, r.y + y, P.tar, 2);
+        else if (d > 0.4 + wf[2][a]) c.set(r.x + x, r.y + y, P.tar, 1);
         else c.set(r.x + x, r.y + y, ash, dashAt(x, y, 3, 8, 1, 3) && y % 2 === 0 ? 3 : 2);
       }
     }

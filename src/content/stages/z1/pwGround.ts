@@ -240,9 +240,14 @@ export class Z1Ground {
     const b = new PwBatch(this.atlas);
     const col = new THREE.Color();
     const base = new THREE.Color(Z1_GLINT_NEUTRAL);
+    const hsl = { h: 0, s: 0, l: 0 };
     pools.forEach((d, i) => {
       if (d.wallYaw !== undefined) return;
-      // (Pale lamps are warmed, as their pools are; every glint a little under its light's own colour.)
+      // (Headlamps and the floodlight lay none: their pools fall on the lanes the horde comes down, and a
+      // patch of pale strokes there would be the brightest thing on the enemies' floor.)
+      col.setHex(d.color).getHSL(hsl);
+      if (hsl.s < 0.6 && hsl.l > 0.8) return;
+      // (Every glint a little under its light's own colour.)
       pwPoolColor(col, d.color, 1 / PW_POOL_GAIN);
       const tint = [Math.min(1, (col.r / base.r) * 0.8), Math.min(1, (col.g / base.g) * 0.8), Math.min(1, (col.b / base.b) * 0.8)];
       const yaw = inAlley(d.x, d.z) ? Math.PI / 2 : 0;
