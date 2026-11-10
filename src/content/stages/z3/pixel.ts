@@ -85,7 +85,7 @@ export function dropUntagged(o: THREE.Object3D, drop: THREE.Object3D[], glows = 
 }
 
 /** The mood of the sunset highway (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
-export const Z3_MOOD: Partial<PwMood> = { pivot: 0.5, steps: 0.75, lo: -2, hi: 1 };
+export const Z3_MOOD: Partial<PwMood> = { pivot: 0.5, hi: 1, tint: 0.8, shade: 0xb898e8 };
 
 export class Z3PixelWorld {
   /** Set before any material is made: every PixelWorld material of the stage is lit under it. */

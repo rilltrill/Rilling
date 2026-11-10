@@ -14,7 +14,7 @@ export const MONITOR_LEVELS = 31;
  * tone-mapped paint ever did; one level under it (247 of 255) needs 2.1.
  */
 export const MONITOR_TOP = 30;
-/** Alpha a palette-true pixel is flagged with in an 8-bit scene target (see `MONITOR`). */
+/** Alpha a palette-true pixel is written with (its flag: see `MONITOR`). */
 const EXACT_ALPHA = 128 / 255;
 
 /**
@@ -22,12 +22,14 @@ const EXACT_ALPHA = 128 / 255;
  * (content/pixelworld/light.ts): a shared uniform — x the exposure of the tone curve the pass will
  * apply (0: there is no pass, the frame goes straight to the canvas), y its colour levels (0: no
  * lattice), z the top level such a pixel may take, w the alpha to write. Such a material snaps its
- * display colour to the lattice and writes the scene value the curve maps there; in the half-float
- * target that survives exactly enough for the ordered dither below to do nothing to it (a pixel
- * something transparent was blended over is off the lattice again, and dithered as ever). An 8-bit
- * target cannot hold it that finely, so there the pixel is flagged in alpha instead (untouched by
- * blending only while nothing is drawn over it) and the pass rounds flagged pixels to the nearest
- * level instead of dithering them.
+ * display colour to the lattice and writes the scene value the curve maps there, with `w` as its
+ * alpha: the pass ROUNDS a pixel that still carries that alpha to its nearest level instead of
+ * dithering it. In the half-float target the value survives so exactly that rounding and dithering
+ * give the same colour anyway; an 8-bit target cannot hold it that finely, there the flag is what
+ * keeps the ordered dither off painted art. Anything transparent drawn over the pixel changes its
+ * alpha with its colour (normal and additive blending both do), so rain, smoke, glass and glows are
+ * dithered over the world as ever — except an overlay made not to (`pwLightOverlay`: a stepped
+ * light pool, which is paint), whose pixels stay flagged and land on whole colours.
  */
 export const MONITOR = { uPwMon: { value: new THREE.Vector4(0, 0, MONITOR_TOP, 1) } };
 
@@ -52,7 +54,7 @@ const FRAG = /* glsl */ `
   uniform float uExposure;
   uniform float uLevels;  // colour levels per channel after quantisation
   uniform float uTime;
-  uniform float uExact;   // alpha of pixels to round, not dither (8-bit scene target; 0 = none)
+  uniform float uExact;   // alpha of the pixels to round, not dither (palette-true ones: see MONITOR)
   #ifdef PW_DEBUG
     uniform float uPwDebug;
   #endif
@@ -79,9 +81,9 @@ const FRAG = /* glsl */ `
     uv += uv * o * o * uCrt;
     return uv * 0.5 + 0.5;
   }
-  vec3 sampleScene(vec2 uv) {
+  vec4 sampleScene(vec2 uv) {
     vec2 cell = (floor(uv * uRes) + 0.5) / uRes;
-    return texture2D(tScene, cell).rgb;
+    return texture2D(tScene, cell);
   }
   void main() {
     vec2 uv = curve(vUv);
@@ -93,7 +95,7 @@ const FRAG = /* glsl */ `
     #ifdef PW_DEBUG
       // A PixelWorld debug view (core/debugView.ts): only the keyed pixels, at their own hue; the rest black.
       if (uPwDebug > 0.5) {
-        vec3 k = sampleScene(uv);
+        vec3 k = sampleScene(uv).rgb;
         float m = max(k.r, max(k.g, k.b));
         gl_FragColor = vec4(m >= ${PW_DEBUG_FLOOR.toFixed(1)} ? k / m : vec3(0.0), 1.0);
         return;
@@ -102,20 +104,21 @@ const FRAG = /* glsl */ `
     // Slight convergence error toward the edges (CRT only).
     vec2 ca = (uv - 0.5) * (0.9 * uCrt) / uRes;
     vec3 col;
+    vec4 here = sampleScene(uv);
     col.r = sampleScene(uv + ca).r;
-    col.g = sampleScene(uv).g;
+    col.g = here.g;
     col.b = sampleScene(uv - ca).b;
     // Cheap phosphor bloom: bright neighbours bleed a little.
     vec2 o = 1.5 / uRes;
-    vec3 n = sampleScene(uv + vec2(o.x, 0.0)) + sampleScene(uv - vec2(o.x, 0.0)) +
-             sampleScene(uv + vec2(0.0, o.y)) + sampleScene(uv - vec2(0.0, o.y));
+    vec3 n = sampleScene(uv + vec2(o.x, 0.0)).rgb + sampleScene(uv - vec2(o.x, 0.0)).rgb +
+             sampleScene(uv + vec2(0.0, o.y)).rgb + sampleScene(uv - vec2(0.0, o.y)).rgb;
     vec3 bloom = max(n * 0.25 - 0.55, 0.0);
     col = aces((col + bloom * 0.6 * uCrt) * uExposure);
     col = toSRGB(col);
     // 15-bit-era colour depth with ordered dithering on the low-res grid.
     float th = (bayer4(px) + 0.5) / 16.0 - 0.5;
-    // (An 8-bit target: palette-true pixels are flagged in alpha and rounded to their level.)
-    if (uExact > 0.0 && abs(texture2D(tScene, (floor(px) + 0.5) / uRes).a - uExact) < 0.002) th = 0.0;
+    // (A palette-true pixel, flagged in alpha, is rounded to its level: no dither over painted art.)
+    if (abs(here.a - uExact) < 0.003) th = 0.0;
     col = clamp(floor(col * uLevels + 0.5 + th) / uLevels, 0.0, 1.0);
     if (uCrt > 0.0) {
       // Scanlines: each low-res row is a bright beam with darker gaps.
@@ -180,7 +183,7 @@ export class RetroPass {
     this.scene.add(quad);
     const ext = renderer.extensions;
     this.hdr = !!(ext.has('EXT_color_buffer_half_float') || ext.has('EXT_color_buffer_float')) && !RetroPass.force8;
-    this.mat.uniforms.uExact.value = this.hdr ? 0 : EXACT_ALPHA;
+    this.mat.uniforms.uExact.value = EXACT_ALPHA;
   }
 
   /** `&pwrt=8` (tests of the fallback): the scene target is 8-bit even where half-float is there. */
@@ -200,7 +203,7 @@ export class RetroPass {
   /** Tell the palette-true materials what their pixels go through (`MONITOR`). */
   private link() {
     if (this.mode === 'off') MONITOR.uPwMon.value.set(0, 0, MONITOR_TOP, 1);
-    else MONITOR.uPwMon.value.set(this.renderer.toneMappingExposure, MONITOR_LEVELS, MONITOR_TOP, this.hdr ? 1 : EXACT_ALPHA);
+    else MONITOR.uPwMon.value.set(this.renderer.toneMappingExposure, MONITOR_LEVELS, MONITOR_TOP, EXACT_ALPHA);
   }
 
   /** Low-res target size for an output of (w, h) CSS pixels. */

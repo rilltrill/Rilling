@@ -13,7 +13,8 @@
  *             `pivot` is chosen from these;
  *   steps     the share of world pixels at each tone step under the stage's mood (and under each
  *             of --moods: `name=key:value,…`, laid over the stage's mood with `__pwMood`).
- * Writes <out>/<label>[-<mood>].png (the exact 624 × 288 art frame, 3×) and, with --views,
+ * Writes <out>/<label>[-<mood>]-pixel.png (the exact 624 × 288 art frame, 3×: the name
+ * scripts/pixel-sheet.mjs pairs with a scripts/pixel-world.mjs capture) and, with --views,
  * <label>[-<mood>]-steps.png and <label>-light.png.
  */
 import { chromium } from '@playwright/test';
@@ -134,7 +135,7 @@ for (const shot of shots) {
     }
     const line = [-3, -2, -1, 0, 1, 2, 3].map((s) => `${s > 0 ? '+' : ''}${s}: ${(((cnt.get(s) ?? 0) / Math.max(1, n)) * 100).toFixed(0).padStart(2)}%`).join('  ');
     console.log(`  ${(m.name || 'stage').padEnd(8)} steps  ${line}`);
-    save(await view('off'), tag);
+    save(await view('off'), `${tag}-pixel`);
   }
   await ctx.close();
 }

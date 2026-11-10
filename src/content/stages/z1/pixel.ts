@@ -111,7 +111,7 @@ const Z = new THREE.Vector3(0, 0, 1);
 const NZ = new THREE.Vector3(0, 0, -1);
 
 /** The mood of MAIN STREET at night (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
-export const Z1_MOOD: Partial<PwMood> = { pivot: 0.3, steps: 0.75, lo: -2, hi: 2 };
+export const Z1_MOOD: Partial<PwMood> = { pivot: 0.55, tint: 0.8, shade: 0x9a90e8 };
 
 export class Z1PixelWorld {
   /** Set before any material is made: every PixelWorld material of the stage is lit under it. */

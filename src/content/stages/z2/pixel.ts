@@ -129,7 +129,7 @@ const BODY_TORSO = [[-0.38, 0.02, 0.12], [-0.3, 0.15, 0.24], [-0.05, 0.18, 0.24]
 
 
 /** The mood of ST. MERCY HOSPITAL (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
-export const Z2_MOOD: Partial<PwMood> = { pivot: 0.24, steps: 0.75, lo: -2, hi: 2 };
+export const Z2_MOOD: Partial<PwMood> = { pivot: 0.45, tint: 0.8, shade: 0x90b8c8 };
 
 /** ST. MERCY HOSPITAL's PIXEL WORLD converter (one per stage build). */
 export class Z2PixelWorld {

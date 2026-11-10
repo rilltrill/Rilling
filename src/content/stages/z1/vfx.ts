@@ -4,6 +4,7 @@ import { Kit } from '../../kit/ModelKit';
 import { Rng } from '../../../core/Rng';
 import { EnvKit } from '../../kit/EnvKit';
 import { applyRetroArray, bakeMerge, texGlow, type RetroParams } from './bake';
+import { pwLightOverlay } from '../../pixelworld/light';
 
 /**
  * Cheap atmospheric effects for MAIN STREET: fake light pools and volumetric
@@ -168,6 +169,8 @@ export class LightPools {
       mat.blendSrc = wall ? THREE.OneMinusDstColorFactor : THREE.DstColorFactor;
       mat.blendDst = THREE.OneFactor;
       mat.premultipliedAlpha = true;
+      // Stepped rings are paint: what they light stays on whole colours (the monitor does not dither it).
+      pwLightOverlay(mat);
       const mesh = new THREE.InstancedMesh(Kit.track(new THREE.PlaneGeometry(1, 1)), mat, Math.max(1, this.defs.length));
       this.defs.forEach((d, i) => {
         const isWall = d.wallYaw !== undefined;

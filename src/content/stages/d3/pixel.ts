@@ -178,7 +178,7 @@ function d3SkyMaterial(atlas: PwAtlas, v0: number, v1: number): THREE.MeshBasicM
 export type TerrainKind = 'floor' | 'mud' | 'rock' | 'bed';
 
 /** The mood of the storm night (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
-export const D3_MOOD: Partial<PwMood> = { pivot: 0.3, steps: 0.75, lo: -2, hi: 2 };
+export const D3_MOOD: Partial<PwMood> = { pivot: 0.45, tint: 0.8, shade: 0x8c98f0 };
 
 export class D3PixelWorld {
   /** Set before any material is made: every PixelWorld material of the stage is lit under it. */
