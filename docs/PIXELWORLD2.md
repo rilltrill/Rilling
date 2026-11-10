@@ -173,7 +173,10 @@ Described in full in docs/ARCHITECTURE.md, *PIXEL WORLD 2 pipeline*. What exists
   keeps its texels at pixel size across the view. Without it density would not help there at
   all. A material's level `bias` still applies: the first pass's biases of 1.0 / 1.5 on z2 / d2
   walls and floors draw texels of 1.4–2.8 pixels by design — set them back to the default (0.5)
-  when those surfaces are repainted, or the audit's `lvl>2` column stays high.
+  when those surfaces are repainted, or the audit's `lvl>2` column stays high. A fine regular
+  pattern (a chequer floor, a grate) now shows much further out: paint it so that it may
+  (cells of 4 texels or more, low contrast between them), or give that one material
+  `{ axes: false }`.
 - **Debug views and the audit** (§8).
 
 Still to come (the light part): ramp-step lighting through the extended palette (§5), banded
