@@ -9,6 +9,7 @@ import { texStd } from './bake';
 import { ALLEY_N, ALLEY_S, CROSS_Z0, CROSS_Z1, GAS_Z0, GAS_Z1, MAIN_FACADE, SECOND_E, SECOND_W, SECOND_X, SQ_X0, SQ_X1, SQ_Z0, SQ_Z1 } from './layout';
 import { M } from './props';
 import { zoneFor, type ZoneId } from './town';
+import { PW_POOL_GAIN, pwPoolColor } from './vfx';
 
 /**
  * MAIN STREET ground decals in ART: PIXEL WORLD (z1/pixel.ts calls this per zone).
@@ -241,8 +242,9 @@ export class Z1Ground {
     const base = new THREE.Color(Z1_GLINT_NEUTRAL);
     pools.forEach((d, i) => {
       if (d.wallYaw !== undefined) return;
-      col.setHex(d.color);
-      const tint = [Math.min(1, col.r / base.r), Math.min(1, col.g / base.g), Math.min(1, col.b / base.b)];
+      // (Pale lamps are warmed, as their pools are; every glint a little under its light's own colour.)
+      pwPoolColor(col, d.color, 1 / PW_POOL_GAIN);
+      const tint = [Math.min(1, (col.r / base.r) * 0.8), Math.min(1, (col.g / base.g) * 0.8), Math.min(1, (col.b / base.b) * 0.8)];
       const yaw = inAlley(d.x, d.z) ? Math.PI / 2 : 0;
       const y = isSidewalk(d.x, d.z) ? WALK_Y + 0.004 : ROAD_Y + 0.008;
       this.decal(b, i % 2 ? 'glintB' : 'glintA', d.x, y, d.z, yaw, undefined, undefined, i % 3 === 0, tint);

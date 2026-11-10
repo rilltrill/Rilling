@@ -918,6 +918,20 @@ export function wearFlags(b: Brush2, rng: PwRng, P: Z1GroundRamps, flags: { x: n
       const r = rng.int(5, 10);
       for (let y = 0; y < r; y++) for (let x = 0; x < r - y; x++) b.shift(cxk ? s.x + s.w - 1 - x : s.x + 1 + x, cyk ? s.y + s.h - 1 - y : s.y + 1 + y, -1, s.ramp);
     }
+    // The stone's own bedding: one or two fine veins along it, a texel thick, a step darker or lighter.
+    for (let i = 0; i < (s.w > 60 ? 2 : 1); i++) {
+      if (rng.chance(0.35)) continue;
+      const len = rng.int(10, Math.max(11, Math.min(34, s.w - 10)));
+      const vx = s.x + rng.int(3, Math.max(4, s.w - len - 3));
+      let vy = s.y + rng.int(4, Math.max(5, s.h - 5));
+      const dt = rng.chance(0.6) ? -1 : 1;
+      for (let p = 0; p < len; p++) {
+        if (p % 7 === 6 && rng.chance(0.5)) vy += rng.chance(0.5) ? 1 : -1;
+        if (vy > s.y + 1 && vy < s.y + s.h - 2) b.shift(vx + p, vy, dt, s.ramp);
+      }
+    }
+    // Damp lying against the near joint: a broken darker line just inside the stone's near edge.
+    for (let p = 2; p < s.w - 2; p++) if (dashAt(p, s.x + s.y, 4, 14, 2, 8)) b.shift(s.x + p, s.y + s.h - 1, -1, s.ramp);
     // Bites out of the lit arris (the far edge), each a short dark notch.
     for (let i = 0; i < Math.round(s.w / 40); i++) {
       const x = s.x + rng.int(3, Math.max(4, s.w - 8));
@@ -1198,31 +1212,40 @@ function paintZ1Junction(c: PwCanvas, k: PwKit) {
   // The streetcar line down the cross street: two rails 1.435 m apart in a strip of granite setts, tarred
   // over long ago; the tar has worn through in stretches and the steel shows.
   for (const ry of [CY - 46, CY + 46]) {
-    const worn = wobbler(seed + ry, 0, 1.4);
-    for (let x = 0; x < W; x++) {
-      const open = worn(x) > -0.15;
-      if (open) {
-        // Setts either side of the rail (two courses each side), then the rail: a lit head, the dark flangeway.
-        for (let q = -9; q <= 9; q++) {
-          const i = b.at(x, ry + q);
-          if (i < 0) continue;
-          const aq = Math.abs(q);
-          if (aq <= 1) continue;
-          const course = aq < 6 ? 0 : 1;
-          const joint = (x + course * 5) % 11 === 0 || aq === 5 || aq === 9;
-          b.R[i] = joint ? P.concDark : P.flag;
-          b.T[i] = joint ? 1 : (x + course * 5) % 11 === 1 || aq === 2 || aq === 6 ? 4 : 3;
-          wet[i] = 0;
-        }
-      }
-      b.set(x, ry - 1, P.iron, open ? 4 : 3);
-      b.set(x, ry, P.iron, open ? 3 : 2);
-      b.set(x, ry + 1, P.tar, 0);
-      if (!open && dashAt(x, seed + ry, 3, 8, 3, 9)) b.shift(x, ry + 2, 1);
+    // Where the strip shows: a few long lobes along the rail (ragged windows worn in the tar), not a ruled band.
+    const open = new Uint8Array(W * 22);
+    let x = rng.int(10, 60);
+    while (x < W - 60) {
+      const len = rng.int(70, 170);
+      const win = blob(rng, len, 20, Math.max(3, Math.round(len / 34)), 0.45, 1);
+      for (let yy = 0; yy < 20; yy++) for (let xx = 0; xx < len; xx++) if (win.m[yy * len + xx] && x + xx < W) open[(yy + 1) * W + x + xx] = 1;
+      x += len + rng.int(30, 110);
     }
-    // The ragged lip of the tar where the strip is open.
-    for (let x = 1; x < W - 1; x++) {
-      if (worn(x) > -0.15 !== worn(x + 1) > -0.15) for (let q = -10; q <= 10; q++) b.set(x + (hash2(q, x, 3) > 0.5 ? 1 : 0), ry + q, P.tar, 1);
+    for (let xx = 0; xx < W; xx++) {
+      for (let q = -10; q <= 10; q++) {
+        const i = b.at(xx, ry + q);
+        if (i < 0 || !open[(q + 11) * W + xx]) continue;
+        const aq = Math.abs(q);
+        // The rail itself is drawn below; either side of it two courses of setts, dark and wet as the road.
+        if (aq <= 1) continue;
+        const course = aq < 6 ? 0 : 1;
+        const joint = (xx + course * 5) % 11 >= 9 || aq === 5 || aq === 9 || aq === 10;
+        b.R[i] = joint ? P.tar : P.blue;
+        b.T[i] = joint ? 1 : (xx + course * 5) % 11 === 0 || aq === 2 || aq === 6 ? 3 : 2;
+        wet[i] = 0;
+      }
+      // The broken edge of the tar round each window has a thickness: dark on its far side, lit on its near one.
+      for (let q = -10; q <= 10; q++) {
+        const o0 = open[(q + 11) * W + xx];
+        const o1 = open[(q + 12) * W + xx];
+        if (o0 && !o1) b.shift(xx, ry + q + 1, 1);
+        else if (!o0 && o1) b.shift(xx, ry + q, -1);
+      }
+      const shown = open[11 * W + xx] === 1;
+      b.set(xx, ry - 1, P.iron, shown ? 4 : 3);
+      b.set(xx, ry, P.iron, shown ? 3 : 2);
+      b.set(xx, ry + 1, P.tar, 0);
+      if (!shown && dashAt(xx, seed + ry, 3, 8, 3, 9)) b.shift(xx, ry + 2, 1);
     }
   }
   // Turning marks: the dark double arcs of tyres cutting each corner (rubber on wet tar: one step down, broken).
@@ -1489,7 +1512,7 @@ function paintZ1Alley(c: PwCanvas, k: PwKit) {
   // tone than the setts; its broken edge has a thickness (dark rim on its far / left side, lit on the near).
   const tar = new Uint8Array(W * H);
   const island = (x: number, y: number, w: number, h: number, lobes: number) => {
-    const bl = blob(rng, w, h, lobes, 0.55);
+    const bl = blob(rng, w, h, lobes, 0.55, 3);
     for (let yy = 0; yy < h; yy++) {
       for (let xx = 0; xx < w; xx++) {
         if (!bl.m[yy * w + xx]) continue;
@@ -1509,6 +1532,20 @@ function paintZ1Alley(c: PwCanvas, k: PwKit) {
   }
   island(60, 300, 330, 70, 7);
   island(90, 620, 280, 56, 6);
+  // The skin breaks off in pieces: square bites two to four texels deep all along its edge.
+  {
+    const src = tar.slice();
+    for (let y = 0; y < H; y++) {
+      for (let x = 1; x < W - 1; x++) {
+        const i = y * W + x;
+        if (!src[i]) continue;
+        const edge = !src[i - 1] || !src[i + 1] || !src[b.at(x, y - 1)] || !src[b.at(x, y + 1)];
+        if (!edge || hash2(x >> 2, y >> 2, seed + 3) > 0.42) continue;
+        const n = 2 + Math.floor(hash2(x >> 2, y >> 2, seed + 4) * 3);
+        for (let yy = (y >> 2) << 2; yy < ((y >> 2) << 2) + n; yy++) for (let xx = (x >> 2) << 2; xx < ((x >> 2) << 2) + n; xx++) tar[b.at(xx, yy)] = 0;
+      }
+    }
+  }
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const i = y * W + x;
@@ -1580,6 +1617,25 @@ function paintZ1Alley(c: PwCanvas, k: PwKit) {
     for (let q = 0; q < len; q++) b.tint(x, y + q, P.sky, q < 2 || q > len - 3 ? 0 : 1, P.blue);
   }
   b.sheen(rng, M0 + 4, 0, W - 2 * M0 - 8, H, 220, P.sky, 2, { min: 4, max: 9, fat: 0, drifts: 40, only: (r) => r === P.flag || r === P.blue });
+  // The tar's own skin: damp ladders in its lighter tone, scabs, pits (the road's language, at the road's density).
+  const onTar = (r: number) => r === P.asph;
+  for (let k2 = 0; k2 < 90; k2++) {
+    const lx = rng.int(M0 + 8, W - M0 - 8);
+    const ly = rng.int(0, H - 1);
+    const i = b.at(lx, ly);
+    if (i < 0 || !tar[i] || wet[i]) continue;
+    ladder(b, rng, lx, ly, rng.int(24, 80), rng.int(7, 18), 0, 1, tar, onTar);
+  }
+  for (let k2 = 0; k2 < 120; k2++) {
+    const x = rng.int(M0 + 6, W - M0 - 7);
+    const y = rng.int(0, H - 1);
+    const i = b.at(x, y);
+    const j = b.at(x + 5, y + 3);
+    const j2 = b.at(x - 5, y - 3);
+    if (i < 0 || j < 0 || j2 < 0 || !tar[i] || !tar[j] || !tar[j2] || wet[i] || b.T[i] !== 3) continue;
+    if (k2 % 2) b.bump(rng, x, y, rng.int(4, 9), { fill: 1, lit: 0, dark: 1, cast: 2, only: P.asph });
+    else b.chip(rng, x, y, rng.int(3, 7), { depth: 3, only: P.asph });
+  }
   // (e) Wear and dressing: cracks in the tar, a patch of setts relaid in sand (paler, out of bond), a drain in
   // the channel, leaves against the walls, a soaked carton, paw prints over a tar island.
   for (let i = 0; i < 8; i++) b.crack(rng, rng.int(M0 + 10, W - M0 - 10), rng.int(0, H - 1), rng.int(30, 90), rng.next() * 6.28, { dt: -2, lip: 1, branch: 0.03, only: P.asph });

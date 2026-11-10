@@ -531,18 +531,20 @@ function puddle(b: Brush2, rng: PwRng, P: Z1GroundRamps, r: DecalRect, lights: r
       let d = 3;
       for (let q = 1; q <= 3 && d === 3; q++) if (!inS(x - q, y) || !inS(x + q, y) || !inS(x, y - q) || !inS(x, y + q)) d = q - 1;
       const far = y < h * 0.36;
+      // (A puddle at night is a mirror, not a hole: its body sits at the wet road's own value, bluer; the far
+      // third, where it looks up at the sky, a step lighter.)
       if (d === 0) b.set(ox + x, oy + y, P.asph, inS(x, y + 1) ? 2 : 1);
       else if (d === 1 && !inS(x, y - 2) && dashAt(x, r.x, 3, 9, 1, 3)) b.set(ox + x, oy + y, P.sky, 3);
-      else if (d < 3) b.set(ox + x, oy + y, P.water, far ? 4 : 3);
-      else b.set(ox + x, oy + y, far ? P.sky : P.water, far ? 1 : 3);
+      else if (d < 3) b.set(ox + x, oy + y, far ? P.sky : P.asph, far ? 1 : 1);
+      else b.set(ox + x, oy + y, P.sky, far ? 2 : 1);
     }
   }
   // The far third breaks into the body in strokes, not a line.
   for (let x = 4; x < w - 4; x += 3) {
     const y = Math.round(h * 0.36) + ((x * 7) % 5);
-    if (dashAt(x, r.y + 3, 3, 8, 2, 5)) for (let q = 0; q < 2; q++) if (inS(x, y + q) && inS(x + 2, y + q)) b.tint(ox + x, oy + y + q, P.sky, 0, P.water);
+    if (dashAt(x, r.y + 3, 3, 8, 2, 5)) for (let q = 0; q < 2; q++) if (inS(x, y + q) && inS(x + 2, y + q) && b.rampAt(ox + x, oy + y + q) === P.sky) b.set(ox + x, oy + y + q, P.sky, 2);
   }
-  const water = (rm: number) => rm === P.water || rm === P.sky;
+  const water = (rm: number) => rm === P.sky;
   // Lights: a column each, from just under the far shore toward the viewer.
   lights.forEach((rmp, i) => {
     const lx = Math.round(w * (lights.length === 1 ? 0.5 : 0.28 + (0.44 * i) / (lights.length - 1)) + rng.spread(w * 0.06));
@@ -558,10 +560,10 @@ function puddle(b: Brush2, rng: PwRng, P: Z1GroundRamps, r: DecalRect, lights: r
     if (!inS(cx - 5, cy) || !inS(cx + 5, cy) || !inS(cx, cy - 3) || !inS(cx, cy + 3)) continue;
     const big = rng.chance(0.4);
     const rx = big ? 5 : 3;
-    b.hrun(ox + cx - rx + 1, oy + cy - (big ? 2 : 1), rx * 2 - 2, P.sky, 3);
-    b.hrun(ox + cx - rx + 1, oy + cy + (big ? 2 : 1), rx * 2 - 2, P.sky, 2);
-    b.set(ox + cx - rx, oy + cy, P.sky, 3);
-    b.set(ox + cx + rx - 1, oy + cy, P.sky, 2);
+    b.hrun(ox + cx - rx + 1, oy + cy - (big ? 2 : 1), rx * 2 - 2, P.sky, 4);
+    b.hrun(ox + cx - rx + 1, oy + cy + (big ? 2 : 1), rx * 2 - 2, P.sky, 3);
+    b.set(ox + cx - rx, oy + cy, P.sky, 4);
+    b.set(ox + cx + rx - 1, oy + cy, P.sky, 3);
   }
 }
 
@@ -977,7 +979,7 @@ function glint(b: Brush2, rng: PwRng, k: PwKit, r: DecalRect, seed: number) {
       const d = Math.sqrt(u * u + v * v);
       const len = Math.min(Math.round(end - x), d < 0.35 ? rng.int(14, 34) : d < 0.7 ? rng.int(7, 16) : rng.int(3, 8));
       const gap = d < 0.35 ? rng.int(1, 3) : d < 0.7 ? rng.int(3, 7) : rng.int(6, 14);
-      const tone = d < 0.3 ? 5 : d < 0.6 ? 4 : 3;
+      const tone = d < 0.3 ? 4 : d < 0.6 ? 3 : 2;
       for (let q = 0; q < len; q++) {
         const tip = q === 0 || q === len - 1;
         // (Lit paint, tinted per light by the batch: it dims and brightens with the street like the puddles' columns.)
