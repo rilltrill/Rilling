@@ -2,7 +2,7 @@ import { describe, it } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { PwPalette } from '../../src/content/pixelworld/canvas';
-import { clearPwCache, paintTile, PwAtlas, PW_STATS, type PwPainter, type PwTile } from '../../src/content/pixelworld/atlas';
+import { clearPwCache, paintTile, PwAtlas, PW_DEBUG_TILE_MS, PW_STATS, type PwPainter, type PwTile } from '../../src/content/pixelworld/atlas';
 import { DEFAULT_SETTINGS } from '../../src/core/types';
 import { ALL_STAGES } from '../../src/content';
 import { World } from '../../src/gameplay/World';
@@ -89,5 +89,38 @@ describe.skipIf(!OUT)('z1 ground look-dev', () => {
     }
     w.dispose();
     Kit.disposeAll();
+  });
+});
+
+/**
+ * z1 paint bench (skipped unless PW_BENCH_Z1 = the number of builds): the stage built that many times
+ * in one process, the minimum paint time per atlas (the box is shared: the minimum is the honest cost)
+ * and the slowest tiles of the best world-atlas paint.
+ */
+describe.skipIf(!process.env.PW_BENCH_Z1)('z1 paint bench', () => {
+  it('minimum cold paint over several builds', { timeout: 900_000 }, () => {
+    const n = Number(process.env.PW_BENCH_Z1);
+    const best = new Map<string, number>();
+    let tiles: string[] = [];
+    let info = '';
+    for (let i = 0; i < n; i++) {
+      clearPwCache();
+      PW_STATS.clear();
+      const w = new World(new THREE.PerspectiveCamera(60, 844 / 390, 0.05, 400), new AudioSystem(), nullHud, { ...DEFAULT_SETTINGS }, 7);
+      w.art = 'pixel';
+      new StageRunner(w, ALL_STAGES.find((s) => s.id === 'z1')!).start();
+      for (const [name, a] of PW_STATS) {
+        if (a.ms < (best.get(name) ?? Infinity)) {
+          best.set(name, a.ms);
+          if (name === 'z1') tiles = PW_DEBUG_TILE_MS().slice(0, 28);
+        }
+      }
+      info = [...PW_STATS].map(([name, a]) => `${name} ${a.w}×${a.h} ${(a.bytes / 1048576).toFixed(1)} MB ${(a.texels / 1e6).toFixed(2)} M texels ${a.tiles} tiles ${a.ramps} ramps`).join(', ');
+      w.dispose();
+      Kit.disposeAll();
+    }
+    console.log(info);
+    console.log(`min paint: ${[...best].map(([k, v]) => `${k} ${v.toFixed(0)} ms`).join(', ')} — total ${[...best.values()].reduce((s, v) => s + v, 0).toFixed(0)} ms`);
+    console.log(tiles.join('\n'));
   });
 });

@@ -29,35 +29,37 @@ export type Z1RoadVariant = 0 | 1 | 2;
 
 /** The ground palette of the stage: every ground painter takes its ramps from here (one street, one set of colours). */
 export function z1GroundRamps(k: PwKit) {
+  // (`dark` is set per ramp so that every tone 0 lands near the night's floor, a deep blue-violet about
+  // #14122a, and no lower: the light steps down from there, it must not start in black.)
   return {
     /** Wet asphalt: the body of the road (an indigo-violet grey). */
-    asph: k.ramp(0x363a48, { light: 0.36, sat: 1.0, dark: 0.42 }),
+    asph: k.ramp(0x363a48, { light: 0.36, sat: 1.0, dark: 0.6 }),
     /** The crown and the lane edges: older, drier, a shade paler and greyer. */
-    dry: k.ramp(0x41434f, { light: 0.34, sat: 0.85, dark: 0.42 }),
+    dry: k.ramp(0x41434f, { light: 0.34, sat: 0.85, dark: 0.56 }),
     /** Tar: sealed cracks, fresh patches, oil. */
-    tar: k.ramp(0x25262f, { light: 0.5, sat: 1.0, dark: 0.5 }),
+    tar: k.ramp(0x25262f, { light: 0.5, sat: 1.0, dark: 0.8 }),
     /** The night sky lying in the wet. */
-    sky: k.ramp(0x5a6890, { light: 0.32, sat: 0.95 }),
+    sky: k.ramp(0x5a6890, { light: 0.32, sat: 0.95, dark: 0.44 }),
     /** Concrete: gutter pans, kerbs, flags. */
-    conc: k.ramp(0x62646c, { light: 0.38, sat: 0.7, dark: 0.42 }),
-    concDark: k.ramp(0x53555d, { light: 0.36, sat: 0.75, dark: 0.42 }),
+    conc: k.ramp(0x62646c, { light: 0.38, sat: 0.7, dark: 0.46 }),
+    concDark: k.ramp(0x53555d, { light: 0.36, sat: 0.75, dark: 0.5 }),
     /** Walks: old bluestone flags, a greyer stone, the paler granite of the kerb, a newer cast slab. */
-    blue: k.ramp(0x505768, { light: 0.36, sat: 0.9, dark: 0.42 }),
-    flag: k.ramp(0x5b5c66, { light: 0.36, sat: 0.75, dark: 0.42 }),
-    cast: k.ramp(0x67655f, { light: 0.34, sat: 0.6, dark: 0.42 }),
-    kerb: k.ramp(0x74767e, { light: 0.34, sat: 0.7, dark: 0.4 }),
+    blue: k.ramp(0x505768, { light: 0.36, sat: 0.9, dark: 0.5 }),
+    flag: k.ramp(0x5b5c66, { light: 0.36, sat: 0.75, dark: 0.48 }),
+    cast: k.ramp(0x67655f, { light: 0.34, sat: 0.6, dark: 0.46 }),
+    kerb: k.ramp(0x74767e, { light: 0.34, sat: 0.7, dark: 0.42 }),
     /** Road paint, worn: never a pure yellow or white on the enemies' floor. */
     yellow: k.ramp(0xa8892e, { light: 0.3, sat: 0.9, dark: 0.45 }),
     white: k.ramp(0xa9a8a2, { light: 0.3, sat: 0.6, dark: 0.45 }),
-    iron: k.ramp(0x3c3e48, { light: 0.5, sat: 0.9, dark: 0.45 }),
-    rust: k.ramp(0x7a4024, { light: 0.4 }),
-    leaf: k.ramp(0x6a5228, { light: 0.4 }),
-    leafRed: k.ramp(0x7a3a22, { light: 0.4 }),
-    moss: k.ramp(0x3e5a32, { light: 0.35 }),
+    iron: k.ramp(0x3c3e48, { light: 0.5, sat: 0.9, dark: 0.6 }),
+    rust: k.ramp(0x7a4024, { light: 0.4, dark: 0.46 }),
+    leaf: k.ramp(0x6a5228, { light: 0.4, dark: 0.46 }),
+    leafRed: k.ramp(0x7a3a22, { light: 0.4, dark: 0.46 }),
+    moss: k.ramp(0x3e5a32, { light: 0.35, dark: 0.55 }),
     paper: k.ramp(0xa8a290, { light: 0.4, sat: 0.6 }),
-    water: k.ramp(0x1e2638, { light: 0.4, sat: 1, dark: 0.55 }),
-    oilP: k.ramp(0x5a3a7a, { light: 0.4 }),
-    oilT: k.ramp(0x2a6a6a, { light: 0.4 }),
+    water: k.ramp(0x1e2638, { light: 0.4, sat: 1, dark: 0.82 }),
+    oilP: k.ramp(0x5a3a7a, { light: 0.4, dark: 0.5 }),
+    oilT: k.ramp(0x2a6a6a, { light: 0.4, dark: 0.5 }),
   };
 }
 export type Z1GroundRamps = ReturnType<typeof z1GroundRamps>;
@@ -172,8 +174,14 @@ function paintAsphalt(
     for (let x = o.x0; x < o.x1; x++) {
       const i = y * W + x;
       if (!wet[i]) continue;
+      // A sheet is two steps deep: a damp rim three texels wide round the standing water.
+      const l = b.at(x - 3, y);
+      const r = b.at(x + 3, y);
+      const u3 = b.at(x, y - 3);
+      const d3 = b.at(x, y + 3);
+      const core = l >= 0 && r >= 0 && u3 >= 0 && d3 >= 0 && wet[l] && wet[r] && wet[u3] && wet[d3];
       R[i] = P.asph;
-      T[i] = 2;
+      T[i] = core ? 1 : 2;
       // The far and near edges of a sheet fray: a broken stroke one row beyond the edge.
       const up = b.at(x, y - 1);
       const dn = b.at(x, y + 1);
@@ -216,7 +224,7 @@ function paintAsphalt(
       }
     }
   }
-  const nDry = Math.round(((o.x1 - o.x0) * H) / 3200);
+  const nDry = Math.round(((o.x1 - o.x0) * H) / 1900);
   for (let k = 0; k < nDry; k++) {
     const lx = rng.int(o.x0 + 8, o.x1 - 8);
     ladder(b, rng, lx, rng.int(0, H - 1), rng.int(30, 110), rng.int(7, 20), 0, 1, null, (r) => r === P.asph || r === P.dry);
@@ -227,7 +235,7 @@ function paintAsphalt(
     const i = b.at(x, y);
     return i >= 0 && !wet[i] && (R[i] === P.asph || R[i] === P.dry);
   };
-  const nScab = Math.round(((o.x1 - o.x0) * H) / 2200);
+  const nScab = Math.round(((o.x1 - o.x0) * H) / 1000);
   for (let d = 0; d < Math.ceil(nScab / 4); d++) {
     const cx = rng.int(o.x0 + 6, o.x1 - 6);
     const cy = rng.int(0, H - 1);
@@ -236,14 +244,15 @@ function paintAsphalt(
       const y = Math.round(cy + (rng.next() + rng.next() - 1) * 44);
       if (!dryOnly(x, y) || !dryOnly(x + 6, y + 3) || !dryOnly(x - 6, y - 3) || x < o.x0 + 8 || x > o.x1 - 9) continue;
       const big = rng.chance(0.3);
-      b.bump(rng, x, y, big ? rng.int(8, 13) : rng.int(4, 7), { fill: 1, lit: 0, dark: 1, cast: 1 });
+      // (Shadows on this dark stone are two steps: one is lost in the night.)
+      b.bump(rng, x, y, big ? rng.int(8, 13) : rng.int(4, 7), { fill: 1, lit: 0, dark: 1, cast: 2, castLen: big ? 2 : 1 });
     }
   }
   for (let i = 0; i < nScab; i++) {
     const x = rng.int(o.x0 + 4, o.x1 - 5);
     const y = rng.int(0, H - 1);
     if (!dryOnly(x, y) || !dryOnly(x + 3, y + 2) || !dryOnly(x - 3, y - 2)) continue;
-    b.chip(rng, x, y, rng.chance(0.25) ? rng.int(5, 8) : 3, { depth: 2 });
+    b.chip(rng, x, y, rng.chance(0.25) ? rng.int(5, 8) : 3, { depth: 3 });
   }
   return wet;
 }
@@ -415,7 +424,19 @@ export function paintZ1Road(c: PwCanvas, k: PwKit, variant: Z1RoadVariant) {
   // (e, early) The paint, under the wear that comes after it.
   roadPaint(b, P, seed, CX, variant);
 
-  // (d) Wear. Tar snakes: sealed cracks wandering down the lanes, shining on their upper-left edge.
+  // (d) Wear. Thermal cracks ACROSS the lanes, every few metres: each wanders kerb-ward from the crown, two
+  // texels wide where it is old, sealed with tar for part of its way — the lines a street is ruled with.
+  for (let i = 0; i < 4; i++) {
+    const y = 40 + i * 122 + rng.int(-26, 26);
+    const side = (i + variant) % 2 ? 1 : -1;
+    const x0 = CX + side * rng.int(8, 40);
+    const len = rng.int(150, 320);
+    const sealed = i % 2 === 0;
+    const [ex, ey] = b.crack(rng, x0, y, len, side > 0 ? rng.spread(0.12) : Math.PI + rng.spread(0.12), sealed ? { ramp: P.tar, tone: 1, lip: 1, fat: 0.7, wander: 0.35 } : { dt: -2, lip: 1, branch: 0.02, fat: 0.4, wander: 0.5 });
+    // (Where it ends a short fork runs off down the lane.)
+    b.crack(rng, ex, ey, rng.int(20, 50), Math.PI / 2 + rng.spread(0.5), { dt: -2, lip: 1, fat: 0 });
+  }
+  // Tar snakes: sealed cracks wandering down the lanes, shining on their upper-left edge.
   const nSnakes = 5 + variant;
   for (let s = 0; s < nSnakes; s++) {
     let x = CX + (rng.chance(0.5) ? 1 : -1) * rng.range(20, PAN - 30);
@@ -1545,7 +1566,7 @@ function paintZ1Alley(c: PwCanvas, k: PwKit) {
         const i = b.at(ox + xx, oy + yy);
         if (bl.m[yy * w + xx] && i >= 0 && tar[i] && T[i] === 3) {
           wet[i] = 1;
-          T[i] = 2;
+          T[i] = 1;
           any = true;
         }
       }

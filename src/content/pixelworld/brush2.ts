@@ -478,10 +478,10 @@ export class Brush2 {
    * left behind): lit upper-left edge, dark lower-right edge, one texel of cast shadow. `fill` shifts
    * its whole face (a paler scab of stone: fill 1, lit 0).
    */
-  bump(rng: PwRng, x: number, y: number, size: number, o: { ramp?: number; tone?: number; lit?: number; dark?: number; cast?: number; fill?: number; only?: number } = {}) {
+  bump(rng: PwRng, x: number, y: number, size: number, o: { ramp?: number; tone?: number; lit?: number; dark?: number; cast?: number; castLen?: number; fill?: number; only?: number } = {}) {
     const w = Math.max(2, Math.round(size));
     const h = Math.max(2, Math.round(size * (0.5 + rng.next() * 0.4)));
-    this.formMask(blob(rng, w, h, w > 6 ? 3 : 2, 0.8), Math.round(x - w / 2), Math.round(y - h / 2), { raised: true, lit: o.lit ?? 1, dark: o.dark ?? 1, cast: o.cast ?? 1, fill: o.fill, ramp: o.ramp, tone: o.tone, only: o.only });
+    this.formMask(blob(rng, w, h, w > 6 ? 3 : 2, 0.8), Math.round(x - w / 2), Math.round(y - h / 2), { raised: true, lit: o.lit ?? 1, dark: o.dark ?? 1, cast: o.cast ?? 1, castLen: o.castLen, fill: o.fill, ramp: o.ramp, tone: o.tone, only: o.only });
   }
 
   /**

@@ -1,4 +1,4 @@
-import { PW_TPM, PW_TPM_MID, PWF, PwCanvas, type PwRng } from './canvas';
+import { PW_TPM, PW_TPM_MID, PwCanvas, type PwRng } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { blob, Brush2, dashAt, discBlob, shore } from './brush2';
 import { drawText, FONT_BOLD } from './font';
@@ -980,8 +980,9 @@ function glint(b: Brush2, rng: PwRng, k: PwKit, r: DecalRect, seed: number) {
       const tone = d < 0.3 ? 5 : d < 0.6 ? 4 : 3;
       for (let q = 0; q < len; q++) {
         const tip = q === 0 || q === len - 1;
-        b.set(x + q, y, g, tip ? tone - 1 : tone, PWF.GLOW);
-        if (!tip && d < 0.75) b.set(x + q, y + 1, g, tone - 1, PWF.GLOW);
+        // (Lit paint, tinted per light by the batch: it dims and brightens with the street like the puddles' columns.)
+        b.set(x + q, y, g, tip ? tone - 1 : tone);
+        if (!tip && d < 0.75) b.set(x + q, y + 1, g, tone - 1);
       }
       x += len + gap;
     }

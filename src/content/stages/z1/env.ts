@@ -155,6 +155,9 @@ export function buildEnv(world: World, curve: THREE.CatmullRomCurve3): Environme
   const pools = pw ? town.pools.buildPixel(0.5) : town.pools.build(poolSurface);
   const beams = town.beams.build(!!pw);
   root.add(pools, beams);
+  // ART: PIXEL WORLD: the strokes each fixed light lays on the wet ground under it (painted, tinted to the light).
+  const glints = pw?.ground.glints(town.pools.all).build(undefined, { gain: Z1_GAIN });
+  if (glints) root.add(glints);
   // ART: PIXEL WORLD: painted wet-road reflections under the fires, the neon and the street lamps.
   let refl: THREE.InstancedMesh | null = null;
   const reflFire: number[] = [];

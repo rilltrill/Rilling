@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { PwAtlas, PwTile } from '../../pixelworld/atlas';
-import type { PwBatch } from '../../pixelworld/batch';
-import { decalSub, z1ApronTile, z1ForecourtTile, z1GroundDecals, z1SquareFieldTile, z1SquarePathTile, Z1_DECALS, type Z1DecalName } from '../../pixelworld/z1ground';
+import { PwBatch } from '../../pixelworld/batch';
+import { decalSub, z1ApronTile, z1ForecourtTile, z1GroundDecals, z1SquareFieldTile, z1SquarePathTile, Z1_DECALS, Z1_GLINT_NEUTRAL, type Z1DecalName } from '../../pixelworld/z1ground';
 import { z1AlleyTile, z1CrosswalkTile, z1JunctionTile, z1KerbFaceTile, z1MarginTile, z1RoadOrder, z1RoadTile, z1WalkTile } from '../../pixelworld/z1road';
 import { hash2 } from '../../pixelworld/surfaces';
 import { Kit } from '../../kit/ModelKit';
@@ -228,6 +228,31 @@ export class Z1Ground {
     _v.set(-s, 0, -c);
     _o.set(x, y, z).addScaledVector(_u, -W / 2).addScaledVector(_v, -H / 2);
     b.rect(_o, _u, _v, W, H, this.sheet, { sub: decalSub(this.sheet, name), flipU: flip, tintRGB });
+  }
+
+  /**
+   * What the stage's fixed lights lay on the wet ground under them: one or two glint decals (a path of
+   * broken strokes, painted neutral) per ground pool, tinted to the light. A batch of its own (the pools
+   * are known only after the zones are built); one draw for the stage.
+   */
+  glints(pools: readonly { x: number; y: number; z: number; r: number; color: number; wallYaw?: number }[]): PwBatch {
+    const b = new PwBatch(this.atlas);
+    const col = new THREE.Color();
+    const base = new THREE.Color(Z1_GLINT_NEUTRAL);
+    pools.forEach((d, i) => {
+      if (d.wallYaw !== undefined) return;
+      col.setHex(d.color);
+      const tint = [Math.min(1, col.r / base.r), Math.min(1, col.g / base.g), Math.min(1, col.b / base.b)];
+      const yaw = inAlley(d.x, d.z) ? Math.PI / 2 : 0;
+      const y = isSidewalk(d.x, d.z) ? WALK_Y + 0.004 : ROAD_Y + 0.008;
+      this.decal(b, i % 2 ? 'glintB' : 'glintA', d.x, y, d.z, yaw, undefined, undefined, i % 3 === 0, tint);
+      // A big pool (a street lamp, the marquee) lays a second patch nearer the walker.
+      if (d.r > 4.6) {
+        const off = 1.7;
+        this.decal(b, i % 2 ? 'glintA' : 'glintB', d.x + (yaw ? off : i % 2 ? 0.5 : -0.5), y, d.z + (yaw ? (i % 2 ? 0.5 : -0.5) : off), yaw, undefined, undefined, i % 3 !== 0, tint);
+      }
+    });
+    return b;
   }
 
   /** Replace the tagged classic ground meshes of a zone (returns them for removal). */
