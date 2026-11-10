@@ -179,3 +179,61 @@ views and the audit script (§8).
   flat, distinct colours, share of smooth-gradient pixel pairs. Thresholds are printed by the
   script; the first pass's numbers are its baseline.
 - **Tile dumps**: `PW_DUMP=<dir> npx vitest run tests/unit/pixel-world-dump.test.ts`.
+
+## 9. The cast (characters, creatures, pickups) — PIXEL CAST 2
+
+The owner, after seeing the plan above: *"the people are still a bit out of place looking so
+make sure their detail and appearance is commensurate with the background. Fine for them to
+look more 2D and less contoured."*
+
+### Why they look out of place (see `/tmp/pw2/cast/a-texels.png`: raw sprite texels × 4)
+
+The figures are at the right pixel size (1 texel = 1 frame pixel until a figure is 240 tall).
+What is wrong is that they read as 3D models passed through a pixel filter:
+
+1. **Contour shading.** Tone follows the normal of the blended field, so every limb is a tube
+   with a dithered gradient round it and every torso a soft lump. That is pre-rendered-sprite
+   shading (and the thing the owner calls "contoured"), not drawn 2D shading.
+2. **Melted silhouettes.** Shapes are smooth unions: no drawn corners — shoulders, lapels,
+   collars, cuffs, hems, heels and hair all round off.
+3. **Faces and hands are specks.** At mid range a face is three pixels of feature.
+4. **Greyed colour.** A multiplied stage tint dulls costumes into the background.
+5. **Thin, even detail.** A few speckled stains; nothing designed.
+
+### The target
+
+Sprites of the same era as the backgrounds: Metal Slug 3's zombies and soldiers, the crowds
+and fighters of Street Fighter III / Garou, Castlevania DS enemies. A sprite is DRAWN:
+
+1. **Flat cel shading.** At most three tones of a ramp per material on screen: the base as a
+   flat field; ONE shadow tone laid as a designed shape (a clean band down the side away from
+   the light, under the chin, under an arm, below a hem, in the crook of a joint); a small
+   highlight accent only on what shines (hair, leather, metal, wet gore, eyes). The shadow
+   edge is crisp and simple (it does not wobble with every bump), and there is no dither
+   round limbs. Dither appears only where a material's texture calls for it.
+2. **Line.** A 1-pixel dark, coloured ink line round the silhouette; lighter interior lines
+   where one part overlaps another AND where two materials meet (collar, cuff, belt, hem,
+   shoe on trouser); a few deliberate fold strokes at joints.
+3. **Shape design.** Silhouettes with corners: square or dropped shoulders, pointed collars
+   and lapels, flared cuffs, torn hems as triangles, boots with heels and soles, hair as a
+   designed shape (spikes, locks, a parting) with a highlight band. Hands, feet and heads a
+   little big, fingers readable — always within what the hitboxes cover (the alignment tests
+   rule: `tests/unit/pixelcast.test.ts`, `scripts/pixel-aim.mjs`).
+4. **Faces read at mid range.** Zombies: big dark sockets with a glowing pin, brow ridge,
+   a mouth shape with teeth, a nose shadow, a jaw that drops. The living: whites, pupils,
+   brows that show fear, an open mouth. Use bigger stamps for heads ≥ 12 pixels.
+5. **Detail equal to the world's.** A costume tells who the person was: a name badge, a
+   pocket with pens, a patterned tie, hi-vis bands with a reflective glint, a tool belt, an
+   apron with a logo, a wristband, laces. 4–6 drawn details per figure; wounds are shapes
+   with a dark rim and a wet bright centre, not speckle.
+6. **Colour and light.** Saturated costume colours, a step brighter than the architecture
+   behind (the game reads first). Shadows are the ramp's own violet end. Stage light moves the
+   whole figure by whole tone steps, in keeping with the world's mood (§5) but never leaving a
+   figure darker than its surroundings; a 1-pixel coloured rim on the side facing a strong
+   light (fire, neon, lightning). No multiplied grey tint.
+7. **Grounding.** A pixel contact shadow in the world's style under the feet.
+
+The same goes for dinosaurs (hide as flat fields with designed markings: stripes, a pale
+belly band, scutes drawn along the back — not a noise of scales), bosses, pickups and thrown
+things. Animation timing (12 redraws a second), hitboxes, budgets and CLASSIC stay as they
+are. PIXEL CAST (`art=sprites`) shares the new cast; the old look is kept as a saved version.
