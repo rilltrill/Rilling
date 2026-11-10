@@ -986,8 +986,11 @@ export function z2ClinicTiles(atlas: PwAtlas): PwTile[] {
     for (let v = 0; v < Z2_PANEL_VARIANTS; v++) out.push(z2ClinicPanel(atlas, style, v, H, density));
   }
   out.push(z2CorridorFloor(atlas), z2RoomFloor(atlas, FLOOR, false), z2RoomFloor(atlas, 0x5a685e, true), z2ClinicCeiling(atlas, 0x7a827c));
-  for (const kind of ['board', 'boardB', 'gel', 'switch', 'callpoint', 'clipboard', 'phone'] as const) out.push(z2ClinicFixture(atlas, kind));
+  // (The ER wall either side of the corridor mouth, one tier up.)
+  out.push(z2ClinicPanel(atlas, 'clinic', 2, 4.2, 96));
+  for (const density of [128, 96, 64]) for (const kind of ['board', 'boardB', 'gel', 'switch', 'callpoint', 'clipboard', 'phone'] as const) out.push(z2ClinicFixture(atlas, kind, 'clinic', density));
   out.push(z2ClinicArchitrave(atlas), z2ClinicLining(atlas));
   for (const st of ['on', 'warm', 'off'] as const) out.push(z2ClinicTroffer(atlas, st, 0x7a827c));
+  out.push(z2ClinicTubeFlicker(atlas, false), z2ClinicTubeFlicker(atlas, true));
   return out;
 }
