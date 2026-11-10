@@ -35,6 +35,8 @@ const shot = args.shot ? args.shot.split(':') : null;
 const pick = Number(args.pick ?? 3);
 const vw = Number(args.vw ?? 844);
 const vh = Number(args.vh ?? 390);
+const dsf = Number(args.dsf ?? 1);
+const retro = args.retro ?? 'pixel';
 mkdirSync(dirname(out), { recursive: true });
 const place = (args.place ?? (shot ? '' : 'walker:0:4'))
   .split(',')
@@ -46,7 +48,7 @@ const place = (args.place ?? (shot ? '' : 'walker:0:4'))
   });
 
 const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
-const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+const ctx = await browser.newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: dsf, isMobile: true, hasTouch: true });
 const page = await ctx.newPage();
 await page.routeWebSocket(/.*/, () => {});
 const errors = [];
@@ -71,7 +73,7 @@ if (!args.hud) await page.addInitScript(() => {
 let labels = [];
 if (shot) {
   const [st, beat, frames] = shot;
-  await page.goto(`${base}/?stage=${st}&beat=${beat}&god=1&seed=7&mute=1&retro=pixel&art=${args.art ?? 'sprites'}&speed=0.00001`, { waitUntil: 'load' });
+  await page.goto(`${base}/?stage=${st}&beat=${beat}&god=1&seed=7&mute=1&retro=${retro}&art=${args.art ?? 'sprites'}&speed=0.00001`, { waitUntil: 'load' });
   const t0 = Date.now();
   while (Date.now() - t0 < 60000) {
     await page.waitForTimeout(250);
@@ -101,7 +103,7 @@ if (shot) {
         if (n.z > 1 || Math.abs(n.x) > 1.05 || Math.abs(n.y) > 1.2) continue;
         list.push({ e, d: p.distanceTo(cp) });
       }
-      list.sort((a, b) => a.d - b.d);
+      list.sort((a, b) => (b.e.constructor.name.includes('Boss') ? 1e3 : 0) - (a.e.constructor.name.includes('Boss') ? 1e3 : 0) + a.d - b.d);
       window.__lookList = list.slice(0, pick).map((x) => x.e);
       return window.__lookList.map((e) => `${e.constructor.name} ${Math.round(e.root.getWorldPosition(new V()).distanceTo(cp) * 10) / 10}m`);
     },
@@ -109,7 +111,7 @@ if (shot) {
   );
 } else {
   const zooArg = stage.startsWith('zoo') ? '&zoo=none' : '';
-  await page.goto(`${base}/?stage=${stage}${zooArg}&god=1&retro=pixel&seed=7&mute=1&art=sprites`, { waitUntil: 'load' });
+  await page.goto(`${base}/?stage=${stage}${zooArg}&god=1&retro=${retro}&seed=7&mute=1&art=sprites`, { waitUntil: 'load' });
   const t0 = Date.now();
   while (Date.now() - t0 < 30000) {
     await page.waitForTimeout(250);
@@ -213,6 +215,7 @@ for (const look of looks) {
   }, look);
   await page.waitForTimeout(Number(args.wait ?? 1100));
   if (args.frames) await page.screenshot({ path: `${out}-${look}.png` });
+  if (args.notiles) continue;
   const r = await page.evaluate(() => {
     const g = window.__game;
     const sp = g.sprites;
@@ -236,6 +239,10 @@ for (const look of looks) {
   stats[look] = r.map((t) => (t ? { w: t.w, h: t.h, k: t.k, prims: t.prims } : null));
 }
 await browser.close();
+if (args.notiles) {
+  console.log(JSON.stringify({ labels, errors: errors.slice(0, 6) }));
+  process.exit(0);
+}
 writeFileSync(`${out}-tiles.json`, JSON.stringify({ looks, labels, zoom, bg: args.bg ?? '#7a8a96', tiles }));
 const py = `
 import json, base64, sys

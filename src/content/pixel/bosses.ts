@@ -113,12 +113,14 @@ export function paintButcher(f: PixelFigure, B: ButcherRig, st: ButcherPose): bo
 
   if (alive) {
     // ── Trunk: hips, gut, barrel chest, shoulder humps, hunched back, neck ──
-    f.layer(0.12 * s, PART.TORSO);
-    slice(f, B.hips, 0.0, 0.0, 0.5, 0.21, 0.36, s, M.pants).k(0.08 * s);
-    f.ellipsoid(B.spine, 0, 0.35, 0.06, 0.756, 0.634, 0.576, M.skin).k(0.14 * s);
-    slice(f, B.chest, 0.22, 0, 0.725, 0.475, 0.475, s, M.skin).k(0.14 * s);
-    for (let sd = 1; sd >= -1; sd -= 2) f.ellipsoid(B.chest, sd * 0.7, 0.52, -0.08, 0.44, 0.35, 0.44, M.skin).k(0.12 * s);
-    f.ellipsoid(B.chest, 0, 0.5, -0.35, 0.576, 0.288, 0.36, M.skinDark).k(0.14 * s);
+    // (PIXEL CAST 2: a tighter melt — the humps and the gut stay shapes, not one lump.)
+    const mk = f.cel > 0 ? 0.45 : 1;
+    f.layer(0.12 * mk * s, PART.TORSO);
+    slice(f, B.hips, 0.0, 0.0, 0.5, 0.21, 0.36, s, M.pants).k(0.08 * mk * s);
+    f.ellipsoid(B.spine, 0, 0.35, 0.06, 0.756, 0.634, 0.576, M.skin).k(0.14 * mk * s);
+    slice(f, B.chest, 0.22, 0, 0.725, 0.475, 0.475, s, M.skin).k(0.14 * mk * s);
+    for (let sd = 1; sd >= -1; sd -= 2) f.ellipsoid(B.chest, sd * 0.7, 0.52, -0.08, 0.44, 0.35, 0.44, M.skin).k(0.12 * mk * s);
+    f.ellipsoid(B.chest, 0, 0.5, -0.35, 0.576, 0.288, 0.36, M.skinDark).k(0.14 * mk * s);
     f.cone(f.at(B.chest, 0, 0.5, 0.3), f.at(B.chest, 0, 0.7, 0.34), 0.2 * s, 0.17 * s, M.skin).k(0.06 * s);
     // Front details (decals): blood smear, veins, the heart cavity with ribs, pustule rims, apron straps.
     const ch = B.chest;
@@ -169,6 +171,13 @@ export function paintButcher(f: PixelFigure, B: ButcherRig, st: ButcherPose): bo
       const ax = f.dir(ap, 1, 0, 0);
       const az = f.dir(ap, 0, 0, 1);
       for (let i = -1; i <= 1; i++) {
+        if (f.cel > 0) {
+          // PIXEL CAST 2: a squared canvas panel with a bib corner, its hem torn into points.
+          f.coneE(f.at(ap, i * 0.42, -0.1, 0), f.at(ap, i * 0.42 + i * 0.03, -1.34, 0), ax, az, 0.215 * s, 0.035 * s, 0.225 * s, 0.035 * s, M.apron).flag(PF.FLAT | PF.CUT_A | PF.CUT_B).k(0.01 * s);
+          f.tri(f.at(ap, i * 0.45 - 0.2, -1.32, 0), f.at(ap, i * 0.45 + 0.02, -1.32, 0), f.at(ap, i * 0.45 - 0.12, -1.5 - 0.05 * (i + 1), 0), M.apron);
+          f.tri(f.at(ap, i * 0.45 + 0.0, -1.32, 0), f.at(ap, i * 0.45 + 0.21, -1.32, 0), f.at(ap, i * 0.45 + 0.13, -1.46, 0), M.apron);
+          continue;
+        }
         f.coneE(f.at(ap, i * 0.42, -0.12, 0), f.at(ap, i * 0.42 + i * 0.03, -1.42, 0), ax, az, 0.21 * s, 0.035 * s, 0.22 * s, 0.035 * s, M.apron)
           .flag(PF.FLAT)
           .rag(0.012 * s, PF.RAG_END)
@@ -224,12 +233,14 @@ export function paintButcher(f: PixelFigure, B: ButcherRig, st: ButcherPose): bo
     f.layer(0.03 * s, PART.ARMOR);
     const bx = f.dir(B.elR, 1, 0, 0);
     const bzv = f.dir(B.elR, 0, 0, 1);
+    // (PIXEL CAST 2: the blade is a slab with square corners and a clipped tip.)
+    const cut = f.cel > 0 ? PF.CUT_A | PF.CUT_B : 0;
     for (let i = -1; i <= 1; i++) {
       const z = 0.2 + i * 0.2;
-      f.coneE(f.at(B.elR, 0, -1.1, z), f.at(B.elR, 0, -2.34, z), bx, bzv, 0.05 * s, 0.13 * s, 0.05 * s, 0.13 * s, M.steel).k(0.06 * s).u(i * 0.2);
+      f.coneE(f.at(B.elR, 0, -1.1, z), f.at(B.elR, 0, -2.34 + (cut ? 0.1 * (1 - i) : 0), z), bx, bzv, 0.05 * s, 0.13 * s, 0.05 * s, 0.13 * s, M.steel).flag(cut).k((cut ? 0.01 : 0.06) * s).u(i * 0.2);
     }
-    f.coneE(f.at(B.elR, 0, -1.1, -0.1), f.at(B.elR, 0, -2.34, -0.1), bx, bzv, 0.06 * s, 0.05 * s, 0.06 * s, 0.05 * s, M.iron).k(0.02 * s).z(-0.01);
-    f.coneE(f.at(B.elR, 0, -1.08, 0.55), f.at(B.elR, 0, -2.36, 0.55), bx, bzv, 0.055 * s, 0.03 * s, 0.055 * s, 0.03 * s, M.edge).flag(PF.GLOW).k(0.005 * s).z(-0.02);
+    f.coneE(f.at(B.elR, 0, -1.1, -0.1), f.at(B.elR, 0, -2.34 + (cut ? 0.24 : 0), -0.1), bx, bzv, 0.06 * s, 0.05 * s, 0.06 * s, 0.05 * s, M.iron).flag(cut).k(0.02 * s).z(-0.01);
+    f.coneE(f.at(B.elR, 0, -1.08, 0.55), f.at(B.elR, 0, -2.36, 0.55), bx, bzv, 0.055 * s, 0.03 * s, 0.055 * s, 0.03 * s, M.edge).flag(PF.GLOW | cut).k(0.005 * s).z(-0.02);
     f.decal(f.at(B.elR, 0.05, -1.2, 0.38), f.at(B.elR, 0.05, -2.0, 0.42), 0.04 * s, 0.03 * s, M.blood).flag(PF.FLAT).rag(0.02 * s, PF.SPIKY).seed(11);
   }
 

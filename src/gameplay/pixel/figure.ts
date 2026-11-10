@@ -498,6 +498,21 @@ export class PixelFigure {
     this.data[o] = Math.floor(this.data[o]) + Math.min(0.999, 1 - c);
   }
 
+  /**
+   * Cap how far the shape bulges toward the viewer (metres): a broad slab — a trunk
+   * drawn as one trapezoid — seen three-quarters on is no deeper than its real
+   * half-depth, so a limb swinging in front of it still composites in front.
+   */
+  bulge(m: number): this {
+    if (this.last >= 0) {
+      const o = this.last * PRIM_FLOATS;
+      const r = Math.max(this.data[o + RA], this.data[o + RB], 1e-6);
+      const q = 1 - (this.data[o + PARTI] - Math.floor(this.data[o + PARTI]));
+      this.depthRatio(Math.min(q, (m * this.lastS) / r));
+    }
+    return this;
+  }
+
   /** Smallest radius in texels (default 0.55 — one-texel lines survive). */
   min(px: number): this {
     if (this.last >= 0) this.minPx[this.last] = px;

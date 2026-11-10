@@ -821,7 +821,7 @@ const RESOLVE_CEL_FRAG = /* glsl */ `
   uniform float uSmall;
   uniform vec4 uTone;   // base step, shadow drop, line drop, highlight steps
   uniform vec4 uInk;    // ink multiplier, selective outline, ink inside, saturation
-  uniform vec2 uStage;  // stage light in whole steps, cast-shadow reach (texels)
+  uniform vec3 uStage;  // stage light in whole steps, cast-shadow reach (texels), floor luma of a base tone
 
   vec4 G(ivec2 q) {
     if (q.x < 0 || q.y < 0 || q.x >= int(uSize.x) || q.y >= int(uSize.y)) return vec4(0.0);
@@ -933,7 +933,12 @@ const RESOLVE_CEL_FRAG = /* glsl */ `
       col = ramp(mat, clamp(1.0 + min(uStage.x, 0.0) * 0.5, 0.0, 1.0));
     } else {
       float lo = isAbs ? 0.0 : (st < 0.5 ? 0.0 : 1.0);
-      st = clamp(st + (isAbs && float(val) < 1.5 ? 0.0 : uStage.x), lo, ${STEPS - 1}.0);
+      float move = uStage.x;
+      // The game reads first: a material whose base tone would sink under the stage's floor
+      // (a black suit on a night street) is drawn a step or two up its own ramp instead.
+      float bl = dot(ramp(mat, clamp(uTone.x + uStage.x, 1.0, ${STEPS - 1}.0)), vec3(0.299, 0.587, 0.114));
+      move += bl < uStage.z * 0.55 ? 2.0 : bl < uStage.z ? 1.0 : 0.0;
+      st = clamp(st + (isAbs && float(val) < 1.5 ? 0.0 : move), lo, ${STEPS - 1}.0);
       col = ramp(mat, st);
     }
     // The cast is a step more saturated than the world behind it.
@@ -941,7 +946,7 @@ const RESOLVE_CEL_FRAG = /* glsl */ `
     col = clamp(mix(vec3(lum), col, uInk.w), 0.0, 1.0);
     col *= uTint;
     // Coloured light rim: 1 texel on the silhouette edge facing the stage's strong light.
-    if (uRim.a > 0.0 && edge && !thin && !noOut) {
+    if (uRim.a > 0.0 && edge && !thin && !noOut && !isAbs) {
       vec2 n = vec2((eR ? 1.0 : 0.0) - (eL ? 1.0 : 0.0), (eU ? 1.0 : 0.0) - (eD ? 1.0 : 0.0));
       if (dot(n, uRimDir) > 0.72 * length(n) * length(uRimDir) && length(n) > 0.5) col = mix(col, uRim.rgb, uRim.a);
     }
@@ -985,6 +990,8 @@ export interface CastEnv {
   step?: number;
   /** PIXEL CAST 2: screen-space direction toward the rim light (x right, y up; default up-right, the back-lit edge). */
   rimDir?: readonly [number, number];
+  /** PIXEL CAST 2: the darkest a material's base tone may be drawn (display luma 0..1; darker ones climb their ramp). */
+  floor?: number;
 }
 
 const SCRATCH = 256;
@@ -1101,7 +1108,7 @@ export class PixelCast {
         uSmall: { value: 0 },
         uTone: { value: new THREE.Vector4(3, 1, 1, 2) },
         uInk: { value: new THREE.Vector4(0.7, 1, 0, 1.15) },
-        uStage: { value: new THREE.Vector2(0, 2) },
+        uStage: { value: new THREE.Vector3(0, 2, 0.12) },
       },
       depthTest: false,
       depthWrite: false,
@@ -1205,7 +1212,8 @@ export class PixelCast {
       cu.uG.value = g.texture;
       (cu.uSize.value as THREE.Vector2).set(W, H);
       (cu.uTint.value as THREE.Color).copy(env.tint);
-      (cu.uRim.value as THREE.Vector4).set(env.rim.r, env.rim.g, env.rim.b, env.rimAmount);
+      // (A far figure is a few texels wide: a day rim there is thinned so it doesn't bleach it.)
+      (cu.uRim.value as THREE.Vector4).set(env.rim.r, env.rim.g, env.rim.b, env.rimAmount * (H * f.kpx < 70 && (env.step ?? 0) >= 0 ? 0.55 : 1));
       (cu.uRimDir.value as THREE.Vector2).set(env.rimDir?.[0] ?? 0.7, env.rimDir?.[1] ?? 0.7);
       (cu.uFog.value as THREE.Vector4).set(env.fog.r, env.fog.g, env.fog.b, env.fogAmount);
       cu.uGap.value = (L.gap / Math.max(f.d1 - f.d0, 1e-3)) * 254 / 255;
@@ -1215,7 +1223,7 @@ export class PixelCast {
       (cu.uTone.value as THREE.Vector4).set(style.base, style.shadow, style.line, style.hi);
       (cu.uInk.value as THREE.Vector4).set(style.ink, style.selOut ? 1 : 0, style.inkInside ? 1 : 0, style.sat);
       // Cast shadows reach further on bigger figures (1 texel far away, up to 4 close up).
-      (cu.uStage.value as THREE.Vector2).set(env.step ?? 0, Math.min(4, Math.max(1, Math.round(H / 56))));
+      (cu.uStage.value as THREE.Vector3).set(env.step ?? 0, Math.min(4, Math.max(1, Math.round(H / 56))), env.floor ?? 0.12);
       dst.viewport.set(0, 0, W, H);
       dst.scissor.set(0, 0, W, H);
       r.setRenderTarget(dst);

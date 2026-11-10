@@ -264,6 +264,11 @@ export function paintTheropod(f: PixelFigure, r: TheroRig, s: TheroSpec, st: The
         const z = len * (0.75 - j * 0.45);
         const ql = (0.045 + 0.02 * ((i + j) % 2)) * dorsal * sc;
         const sw = Math.sin(st.time * 5 + i * 2 + j) * 0.004;
+        if (f.cel > 0) {
+          // PIXEL CAST 2: scutes drawn along the back — flat pointed triangles raked backward.
+          f.tri(f.at(n, 0, ry0 * 0.86, z + ql * 0.55), f.at(n, 0, ry0 * 0.86, z - ql * 0.55), f.at(n, sw, ry0 * 0.9 + ql * 0.95, z - ql * 1.1), M.back).part(PART.NONE);
+          continue;
+        }
         f.cone(f.at(n, 0, ry0 * 0.92, z), f.at(n, sw, ry0 * 0.92 + ql * 0.75, z - ql * 0.85), 0.014 * sc, 0.003 * sc, M.back)
           .part(PART.NONE)
           .k(0.006 * sc)
@@ -281,6 +286,10 @@ export function paintTheropod(f: PixelFigure, r: TheroRig, s: TheroSpec, st: The
       const z = T.len * (0.85 - j * 0.24);
       const yy = T.rise * (z / T.len) + T.r1[1] * (0.95 - 0.05 * j);
       const ql = (0.05 - j * 0.006) * dorsal * sc;
+      if (f.cel > 0) {
+        f.tri(f.at(r.chest, 0, yy - ql * 0.12, z + ql * 0.6), f.at(r.chest, 0, yy - ql * 0.12, z - ql * 0.6), f.at(r.chest, 0, yy + ql * 0.95, z - ql * 1.15), M.back).part(PART.NONE);
+        continue;
+      }
       f.cone(f.at(r.chest, 0, yy, z), f.at(r.chest, 0, yy + ql * 0.7, z - ql), 0.016 * sc, 0.003 * sc, M.back)
         .part(PART.NONE)
         .k(0.006 * sc)

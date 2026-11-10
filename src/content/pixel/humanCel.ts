@@ -103,24 +103,26 @@ export function paintHumanCel(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: 
   const hemY = untucked ? (o === 'patient' || o === 'nurse' ? -0.085 : -0.04) : 0.015;
   // Two stacked trapezoids: square shoulders tapering to the waist, then the shirt flaring
   // to a hem cut straight across (corners at the shoulder, the waist and the hem).
-  const shHalf = 0.194 * b + 0.012;
+  const shHalf = 0.19 * b + 0.005;
   f.coneE(f.at(r.spine, 0, 0.452, hz * 0.7), f.at(r.spine, 0, 0.13, hz * 0.3), spX, spZ, shHalf * s, 0.112 * sb * s, 0.156 * b * s, 0.102 * sb * s, M.shirt)
     .flag(CUT)
+    .bulge(0.1 * sb * s)
     .u(0.05);
   f.coneE(f.at(r.spine, 0, 0.14, hz * 0.3), f.at(r.spine, 0, hemY, 0.004), spX, spZ, 0.156 * b * s, 0.102 * sb * s, (untucked ? 0.174 : 0.16) * b * s, 0.102 * sb * s, M.shirt)
     .flag(CUT)
+    .bulge(0.09 * sb * s)
     .u(0.36);
   // Shoulder line: sloping from the neck to each shoulder point (one shoulder drops on the dead).
   const shW = 0.2 * b + 0.032;
   for (let side = 1; side >= -1; side -= 2) {
     const drop = 0.016 * slump * side;
-    f.cone(f.at(r.chest, side * 0.04, 0.045, -0.006), f.at(r.chest, side * (shW - 0.045), -0.02 - drop, hz * 0.6), 0.04 * s, 0.05 * s, M.shirt).k(0.008 * s);
+    f.cone(f.at(r.chest, side * 0.04, 0.038, -0.006), f.at(r.chest, side * (shW - 0.05), -0.022 - drop, hz * 0.6), 0.052 * s, 0.058 * s, M.shirt).k(0.008 * s);
   }
   // Upper-back hump (the hunched dead, in profile).
   f.cone(f.at(r.spine, 0, 0.27, -0.035 - 0.015 * hunch), f.at(r.spine, 0, 0.4, -0.03 - 0.02 * hunch), 0.085 * sb * s, 0.08 * sb * s, M.shirt).k(0.03 * s);
   // Neck.
   const nw = st.neckW ?? 1;
-  f.cone(f.at(r.chest, 0, -0.02, -0.006 + hz), f.at(r.neck, 0, nw > 1.2 ? 0.04 : 0.075, 0.004), 0.052 * nw * s, 0.046 * Math.min(nw, 1.3) * s, M.skin).k(0.01 * s);
+  f.cone(f.at(r.chest, 0, -0.02, -0.006 + hz), f.at(r.neck, 0, nw > 1.2 ? 0.04 : 0.075, 0.004), 0.054 * nw * s, 0.048 * Math.min(nw, 1.3) * s, M.skin).k(0.01 * s);
   // The dead's hem is torn: pointed strips hang below it and sway with the walk.
   if (L.dead) {
     const n = Math.min(3, Math.max(untucked ? 2 : 0, L.rags));
@@ -180,7 +182,7 @@ export function paintHumanCel(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: 
     const arm = side > 0 ? r.armL : r.armR;
     if (sev >= 2) continue;
     const mid = f.depth(f.at(arm.shoulder, 0, -0.25, 0));
-    f.layer(0.012 * s, PART.LIMB, mid > torsoDepth + 0.05 ? -0.1 : 0);
+    f.layer(0.03 * s, PART.LIMB, mid > torsoDepth + 0.05 ? -0.1 : 0);
     armCel(f, arm.shoulder, sev >= 1 ? null : arm.elbow, side, L, M, C, s * (st.armW?.[side > 0 ? 0 : 1] ?? 1), st, r.chest);
   }
 
@@ -465,7 +467,8 @@ function headCel(f: PixelFigure, r: HumanoidRig, h: THREE.Object3D, L: HumanLook
   }
 
   // ── Face: hand-pixelled stamps, placed where the rig's eyes and lips are ──
-  if (face > 0.05) {
+  // (Also in profile: the near eye, and the mouth as a notch in the face's edge.)
+  if (face > -0.3) {
     const ey = 0.148 * hs;
     const ez = 0.114 * hs;
     const headTx = tx(f, f.at(h, 0, 0.13 * hs, 0), 0.26 * hs * s);
@@ -577,8 +580,8 @@ function armCel(f: PixelFigure, sh: THREE.Object3D, elbow: THREE.Object3D | null
   const bare = L.sleeves === 'none';
   const upperMat = bare ? M.skin : M.sleeve;
   const shortSleeve = L.sleeves === 'short';
-  f.ball(f.at(sh, 0.006 * side, 0.004, 0.004), 0.064 * s, upperMat);
-  f.cone(f.at(sh, 0, -0.03 * a, 0.005), f.at(sh, 0, -0.295 * a, -0.002), 0.056 * s, 0.045 * s, upperMat);
+  f.ball(f.at(sh, 0.006 * side, 0.004, 0.004), 0.06 * s, upperMat);
+  f.cone(f.at(sh, 0, -0.03 * a, 0.005), f.at(sh, 0, -0.295 * a, -0.002), 0.053 * s, 0.043 * s, upperMat);
   if (shortSleeve) {
     f.mat2(M.skin, 0.44);
     // Sleeve hem: a flared band cut square (torn into a point on the dead).
@@ -596,8 +599,10 @@ function armCel(f: PixelFigure, sh: THREE.Object3D, elbow: THREE.Object3D | null
   }
   const longSleeve = L.sleeves === 'long';
   const foreMat = longSleeve ? M.sleeve : M.skin;
+  // The forearm swells below the elbow (and the sleeve bunches there).
+  f.ball(f.at(elbow, 0, -0.088 * a, 0.004), 0.055 * s, foreMat);
   if (longSleeve) {
-    f.cone(f.at(elbow, 0, 0.012, 0.002), f.at(elbow, 0, -0.232 * a, 0.002), 0.05 * s, 0.041 * s, foreMat).flag(PF.CUT_B);
+    f.cone(f.at(elbow, 0, 0.012, 0.002), f.at(elbow, 0, -0.232 * a, 0.002), 0.053 * s, 0.043 * s, foreMat).flag(PF.CUT_B);
     // Cuff: a flared band at the wrist — the shirt's own white cuff under a jacket.
     const cuff = L.jacket !== null ? M.collar : M.sleeve;
     f.cone(f.at(elbow, 0, -0.198 * a, 0.002), f.at(elbow, 0, -0.243 * a, 0.002), 0.045 * s, 0.049 * s, cuff)
@@ -605,7 +610,7 @@ function armCel(f: PixelFigure, sh: THREE.Object3D, elbow: THREE.Object3D | null
       .k(0.003 * s)
       .tone(L.jacket !== null ? 0 : -0.2);
   } else {
-    f.cone(f.at(elbow, 0, 0.012, 0.004), f.at(elbow, 0, -0.24 * a, 0.0), 0.047 * s, 0.032 * s, foreMat);
+    f.cone(f.at(elbow, 0, 0.012, 0.004), f.at(elbow, 0, -0.24 * a, 0.0), 0.053 * s, 0.04 * s, foreMat);
   }
   const fore = f.facing(f.at(elbow, 0, -0.1, 0.05), f.dir(elbow, 0, 0, 1));
   // A drawn crease at the inner elbow when the arm bends.
@@ -623,8 +628,7 @@ function armCel(f: PixelFigure, sh: THREE.Object3D, elbow: THREE.Object3D | null
     }
     if (L.armWound === side) f.triDecal(f.at(elbow, -0.04, -0.06 * a, 0.03), f.at(elbow, 0.045, -0.09 * a, 0.03), f.at(elbow, 0.0, -0.165 * a, 0.03), M.blood);
   }
-  // (Hands a little big.)
-  paintHand(f, elbow, side, L, M, s * 1.1, a, st.time, (side > 0 ? st.handL : st.handR) ?? st.hand ?? (L.dead ? HAND.CLAW : HAND.OPEN), chest);
+  paintHand(f, elbow, side, L, M, s, a, st.time, (side > 0 ? st.handL : st.handR) ?? st.hand ?? (L.dead ? HAND.CLAW : HAND.OPEN), chest);
 }
 
 /**
@@ -634,14 +638,14 @@ function armCel(f: PixelFigure, sh: THREE.Object3D, elbow: THREE.Object3D | null
  */
 function legCel(f: PixelFigure, hip: THREE.Object3D, knee: THREE.Object3D, side: number, L: HumanLook, M: Mats, C: CelMats, s: number) {
   const pm = M.pants;
-  f.cone(f.at(hip, 0, 0.035, 0.004), f.at(hip, 0, -0.44, 0.01), 0.088 * s, 0.064 * s, pm);
+  f.cone(f.at(hip, 0, 0.035, 0.004), f.at(hip, 0, -0.44, 0.01), 0.09 * s, 0.068 * s, pm);
   const torn = L.legWound === side && L.dead;
   const seenFront = f.facing(f.at(knee, 0, 0, 0.07), f.dir(knee, 0, 0, 1)) > 0;
   if (L.bareLegs) {
     f.cone(f.at(knee, 0, 0.012, 0.004), f.at(knee, 0, -0.375, 0.0), 0.058 * s, 0.035 * s, pm);
     f.cone(f.at(knee, 0, -0.06, -0.02), f.at(knee, 0, -0.22, -0.016), 0.058 * s, 0.046 * s, pm).k(0.03 * s);
   } else {
-    f.cone(f.at(knee, 0, 0.016, 0.0), f.at(knee, 0, -0.378, 0.004), 0.064 * s, 0.062 * s, pm).flag(PF.CUT_B);
+    f.cone(f.at(knee, 0, 0.016, 0.0), f.at(knee, 0, -0.378, 0.004), 0.068 * s, 0.065 * s, pm).flag(PF.CUT_B);
     if (torn) f.mat2(M.skin, 0.42);
     if (L.dead && !torn) {
       // Torn hem: two points hanging over the shoe.

@@ -10,7 +10,7 @@
  *   0  CONTOUR      the first PIXEL CAST look (legacy shaders, legacy painters).
  *   a  STRICT CEL   two flat tones + ink: base and one bold shadow tone, a dark
  *                   coloured ink line on the silhouette and on every interior
- *                   edge, no highlights, no texture, no rim.
+ *                   edge, no highlights, no texture; a rim only in dark stages.
  *   b  CEL+ACCENTS  base / one shadow shape / small highlight accents on what
  *                   shines; lighter interior lines; selective outline (the lit
  *                   edge takes a lighter line); a cool rim in dark stages only.
@@ -59,7 +59,7 @@ export interface CastStyle {
 
 export const CAST_STYLES: Record<CastLookId, CastStyle> = {
   '0': { id: '0', name: 'CONTOUR (before)', cel: 0, base: 3, shadow: 1, line: 1, hi: 0, ink: 0.42, selOut: true, inkInside: false, sat: 1, texture: 0, rim: 1, band: 0, ground: 0 },
-  a: { id: 'a', name: 'A STRICT CEL', cel: 1, base: 3, shadow: 2, line: 3, hi: 0, ink: 0.5, selOut: false, inkInside: true, sat: 1.22, texture: 0, rim: 0, band: 0.62, ground: 1 },
+  a: { id: 'a', name: 'A STRICT CEL', cel: 1, base: 3, shadow: 2, line: 3, hi: 0, ink: 0.5, selOut: false, inkInside: true, sat: 1.22, texture: 0, rim: 1, band: 0.62, ground: 1 },
   b: { id: 'b', name: 'B CEL + ACCENTS', cel: 2, base: 3, shadow: 2, line: 1, hi: 2, ink: 0.72, selOut: true, inkInside: false, sat: 1.18, texture: 0, rim: 1, band: 0.55, ground: 2 },
   c: { id: 'c', name: 'C DRAWN + TEXTURED', cel: 3, base: 3, shadow: 2, line: 1, hi: 2, ink: 0.72, selOut: true, inkInside: false, sat: 1.14, texture: 1, rim: 2, band: 0.55, ground: 2 },
 };
@@ -110,6 +110,12 @@ export function setCastLook(id: CastLookId) {
 export interface CastStageLight {
   /** Whole tone steps added to every lit tone (−1 = a night stage; never below −1: the game reads first). */
   step: number;
+  /**
+   * The darkest a material's base tone may be drawn in this stage (display luma 0..1): a
+   * material that would sink under it (a black suit on a night street) climbs a step or
+   * two up its own ramp — figures stay at least a step brighter than what is behind them.
+   */
+  floor: number;
   /** Rim colour (sRGB hex) and strength 0..1 (how much of the edge texel it replaces). */
   rim: number;
   rimAmount: number;
@@ -122,21 +128,21 @@ export interface CastStageLight {
   fog: number;
 }
 
-const DAY: CastStageLight = { step: 0, rim: 0xfff0c0, rimAmount: 0.85, rimDir: [-0.6, 0.8], ground: 0x1c1830, groundAlpha: 0.5, fog: 0.5 };
-const NIGHT: CastStageLight = { step: -1, rim: 0x9cc4ff, rimAmount: 0.9, rimDir: [0.8, 0.6], ground: 0x0e0c1e, groundAlpha: 0.6, fog: 0.5 };
+const DAY: CastStageLight = { step: 0, floor: 0.12, rim: 0xfff0c0, rimAmount: 0.85, rimDir: [-0.6, 0.8], ground: 0x1c1830, groundAlpha: 0.5, fog: 0.5 };
+const NIGHT: CastStageLight = { step: -1, floor: 0.2, rim: 0x9cc4ff, rimAmount: 0.9, rimDir: [0.8, 0.6], ground: 0x0e0c1e, groundAlpha: 0.6, fog: 0.5 };
 
 /** Per stage id (`StageDef.id`); stages not listed fall back to DAY / NIGHT by how dark their fog is. */
 export const CAST_STAGE_LIGHT: Record<string, CastStageLight> = {
   // z1: night street — sodium lamps and neon behind, a cold moon rim from the right.
   z1: { ...NIGHT, rim: 0x9cc4ff },
   // z2: hospital — failing fluorescent tubes overhead: no step down, a pale green-white top rim.
-  z2: { step: 0, rim: 0xd8ffe8, rimAmount: 0.8, rimDir: [0.2, 1], ground: 0x12202a, groundAlpha: 0.5, fog: 0.5 },
+  z2: { step: 0, floor: 0.17, rim: 0xd8ffe8, rimAmount: 0.8, rimDir: [0.2, 1], ground: 0x12202a, groundAlpha: 0.5, fog: 0.5 },
   // z3: dusk bridge — fires behind the horde: an orange rim from the right, one step down.
-  z3: { step: -1, rim: 0xffb060, rimAmount: 0.9, rimDir: [0.9, 0.4], ground: 0x1a1024, groundAlpha: 0.55, fog: 0.5 },
+  z3: { step: -1, floor: 0.2, rim: 0xffb060, rimAmount: 0.9, rimDir: [0.9, 0.4], ground: 0x1a1024, groundAlpha: 0.55, fog: 0.5 },
   // d1: day jungle — sun through the canopy from the upper left.
   d1: { ...DAY, rim: 0xfff2b0 },
   // d2: lab / greenhouse — cool skylight from above.
-  d2: { step: 0, rim: 0xc8f4ff, rimAmount: 0.8, rimDir: [0.3, 1], ground: 0x101c28, groundAlpha: 0.5, fog: 0.5 },
+  d2: { step: 0, floor: 0.14, rim: 0xc8f4ff, rimAmount: 0.8, rimDir: [0.3, 1], ground: 0x101c28, groundAlpha: 0.5, fog: 0.5 },
   // d3: storm night — lightning-blue rim, one step down.
   d3: { ...NIGHT, rim: 0xb8d0ff },
 };

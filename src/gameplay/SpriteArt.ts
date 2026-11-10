@@ -593,8 +593,8 @@ const SHADOW_FRAG = /* glsl */ `
       // hard edge; (2) its skirt broken into short horizontal dashes, the way the world's
       // painted shadows end — never a soft blob.
       vec2 px = floor(f / uPxScale);
-      float a = r < 0.74 ? 1.0 : 0.0;
-      if (uStyle > 1.5 && r >= 0.74 && r < 1.0) a = mod(px.x + 2.0 * px.y, 4.0) < 2.0 ? 1.0 : 0.0;
+      float a = r < 0.78 ? 1.0 : 0.0;
+      if (uStyle > 1.5 && r >= 0.78 && r < 1.0) a = mod(px.y, 2.0) < 1.0 && mod(px.x + px.y * 1.5, 6.0) < 4.0 ? 1.0 : 0.0;
       a *= uGround.a * step(0.3, vAlpha);
       if (a < 0.01) discard;
       gl_FragColor = vec4(uGround.rgb, a);
@@ -1808,6 +1808,7 @@ export class SpriteArt {
       const sl = castStageLight(this.world.stage?.id, this.night);
       env.tint.setRGB(1, 1, 1);
       env.step = sl.step;
+      env.floor = sl.floor;
       env.rimDir = sl.rimDir;
       env.rim.setRGB(((sl.rim >> 16) & 255) / 255, ((sl.rim >> 8) & 255) / 255, (sl.rim & 255) / 255);
       env.rimAmount = style.rim === 2 || (style.rim === 1 && sl.step < 0) ? sl.rimAmount : 0;
