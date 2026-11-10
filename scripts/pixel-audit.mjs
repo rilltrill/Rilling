@@ -62,18 +62,20 @@ const DEFAULT_SHOTS =
   'd3:4:240:d3-visitor,d3:8:200:d3-roadblock,d3:12:200:d3-mud,d3:16:240:d3-boss';
 
 /**
- * Pass marks. Density is the art bible's rule (§2.1, §3); `flat` and `tiny` are set well under
- * the first pass, whose 24-shot means were flat 26.5 % and tiny 66.6 % (/tmp/pw2/audit-v1.json).
+ * Pass marks. Density is the art bible's rule (§2.1, §3). `flat` and `tiny` are set well under
+ * the first pass, measured before anything else changed (/tmp/pw2/audit-v1.json, these 24
+ * shots): flat 12.7 % on average (1.0–38.5 %), tiny 65.1 % (54.0–74.4 %) — and >1.5: 20.9 %,
+ * >2 mid: 6.3 %, lvl>2: 37.1 %, 1293 colours a frame.
  */
 export const THRESHOLDS = {
   /** ≤ 5 % of world pixels with a texel wider than 1.5 frame pixels. */
   mag15: 0.05,
   /** ≤ 1 % wider than 2 pixels inside the middle 80 % of the frame. */
   mag2mid: 0.01,
-  /** ≤ 8 % of world blocks flat. */
-  flat: 0.08,
-  /** ≤ 25 % of adjacent world pairs one monitor step apart. */
-  tiny: 0.25,
+  /** ≤ 4 % of world blocks flat (a third of the first pass). */
+  flat: 0.04,
+  /** ≤ 20 % of adjacent world pairs one monitor step apart (under a third of the first pass). */
+  tiny: 0.2,
 };
 
 const shots = (args.shots ?? DEFAULT_SHOTS)
