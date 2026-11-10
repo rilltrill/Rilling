@@ -12,6 +12,7 @@ import { Kit } from '../../src/content/kit/ModelKit';
 import { nullHud } from './sim';
 import { encodePng } from './pwPng';
 import { pwPreview, type PvCam } from './pw2Preview';
+import { brush2Sampler } from '../../src/content/pixelworld/brush2';
 import { z1GroundLookdev } from '../../src/content/pixelworld/z1road';
 import { z1ApronTile, z1ForecourtTile, z1GroundDecals, z1SquareFieldTile, z1SquarePathTile } from '../../src/content/pixelworld/z1ground';
 
@@ -55,7 +56,7 @@ describe.skipIf(!OUT)('z1 ground look-dev', () => {
     if (process.env.PW_TILES !== '0') {
       const atlas = new PwAtlas('z1-lookdev');
       const pal = new PwPalette();
-      const tiles: PwTile[] = [...z1GroundLookdev(atlas), z1SquareFieldTile(atlas), z1SquarePathTile(atlas), z1ApronTile(atlas), z1ForecourtTile(atlas), z1GroundDecals(atlas)];
+      const tiles: PwTile[] = [...z1GroundLookdev(atlas), z1SquareFieldTile(atlas), z1SquarePathTile(atlas), z1ApronTile(atlas), z1ForecourtTile(atlas), z1GroundDecals(atlas), brush2Sampler(atlas)];
       const defs = (atlas as unknown as { tiles: Map<string, { paint: PwPainter }> }).tiles;
       const only = process.env.PW_ONLY;
       let total = 0;

@@ -1,4 +1,5 @@
 import type { PwCanvas, PwRng } from './canvas';
+import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { hash2 } from './surfaces';
 
 /**
@@ -906,4 +907,60 @@ export function regionField(w: number, h: number, cell: number, seed: number, o:
     }
   }
   return { f, fw, fh, shift };
+}
+
+/**
+ * A sampler of every brush on one 384 × 256 tile (look-dev only: no stage registers it) — the
+ * quickest way to see what each one draws, and the test that they all still do:
+ *   PW_PREVIEW=<dir> PW_VIEWS=0 PW_ONLY=brush2 npx vitest run tests/unit/pw2-z1-preview.test.ts
+ * Left to right, top row: courses (brick in runs) with a stepped damp band at their foot, a
+ * drainpipe bracket's stain fan and drips, a painted light pool (three rings, tinted core);
+ * bottom row: a slab with form edges and its contact shadow, chips / bumps / a crack / a groove
+ * on stone, aggregate drifts, a wet floor (sheen, a mirrored light column), a shore and a blob.
+ */
+export function brush2Sampler(atlas: PwAtlas): PwTile {
+  return atlas.tile('brush2|sampler', 384, 256, paintBrush2Sampler, { density: 64 });
+}
+
+function paintBrush2Sampler(c: PwCanvas, k: PwKit) {
+  const rng = k.rng;
+  const b = new Brush2(c);
+  const brick = k.ramp(0x7a4a3a, { light: 0.36, dark: 0.5 });
+  const brick2 = k.ramp(0x6a4034, { light: 0.36, dark: 0.5 });
+  const mortar = k.ramp(0x5a5650, { light: 0.3, dark: 0.5 });
+  const stone = k.ramp(0x5b5c66, { light: 0.36, sat: 0.75, dark: 0.48 });
+  const road = k.ramp(0x363a48, { light: 0.36, dark: 0.6 });
+  const sky = k.ramp(0x5a6890, { light: 0.32, dark: 0.44 });
+  const neon = k.ramp(0xff3c9a, { light: 0.5 });
+  const rust = k.ramp(0x7a4024, { light: 0.4, dark: 0.46 });
+  // Top left: a wall. Courses in runs, a damp foot (stepped band), a stain fan under a bracket, a lamp's pool.
+  b.courses(rng, 0, 0, 256, 128, { uw: 14, uh: 6, ramps: [brick, brick, brick2], joint: 1, jointRamp: mortar, jointTone: 2, run: [3, 7], toneVar: 0.3 });
+  b.band(0, 64, 256, 64, 'bottom', { dt: -2, steps: 2, wob: 3, seed: 1 });
+  b.formRect(60, 20, 10, 6, { raised: true, ramp: rust, tone: 3, cast: 1, castLen: 2 });
+  b.stainFan(rng, 58, 27, 14, 30, { ramp: rust, dt: -1 });
+  b.drip(rng, 120, 8, 60, { dt: -1, width: 3, wet: true, pool: 6 });
+  b.lightPool(196, 60, 52, 50, { steps: 3, seed: 3, tint: neon, tintRings: 1, dash: 'edge', skip: (r) => r === mortar });
+  // Top right: masonry in another bond with a raised slab on it (form edges, cast shadow, contact line below).
+  b.courses(rng, 256, 0, 128, 128, { uw: 30, uh: 16, ramps: [stone], joint: 2, jointTone: 1, bond: 'third', run: [1, 3], toneVar: 0.5 });
+  b.formRect(290, 40, 60, 36, { raised: true, lit: 1, dark: 1, cast: 2, castLen: 3, fill: 1 });
+  b.contact(256, 120, 128, 'above', { dt: -2, depth: 5, line: 2, seed: 2 });
+  // Bottom left: stone with wear — chips, bumps, a crack that forks, a groove with its lip, aggregate.
+  c.rect(0, 128, 128, 128, stone, 3);
+  b.wearDrift(rng, 4, 132, 120, 60, 18, { drifts: 3, max: 8, dirY: 0 });
+  b.wearDrift(rng, 4, 196, 60, 56, 10, { drifts: 2, max: 8, bumps: true });
+  b.crack(rng, 6, 190, 110, 0.1, { dt: -2, lip: 1, branch: 0.05, fat: 0.4 });
+  b.groove([70, 200, 120, 204, 124, 250], { dt: -2, lip: 1, width: 2 });
+  b.aggregate(rng, 66, 208, 50, 44, 40, { drifts: 4 });
+  // Bottom middle: wet ground — a sheet a step down, sheen strokes, a light standing in it, a pool of light as dashes.
+  c.rect(128, 128, 128, 128, road, 3);
+  b.formMask(shore(rng, 100, 70, 1), 140, 140, { raised: false, fill: -2, dark: 0, lit: 0 });
+  b.sheen(rng, 146, 146, 88, 58, 26, sky, 2, { min: 5, max: 14, fat: 0.25, core: 3, drifts: 5, only: (r) => r === road });
+  b.wetStreak(rng, 190, 142, 64, 16, neon, 4, { only: (r) => r === road || r === sky });
+  b.lightPool(180, 232, 46, 18, { steps: 2, seed: 5, dash: 'h', max: 5 });
+  // Bottom right: shapes — a shore, a blob, a smoothed blob, a disc, each as a raised form on stone.
+  c.rect(256, 128, 128, 128, stone, 2);
+  b.formMask(shore(rng, 50, 34, 1), 262, 136, { raised: true, fill: 1, cast: 1 });
+  b.formMask(blob(rng, 50, 34, 5, 0.5), 324, 136, { raised: true, fill: 1, cast: 1 });
+  b.formMask(blob(rng, 50, 34, 5, 0.5, 2), 262, 196, { raised: false, fill: -1 });
+  b.formMask(discBlob(34, 34), 334, 196, { raised: true, fill: 1, cast: 2, castLen: 2 });
 }
