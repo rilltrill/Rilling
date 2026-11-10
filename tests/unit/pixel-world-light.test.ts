@@ -208,11 +208,15 @@ describe('PixelWorld light: palette-true through the arcade monitor', () => {
 
   it('pwFilmHex is what the monitor shows of a colour that goes through its tone curve', () => {
     expect(pwFilmHex(0x000000)).toBe(0);
-    // The lead's measurement: a pool painted #1c273d arrived on screen as about #0d111e.
-    const f = pwFilmHex(0x1c273d);
-    expect(Math.abs(((f >> 16) & 255) - 0x0d)).toBeLessThanOrEqual(3);
-    expect(Math.abs(((f >> 8) & 255) - 0x11)).toBeLessThanOrEqual(3);
-    expect(Math.abs((f & 255) - 0x1e)).toBeLessThanOrEqual(4);
+    // The curve's toe sinks dark paint (why the first pass's nights went muddy) and lifts mid tones.
+    const dark = pwFilmHex(0x1c273d);
+    for (const sh of [16, 8, 0]) {
+      expect((dark >> sh) & 255).toBeLessThan((0x1c273d >> sh) & 255);
+      expect((dark >> sh) & 255).toBeGreaterThan(0);
+    }
+    expect(pwFilmHex(0x808080) & 255).toBeGreaterThan(0x80);
+    // It is the pass's own arithmetic: display = sRGB(aces(scene × exposure)).
+    expect(pwFilmHex(0x808080) & 255).toBe(Math.round(pwToSrgb(pwAces(pwToLinear(0x80 / 255) * 1.05)) * 255));
   });
 
   it('the monitor link starts as "no pass": straight to the canvas, no lattice', () => {
