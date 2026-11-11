@@ -373,6 +373,36 @@ export class Pen {
   }
 
   /**
+   * Fills the outline over texels of `group`, `steps` tones below whatever is there now. A plaid
+   * or a print has already changed the tone it sits on: a fold has to go down from that.
+   */
+  darken(group: number, steps: number) {
+    this.flatten(true);
+    if (!this.scan()) return;
+    const c = this.c;
+    for (let y = this.yLo; y <= this.yHi; y++) {
+      const n = this.crossN[y];
+      if (n === 0) continue;
+      const base = y * MAX_CROSS;
+      let wind = 0;
+      for (let i = 0; i < n - 1; i++) {
+        wind += this.crossD[base + i];
+        if (wind === 0) continue;
+        const a = Math.max(0, Math.ceil(this.crossX[base + i] - 0.5));
+        const b = Math.min(c.w - 1, Math.ceil(this.crossX[base + i + 1] - 0.5) - 1);
+        for (let x = a; x <= b; x++) {
+          const k = y * c.w + x;
+          if ((group !== 0 && c.group[k] !== group) || c.idx[k] === 0) continue;
+          const v = c.idx[k] - 1;
+          const r = Math.floor(v / RAMP_TONES);
+          const t = v - r * RAMP_TONES;
+          c.idx[k] = 1 + r * RAMP_TONES + Math.max(1, Math.min(RAMP_TONES - 1, t - steps));
+        }
+      }
+    }
+  }
+
+  /**
    * Strokes the open curve 1 texel wide: only over texels of `group` (0 = any filled texel), in
    * the texel's own ramp at its `base + delta` (a fold) or, with `ramp`, that ramp at `tone`.
    */

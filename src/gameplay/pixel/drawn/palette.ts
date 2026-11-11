@@ -35,15 +35,17 @@ export const R = {
   teeth: 16,
   belt: 17,
   white: 18,
-  count: 19,
+  sneaker: 19,
+  sole: 20,
+  count: 21,
 } as const;
 
 export const RAMPS: RampDef[] = [
-  { name: 'shirtGrey', hex: 0x5a6a7a, kind: 'cloth' },
+  { name: 'shirtGrey', hex: 0x5a6a7a, kind: 'cloth', colors: [0x161c26, 0x2e3a48, 0x45556a, 0x5a6a7a, 0x72828f, 0x8e9ba5] },
   { name: 'hivis', hex: 0xc8f020, kind: 'flat', colors: [0x20280c, 0x5e7a14, 0x96bf1a, 0xcceb22, 0xe8f65e, 0xfaffc4] },
   { name: 'reflect', hex: 0xdfe6e0, kind: 'metal' },
-  { name: 'denim', hex: 0x3f5270, kind: 'cloth' },
-  { name: 'boot', hex: 0x6a4524, kind: 'leather' },
+  { name: 'denim', hex: 0x3f5270, kind: 'cloth', colors: [0x0e1424, 0x1f2c4a, 0x2d4166, 0x3f5270, 0x54698a, 0x6c82a2] },
+  { name: 'boot', hex: 0xb88f52, kind: 'leather', colors: [0x2a1a10, 0x5a3c1e, 0x8a6434, 0xb88f52, 0xd8b678, 0xf0dcae] },
   { name: 'hat', hex: 0xf2be1e, kind: 'flat' },
   { name: 'skinDead', hex: 0xa6b292, kind: 'dead' },
   { name: 'hairDark', hex: 0x4a3a2c, kind: 'hair' },
@@ -53,11 +55,13 @@ export const RAMPS: RampDef[] = [
   { name: 'flannel', hex: 0xb4282e, kind: 'cloth' },
   { name: 'flannelDark', hex: 0x2c2c3a, kind: 'cloth' },
   { name: 'skinLive', hex: 0xd89a70, kind: 'live' },
-  { name: 'denimCiv', hex: 0x3a5a94, kind: 'cloth' },
+  { name: 'denimCiv', hex: 0x3a5a94, kind: 'cloth', colors: [0x0e1730, 0x1c2f5c, 0x2a4680, 0x3a5a94, 0x5075ae, 0x6f92c6] },
   { name: 'bootCiv', hex: 0x6e5038, kind: 'leather' },
   { name: 'teeth', hex: 0xece6cc, kind: 'flat' },
   { name: 'belt', hex: 0x5c3f20, kind: 'leather' },
   { name: 'white', hex: 0xf0f0e8, kind: 'flat' },
+  { name: 'sneaker', hex: 0x4a6a8a, kind: 'cloth' },
+  { name: 'sole', hex: 0xddd8c8, kind: 'flat' },
 ];
 
 /** RGB of every (ramp, tone), `RAMP_TONES` entries per ramp (for PNG tools and tests). */

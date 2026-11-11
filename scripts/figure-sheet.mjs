@@ -210,7 +210,14 @@ if (which.has('measure')) {
   const canon = (name, def, pose) => {
     const f = renderer.draw(def, POSES[pose], 0, 0, 180);
     const headH = 180 / 6.25;
-    const headW = headH * 0.8;
+    // (The head as drawn, not a nominal width: rows of the head part below the hat, widest row, ears included.)
+    let headW = 0;
+    {
+      const rows = [];
+      for (let y = 0; y < f.h; y++) { let any = false; for (let x = 0; x < f.w; x++) if (f.part[y * f.w + x] === 1) any = true; if (any) rows.push(y); }
+      const y0 = rows[0] + Math.floor((rows[rows.length - 1] - rows[0]) * 0.3);
+      for (const y of rows) if (y >= y0) { let a = 1e9, b = -1; for (let x = 0; x < f.w; x++) if (f.part[y * f.w + x] === 1) { a = Math.min(a, x); b = Math.max(b, x); } headW = Math.max(headW, b - a + 1); }
+    }
     const width = (y, part) => {
       let min = 1e9, max = -1;
       for (let x = 0; x < f.w; x++) {
@@ -365,5 +372,34 @@ if (which.has('solid')) {
     break;
   }
   s.save(`${out}/solid.png`);
+}
+if (which.has('r2')) {
+  // Round two: every thing the judges pointed at, on labelled strips.
+  const K = 2;
+  const G = 0x6f7f8c;
+  const strip = (name, def, pose, views, frames, sz = 180, kk = K, gap = 0) => {
+    const f0 = POSES[pose];
+    const list = frames ?? f0.map((_, i) => i);
+    const s = new Sheet(1880, Math.round(((sz * 1.32) | 0) * kk) * views.length + 40 * views.length, G);
+    views.forEach((v, r) => {
+      const y0 = (Math.round(sz * 1.32 * kk) + 40) * r;
+      s.text(8, y0 + 6, `${def.name} ${pose} view ${v}`);
+      list.forEach((i, c) => {
+        const fig = renderer.draw(def, f0, i, v, sz);
+        const cw = gap || Math.round(1880 / list.length);
+        put(s, fig, Math.round(cw * (c + 0.5)), y0 + Math.round(sz * 1.32 * kk) + 8, kk, `${i}`);
+      });
+    });
+    s.save(`${out}/${name}.png`);
+  };
+  strip('s-shamble', WORKER, 'zshamble', [0, 2], null, 110, 2);
+  strip('s-idle-wind', WORKER, 'zwindup', [0, 1, 2], null, 180, 2);
+  strip('s-lunge', WORKER, 'zlunge', [0, 1, 2, 3, 4], null, 180, 2);
+  strip('s-civrun', FLANNEL, 'civrun', [0, 2], null, 110, 2);
+  strip('s-civwalk', FLANNEL, 'civwalk', [0, 2], null, 110, 2);
+  strip('s-death', WORKER, 'zdeath', [0, 1, 2], null, 130, 2);
+  strip('s-stagger', WORKER, 'zstagger', [0, 2], null, 130, 2);
+  strip('s-civ-states', FLANNEL, 'civcower', [0, 1, 2], null, 130, 2);
+  strip('s-civ-plead', FLANNEL, 'civplead', [0, 1, 2], null, 130, 2);
 }
 console.log(`done in ${(performance.now() - t0).toFixed(0)} ms`);

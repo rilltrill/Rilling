@@ -1,16 +1,70 @@
-import type { PoseKey } from './skeleton';
+import { BODY, type PoseKey } from './skeleton';
 
 /**
- * DRAWN FIGURES: hand-authored keyframes (angles in degrees on the designed skeleton). Six frames
- * a cycle at about 12 a second, like sprite sheets of the period: the extremes are designed (a foot
- * planted, the other swinging, the shoulders against the hips), never interpolated curves.
+ * DRAWN FIGURES: hand-authored keyframes. The cycles are drawn the way a sprite animator plots
+ * them: for each frame, where each ankle goes on the ground grid and how low the hips sit (`foot`
+ * solves the leg for that), so a planted foot stays planted and the stride crosses evenly. Angles
+ * elsewhere are degrees on the designed skeleton. Frames change about 12 times a second.
  */
+
+const DEG = Math.PI / 180;
+
+/** The pelvis fields a leg is solved against. */
+type Hips = Pick<PoseKey, 'px' | 'py' | 'lean' | 'tilt' | 'turn'>;
+
+/** Vector through R = Ry(turn) Rx(lean) Rz(tilt), or back through it. */
+function pelvisRot(k: Hips, v: [number, number, number], inverse: boolean): [number, number, number] {
+  const sign = inverse ? -1 : 1;
+  const ry = (a: number) => {
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    return [c * v[0] + s * v[2], v[1], -s * v[0] + c * v[2]] as [number, number, number];
+  };
+  const rx = (a: number) => {
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    return [v[0], c * v[1] - s * v[2], s * v[1] + c * v[2]] as [number, number, number];
+  };
+  const rz = (a: number) => {
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    return [c * v[0] - s * v[1], s * v[0] + c * v[1], v[2]] as [number, number, number];
+  };
+  const ops: ((a: number) => [number, number, number])[] = inverse ? [rz, rx, ry] : [ry, rx, rz];
+  const ang = inverse ? [k.tilt ?? 0, k.lean ?? 0, k.turn ?? 0] : [k.turn ?? 0, k.lean ?? 0, k.tilt ?? 0];
+  // (Forward is applied last-to-first on the vector, as the matrix product is written.)
+  const seq = inverse ? [0, 1, 2] : [2, 1, 0];
+  for (const i of seq) v = ops[i](sign * ang[i] * DEG);
+  return v;
+}
+
+/**
+ * The leg angles [swing, out, knee, ankle] that put the ankle `side` (+1 left, −1 right) at
+ * (x, ankle height + lift, z), against the pelvis of `k`. Knee always forward.
+ */
+function foot(side: 1 | -1, k: Hips, x: number, z: number, lift = 0, ankle = 0): [number, number, number, number] {
+  const hip = pelvisRot(k, [side * BODY.hipX, BODY.hipDown, 0], false);
+  const hy = BODY.hipY + (k.py ?? 0) + hip[1];
+  const hx = (k.px ?? 0) + hip[0];
+  const v = pelvisRot(k, [x - hx, BODY.ankleY + lift - hy, z - hip[2]], true);
+  const L1 = BODY.thigh;
+  const L2 = BODY.shin;
+  const d = Math.min((L1 + L2) * 0.9995, Math.hypot(v[0], v[1], v[2]));
+  const f = Math.PI - Math.acos(Math.max(-1, Math.min(1, (L1 * L1 + L2 * L2 - d * d) / (2 * L1 * L2))));
+  const sphi = Math.max(-1, Math.min(1, v[0] / (L1 + L2 * Math.cos(f))));
+  const phi = Math.asin(sphi);
+  const A = (L1 + L2 * Math.cos(f)) * Math.cos(phi);
+  const B = L2 * Math.sin(f);
+  const s = Math.atan2(v[2], -v[1]) + Math.atan2(B, A);
+  return [s / DEG, (side * phi) / DEG, f / DEG, ankle];
+}
 
 const zPose = (o: PoseKey): PoseKey => ({ cLean: 8, sLean: 6, lean: 4, hPitch: 10, ...o });
 
 /** A zombie standing: weight on one leg, one shoulder dropped, an arm dragging, the head lolling. */
+const ZIDLE_HIPS: PoseKey = { px: 0.14, py: -0.08, tilt: 6, lean: 4 };
 export const ZIDLE: PoseKey[] = [
-  zPose({ px: 0.08, tilt: 5, sTilt: -4, cTilt: -9, cLean: 10, sLean: 8, hRoll: -13, aL: [2, 5, 10], aR: [14, 12, 30], lL: [4, 3, 8], lR: [-3, 6, 4], py: -0.05 }),
+  zPose({ ...ZIDLE_HIPS, sTilt: -5, cTilt: -9, cLean: 10, sLean: 8, hRoll: -13, aL: [2, 17, 14], aR: [14, 14, 30], lL: foot(1, ZIDLE_HIPS, 0.34, 0.06), lR: foot(-1, ZIDLE_HIPS, -0.62, 0.3, 0.02) }),
 ];
 
 /** A linear in-between of two keys (an animator's in-between; the keys hold the design). */
@@ -37,6 +91,7 @@ export function blendKey(a: PoseKey, b: PoseKey, t: number): PoseKey {
     aR: arr(a.aR, b.aR),
     lL: arr(a.lL, b.lL),
     lR: arr(a.lR, b.lR),
+    fists: a.fists,
   };
 }
 
@@ -49,35 +104,63 @@ function doubled(keys: PoseKey[]): PoseKey[] {
   return out;
 }
 
-/** Zombie shamble, six frames: a stiff planted leg, the other dragged through. */
-const ZSHAMBLE6: PoseKey[] = [
-  // 0: left foot planted forward, right trailing.
-  zPose({ px: 0.05, py: -0.06, tilt: 5, sTilt: -4, cTilt: -8, cLean: 10, turn: 6, sTurn: -10, hRoll: -12, aL: [-4, 5, 12], aR: [32, 16, 34], lL: [20, 4, 8], lR: [-14, 8, 16] }),
-  // 1: weight rolling onto the left leg.
-  zPose({ px: 0.09, py: -0.02, tilt: 7, sTilt: -5, cTilt: -9, cLean: 10, turn: 3, sTurn: -7, hRoll: -14, aL: [2, 5, 14], aR: [26, 16, 36], lL: [8, 4, 10], lR: [-12, 8, 34] }),
-  // 2: passing: the right foot dragged past.
-  zPose({ px: 0.08, py: 0.05, tilt: 6, sTilt: -4, cTilt: -8, cLean: 9, turn: -3, sTurn: 2, hRoll: -11, aL: [12, 6, 20], aR: [14, 14, 30], lL: [-2, 4, 6], lR: [2, 10, 48] }),
-  // 3: right foot forward.
-  zPose({ px: -0.05, py: -0.06, tilt: -5, sTilt: 5, cTilt: -3, cLean: 8, turn: -6, sTurn: 10, hRoll: -10, aL: [30, 12, 34], aR: [-4, 12, 16], lL: [-16, 8, 20], lR: [18, 6, 8] }),
-  // 4: weight rolling onto the right leg.
-  zPose({ px: -0.09, py: -0.02, tilt: -7, sTilt: 6, cTilt: -1, cLean: 8, turn: -3, sTurn: 7, hRoll: -8, aL: [24, 12, 30], aR: [2, 12, 20], lL: [-12, 8, 36], lR: [8, 6, 10] }),
-  // 5: passing: the left foot dragged past.
-  zPose({ px: -0.08, py: 0.04, tilt: -6, sTilt: 5, cTilt: -4, cLean: 8, turn: 3, sTurn: -2, hRoll: -11, aL: [12, 10, 28], aR: [12, 12, 24], lL: [4, 10, 44], lR: [-2, 6, 6] }),
-];
+/**
+ * Zombie shamble: twelve drawn frames, a limp. The left leg is the stiff one; the right is dragged,
+ * its toe on the street through the whole swing. Plotted on the ground grid (hu, + = forward) so
+ * the stance foot slides back evenly and the swing crosses over five frames, not two.
+ */
+const ZS = {
+  //        contact recoil               pass                  drag     | R contact recoil            pass                  through
+  lz: [0.72, 0.52, 0.3, 0.06, -0.18, -0.42, -0.66, -0.52, -0.2, 0.14, 0.46, 0.68],
+  llift: [0, 0, 0, 0, 0, 0, 0.1, 0.16, 0.18, 0.15, 0.07, 0.01],
+  lx: [0.3, 0.3, 0.3, 0.3, 0.3, 0.32, 0.32, 0.24, 0.14, 0.14, 0.22, 0.28],
+  rz: [-0.72, -0.58, -0.3, 0.06, 0.4, 0.62, 0.68, 0.46, 0.22, -0.04, -0.28, -0.52],
+  rlift: [0.1, 0.15, 0.17, 0.13, 0.06, 0.01, 0, 0, 0, 0, 0, 0],
+  rx: [-0.32, -0.24, -0.14, -0.14, -0.22, -0.28, -0.3, -0.3, -0.3, -0.3, -0.3, -0.32],
+  // Hips: low on the two contacts (deeper on the bad leg), up over the passing leg.
+  drop: [0.14, 0.2, 0.1, 0.0, 0.03, 0.08, 0.18, 0.27, 0.14, 0.01, 0.04, 0.09],
+  // Weight goes over the stance foot.
+  px: [0.08, 0.17, 0.22, 0.24, 0.2, 0.1, -0.08, -0.18, -0.24, -0.25, -0.2, -0.1],
+  tilt: [3, 6, 7, 6, 4, 1, -3, -6, -8, -6, -4, -1],
+  turn: [-6, -4, -1, 2, 4, 6, 6, 4, 1, -2, -4, -6],
+  sTurn: [11, 8, 3, -3, -8, -11, -11, -8, -3, 3, 8, 11],
+  // Spine and shoulders against the hips; the dip lands on the contact frames.
+  sTilt: [-3, -5, -6, -5, -3, -1, 3, 5, 6, 5, 3, 1],
+  cTilt: [-10, -12, -9, -7, -5, -6, -3, -1, -4, -6, -7, -8],
+  // The head is a frame behind the shoulders.
+  hRoll: [-8, -10, -12, -14, -15, -13, -11, -9, -8, -9, -10, -9],
+  hPitch: [10, 12, 11, 9, 8, 9, 10, 13, 12, 10, 8, 9],
+  // Arms: the left hangs dead and swings late, the right is half raised.
+  aLs: [-2, 2, 8, 14, 18, 20, 14, 8, 2, -4, -6, -4],
+  aLe: [12, 14, 18, 22, 26, 28, 26, 22, 18, 14, 12, 12],
+  aRs: [30, 28, 24, 18, 14, 10, 8, 10, 16, 22, 28, 30],
+  aRe: [34, 36, 34, 32, 30, 28, 26, 28, 30, 32, 34, 34],
+};
+
+function shambleFrame(i: number): PoseKey {
+  const k: PoseKey = zPose({ px: ZS.px[i], py: -ZS.drop[i], tilt: ZS.tilt[i], turn: ZS.turn[i], sTurn: ZS.sTurn[i], sTilt: ZS.sTilt[i], cTilt: ZS.cTilt[i], cLean: 10, hRoll: ZS.hRoll[i], hPitch: ZS.hPitch[i], aL: [ZS.aLs[i], 15, ZS.aLe[i]], aR: [ZS.aRs[i], 14, ZS.aRe[i]] });
+  return { ...k, lL: foot(1, k, ZS.lx[i], ZS.lz[i], ZS.llift[i]), lR: foot(-1, k, ZS.rx[i], ZS.rz[i], ZS.rlift[i]) };
+}
 
 /** The cycle shown: twelve frames. */
-export const ZSHAMBLE: PoseKey[] = doubled(ZSHAMBLE6);
+export const ZSHAMBLE: PoseKey[] = Array.from({ length: 12 }, (_, i) => shambleFrame(i));
 
-/** Arms coming up to grab: two frames rising, one at full reach. */
+const zw = (hips: PoseKey, lx: number, lz: number, rx: number, rz: number, o: PoseKey): PoseKey => zPose({ ...hips, ...o, lL: foot(1, hips, lx, lz), lR: foot(-1, hips, rx, rz, 0.02) });
+
+/** Arms coming up to grab: hands rising from the thigh, to the chest, to the face. */
+const WH0: PoseKey = { py: -0.1, px: 0.05, lean: 6, tilt: 2 };
+const WH1: PoseKey = { py: -0.16, px: -0.06, lean: 8, tilt: -3 };
+const WH2: PoseKey = { py: -0.24, px: -0.08, lean: 10, tilt: -4 };
 export const ZWINDUP: PoseKey[] = [
-  zPose({ py: -0.1, cLean: 14, hPitch: 4, hRoll: -10, cTilt: -6, aL: [50, 7, 40], aR: [60, 8, 36], lL: [10, 6, 16], lR: [-6, 10, 12] }),
-  zPose({ py: -0.14, cLean: 18, hPitch: -6, hRoll: -6, cTilt: -3, aL: [85, 7, 30], aR: [95, 9, 26], lL: [14, 6, 18], lR: [-12, 12, 18] }),
-  zPose({ py: -0.2, cLean: 22, lean: 8, hPitch: -14, hRoll: 0, aL: [112, 8, 16], aR: [120, 9, 14], lL: [20, 8, 24], lR: [-20, 12, 26] }),
+  zw(WH0, 0.36, 0.2, -0.42, -0.34, { cLean: 12, hPitch: 8, hRoll: -10, cTilt: -6, aL: [22, 12, 18], aR: [32, 14, 26] }),
+  zw(WH1, 0.42, 0.34, -0.42, -0.54, { cLean: 18, hPitch: -2, hRoll: -6, cTilt: -3, aL: [85, 7, 30], aR: [95, 9, 26] }),
+  zw(WH2, 0.46, 0.46, -0.46, -0.72, { cLean: 22, hPitch: -14, hRoll: 2, cTilt: 2, aL: [112, 8, 16], aR: [120, 9, 14] }),
 ];
 
 /** The lunge: the whole body thrown at the camera. */
+const LH: PoseKey = { py: -0.28, px: 0.05, lean: 16 };
 export const ZLUNGE: PoseKey[] = [
-  zPose({ py: -0.26, lean: 16, cLean: 24, hPitch: -20, aL: [125, 8, 10], aR: [130, 9, 8], lL: [26, 8, 30], lR: [-26, 12, 20] }),
+  zPose({ ...LH, cLean: 24, hPitch: -20, aL: [125, 8, 10], aR: [130, 9, 8], lL: [26, 8, 30], lR: [-26, 12, 20] }),
 ];
 
 /** Rocked back by a hit. */
@@ -86,39 +169,67 @@ export const ZSTAGGER: PoseKey[] = [
   zPose({ py: -0.16, lean: -3, cLean: 6, sLean: 2, hPitch: 16, hRoll: -18, tilt: -6, sTilt: -10, aL: [10, 22, 40], aR: [-4, 28, 18], lL: [4, 10, 28], lR: [-8, 10, 12] }),
 ];
 
-/** Going down: knees go, the body folds and drops. */
+/** Going down: knees go, the body folds forward and the arms lag behind it, then limp on the ground. */
 export const ZDEATH: PoseKey[] = [
   zPose({ py: -0.3, lean: -10, cLean: -6, hPitch: -24, hRoll: 14, aL: [-10, 34, 30], aR: [-18, 40, 26], lL: [18, 10, 40], lR: [8, 14, 30] }),
-  zPose({ py: -1.3, lean: 10, cLean: 18, sLean: 12, hPitch: 30, hRoll: -14, aL: [8, 22, 34], aR: [20, 18, 28], lL: [70, 14, 110], lR: [60, 18, 118] }),
-  // Kneeling, folding over.
-  { noGround: true, py: -2.0, lean: 26, cLean: 30, sLean: 14, hPitch: 30, hRoll: -24, aL: [30, 10, 40], aR: [50, 14, 24], lL: [80, 14, 130], lR: [86, 18, 134] },
-  // Fallen on the back, drawn lying in the ground plane (foreshortened toward the viewer).
-  { noGround: true, py: -2.9, lean: -72, sLean: -6, cLean: -8, hPitch: 6, hRoll: 20, aL: [40, 40, 30], aR: [-20, 44, 40], lL: [14, 10, 14], lR: [28, 16, 34] },
+  zPose({ py: -1.3, lean: 16, cLean: 34, sLean: 20, hPitch: 36, hRoll: -14, aL: [-28, 18, 24], aR: [-12, 22, 18], lL: [70, 14, 110], lR: [60, 18, 118] }),
+  // Kneeling, folded right over; the arms come down last.
+  { noGround: true, py: -2.0, lean: 34, cLean: 40, sLean: 22, hPitch: 34, hRoll: -24, aL: [10, 14, 22], aR: [34, 18, 14], lL: [80, 14, 130], lR: [86, 18, 134] },
+  // Fallen on the back, seen from the side: flat on the street, arms out, knees loose.
+  {
+    noGround: true,
+    py: -2.86,
+    lean: -86,
+    sLean: -3,
+    cLean: -3,
+    hPitch: 8,
+    hRoll: 30,
+    aL: [4, 76, 12],
+    aR: [0, 72, 22],
+    lL: [18, 12, 24],
+    lR: [6, 18, 16],
+    // The same body with its feet toward the viewer: the street's foreshortening, arms flung out, head fallen aside.
+    front: { noGround: true, py: -2.32, lean: -72, sLean: -2, cLean: -2, hPitch: 6, hRoll: 62, aL: [2, 78, 14], aR: [0, 70, 26], lL: [8, 22, 20], lR: [4, 30, 14] },
+  },
 ];
 
-const cPose = (o: PoseKey): PoseKey => o;
-
-
-/** The living, standing: weight on a leg, an alert head. */
+/** The living, standing: weight over the left foot, shoulders against the hips, the free foot turned out. */
+const CS: PoseKey = { px: 0.18, tilt: 6 };
 export const CIVSTAND: PoseKey[] = [
-  cPose({ px: 0.05, tilt: 3, sTilt: -4, cTilt: -3, hRoll: 4, aL: [4, 8, 16], aR: [6, 10, 22], lL: [2, 5, 6], lR: [-2, 12, 4] }),
+  { ...CS, sTilt: -6, cTilt: -6, hRoll: 7, aL: [4, 15, 16], aR: [6, 17, 22], lL: foot(1, CS, 0.32, 0.0), lR: foot(-1, CS, -0.56, 0.28) },
 ];
 
-/** Running for her life: leaning in, arms pumping. */
+/** Running for her life: leaning in, fists pumping; a forearm is always up while the other is low. */
 const CIVRUN6: PoseKey[] = [
-  { lean: 10, sLean: 6, cLean: 6, py: -0.1, turn: 8, sTurn: -14, hPitch: -6, aL: [-40, 10, 82], aR: [46, 10, 94], lL: [52, 4, 26], lR: [-38, 8, 68] },
-  { lean: 8, sLean: 6, cLean: 6, py: -0.02, turn: 5, sTurn: -9, hPitch: -6, aL: [-20, 8, 86], aR: [26, 8, 92], lL: [30, 4, 18], lR: [-18, 8, 80] },
-  { lean: 8, sLean: 6, cLean: 4, py: 0.08, turn: -2, sTurn: 2, hPitch: -6, aL: [14, 8, 84], aR: [-6, 8, 88], lL: [0, 4, 30], lR: [-4, 8, 96] },
-  { lean: 10, sLean: 6, cLean: 6, py: -0.1, turn: -8, sTurn: 14, hPitch: -6, aL: [46, 10, 94], aR: [-40, 10, 82], lL: [-38, 8, 68], lR: [52, 4, 26] },
-  { lean: 8, sLean: 6, cLean: 6, py: -0.02, turn: -5, sTurn: 9, hPitch: -6, aL: [26, 8, 92], aR: [-20, 8, 86], lL: [-18, 8, 80], lR: [30, 4, 18] },
-  { lean: 8, sLean: 6, cLean: 4, py: 0.08, turn: 2, sTurn: -2, hPitch: -6, aL: [-6, 8, 88], aR: [14, 8, 84], lL: [-4, 8, 96], lR: [0, 4, 30] },
+  { fists: true, lean: 10, sLean: 6, cLean: 6, py: -0.1, turn: 8, sTurn: -14, hPitch: -6, aL: [-40, 10, 82], aR: [46, 10, 94], lL: [52, 0, 26], lR: [-38, 0, 68] },
+  { fists: true, lean: 8, sLean: 6, cLean: 6, py: -0.02, turn: 5, sTurn: -9, hPitch: -6, aL: [-20, 8, 74], aR: [26, 8, 104], lL: [30, 0, 18], lR: [-18, 0, 80] },
+  { fists: true, lean: 8, sLean: 6, cLean: 4, py: 0.08, turn: -2, sTurn: 2, hPitch: -6, aL: [18, 8, 100], aR: [-12, 8, 68], lL: [0, 0, 30], lR: [-4, 0, 96] },
+  { fists: true, lean: 10, sLean: 6, cLean: 6, py: -0.1, turn: -8, sTurn: 14, hPitch: -6, aL: [46, 10, 94], aR: [-40, 10, 82], lL: [-38, 0, 68], lR: [52, 0, 26] },
+  { fists: true, lean: 8, sLean: 6, cLean: 6, py: -0.02, turn: -5, sTurn: 9, hPitch: -6, aL: [26, 8, 104], aR: [-20, 8, 74], lL: [-18, 0, 80], lR: [30, 0, 18] },
+  { fists: true, lean: 8, sLean: 6, cLean: 4, py: 0.08, turn: 2, sTurn: -2, hPitch: -6, aL: [-12, 8, 68], aR: [18, 8, 100], lL: [-4, 0, 96], lR: [0, 0, 30] },
 ];
 
 export const CIVRUN: PoseKey[] = doubled(CIVRUN6);
 
+/** Walking, a person's easy step (and, played backwards, backing away from something). */
+const CW = {
+  lz: [0.52, 0.28, 0.0, -0.26, -0.5, -0.5, -0.1, 0.32],
+  llift: [0, 0, 0, 0, 0.05, 0.14, 0.2, 0.06],
+  rz: [-0.5, -0.5, -0.1, 0.32, 0.52, 0.28, 0.0, -0.26],
+  rlift: [0.05, 0.14, 0.2, 0.06, 0, 0, 0, 0],
+  drop: [0.1, 0.05, 0.0, 0.04, 0.1, 0.05, 0.0, 0.04],
+  px: [0.08, 0.14, 0.16, 0.1, -0.08, -0.14, -0.16, -0.1],
+};
+function civWalkFrame(i: number): PoseKey {
+  const swing = Math.sin((i / 8) * Math.PI * 2);
+  const k: PoseKey = { px: CW.px[i], py: -CW.drop[i], lean: 3, sLean: 3, tilt: swing * 3, sTilt: -swing * 3, hPitch: -2, aL: [-swing * 14 + 4, 13, 20], aR: [swing * 14 + 6, 13, 24] };
+  return { ...k, lL: foot(1, k, 0.28 + (i >= 4 ? -0.08 : 0), CW.lz[i], CW.llift[i]), lR: foot(-1, k, -0.28 + (i < 4 ? 0.08 : 0), CW.rz[i], CW.rlift[i]) };
+}
+export const CIVWALK: PoseKey[] = Array.from({ length: 8 }, (_, i) => civWalkFrame(i));
+
 /** Cowering: crouched, knees in, arms up over the head. */
 export const CIVCOWER: PoseKey[] = [
-  { py: -1.1, lean: 22, sLean: 16, cLean: 14, hPitch: 24, hRoll: 6, aL: [110, 14, 118], aR: [124, 16, 122], lL: [64, 10, 118], lR: [74, 12, 116] },
+  { noReach: true, py: -1.1, lean: 22, sLean: 16, cLean: 14, hPitch: 24, hRoll: 6, aL: [110, 14, 118], aR: [124, 16, 122], lL: [64, 10, 118], lR: [74, 12, 116] },
 ];
 
 /** Pleading: on the feet, one arm stretched toward the player, the other against the chest. */
@@ -135,6 +246,7 @@ export const POSES = {
   zdeath: ZDEATH,
   civstand: CIVSTAND,
   civrun: CIVRUN,
+  civwalk: CIVWALK,
   civcower: CIVCOWER,
   civplead: CIVPLEAD,
 } as const;

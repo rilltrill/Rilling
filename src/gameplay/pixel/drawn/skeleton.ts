@@ -22,7 +22,8 @@ export const BODY = {
   pelvisToWaist: 0.55,
   waistToChest: 0.85,
   chestToNeck: 0.52,
-  neckToHead: 0.55,
+  /** A little longer than the rest of the canon asks: a jaw on the collar reads as no neck at all. */
+  neckToHead: 0.6,
   /** Shoulder joints from the chest origin. */
   shoulderX: 0.56,
   shoulderUp: 0.25,
@@ -90,6 +91,12 @@ export interface PoseKey {
   lR?: readonly [number, number, number, number?];
   /** Do not rest the lowest foot on the ground (a lying figure, a figure held off the floor). */
   noGround?: boolean;
+  /** Front and back views keep arms raised over the head as drawn (a cower), not thrust at the viewer. */
+  noReach?: boolean;
+  /** Hands closed (a runner's fists). */
+  fists?: boolean;
+  /** A different drawing of this key for the front and back views (a lying body has its own foreshortening). */
+  front?: PoseKey;
 }
 
 /** Joint positions: figure frame (x, y, z); and, after `project`, screen hu (x right, y up) with z = toward the viewer. */
@@ -106,6 +113,8 @@ export class Skeleton {
   headYaw = 0;
   /** Pitch of the head in radians (nod forward +). */
   headPitch = 0;
+  /** Foot pitch about the toe (radians, toe down +): left, right. */
+  readonly footPitch = new Float32Array(2);
 }
 
 // A rotation as 9 numbers (column vectors), no allocation.
@@ -237,6 +246,31 @@ export function buildPose(sk: Skeleton, k: PoseKey, ground = true) {
     }
     for (let i = 0; i < J.count; i++) Y[i] -= min;
   }
+  footOnToe(sk, J.ankleL, J.toeL, 0, 1, ground);
+  footOnToe(sk, J.ankleR, J.toeR, 1, -1, ground);
+}
+
+/** Toe joint below the ankle at rest, the distance between them, and the foot's rest slope. */
+const TOE_DROP = BODY.ankleY * 0.55;
+const FOOT_L = Math.hypot(TOE_DROP, BODY.foot);
+const FOOT_0 = Math.atan2(TOE_DROP, BODY.foot);
+const TOE_Y = BODY.ankleY - TOE_DROP;
+/** A foot within this height (hu) of the street drags on its toe instead of hovering over it. */
+const DRAG_H = 0.6;
+
+/** A foot near the ground pivots about its toe: the toe stays on the street, the heel comes up. */
+function footOnToe(sk: Skeleton, a: number, t: number, i: number, side: number, ground: boolean) {
+  sk.footPitch[i] = 0;
+  const ya = sk.y[a];
+  if (!ground || ya - BODY.ankleY > DRAG_H || ya - TOE_DROP <= TOE_Y + 1e-3) return;
+  const sin = Math.min(1, (ya - TOE_Y) / FOOT_L);
+  const p = Math.min(1.2, Math.asin(sin) - FOOT_0);
+  if (p <= 0) return;
+  sk.footPitch[i] = p;
+  identity(_Rt);
+  rot(_Rt, 1, side * 12);
+  rot(_Rt, 0, p / DEG);
+  mulV(_Rt, 0, -TOE_DROP, BODY.foot, t, sk.x[a], sk.y[a], sk.z[a], sk);
 }
 
 function limb(sk: Skeleton, parent: Float32Array, a: number, b: number, c: number, d: number, p: readonly (number | undefined)[], l1: number, l2: number, l3: number, side: number) {

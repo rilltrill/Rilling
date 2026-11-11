@@ -1,6 +1,7 @@
 import { J, HEADS, Skeleton, buildPose, project, type PoseKey, type ViewId } from './skeleton';
 import { IndexedCanvas, Pen, MAX_CANVAS } from './raster';
 import type { FigureDef } from './outfits';
+import type { BandRow } from './body';
 
 /**
  * DRAWN FIGURES: turns one (figure, pose, view, size) into an indexed sprite. Outlines live in
@@ -72,6 +73,12 @@ export class Draw {
   time = 0;
   /** Damage drawn into this frame (bits 0-1 left arm, 2-3 right arm: 0 whole, 1 forearm gone, 2 arm gone; bit 4 headless). */
   flags = 0;
+  /** The pose being drawn. */
+  key: PoseKey = {};
+  /** Front and back views: an arm thrust at or away from the viewer (0 no, else 0..1 how far up), left and right. */
+  readonly reach = new Float32Array(2);
+  /** Front and back views: a shin folded back behind its thigh, left and right. */
+  readonly shinBack = new Uint8Array(2);
 
   constructor(pen: Pen) {
     this.pen = pen;
@@ -132,6 +139,14 @@ export class Draw {
     this.sg[b] = sg;
   }
 
+  /** Screen texels of a point given in screen head units from the ground point. */
+  sx(x: number) {
+    return this.cx + x * this.S;
+  }
+  sy(y: number) {
+    return this.cy - y * this.S;
+  }
+
   /** Screen position (texels) of a control point; the base of everything a table says. */
   px(b: number, a: number, n: number) {
     const o = this.ox[b] + this.ax[b] * a * this.A[b] + -this.ay[b] * n * this.sg[b];
@@ -183,6 +198,79 @@ export class Draw {
   }
 }
 
+/**
+ * A shaped form on one side of a limb: `side` −1 = toward the light, +1 = away. Rows are (bone,
+ * along, near edge, far edge); `delta` tone steps from the base (never stacks with another shade).
+ */
+export function band(d: Draw, tbl: readonly BandRow[], map: readonly number[], group: number, delta: number, side: number) {
+  const pen = d.pen;
+  pen.begin();
+  const sign = side * d.away(map[tbl[0][0]]);
+  for (let i = 0; i < tbl.length; i++) {
+    const r = tbl[i];
+    d.pt(map[r[0]], r[1], r[2] * sign);
+  }
+  for (let i = tbl.length - 1; i >= 0; i--) {
+    const r = tbl[i];
+    d.pt(map[r[0]], r[1], r[3] * sign);
+  }
+  pen.shade(group, delta);
+}
+
+/**
+ * Front and back views: arms thrust along the view axis. Bones cannot show this (an arm aimed at
+ * the camera projects straight up), so the drawing is placed by hand: hands rising thigh, chest,
+ * face with the swing, wrists at the shoulders' width, big in front of the body.
+ */
+function placeReach(d: Draw, key: PoseKey, view: ViewId) {
+  const sk = d.sk;
+  d.reach[0] = d.reach[1] = 0;
+  if ((view !== 0 && view !== 4) || key.noReach) return;
+  for (let s = 0; s < 2; s++) {
+    const a = s === 0 ? key.aL : key.aR;
+    const swing = a?.[0] ?? 0;
+    if (swing <= 60) continue;
+    const t = Math.max(0, Math.min(1, (swing - 70) / 55));
+    d.reach[s] = 0.05 + t * 0.95;
+    const sh = s === 0 ? J.shL : J.shR;
+    const out = Math.sign(sk.sx[sh] - sk.sx[J.chest]) || (s === 0 ? 1 : -1);
+    const x0 = sk.sx[sh];
+    const y0 = sk.sy[sh];
+    const wx = x0 + out * (0.22 - 0.04 * t);
+    const wy = y0 - 0.75 + 0.8 * t;
+    const el = s === 0 ? J.elL : J.elR;
+    const wr = s === 0 ? J.wrL : J.wrR;
+    const tip = s === 0 ? J.tipL : J.tipR;
+    sk.sx[el] = (x0 + wx) * 0.5 + out * 0.18;
+    sk.sy[el] = (y0 + wy) * 0.5 - 0.22;
+    sk.sx[wr] = wx;
+    sk.sy[wr] = wy;
+    // Fingers aimed at the camera are short on screen: the hand is wide and squat, not tall.
+    const hl = 0.64 + 0.06 * t;
+    sk.sx[tip] = wx + out * hl * 0.3;
+    sk.sy[tip] = wy + hl * 0.95;
+  }
+}
+
+/** Front and back views: a shin going far back is hidden behind the thigh and stays under the knee. */
+function placeShins(d: Draw, view: ViewId) {
+  const sk = d.sk;
+  d.shinBack[0] = d.shinBack[1] = 0;
+  if (view !== 0 && view !== 4) return;
+  for (let s = 0; s < 2; s++) {
+    const kn = s === 0 ? J.kneeL : J.kneeR;
+    const an = s === 0 ? J.ankleL : J.ankleR;
+    const to = s === 0 ? J.toeL : J.toeR;
+    const z = sk.z[an] - sk.z[kn];
+    if (z > -0.77 * 1.3) continue;
+    d.shinBack[s] = 1;
+    const dx = Math.max(-0.1, Math.min(0.1, sk.sx[an] - sk.sx[kn]));
+    const mv = sk.sx[kn] + dx - sk.sx[an];
+    sk.sx[an] += mv;
+    sk.sx[to] += mv;
+  }
+}
+
 export interface RenderedFigure {
   w: number;
   h: number;
@@ -215,6 +303,8 @@ export function makeFigureRenderer() {
     d.view = view;
     d.flags = flags;
     const sk = d.sk;
+    if ((view === 0 || view === 4) && key.front) key = key.front;
+    d.key = key;
     buildPose(sk, key, def.ground !== false && !key.noGround);
     project(sk, view);
     d.S = pxTall / HEADS;
@@ -224,6 +314,8 @@ export function makeFigureRenderer() {
     d.cx = canvas.w / 2;
     d.cy = canvas.h - 8;
     d.lod = lod >= 0 ? lod : lodFor(d.S, -1);
+    placeReach(d, key, view);
+    placeShins(d, view);
     d.frames();
     // Sleeves flow into the shoulder, trousers into the hip: no seam line round the joint.
     const R = 0.38 * d.S;
@@ -266,6 +358,7 @@ export function makeFigureRenderer() {
 
   /** The skeleton of a pose for one view, without drawing it (placement). */
   function pose(key: PoseKey, view: ViewId) {
+    if ((view === 0 || view === 4) && key.front) key = key.front;
     buildPose(d.sk, key, !key.noGround);
     project(d.sk, view);
     return d.sk;
