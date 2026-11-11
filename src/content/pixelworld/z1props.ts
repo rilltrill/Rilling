@@ -55,7 +55,7 @@ export function z1PropTiles(a: PwAtlas): Z1PropTiles {
     basin: a.tile('z1prop|basin', 64, 32, paintBasin, { wrap: true }),
     water: a.tile('z1prop|water', 64, 64, paintWater, { wrap: true }),
     column: a.tile('z1prop|col', 32, 32, paintColumn, { wrap: true }),
-    plinth: a.tile('z1prop|plinth', 64, 70, paintPlinth),
+    plinth: a.tile('z1prop|plinth', PLINTH_W, PLINTH_H, paintPlinth),
     tympanum: a.tile('z1prop|tymp', 228, 36, paintTympanum),
     flood: a.tile('z1prop|flood', 26, 16, paintFlood),
   };
@@ -268,36 +268,95 @@ function paintColumn(c: PwCanvas, k: PwKit) {
   for (let i = 0; i < 6; i++) c.cluster(k.rng.int(0, c.w - 3), k.rng.int(c.h - 10, c.h - 3), k.rng.int(0, 9), moss, 2);
 }
 
-/** The memorial's plinth face (2 × 2.2 m): granite courses, a bronze dedication plate, a wreath at its foot. */
+/** The memorial's plinth as a card (2.75 × 2.875 m): a real box's side faces read blue and pink in the hero shot, a cut-out drawing does not. */
+export const PLINTH_W = 88;
+export const PLINTH_H = 92;
+
+/** Weathered granite, chipped outline, a bronze cap and dedication plate, a wreath, candles and flowers left at its ragged foot. Painted lit from the left; no side. */
 function paintPlinth(c: PwCanvas, k: PwKit) {
-  const W = c.w;
-  const H = c.h;
+  const W = PLINTH_W;
+  const H = PLINTH_H;
   const gr = k.ramp(0x6a665e, { light: 0.38, sat: 0.5 });
+  const moss = k.ramp(0x4a5a3e, { light: 0.34, sat: 0.7 });
   const bronze = k.ramp(0x3e6050, { light: 0.45 });
   const brass = k.ramp(0xb89a4a, { light: 0.4 });
   const leaf = k.ramp(0x2a4a2a, { light: 0.4 });
   const red = k.ramp(0xa82a2a, { light: 0.45 });
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) c.set(x, y, gr, y % 18 === 0 ? 1.6 : y % 18 === 1 ? 3.8 : (x + (Math.floor(y / 18) % 2) * 16) % 32 === 0 ? 1.6 : 3);
-  // Cornice and plinth base mouldings.
-  c.rect(0, 0, W, 4, gr, 3.8);
-  c.hline(0, 4, W, gr, 1);
-  c.rect(0, H - 6, W, 6, gr, 2.6);
-  c.hline(0, H - 6, W, gr, 4);
-  // Bronze plate, green with age, raised letters.
-  c.rect(10, 16, W - 20, 22, bronze, 3);
-  c.frame(10, 16, W - 20, 22, bronze, 4);
-  drawText(c, 'OUR', 26, 19, FONT_3x5, brass, 3);
-  drawText(c, 'FALLEN', 20, 25, FONT_3x5, brass, 3);
-  drawText(c, '1917-19', 18, 31, FONT_3x5, brass, 2.4);
-  // Verdigris runs below the plate.
-  for (let x = 12; x < W - 12; x += 5) for (let j = 0; j < 4 + (x % 7); j++) c.tint(x, 38 + j, bronze, -0.6);
-  // A wreath leaning on the foot: a ring of leaves with a red ribbon.
-  for (let a = 0; a < 40; a++) {
-    const t = (a / 40) * Math.PI * 2;
-    c.set(Math.round(W / 2 + Math.cos(t) * 9), Math.round(H - 15 + Math.sin(t) * 8), leaf, a % 3 ? 3 : 2);
-    c.set(Math.round(W / 2 + Math.cos(t) * 8), Math.round(H - 15 + Math.sin(t) * 7), leaf, 2);
+  const wax = k.ramp(0xd8c8a0, { light: 0.34 });
+  const flame = k.ramp(0xffc060, { light: 0.5, sat: 1.1 });
+  const ink = k.ramp(0x201c28, { light: 0.3 });
+  const seed = 451;
+  const stoneT = (x: number, y: number, base: number) => {
+    const u = x / W;
+    const grain = hash2(x >> 2, y >> 2, seed) > 0.82 ? -0.4 : 0;
+    return base + (u < 0.28 ? 0.7 : u > 0.72 ? -0.55 : 0) + grain;
+  };
+  // Courses: the die between two runs of cornice stones. Each course its own width, each end chipped.
+  const course = (x0: number, x1: number, y0: number, y1: number, base: number, chip: number) => {
+    for (let y = y0; y < y1; y++) {
+      const a = x0 + (hash2(y >> 1, 1, seed + 3) > 1 - chip ? 2 : 0);
+      const b = x1 - (hash2(y >> 1, 2, seed + 3) > 1 - chip ? 2 : 0);
+      for (let x = a; x < b; x++) c.set(x, y, gr, y === y0 ? stoneT(x, y, base + 0.9) : y === y1 - 1 ? stoneT(x, y, base - 1.1) : stoneT(x, y, base));
+    }
+  };
+  course(2, W - 2, H - 8, H, 2.2, 0.4);
+  course(8, W - 8, H - 15, H - 8, 2.6, 0.35);
+  course(16, W - 16, 24, H - 15, 2.7, 0.3);
+  course(8, W - 8, 18, 24, 3.0, 0.25);
+  // Joints, cut by hand: not a grid.
+  for (let j = 0; j < 4; j++) {
+    const y = 34 + j * 13 + Math.round(hash2(j, 1, seed + 5) * 3);
+    for (let x = 18; x < W - 18; x++) if (hash2(x >> 3, j, seed + 7) > 0.15) c.shift(x, y, -1.3);
+    const vx = 26 + Math.floor(hash2(j, 2, seed + 7) * 34);
+    for (let yy = y; yy < y + 12; yy++) c.shift(vx, yy, -1.1);
   }
-  c.rect(W / 2 - 2, H - 8, 4, 6, red, 3);
+  // Bronze cap on which the soldier stands: green with age, its edge lit.
+  course(22, W - 22, 3, 18, 2.8, 0.2);
+  for (let y = 3; y < 18; y++) for (let x = 22; x < W - 22; x++) c.tint(x, y, bronze, y < 6 ? 0.5 : 0);
+  // Dedication plate, its letters clear, its corners bolted.
+  c.rect(24, 28, W - 48, 22, bronze, 3);
+  c.frame(24, 28, W - 48, 22, bronze, 4);
+  drawText(c, 'OUR', 37, 31, FONT_3x5, brass, 4.4);
+  drawText(c, 'FALLEN', 31, 38, FONT_3x5, brass, 4.2);
+  for (const [bx, by] of [[26, 30], [W - 27, 30], [26, 47], [W - 27, 47]]) c.set(bx, by, brass, 4.6);
+  for (let x = 26; x < W - 26; x += 3) for (let j = 0; j < 3 + (x % 7); j++) c.tint(x, 50 + j, bronze, -0.6);
+  // A corner gone, chips and moss in the joints.
+  c.poly([W - 18, 24, W - 8, 24, W - 8, 36, W - 14, 30], 0, 0);
+  c.poly([16, H - 15, 26, H - 15, 22, H - 8, 14, H - 8], 0, 0);
+  for (let i = 0; i < 22; i++) {
+    const x = 18 + Math.floor(hash2(i, 3, seed + 9) * (W - 36));
+    const y = 26 + Math.floor(hash2(i, 4, seed + 9) * (H - 44));
+    if (c.at(x, y) === gr) c.tint(x, y, moss, 0);
+  }
+  // Wreath leaning at the foot.
+  const wx = 30;
+  const wy = H - 22;
+  for (let a = 0; a < 48; a++) {
+    const t = (a / 48) * Math.PI * 2;
+    for (const r of [11, 9, 7]) c.set(Math.round(wx + Math.cos(t) * r), Math.round(wy + Math.sin(t) * r), leaf, a % 3 ? 3 : 2);
+  }
+  c.rect(wx - 2, wy + 6, 4, 10, red, 3);
+  c.poly([wx - 5, wy + 6, wx + 5, wy + 6, wx + 1, wy + 14], red, 3.4);
+  // Candles and flowers; the wax has run.
+  for (let i = 0; i < 6; i++) {
+    const cx = 46 + i * 7 + Math.round(hash2(i, 5, seed + 11) * 3);
+    const ch = 6 + Math.floor(hash2(i, 6, seed + 11) * 6);
+    c.rect(cx, H - 8 - ch, 3, ch, wax, 3.2);
+    c.hline(cx - 1, H - 8, 5, wax, 2.6);
+    c.set(cx + 1, H - 9 - ch, flame, 4.8, PWF.GLOW);
+    c.set(cx + 1, H - 10 - ch, flame, 3.6, PWF.GLOW);
+  }
+  for (let x = 6; x < W - 6; x += 5 + Math.floor(hash2(x, 2, seed + 13) * 4)) {
+    c.set(x, H - 3, red, 3.6);
+    c.set(x + 1, H - 2, leaf, 2.6);
+  }
+  // A ragged foot: the bottom row eaten, ash and rain-dark rubbish in the gaps.
+  for (let x = 0; x < W; x++) {
+    const bite = Math.floor(hash2(x >> 1, 7, seed + 15) * 3);
+    for (let j = 0; j < bite; j++) if (hash2(x, j, seed + 17) > 0.45) c.set(x, H - 1 - j, 0, 0);
+  }
+  c.outline(0.5, false);
+  void ink;
 }
 
 /** The courthouse tympanum (a 228 × 36 module laid over the pediment's face, cut out above its rakes): the scales of justice between laurels. */

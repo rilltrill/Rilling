@@ -226,7 +226,13 @@ export class Z1PixelWorld {
     for (const m of this.ground.replaceTagged(b, zone)) m.parent?.remove(m);
     this.ground.dress(b, id);
     // Cars: painted body / glass / nose / tail / wheel modules.
-    for (const m of this.cars.convert(b, zone)) m.parent?.remove(m);
+    // (The burning car at the middle of beat 5 is a drawn flat; the other wreck, in the fog at the end of the street, keeps its shell.)
+    const burning = (g: THREE.Object3D) => !!(g.userData.pwCar as { burnt?: boolean }).burnt && Math.abs(g.position.z + 66.5) < 0.5;
+    for (const m of this.cars.convert(b, zone, (g) => {
+      if (!burning(g)) return false;
+      this.flats.stageBurntCar(id, g);
+      return true;
+    })) m.parent?.remove(m);
     // The chrome diner: its lit interior; the front is a drawn card.
     for (const m of this.diner.convert(b, zone)) m.parent?.remove(m);
     zone.traverse((o) => {

@@ -1095,7 +1095,7 @@ export function buildTown(): Town {
       const st = new THREE.Group();
       const bronze = Kit.tex('metal', 0x3e6050, 2, 0.6);
       Kit.add(st, Kit.box(2, 2.2, 2), Kit.tex('brick', 0x6a665e, 1), 0, 1.1, 0).userData.pwProp = 'plinth';
-      Kit.add(st, Kit.box(1.4, 0.4, 1.4), bronze, 0, 2.4, 0);
+      Kit.add(st, Kit.box(1.4, 0.4, 1.4), bronze, 0, 2.4, 0).userData.pwProp = 'plinthCap';
       Kit.add(st, Kit.capsule(0.32, 0.9, 2, 6), bronze, 0, 3.3, 0).userData.pwSq = 'statue';
       Kit.add(st, Kit.box(0.3, 0.3, 0.3), bronze, 0, 4.1, 0).userData.pwSq = 'drop';
       Kit.add(st, Kit.box(0.12, 1.2, 0.12), bronze, 0.4, 3.8, 0, 0, 0, -0.5).userData.pwSq = 'drop';

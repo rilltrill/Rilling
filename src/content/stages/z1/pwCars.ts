@@ -39,8 +39,8 @@ export class Z1Cars {
     this.t = z1CarTiles(atlas);
   }
 
-  /** Paint every car under `root`; returns the classic meshes it replaced (remove them). */
-  convert(b: PwBatch, root: THREE.Object3D): THREE.Object3D[] {
+  /** Paint every car under `root`; returns the classic meshes it replaced (remove them). Cars `drawn` says are drawn elsewhere as a flat just lose their meshes. */
+  convert(b: PwBatch, root: THREE.Object3D, drawn?: (g: THREE.Object3D, o: CarOptions) => boolean): THREE.Object3D[] {
     const cars: THREE.Object3D[] = [];
     root.traverse((o) => {
       if (o.userData.pwCar) cars.push(o);
@@ -55,6 +55,10 @@ export class Z1Cars {
       });
       const v = hash2(Math.round(g.position.x * 10), Math.round(g.position.z * 10), 5) > 0.55 ? 1 : 0;
       const paintHex = o.police ? 0x18191f : o.color;
+      if (drawn?.(g, o)) {
+        drop.push(...parts);
+        continue;
+      }
       for (const m of parts) if (this.part(b, m, o, v, paintHex)) drop.push(m);
       this.extras(b, g, o, paintHex, v);
     }

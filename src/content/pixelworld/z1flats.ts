@@ -68,7 +68,7 @@ const WALL_ROOF: ElevWallColours = { wall: 0x6a6a70, brick: 0x76402f, stone: 0x9
 function roofCard(buildingId: string, i: number, it: RoofItem, wM: number, hTop: number): FlatCardDef {
   const [kind, xM, a] = it;
   const cw = kind === 'tank' ? 3.1 : kind === 'aerial' ? 1.4 : (a ?? (kind === 'chim3' ? 1.4 : 1.1)) + 0.6;
-  const ch = kind === 'tank' ? 5.0 : kind === 'chim3' ? 4.2 : kind === 'chim' ? 3.3 : kind === 'aerial' ? 3.8 : 1.8;
+  const ch = kind === 'tank' ? 5.9 : kind === 'chim3' ? 4.2 : kind === 'chim' ? 3.3 : kind === 'aerial' ? 3.8 : 1.8;
   const seed = (i + 1) * 37 + buildingId.length * 91;
   return {
     id: `r${i}`,
@@ -77,7 +77,8 @@ function roofCard(buildingId: string, i: number, it: RoofItem, wM: number, hTop:
     x: xM - wM / 2,
     // (Lower than the parapet's old line, so a dropped stretch of roofline never shows a card's foot.)
     y: hTop - 0.85,
-    z: -1.1 - (i % 3) * 0.3,
+    // (A tank stands close behind the wall, its legs clear of the parapet from the road; the rest step back a little for parallax.)
+    z: kind === 'tank' ? -0.55 : -1.1 - (i % 3) * 0.3,
     paint: (c, k) => {
       const e = new Elev(c, k, seed, WALL_ROOF, 0);
       const mid = cw / 2;
@@ -120,7 +121,7 @@ function row(e: Elev, f: number, cols: number[], kinds: Row, o: { w?: number; h?
 }
 
 /** The picture's own light: moon on the upper left, street lamps low, shade to the right and the foot. (A step per pass: no paint slice runs long.) */
-function* light(e: Elev, o: { moon?: number; foot?: number; right?: number } = {}): Generator<void, void, void> {
+function* light(e: Elev, o: { moon?: number; foot?: number; right?: number; shadow?: { x0M: number; y0M: number; x1M: number; y1M: number; second?: { x0M: number; y0M: number; x1M: number; y1M: number } }; lamp?: { xM: number; yM: number; rx: number; ry: number } } = {}): Generator<void, void, void> {
   e.finish();
   yield;
   const { H, W } = e;
@@ -132,6 +133,33 @@ function* light(e: Elev, o: { moon?: number; foot?: number; right?: number } = {
   e.value((x, y) => Math.max(0, 1 - y / (H * 0.5)) * Math.max(0, 1.1 - x / (W * 0.65)) * moon, 1, 0.14, { y1: Math.ceil(H * 0.5), x1: Math.ceil(W * 0.72) });
   yield;
   e.value((x) => Math.max(0, (x - W * 0.62) / (W * 0.38)) * right, -1, 0.14, { x0: Math.floor(W * 0.62) });
+  if (o.shadow) {
+    // A neighbouring roof's shadow, placed by hand: one big diagonal shape with its stepped edge (the painting's value structure, not a patch).
+    const place = (d: { x0M: number; y0M: number; x1M: number; y1M: number }, salt: number) => {
+      const ax = e.X(d.x0M);
+      const bx = e.X(d.x1M);
+      const ay = e.Y(d.y0M);
+      const by = e.Y(d.y1M);
+      const edgeD = new Int16Array(W);
+      for (let x = 0; x < W; x++) {
+        const t = Math.max(0, Math.min(1, (x - ax) / (bx - ax)));
+        const step = Math.floor(x / 44);
+        edgeD[x] = Math.round(ay + (by - ay) * t + (hash2(step, salt, e.seed + 31) - 0.5) * 18);
+      }
+      e.value((x, y) => (y > edgeD[x] ? 1 : 0), -1, 0.14, { y0: Math.min(ay, by) - 6 });
+    };
+    yield;
+    place(o.shadow, 3);
+    if (o.shadow.second) {
+      yield;
+      place(o.shadow.second, 5);
+    }
+    yield;
+    if (o.lamp) e.wallLamp(e.X(o.lamp.xM), e.Y(o.lamp.yM), o.lamp.rx, o.lamp.ry);
+    e.footGrime();
+    e.ink();
+    return;
+  }
   // The block across the street throws a long shadow over the lower wall: one big diagonal shape, drawn by hand.
   // (Its edge is the block's own roofline: runs and steps, not a smooth wave.)
   yield;
@@ -702,10 +730,19 @@ const paintBank: PwPainter = function* (c, k) {
   e.cornerBite(false, 52, 34);
   e.fill();
   e.brick({ amount: 0.5, course: 8, len: 22 });
-  e.patch(e.X(0.8), e.Y(8.4), 120, 44, e.r.alt);
   e.cornice(e.Y(h - 0.7), { h: 15 });
+  e.coping(S, 3, [[e.X(16.8), e.X(19.2)]]);
   yield;
-  drawText(c, 'FIRST NATIONAL', e.X(10) - textWidth('FIRST NATIONAL', FONT_BOLD, { spacing: 1 }) / 2, e.Y(h - 1.2), FONT_BOLD, e.r.ink, 1, { spacing: 1 });
+  // The frieze: a plain stone band with the letters cut clear into it (seven rows of bold capitals), its ends worn away.
+  {
+    const fy = e.Y(h - 1.2);
+    const tw = textWidth('FIRST NATIONAL', FONT_BOLD, { spacing: 1 });
+    const fx = e.X(10) - tw / 2;
+    for (let x = fx - 8; x < fx + tw + 8; x++) {
+      for (let y = fy - 3; y < fy + 12; y++) c.set(x, y, S, y === fy - 3 ? 3.9 : y === fy + 11 ? 1.2 : 3.0 + (hash2(x >> 3, y, 193) > 0.84 ? -0.5 : 0));
+    }
+    drawText(c, 'FIRST NATIONAL', fx, fy, FONT_BOLD, e.r.ink, 0.9, { spacing: 1 });
+  }
   // The pediment: tympanum recessed a tone, raking cornices with dentils, a black cast shadow under them.
   const cx = e.X(10);
   const halfW = Math.round(6.3 * FLAT_TPM);
@@ -727,15 +764,25 @@ const paintBank: PwPainter = function* (c, k) {
   }
   // The clock: a stone round with hands stopped at the end of the world.
   const ccy = yBase - 26;
-  c.ellipse(cx, ccy, 18, 18, S, (u, v) => 3 - v * 0.6 + u * 0.3);
-  c.ellipse(cx, ccy, 14, 14, e.r.ink, 0.6);
-  c.ellipse(cx, ccy, 12, 12, e.r.lamp, 2.6, PWF.GLOW);
-  c.line(cx, ccy, cx + 5, ccy - 7, e.r.ink, 0.3, PWF.GLOW);
-  c.line(cx, ccy, cx - 2, ccy + 8, e.r.ink, 0.3, PWF.GLOW);
+  c.ellipse(cx, ccy, 18, 18, S, (u, v) => 3.2 - v * 0.6 + u * 0.3);
+  c.ellipse(cx, ccy, 15, 15, e.r.ink, 0.6);
+  c.ellipse(cx, ccy, 13, 13, e.r.lamp, 2.8, PWF.GLOW);
+  // Hours: a tick at the quarters, a dot between; hands stopped at twenty to four.
   for (let i = 0; i < 12; i++) {
     const a = (i / 12) * Math.PI * 2;
-    c.set(cx + Math.round(Math.cos(a) * 10), ccy + Math.round(Math.sin(a) * 10), e.r.ink, 0.5, PWF.GLOW);
+    const tx = cx + Math.round(Math.cos(a) * 10.5);
+    const ty = ccy + Math.round(Math.sin(a) * 10.5);
+    c.set(tx, ty, e.r.ink, 0.4, PWF.GLOW);
+    if (i % 3 === 0) {
+      c.set(cx + Math.round(Math.cos(a) * 9), ccy + Math.round(Math.sin(a) * 9), e.r.ink, 0.4, PWF.GLOW);
+      c.set(tx + (Math.abs(Math.cos(a)) > 0.5 ? 0 : 1), ty + (Math.abs(Math.sin(a)) > 0.5 ? 0 : 1), e.r.ink, 0.4, PWF.GLOW);
+    }
   }
+  for (let t = 0; t < 2; t++) {
+    c.line(cx + t, ccy, cx + t - 7, ccy + 6, e.r.ink, 0.3, PWF.GLOW);
+    c.line(cx, ccy + t, cx + 3, ccy - 10 + t, e.r.ink, 0.3, PWF.GLOW);
+  }
+  c.set(cx, ccy, e.r.ink, 0.2, PWF.GLOW);
   yield;
   // Columns on a stepped base, carrying the entablature down in front of the fascia line.
   const yBottom = e.Y(0.72);
@@ -843,6 +890,29 @@ const paintShutterBlock: PwPainter = function* (c, k) {
   c.rect(sx0 - 3, e.Y(0.6), sx3 - sx0 + 6, e.H - e.Y(0.6), kerb, 2.4);
   // The arch: dark passage, stone voussoirs, a dim lamp at the far end.
   e.archway(e.X(10), e.Y(4.1), 54, e.H - e.Y(4.1));
+  // Boarded up, the boards nailed unevenly across the arch (the empty passage was a dead brown shape under the awning at the boss).
+  {
+    const ax = e.X(10);
+    const yTop = e.Y(4.1) + 28;
+    const planks = 8;
+    for (let i = 0; i < planks; i++) {
+      const pw = 13;
+      const x0 = ax - 54 + i * pw;
+      const drop = Math.round(hash2(i, 3, 211) * 16);
+      const t = 2.1 + ((i * 7) % 5) * 0.22;
+      for (let x = x0; x < x0 + pw - 1; x++) {
+        for (let y = yTop + drop; y < e.H; y++) {
+          c.set(x, y, e.r.wood, (x === x0 ? t + 1.1 : x === x0 + pw - 2 ? t - 0.9 : t) + ((y + i * 7) % 19 < 1 ? -0.6 : 0));
+        }
+      }
+    }
+    for (const yb of [e.Y(3.2), e.Y(1.5)]) {
+      const lean = yb > e.Y(2) ? 7 : -5;
+      c.poly([ax - 56, yb, ax + 56, yb + lean, ax + 56, yb + lean + 11, ax - 56, yb + 11], e.r.wood, 3.1);
+      c.line(ax - 56, yb, ax + 56, yb + lean, e.r.wood, 4);
+    }
+    e.tag(ax - 40, e.Y(2.5), 'KEEP OUT', 0xd8d0b8, 0x282018, 2);
+  }
   e.tag(sx0 + 30, sy + 26, 'GO HOME', 0xc08ce8, 0x201030, 3, { metal: true });
   e.tag(sx2 + 14, sy + 34, 'NO ONE LEFT', 0xc8e070, 0x2a3a1a, 2, { metal: true });
   e.drainpipe(0.4, h - 1);
@@ -862,6 +932,7 @@ const paintCornerW: PwPainter = function* (c, k) {
   const w = 14;
   const h = buildingH(3);
   const e = new Elev(c, k, 223, CW_COL);
+  e.plainLit = true;
   e.sides('stone', 'pier');
   e.parapet(0, w, h + 0.1);
   e.parapet(0, 5.2, h + 0.5);
@@ -870,8 +941,7 @@ const paintCornerW: PwPainter = function* (c, k) {
   e.bite(11.6, 1.8, 0.85);
   e.cornerBite(false, 56, 34);
   e.fill();
-  e.brick({ amount: 0.36 });
-  e.patch(e.X(0.9), e.Y(8.6), 150, 64, e.r.alt);
+  e.brick({ amount: 0.2 });
   e.cornice(e.Y(h - 0.85), { gaps: [[e.X(11.2), e.X(13.6)]] });
   e.coping(e.r.stone, 3, [[e.X(11.2), e.X(13.6)]]);
   yield;
@@ -881,8 +951,10 @@ const paintCornerW: PwPainter = function* (c, k) {
   e.ghostGround(gx, gy, 320, 70, e.r.stone);
   drawText(c, "DR KELSO'S", gx + 10, gy + 8, FONT_BOLD, e.r.wall, 1.4, { spacing: 1, scale: 2 });
   drawText(c, 'TONIC', gx + 10, gy + 38, FONT_BOLD, e.r.brick, 1.9, { spacing: 2, scale: 2 });
-  row(e, 1, [11.0], ['lit'], { w: 34, dy: -2 });
-  row(e, 0, [2.0, 5.2, 8.6, 11.8], ['dark', 'curtain', 'blind', 'boarded'], { w: 32, dy: 6 });
+  row(e, 1, [11.0], ['figure'], { w: 34, dy: -2 });
+  // (One window hung out of its row: the wall's own history, and the row reads as a row of things put there by hand.)
+  row(e, 0, [2.0, 5.2, 11.8], ['dark', 'curtain', 'boarded'], { w: 32, dy: 6 });
+  row(e, 0, [8.6], ['blind'], { w: 26, h: 44, dy: -14 });
   e.band(e.Y(GROUND_H - 0.1), 5, e.r.stone, { salt: 5 });
   const dx = e.X(2.4);
   c.rect(dx, e.Y(3.1), 54, e.Y(0) - e.Y(3.1), e.r.stone, 3);
@@ -894,11 +966,11 @@ const paintCornerW: PwPainter = function* (c, k) {
   e.drainpipe(13.5, h - 0.8);
   e.bills(e.X(11.8), e.Y(2.6), 44, 48);
   yield;
-  e.breach(e.X(12.0), e.Y(9.0), 26, 30, { salt: 3, lintel: true });
+  e.breach(e.X(12.0), e.Y(9.0), 26, 30, { salt: 3, lintel: true, shape: 'corner' });
   e.scorch(e.X(5.2), sillOf(e, 0) + 6 - 54, 30, 60);
   e.crack(e.X(7.5), e.Y(11.0), 40);
-  e.pocks(e.X(1), e.Y(8.5), 380, 150, 26);
-  yield* light(e, { moon: 1.0, right: 0.5 });
+  e.pocks(e.X(1), e.Y(8.5), 380, 110, 16);
+  yield* light(e, { moon: 1.0, right: 0, foot: 0.8, shadow: { x0M: 0.2, y0M: 11.4, x1M: 13.8, y1M: 5.6 }, lamp: { xM: 4.3, yM: 3.5, rx: 84, ry: 112 } });
 };
 
 const CE_COL: ElevWallColours = { wall: 0x665a52, alt: 0x584e48, brick: 0x704030, stone: 0x9a9080, frame: 0x2a2624, curtain: 0x7a3f2a };
@@ -908,6 +980,7 @@ const paintCornerE: PwPainter = function* (c, k) {
   const w = 14;
   const h = buildingH(3);
   const e = new Elev(c, k, 239, CE_COL);
+  e.plainLit = true;
   e.sides('stone', 'pier');
   e.parapet(0, w, h);
   // Stepped parapet climbing away from the turret, each step its own cap.
@@ -918,14 +991,14 @@ const paintCornerE: PwPainter = function* (c, k) {
   e.bite(8.0, 0.8, 0.35);
   e.cornerBite(false, 26, 22);
   e.fill();
-  e.brick({ amount: 0.36 });
-  e.patch(e.X(5.4), e.Y(10), 140, 60, e.r.alt);
+  e.brick({ amount: 0.2 });
   e.cornice(e.Y(h - 0.8), { x0: e.X(4.2) });
   e.coping(e.r.stone, 3, [[e.X(0), e.X(4.2)]]);
   yield;
   // Windows, one column off the grid, an end bay of boards.
   row(e, 1, [6.0, 9.4, 12.6], ['curtain', 'moon', 'boarded'], { w: 32, head: 'hood', dy: -4 });
-  row(e, 0, [7.2, 10.6], ['dark', 'lit'], { w: 32, dy: 8 });
+  row(e, 0, [7.2], ['dark'], { w: 32, dy: 8 });
+  row(e, 0, [10.8], ['figure'], { w: 34, dy: -6 });
   e.band(e.Y(GROUND_H - 0.1), 5, e.r.stone, { salt: 5, x0: e.X(4.2) });
   // Ground floor: a shop window with a metal shutter, a side door.
   const sy = e.Y(3.8);
@@ -938,10 +1011,10 @@ const paintCornerE: PwPainter = function* (c, k) {
   // The turret: a round tower carried up the corner, its slates, three tall windows, a green copper finial.
   e.turret(e.X(2.05), 58, e.H, e.Y(h + 2.75));
   e.tag(e.X(7.0), e.Y(2.9), 'NO EXIT', 0xe058a0, 0x2a1228, 2, { metal: true });
-  e.breach(e.X(12.4), e.Y(7.6), 18, 22, { salt: 2 });
+  e.breach(e.X(12.6), e.Y(9.8), 18, 22, { salt: 2, shape: 'rip' });
   e.crack(e.X(6.4), e.Y(10.8), 34);
-  e.pocks(e.X(4), e.Y(8.5), 280, 110, 20);
-  yield* light(e, { moon: 0.95, right: 0.55 });
+  e.pocks(e.X(4), e.Y(8.5), 280, 90, 14);
+  yield* light(e, { moon: 0.95, right: 0, foot: 0.8, shadow: { x0M: 3.6, y0M: 11.6, x1M: 13.8, y1M: 7.0 }, lamp: { xM: 12.5, yM: 3.6, rx: 70, ry: 115 } });
 };
 
 // ─── Cards ──────────────────────────────────────────────────────────────────

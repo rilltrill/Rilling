@@ -27,6 +27,7 @@ import {
   paintMarqueeSoffit,
   type DinerSignLayout,
 } from '../../pixelworld/z1dinerflat';
+import { BURNT_CAR_H, BURNT_CAR_TPM, BURNT_CAR_W, paintBurntCarFlat } from '../../pixelworld/z1wreck';
 import type { ZoneId } from './town';
 
 /**
@@ -233,6 +234,21 @@ export class Z1Flats {
     b.setMatrix(s.matrixWorld);
     b.rect(_o.set(-l.w / 2 / PW_TPM, -l.h / 2 / PW_TPM - DINER_SIGN_STRUTS / PW_TPM, 0.01), X, Y, l.w / PW_TPM, (l.h + DINER_SIGN_STRUTS) / PW_TPM, t);
     b.setMatrix(null);
+  }
+
+  /** The burning car as a drawn flat (`g`: the car group, its meshes dropped): the card stands just behind the fire, square to the road. */
+  stageBurntCar(id: ZoneId, g: THREE.Object3D) {
+    const b = this.batch(id);
+    const t = this.tile('burnt-car', BURNT_CAR_W, BURNT_CAR_H, paintBurntCarFlat, BURNT_CAR_TPM);
+    const w = BURNT_CAR_W / BURNT_CAR_TPM;
+    const h = BURNT_CAR_H / BURNT_CAR_TPM;
+    // (Yaw from the road's centreline a car length before it: the card is seen nearly square on from where the beat is played.)
+    const yaw = -0.21;
+    const ux = Math.cos(yaw);
+    const uz = -Math.sin(yaw);
+    const cx = g.position.x + Math.sin(yaw) * -0.6;
+    const cz = g.position.z + Math.cos(yaw) * -0.6;
+    b.rect(_o.set(cx - (ux * w) / 2, -0.03, cz - (uz * w) / 2), new THREE.Vector3(ux, 0, uz), Y, w, h, t);
   }
 
   /** The marquee as three drawn cards: a shaped face, a painted soffit under it, a flared end. `s` is the marquee group (the box front is at z 3.2). */

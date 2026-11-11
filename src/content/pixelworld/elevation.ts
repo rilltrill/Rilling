@@ -60,6 +60,8 @@ export interface ElevRamps {
   /** Mortar / the wall's darks (kept on the wall's own family). */
   mortar: number;
   brick: number;
+  /** Brick where it is seen raw through a break, on this wall's own family (a warm brick on a brick wall, a greyed one on blue, grey or stone). */
+  raw: number;
   stone: number;
   iron: number;
   wood: number;
@@ -88,11 +90,18 @@ export interface ElevWallColours {
 export function elevRamps(k: PwKit, o: ElevWallColours): ElevRamps {
   const wall = k.ramp(o.wall, { light: 0.34, sat: 0.95, dark: 0.42 });
   const alt = k.ramp(o.alt ?? mix(o.wall, 0x3a3a48, 0.25), { light: 0.34, sat: 0.9, dark: 0.42 });
+  // A cool or grey wall shows a raw break in dull, darkened brick; on red walls it was already right.
+  const brickHex = o.brick ?? 0x7a4034;
+  const warmWall = ((o.wall >> 16) & 255) - (o.wall & 255) > 40;
+  const luma = (((brickHex >> 16) & 255) * 0.3 + ((brickHex >> 8) & 255) * 0.59 + (brickHex & 255) * 0.11) | 0;
+  const greyed = mix(mix(brickHex, (luma << 16) | (luma << 8) | luma, 0.55), o.wall, 0.2);
+  const rawHex = warmWall ? brickHex : mix(greyed, 0x201c28, 0.18);
   return {
     wall,
     alt,
     mortar: alt,
     brick: k.ramp(o.brick ?? 0x7a4034, { light: 0.34, dark: 0.42 }),
+    raw: k.ramp(rawHex, { light: 0.34, sat: warmWall ? 1 : 0.7, dark: 0.42 }),
     stone: k.ramp(o.stone ?? 0x8c8778, { light: 0.42, sat: 0.7, dark: 0.42 }),
     iron: k.ramp(0x363842, { light: 0.4, sat: 0.6, dark: 0.45 }),
     wood: k.ramp(0x7a5a3a, { light: 0.42, sat: 0.85, dark: 0.42 }),
@@ -158,6 +167,10 @@ export class Elev {
   private readonly splash: { x: number; s: number }[] = [];
   private readonly bites: { x0: number; x1: number }[] = [];
   private readonly joists: { x0: number; x1: number }[] = [];
+  /** Lit rooms drawn so far (a breach goes round them). */
+  private readonly litWindows: { x0: number; y0: number; x1: number; y1: number }[] = [];
+  /** Lit windows drawn plain: a wall seen from far off (a person or a lamp at 9 art pixels wide turns into flames; one tone of light does not). */
+  plainLit = false;
   private readonly runs = new Map<number, LineBreaks>();
   /** The hand-shaped seam of `value`, once per picture. */
   private wob?: Float32Array;
@@ -378,36 +391,76 @@ export class Elev {
     const yB = this.Y(baseM);
     const w = Math.round((o.w ?? 2.5) * this.tpm);
     const h = Math.round((o.h ?? 2.2) * this.tpm);
-    const legs = 28;
+    const legs = 42;
     const yLeg = yB - legs;
+    const bow = Math.max(3, Math.round(w * 0.08));
+    /** How high the near rim of a round tank rises in the middle (seen from below: the arch of a hoop). */
+    const arch = (x: number) => {
+      const u = Math.min(1, Math.abs((x - cx) / (w / 2)));
+      return Math.round(Math.sqrt(1 - u * u) * bow);
+    };
     const iron = r.stone;
-    // Trestle: three heavy posts, two diagonals (a lit edge, a dark one).
-    for (const lx of [-w / 2 + 3, 0, w / 2 - 6]) {
-      const x0 = cx + Math.round(lx);
-      for (let i = 0; i < 6; i++) c.line(x0 + i, yLeg, x0 + i - 1, yB + 2, iron, i === 0 ? 3.6 : i === 5 ? 0.8 : 2);
+    // Four steel legs (the rear pair inset and shorter, a shade darker), each lit on its moon side; X braces between them.
+    const leg = (lx: number, top: number, foot: number, lit: number) => {
+      for (let i = 0; i < 5; i++) c.line(lx + i, top, lx + i - Math.sign(lx - cx) * 2, foot, iron, i === 0 ? lit : i === 4 ? 0.7 : lit - 1.2);
+    };
+    const rearDx = Math.round(w * 0.2);
+    leg(cx - rearDx - 2, yLeg, yB - 8, 2.7);
+    leg(cx + rearDx - 2, yLeg, yB - 8, 2.5);
+    leg(cx - w / 2 + 2, yLeg - 2, yB + 2, 3.8);
+    leg(cx + w / 2 - 7, yLeg - 2, yB + 2, 3.2);
+    for (let i = 0; i < 2; i++) {
+      c.line(cx - w / 2 + 7, yLeg + 3 + i, cx + w / 2 - 7, yB - 6 + i, iron, i === 0 ? 2.8 : 1.4);
+      c.line(cx + w / 2 - 7, yLeg + 3 + i, cx - w / 2 + 7, yB - 6 + i, iron, i === 0 ? 2.5 : 1.2);
     }
-    for (let i = -1; i <= 1; i++) {
-      c.line(cx - w / 2 + 6, yLeg + 3 + i, cx + w / 2 - 8, yB - 6 + i, iron, i === 0 ? 2.4 : 1.2);
-      c.line(cx + w / 2 - 6, yLeg + 3 + i, cx - w / 2 + 8, yB - 6 + i, iron, i === 0 ? 2.8 : 1);
-    }
-    c.rect(cx - w / 2 + 3, yLeg, w - 6, 3, iron, 3);
+    c.rect(cx - w / 2 + 3, yLeg - 1, w - 6, 3, iron, 3);
     this.roofStrip(cx - w / 2 - 6, cx + w / 2 + 6, yB + 2);
-    // The barrel: staves, hoops, a conical cap.
+    // The barrel: staves that narrow toward the edges of a round thing, lit on the moon side down to dark on the far side, no flat side panel.
     const yT = yLeg - h;
-    c.rect(cx - w / 2, yT, w, h, r.wood, 3);
-    for (let x = cx - w / 2; x < cx + w / 2; x += 4) c.vline(x + Math.round(hash2(x, 3, seed) * 1), yT, h, r.wood, 2);
-    c.rect(cx - w / 2, yT, 3, h, r.wood, 4);
-    c.rect(cx + w / 2 - 6, yT, 6, h, r.wood, 1);
-    for (const hy of [yT + 5, yT + h / 2 - 2, yT + h - 6]) {
-      c.hline(cx - w / 2, hy, w, r.iron, 3);
-      c.hline(cx - w / 2, hy + 1, w, r.iron, 1);
+    for (let x = Math.round(cx - w / 2); x < cx + w / 2; x++) {
+      const u = (x - cx) / (w / 2);
+      const a0 = Math.asin(Math.max(-1, Math.min(1, u)));
+      const stave = Math.floor((a0 + 1.6) * 4.2);
+      const light = u < -0.55 ? 3.4 : u < -0.05 ? 2.7 : u < 0.5 ? 1.9 : 1.2;
+      const tone = light + (stave % 3 === 0 ? 0.3 : 0) - (stave % 7 === 2 ? 0.5 : 0);
+      const top = yT - arch(x);
+      const foot = yT + h - arch(x);
+      for (let y = top; y < foot; y++) {
+        c.set(x, y, r.wood, (y - top + hash2(stave, 3, seed)) % 11 < 1 ? tone - 0.3 : tone);
+      }
+      if (hash2(stave, 7, seed + 3) > 0.7) c.set(x, top + 3 + Math.floor(hash2(x, 3, seed + 5) * (h - 6)), r.wood, tone - 0.9);
     }
-    c.frame(cx - w / 2, yT, w, h, r.iron, 1);
-    // Cap: a cone, one side catching the moon.
-    const capH = Math.round(w * 0.42);
-    const pts = [cx - w / 2 - 3, yT, cx + w / 2 + 3, yT, cx + 3, yT - capH, cx - 3, yT - capH];
-    c.poly(pts, r.iron, (x, y) => (x + (y - yT) * 0.9 < cx - 3 ? 4 : x > cx + w * 0.22 ? 1 : 2));
-    c.hline(cx - w / 2 - 3, yT, w + 6, r.iron, 1);
+    // Iron hoops on the arch, and rust running out from the third.
+    for (const offset of [6, Math.round(h * 0.34), Math.round(h * 0.68), h - 6]) {
+      for (let x = Math.round(cx - w / 2); x < cx + w / 2; x++) {
+        const y = yT + offset - arch(x);
+        c.set(x, y, r.iron, 3);
+        c.set(x, y + 1, r.iron, 1);
+      }
+    }
+    for (let i = 0; i < 9; i++) {
+      const sx = Math.round(cx - w * 0.35 + hash2(i, 3, seed + 7) * w * 0.7);
+      const len = 6 + Math.round(hash2(i, 5, seed + 7) * 22);
+      const sy = yT + Math.round(h * 0.68) - arch(sx);
+      for (let j = 2; j < len; j++) c.tint(sx, sy + j, r.rust, -0.6);
+    }
+    c.line(cx - w / 2, yT - arch(cx - w / 2), cx - w / 2, yT + h, r.iron, 1);
+    c.line(cx + w / 2, yT - arch(cx + w / 2), cx + w / 2, yT + h, r.iron, 1);
+    // The cap: a cone over a curved rim, its moon side and shadow side in two whole shapes, a finial at the point.
+    const capH = Math.round(w * 0.46);
+    for (let x = Math.round(cx - w / 2 - 3); x <= cx + w / 2 + 3; x++) {
+      const u = (x - cx) / (w / 2 + 3);
+      if (Math.abs(u) > 1) continue;
+      const rim = yT - Math.round(Math.sqrt(1 - u * u) * bow) - 1;
+      const apex = yT - capH + Math.round(Math.abs(u) * Math.abs(u) * 6);
+      const peak = yT - capH + Math.round(Math.abs(u) * capH);
+      const tip = Math.max(apex, peak);
+      const light = u < -0.35 ? 3.8 : u < 0.2 ? 2.4 : 1.1;
+      for (let y = tip; y <= rim; y++) c.set(x, y, r.iron, (y - tip) % 7 === 0 ? light - 0.5 : light);
+      c.set(x, rim + 1, r.iron, 1);
+    }
+    c.vline(cx, yT - capH - 7, 8, r.iron, 2.2);
+    c.set(cx - 1, yT - capH - 4, r.iron, 3);
     return this;
   }
 
@@ -688,14 +741,37 @@ export class Elev {
    * window head stop at its edge. Dark inside with a charred joist, a ragged 2–3 texel inner edge
    * of raw brick, a lit lip on the lower right, rubble staining the wall below it.
    */
-  breach(cx: number, cy: number, rx: number, ry: number, o: { salt?: number; lintel?: boolean; rubble?: number } = {}): this {
+  breach(cx: number, cy: number, rx: number, ry: number, o: { salt?: number; lintel?: boolean; rubble?: number; shape?: 'blob' | 'rip' | 'corner' } = {}): this {
     const { c, seed, r } = this;
     const salt = o.salt ?? 1;
+    // Three outlines, so damage is never one stamped star: a rounded-off hole, a long horizontal rip along the courses, a corner of masonry gone in steps.
+    const shape = o.shape ?? (['blob', 'rip', 'corner'] as const)[Math.abs(seed + salt * 7) % 3];
+    if (shape === 'rip') {
+      rx = Math.round(rx * 1.7);
+      ry = Math.max(8, Math.round(ry * 0.5));
+    }
+    // A hole never goes through a lit room (the light would read as something else): it moves along the wall until it clears them all.
+    for (const w of this.litWindows) {
+      const hx = rx * 1.3;
+      const hy = ry * 1.3;
+      if (cx + hx > w.x0 && cx - hx < w.x1 && cy + hy > w.y0 && cy - hy < w.y1) {
+        cx = cx < (w.x0 + w.x1) / 2 ? Math.min(cx, w.x0 - hx - 4) : Math.max(cx, w.x1 + hx + 4);
+      }
+    }
     const rad = (x: number, y: number) => {
-      const a = Math.atan2((y - cy) / ry, (x - cx) / rx);
-      const rr = 1 + 0.2 * Math.sin(a * 3 + seed + salt) + 0.12 * Math.sin(a * 5 + salt * 2 + 1);
       const u = (x - cx) / rx;
       const v = (y - cy) / ry;
+      if (shape === 'rip') {
+        const tear = 1 + 0.16 * Math.sin(u * 3.1 + salt) + 0.1 * Math.sin(u * 8.3 + seed);
+        return Math.pow(Math.pow(Math.abs(u), 3) + Math.abs(v / tear), 0.9);
+      }
+      if (shape === 'corner') {
+        // Stepped by the courses, as a corner of masonry falls: nearly square, its edges in stairs.
+        const a = Math.atan2(v, u);
+        return Math.max(Math.abs(u), Math.abs(v) + Math.round(u * 2.4) * 0.14) / (1 + 0.1 * Math.sin(a * 3 + seed + salt));
+      }
+      const a = Math.atan2(v, u);
+      const rr = 1 + 0.15 * Math.sin(a * 2 + seed + salt) + 0.09 * Math.sin(a * 3 + salt * 2 + 1);
       return Math.sqrt(u * u + v * v) / rr;
     };
     const R = 1.6;
@@ -717,7 +793,7 @@ export class Elev {
         if (d > 0.93) {
           // A surviving half-brick of the broken edge: its own light, a dark mortar joint.
           const m = (y & 3) === 3 || (x + (cn & 1) * 5) % 10 === 0;
-          c.set(x, y, r.brick, m ? 0.9 : 2.1 + (hash2(bx, cn, seed + salt) > 0.55 ? 0.8 : 0));
+          c.set(x, y, r.raw, m ? 0.9 : 2.1 + (hash2(bx, cn, seed + salt) > 0.55 ? 0.8 : 0));
         } else {
           const low = (y - cy) / ry;
           c.set(x, y, r.ink, 0.45 + (low > 0.3 ? 0.55 : 0) + (hash2(x >> 3, y >> 3, seed + 3) > 0.74 ? 0.4 : 0));
@@ -747,7 +823,7 @@ export class Elev {
         const xx = sx + Math.round(Math.sin(j * 0.22 + i) * 1.2);
         if (!this.inWall(xx, sy + j)) continue;
         c.shift(xx, sy + j, j < len * 0.6 ? -1.5 : -0.8);
-        if (hash2(xx, sy + j, seed + 9) > 0.86) c.tint(xx, sy + j, r.brick, 0);
+        if (hash2(xx, sy + j, seed + 9) > 0.86) c.tint(xx, sy + j, r.raw, 0);
       }
     }
     this.spots.push({ x: cx, y: cy, rx: rx * 2.2, ry: ry * 2.2 });
@@ -837,7 +913,7 @@ export class Elev {
       } else if (k < 0.7) {
         cur = cur ? 0 : 6 + Math.floor(hash2(i, salt, seed + 611) * 9);
       } else {
-        const gw = 20 + Math.floor(hash2(i, salt, seed + 613) * 21);
+        const gw = 10 + Math.floor(hash2(i, salt, seed + 613) * 31);
         st.fill(2, Math.max(0, x), Math.min(W, x + gw));
       }
       dy.fill(cur, Math.max(0, x), Math.min(W, x + len));
@@ -848,16 +924,20 @@ export class Elev {
     return b;
   }
 
-  /** Raw brick where a moulding has fallen away (one column of it, in courses, rough). */
+  /** Raw brick where a moulding has fallen away (one column of it): two or three courses, a torn top edge, the wall's own raw colour (never the same red chip on every wall). */
   private rawBand(x: number, y: number, h: number) {
     const { c, r, seed } = this;
-    for (let j = 0; j < h; j++) {
+    const courses = hash2(x >> 3, 7, seed + 41) > 0.5 ? 2 : 3;
+    const n = Math.min(h, courses * 4);
+    const torn = Math.floor(hash2(x >> 1, 9, seed + 43) * 3);
+    for (let j = torn; j < n; j++) {
       const yy = y + j;
       if (!this.inWall(x, yy)) continue;
       const cn = yy >> 2;
       const mortar = (yy & 3) === 3 || (x + (cn & 1) * 5) % 10 === 0;
-      c.set(x, yy, r.brick, mortar ? 1.1 : 2 + (hash2(x >> 3, cn, seed + 33) > 0.7 ? 0.7 : 0));
+      c.set(x, yy, r.raw, mortar ? 1.1 : 2 + (hash2(x >> 3, cn, seed + 33) > 0.7 ? 0.7 : 0));
     }
+    this.c.shift(x, y + n, -1.2);
   }
 
   /** A pier breaking through a moulding: its block stands forward, lit left, shadow right and under. */
@@ -1142,6 +1222,7 @@ export class Elev {
     const { c, r, seed } = this;
     const v = o.v ?? Math.floor(hash2(x, y, seed + 41) * 1000);
     const head = o.head ?? 'lintel';
+    if (kind === 'lit' || kind === 'curtain' || kind === 'blind' || kind === 'figure' || kind === 'tv') this.litWindows.push({ x0: x, y0: y, x1: x + w, y1: y + h });
     this.spots.push({ x: x + w / 2, y: y + h + 9, rx: w * 0.95, ry: 15 });
     // Surround: a shadow halo on the wall round the opening, then the head and the sill.
     this.halo(x - 2, y - 2, w + 4, h + 4);
@@ -1322,6 +1403,20 @@ export class Elev {
       return;
     }
     const lit = kind === 'lit' || kind === 'curtain' || kind === 'blind' || kind === 'figure' || kind === 'tv';
+    if (lit && this.plainLit) {
+      // Far off: one lit tone and, if anyone is home, a head and shoulders in one dark tone, clear at 9 art pixels wide. No lamp, no furniture.
+      for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) c.set(x + i, y + j, r.lampDeep, (j < h * 0.5 ? 3 : 2.5) + ((i * 3 + j) % 7 === 0 ? 0.3 : 0), G);
+      c.rect(x, y, w, 2, r.ink, 1, G);
+      if (kind === 'figure' || (kind === 'curtain' && v % 2 === 0)) {
+        const fx = x + Math.round(w * (0.4 + (v % 3) * 0.1));
+        const by = y + h;
+        const fy = Math.round(h * 0.42);
+        c.ellipse(fx, y + fy, 6, 7, r.ink, 0.6, G);
+        c.rect(fx - 3, y + fy + 6, 6, 4, r.ink, 0.6, G);
+        c.poly([fx - 13, by, fx - 11, y + fy + 9, fx - 4, y + fy + 7, fx + 4, y + fy + 7, fx + 11, y + fy + 9, fx + 13, by], r.ink, 0.6, G);
+      }
+      return;
+    }
     if (lit) {
       // A dim room behind it: never a flat yellow pane. The body of the window is the deep warm
       // tone, with the light only where a lamp hangs (a small bright core), wallpaper dashes, shadows of furniture.
@@ -1525,7 +1620,7 @@ export class Elev {
       for (let x = x0; x < x1; x++) {
         const y0 = this.top[x];
         const d = 2 + Math.round(hash2(x >> 2, 3, seed + 81) * 2);
-        for (let j = 0; j < d; j++) if (this.inWall(x, y0 + j)) c.set(x, y0 + j, r.brick, j === 0 ? 1.1 : 1.9 + (hash2(x, j, seed + 83) > 0.7 ? 0.8 : 0));
+        for (let j = 0; j < d; j++) if (this.inWall(x, y0 + j)) c.set(x, y0 + j, r.raw, j === 0 ? 1.1 : 1.9 + (hash2(x, j, seed + 83) > 0.7 ? 0.8 : 0));
         c.shift(x, y0 + d, -1);
       }
       for (let x = x0 + 4; x < x1 - 3; x += 7 + Math.floor(hash2(x, 5, seed + 87) * 11)) {
@@ -1795,12 +1890,52 @@ export class Elev {
   /** A faded painted sign on the wall (lettering already gone in places): `text` drawn by caller; this lays its faded ground. */
   ghostGround(x: number, y: number, w: number, h: number, ramp: number): this {
     const { c } = this;
+    const seed = this.seed;
     for (let j = 0; j < h; j++) {
+      // The rows it still clings to: ragged at both ends and top and bottom, never a printed oblong.
+      const edgeL = Math.round(vnoise(j, 7, seed + 93) * 22);
+      const edgeR = Math.round(vnoise(j, 9, seed + 95) * 26);
       for (let i = 0; i < w; i++) {
         if (!this.inWall(x + i, y + j)) continue;
-        if (bayer(x + i, y + j) < 0.34 + vnoise2(x + i, y + j, 26, 16, this.seed + 91) * 0.34) c.ramp[(y + j) * c.w + x + i] = ramp;
+        const inset = Math.min(i - edgeL, w - edgeR - i, j + 2 * vnoise(i, 13, seed + 97), h - 1 - j + 2 * vnoise(i, 11, seed + 99));
+        if (inset < 0) continue;
+        const fade = Math.min(1, inset / 10);
+        if (bayer(x + i, y + j) < (0.34 + vnoise2(x + i, y + j, 26, 16, seed + 91) * 0.34) * fade) c.ramp[(y + j) * c.w + x + i] = ramp;
       }
     }
+    return this;
+  }
+
+  /**
+   * A wall lamp on an iron arm and its warm light on the brick or render below it: three flat rings on
+   * this wall's own ramps, a warmer colour with each, the edges stepped. (A hole in the night: bricks, sills and doors keep their colours.)
+   */
+  wallLamp(cx: number, yTop: number, rx: number, ry: number): this {
+    const { c, k, r, seed } = this;
+    const warm = (t: number) => k.ramp(mix(0x665a52, 0xe89a5c, t), { light: 0.34, sat: 0.95, dark: 0.42 });
+    const rings = [warm(0.32), warm(0.55), warm(0.8)];
+    for (let y = yTop; y < yTop + ry * 1.08; y++) {
+      for (let x = Math.floor(cx - rx * 1.05); x <= cx + rx * 1.05; x++) {
+        if (!this.inWall(x, y)) continue;
+        const i = y * c.w + x;
+        if (c.ramp[i] !== r.wall && c.ramp[i] !== r.alt) continue;
+        // A fan of light: narrow under the lamp, wide at the ground.
+        const v = (y - yTop) / ry;
+        const halfW = rx * (0.35 + 0.7 * Math.min(1, v));
+        const u = (x - cx) / halfW;
+        const d = Math.max(Math.abs(u), v * v) * (1 + 0.05 * Math.sin(x * 0.17 + seed));
+        const lvl = d < 0.4 ? 2 : d < 0.7 ? 1 : d < 1 ? 0 : -1;
+        if (lvl < 0) continue;
+        const fringe = (lvl === 0 && d > 0.88 && bayer(x, y) < 0.5) || (lvl === 1 && d > 0.62 && bayer(x, y) < 0.35);
+        c.ramp[i] = fringe ? rings[Math.max(0, lvl - 1)] : rings[lvl];
+        c.tone[i] = Math.min(5, c.tone[i] + lvl * 0.5);
+      }
+    }
+    // The arm and the lamp.
+    c.line(cx - 10, yTop - 2, cx - 1, yTop - 2, r.iron, 2);
+    c.line(cx - 10, yTop - 8, cx - 10, yTop + 3, r.iron, 1.4);
+    c.rect(cx - 3, yTop - 3, 7, 3, r.iron, 2.6);
+    c.rect(cx - 2, yTop, 5, 2, r.lamp, 4.8, PWF.GLOW);
     return this;
   }
 

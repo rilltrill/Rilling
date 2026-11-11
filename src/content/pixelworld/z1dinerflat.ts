@@ -179,20 +179,26 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
   // Where a panel has gone: the frame's bare steel ribs every 6 texels (a rail across them), rust running down from the wound,
   // the torn sheet's edge lit. Never a solid black area: at the hold a black gap read as a hole in the card, or a bin.
   const wound = (gone: Uint8Array, a: number, b: number, rustBelow: boolean) => {
+    // (Rib pitch by a hand, 5 to 11 texels: at the hold an even comb of bright ribs read as a fence.)
+    const rib = new Uint8Array(W);
+    for (let x = 0, i = 0; x < W; i++) {
+      rib[x] = 1;
+      rib[x + 1] = 2;
+      x += 5 + Math.floor(hash2(i, 41, seed) * 7);
+    }
     for (let x = 0; x < W; x++) {
       if (!gone[x]) continue;
       const edgeL = !gone[x - 1];
       const edgeR = !gone[x + 1];
       for (let y = a; y < b; y++) {
-        const rib = x % 6 < 2;
         const rail = (y - a) % 26 < 3;
-        c.set(x, y, rib || rail ? chrome : ink, rib ? (x % 6 === 0 ? 2.9 : 1.9) : rail ? 2.2 : 0.9 + (((x + y) & 3) === 0 ? 0.5 : 0));
-        if (hash2(x >> 1, y >> 4, seed + 81) > 0.8) c.tint(x, y, rust);
+        c.set(x, y, rib[x] || rail ? chrome : ink, rib[x] === 1 ? 2.1 : rib[x] === 2 ? 1.3 : rail ? 1.7 : 0.9 + (((x + y) & 3) === 0 ? 0.5 : 0));
+        if (hash2(x >> 1, y >> 4, seed + 81) > 0.72) c.tint(x, y, rust);
       }
       // The sheet's torn end: stepped, lit, its top and bottom bitten unevenly.
       if (edgeL || edgeR) {
         const lip = 2 + Math.floor(hash2(x, 4, seed + 83) * 3);
-        for (let y = a + lip; y < b - lip; y++) c.set(x, y, chrome, 4.2);
+        for (let y = a + lip; y < b - lip; y++) if (hash2(x, y >> 3, seed + 85) > 0.25) c.set(x, y, chrome, 4.2);
       }
       if (rustBelow && x % 3 !== 1) {
         const len = 6 + Math.floor(hash2(x, 19, seed + 87) * 22);
@@ -391,13 +397,17 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
     const nearest = (want: number) => seam.reduce((best, x) => (Math.abs(x - want) < Math.abs(best - want) ? x : best), seam[0]);
     const jNear = nearest(colOf(-5.7));
     const jFar = nearest(colOf(5.1));
-    const hot = 0xe67fd2;
-    const mix = (from: number, t: number) => {
-      const ch = (v: number, w: number) => Math.round(v + (w - v) * t);
-      return (ch(from >> 16, hot >> 16) << 16) | (ch((from >> 8) & 255, (hot >> 8) & 255) << 8) | ch(from & 255, hot & 255);
+    // Light, so it takes no moon tint: the first step starts from the colour the moon gives this chrome on screen.
+    const chromeLit = 0x8d8dd0;
+    const whiteLit = 0xbdbdea;
+    const hotChrome = 0xee90da;
+    const hotWhite = 0xf8b6ec;
+    const mixTo = (from: number, to: number, t: number) => {
+      const ch = (s: number) => Math.round(((from >> s) & 255) * (1 - t) + ((to >> s) & 255) * t) << s;
+      return ch(16) | ch(8) | ch(0);
     };
-    const washChrome = [0.3, 0.62, 1].map((t) => k.ramp(mix(0x9aa4ae, t), { light: 0.4, sat: 0.85, dark: 0.42 }));
-    const washWhite = [0.3, 0.62, 1].map((t) => k.ramp(mix(0xd6d0c0, t), { light: 0.34, dark: 0.45 }));
+    const washChrome = [0.28, 0.62, 1].map((t) => k.ramp(mixTo(chromeLit, hotChrome, t), { light: 0.4, sat: 0.95, dark: 0.42 }));
+    const washWhite = [0.28, 0.62, 1].map((t) => k.ramp(mixTo(whiteLit, hotWhite, t), { light: 0.34, dark: 0.45 }));
     for (let y = 0; y < H; y++) {
       const nudge = Math.floor(hash2(y >> 2, 7, seed + 61) * 4);
       for (let x = jNear; x <= jFar; x++) {
@@ -406,7 +416,9 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
         const d = Math.min(x - jNear, jFar - x);
         const e = d + nudge + (bayer(x, y) > 0.5 ? 2 : 0);
         const lvl = e < 12 ? 0 : e < 24 ? 1 : 2;
-        c.tint(x, y, r === chrome ? washChrome[lvl] : washWhite[lvl]);
+        const i = y * W + x;
+        c.ramp[i] = r === chrome ? washChrome[lvl] : washWhite[lvl];
+        c.flag[i] |= PWF.GLOW;
       }
     }
   }

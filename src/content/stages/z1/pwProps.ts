@@ -3,7 +3,7 @@ import type { PwAtlas, PwTile } from '../../pixelworld/atlas';
 import type { PwBatch } from '../../pixelworld/batch';
 import { PW_TPM } from '../../pixelworld/canvas';
 import { stoneTile } from '../../pixelworld/surfaces';
-import { z1PropTiles, type Z1PropTiles } from '../../pixelworld/z1props';
+import { PLINTH_H, PLINTH_W, z1PropTiles, type Z1PropTiles } from '../../pixelworld/z1props';
 import { boxFaces, cylinder } from './pwDiner';
 
 /**
@@ -26,6 +26,8 @@ const _o = new THREE.Vector3();
 const _u = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
+/** Which way the memorial's drawing faces (radians from +z toward +x): at the boss hold's camera. */
+const PLINTH_YAW = 0.6;
 
 /** A flat n-gon disc at height `y` (wrap tile at world density), facing up. */
 function disc(b: PwBatch, r: number, y: number, seg: number, tile: PwTile) {
@@ -129,12 +131,23 @@ export class Z1Props {
           break;
         }
         case 'plinth': {
-          const m = o as THREE.Mesh;
-          const p = (m.geometry as THREE.BoxGeometry).parameters;
-          boxFaces(b, p.width, p.height, p.depth, { pz: t.plinth, nz: t.plinth, px: t.plinth, nx: t.plinth, py: this.stone });
+          // A cut-out drawing, square to where the boss is fought (a box's side faces were the last modelled thing at the square).
+          // World-aligned: the group's own quarter turn would put it edge-on. Nothing shoots or stands on it.
+          _o.setFromMatrixPosition(o.matrixWorld);
+          const px = _o.x;
+          const pz = _o.z;
+          const wM = PLINTH_W / PW_TPM;
+          const hM = PLINTH_H / PW_TPM;
+          const ux = Math.cos(PLINTH_YAW);
+          const uz = -Math.sin(PLINTH_YAW);
+          b.setMatrix(null);
+          b.rect(_o.set(px - (ux * wM) / 2, 0, pz - (uz * wM) / 2), _u.set(ux, 0, uz), Y, wM, hM, t.plinth);
           drop.push(o);
           break;
         }
+        case 'plinthCap':
+          drop.push(o);
+          break;
         case 'pediment': {
           // A proper gable on the portico's frieze (14 m, 2.2 m high, 4 m deep): the tympanum, two raking slopes.
           b.setMatrix(o.parent!.matrixWorld);
