@@ -831,10 +831,27 @@ else is CEL. `&drawnfig=all` (look-dev) shows every walker / civilian as those t
   (head and chest joints are cached per pose, frame and view). Detail levels hold with hysteresis
   (`lodFor`). Stage light is a palette rebuild (`setStageLight`, `CastStageLight.step` / `floor` /
   `tint` / `tintAmt`), not a repaint; fog in whole bands per sprite.
+- Round three: the figure is built like a person, on the silhouette (measured at the widest row
+  with `--sheet check`): hips no wider than the chest, the inner thigh inside the hip joint so the legs
+  part at the pelvis floor, jeans lit as hard planes (`legForm`: a thigh plane ending in a diagonal at
+  the hip crease, a diamond knee cap, a straight shin), an outer seam, fly and pockets. Views that look
+  along the walk get depth by hand (`floorDepth`): a foot coming at the viewer lands lower on the
+  screen and bigger, one going away sits higher; the near knee is drawn over a shortened shin. A
+  front crouch draws its knees out (`PoseKey.kneeSpread`). The last frame of a death has its own front
+  drawing, a body seen from its feet (`PoseKey.corpse`, plotted joint by joint in `figure.ts`, painted
+  far to near in `corpseFront`: hat knocked off beside the head, the trunk foreshortened behind two
+  boot soles). The front reach is asymmetric (`placeReach`: a lead hand low over the breastbone and
+  big, the other hand at chin height; `PoseKey.leadL` swaps them on recovery).
+- The neck has limits (`NECK_DOWN`, `NECK_UP`, `NECK_BEND` in `DrawnCast`): past them the head stays
+  on the body. A ducking rig gets a ducking drawing instead (`civilianFrame` picks one of three cower
+  keys by the rig's head height). `DrawnQuery.free`: once a dying rig takes no more hits the drawing
+  stops following its head. A falling ceiling-drop shows `ZFALL`, not a walk frame in mid-air.
+- Raster budget: at most `MAX_RASTERS` per frame and `RASTER_BUDGET_MS` of them (the first one always
+  runs). Figures between 40 and 60 texels tall share rasters across two-texel head offsets.
 - Look-dev without a browser: `node --experimental-strip-types --no-warnings scripts/figure-sheet.mjs
-  --out DIR --sheet turn,anim,states,sizes,solid,sil,heads,r2,canon,measure,look,perf` (labelled PNGs in a few ms).
-  Round one's rollout plan is in the round-one report (per figure group: outfit sketches, then
-  `poses.ts` / `states.ts` for its movement set, then `drawnFigure` on the entity).
+  --out DIR --sheet turn,anim,states,sizes,solid,sil,heads,r2,canon,measure,look,perf,check` (labelled PNGs in a few ms;
+  `check` prints the judges' measurements: widths at the widest row, inseam, front-walk boots, corpse box, far-size connectivity).
+  Rollout: for each figure group, outfit sketches, then `poses.ts` / `states.ts` for its movement set, then `drawnFigure` on the entity.
 
 ## Art style: PIXEL WORLD — PixelWorld environments (`content/pixelworld/`)
 
