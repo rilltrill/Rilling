@@ -16,6 +16,10 @@ export interface HeadGroups {
   hair: number;
   hat: number;
   ear: number;
+  /** The neck: the shadow the head casts on it goes here. */
+  neck: number;
+  /** A far hat's brim: no ink line (two texels of ink would be the whole brim). */
+  brim: number;
 }
 
 export interface HeadSpec {
@@ -35,14 +39,14 @@ const HEAD_F: readonly Pt[] = [
   [0, 0.44, 0.22],
   [0, 0.27, 0.32],
   [0, 0.05, 0.35],
-  [0, -0.14, 0.32],
-  [0, -0.3, 0.26],
-  [0, -0.42, 0.16],
-  [0, -0.5, 0.05],
-  [0, -0.5, -0.05],
-  [0, -0.42, -0.16],
-  [0, -0.3, -0.26],
-  [0, -0.14, -0.32],
+  [0, -0.14, 0.33],
+  [0, -0.3, 0.28],
+  [0, -0.42, 0.18],
+  [0, -0.5, 0.06],
+  [0, -0.5, -0.06],
+  [0, -0.42, -0.18],
+  [0, -0.3, -0.28],
+  [0, -0.14, -0.33],
   [0, 0.05, -0.35],
   [0, 0.27, -0.32],
   [0, 0.44, -0.22],
@@ -56,12 +60,12 @@ const HEAD_F_SLACK: readonly Pt[] = [
   [0, 0.05, 0.35],
   [0, -0.14, 0.32],
   [0, -0.28, 0.27],
-  [0, -0.44, 0.2],
-  [0, -0.58, 0.15],
-  [0, -0.67, 0.05],
-  [0, -0.67, -0.05],
-  [0, -0.58, -0.15],
-  [0, -0.44, -0.2],
+  [0, -0.44, 0.21],
+  [0, -0.58, 0.18],
+  [0, -0.68, 0.09],
+  [0, -0.69, -0.02],
+  [0, -0.6, -0.12],
+  [0, -0.44, -0.19],
   [0, -0.28, -0.27],
   [0, -0.14, -0.32],
   [0, 0.05, -0.35],
@@ -79,8 +83,8 @@ const HEAD_Q: readonly Pt[] = [
   [0, -0.1, 0.38],
   [0, -0.2, 0.31],
   [0, -0.3, 0.31],
-  [0, -0.44, 0.18],
-  [0, -0.5, 0.05],
+  [0, -0.44, 0.19],
+  [0, -0.5, 0.06],
   [0, -0.46, -0.1],
   [0, -0.3, -0.28],
   [0, -0.05, -0.42],
@@ -270,7 +274,8 @@ function deadFace(d: Draw, s: HeadSpec, g: HeadGroups, view: ViewId) {
   }
   const w = view === 2 ? 0.14 : view === 1 ? 0.16 : 0.19;
   const top = -0.27;
-  const bot = -0.47;
+  // The opening stops short of the chin: a lower jaw of skin stays under it.
+  const bot = -0.4;
   if (view === 2) {
     poly(d, top, 0.34, bot - 0.02, 0.2, bot - 0.03, 0.1, top - 0.04, 0.12, top + 0.02, 0.22);
     pen.shade(g.head, 0, R.blood, 1);
@@ -297,7 +302,7 @@ function deadFace(d: Draw, s: HeadSpec, g: HeadGroups, view: ViewId) {
       // Lip line under the opening; the chin below takes the light.
       poly(d, bot - 0.02, mid - w * 0.7, bot - 0.02, mid + w * 0.7, bot - 0.06, mid + w * 0.62, bot - 0.06, mid - w * 0.62);
       pen.shade(g.head, 0, skin, 2);
-      poly(d, -0.56, mid - 0.13, -0.56, mid + 0.02, -0.63, mid + 0.02, -0.63, mid - 0.1);
+      poly(d, -0.54, mid - 0.09, -0.54, mid + 0.1, -0.63, mid + 0.06, -0.63, mid - 0.06);
       pen.shade(g.head, 1);
       if (lod >= 3 && view === 0) {
         // The cheek is torn through on one side, up from the corner of the mouth.
@@ -308,7 +313,7 @@ function deadFace(d: Draw, s: HeadSpec, g: HeadGroups, view: ViewId) {
   }
   if (lod >= 2) {
     // A thin run of blood from the far corner of the mouth, leaving the chin skin.
-    poly(d, bot - 0.02, mid + w * 0.7, bot - 0.01, mid + w * 0.94, -0.68, mid + w * 0.92, -0.68, mid + w * 0.72);
+    poly(d, bot - 0.02, mid + w * 0.7, bot - 0.01, mid + w * 0.94, -0.62, mid + w * 1.0, -0.62, mid + w * 0.78);
     pen.shade(g.head, 0, R.blood, 3);
   }
 }
@@ -423,62 +428,112 @@ function hairShape(d: Draw, g: HeadGroups, ramp: number, view: ViewId) {
     d.pt(B.head, 0.26, -0.5);
     d.pt(B.head, 0.46, -0.32);
   } else if (view === 2) {
+    // Profile: cut to the skull, following the occiput down to a short nape; no wing behind.
     d.pt(B.head, 0.55, 0.02);
     d.pt(B.head, 0.6, 0.12, true);
     d.pt(B.head, 0.45, 0.2);
     d.pt(B.head, 0.32, 0.29);
     d.pt(B.head, 0.35, 0.06);
-    d.pt(B.head, 0.14, -0.04);
-    d.pt(B.head, -0.06, -0.18);
-    d.pt(B.head, -0.24, -0.4);
-    d.pt(B.head, -0.33, -0.54, true);
-    d.pt(B.head, -0.12, -0.62);
-    d.pt(B.head, 0.1, -0.68);
-    d.pt(B.head, 0.34, -0.64);
-    d.pt(B.head, 0.5, -0.42);
+    d.pt(B.head, 0.14, -0.06);
+    d.pt(B.head, 0.1, -0.24, true);
+    d.pt(B.head, -0.08, -0.26);
+    d.pt(B.head, -0.3, -0.3, true);
+    d.pt(B.head, -0.25, -0.37, true);
+    d.pt(B.head, -0.32, -0.42, true);
+    d.pt(B.head, -0.1, -0.52);
+    d.pt(B.head, 0.1, -0.64);
+    d.pt(B.head, 0.34, -0.6);
+    d.pt(B.head, 0.5, -0.4);
   } else if (view === 3) {
-    // Three-quarter back: the back of the head, hair down to the nape.
+    // Three-quarter back: tufts break the outline, the hair tapers to the nape.
     d.pt(B.head, 0.54, 0.02);
-    d.pt(B.head, 0.46, 0.28);
-    d.pt(B.head, 0.2, 0.4);
-    d.pt(B.head, -0.08, 0.33);
-    d.pt(B.head, -0.22, 0.14, true);
-    d.pt(B.head, -0.3, 0.02);
-    d.pt(B.head, -0.24, -0.08, true);
-    d.pt(B.head, -0.34, -0.2);
-    d.pt(B.head, -0.06, -0.46);
+    d.pt(B.head, 0.6, 0.14, true);
+    d.pt(B.head, 0.5, 0.24);
+    d.pt(B.head, 0.3, 0.36);
+    d.pt(B.head, 0.1, 0.36);
+    d.pt(B.head, -0.04, 0.3);
+    d.pt(B.head, -0.14, 0.2, true);
+    d.pt(B.head, -0.28, 0.14, true);
+    d.pt(B.head, -0.2, 0.06, true);
+    d.pt(B.head, -0.33, -0.02, true);
+    d.pt(B.head, -0.25, -0.1, true);
+    d.pt(B.head, -0.32, -0.2, true);
+    d.pt(B.head, -0.14, -0.33);
+    d.pt(B.head, 0.02, -0.45, true);
+    d.pt(B.head, 0.1, -0.5, true);
     d.pt(B.head, 0.3, -0.46);
     d.pt(B.head, 0.48, -0.26);
   } else {
-    // Back: over the skull, a ragged line at the nape.
-    d.pt(B.head, 0.54, 0.02);
-    d.pt(B.head, 0.48, 0.28);
-    d.pt(B.head, 0.25, 0.43);
-    d.pt(B.head, -0.04, 0.4);
-    d.pt(B.head, -0.26, 0.26, true);
-    d.pt(B.head, -0.3, 0.16);
-    d.pt(B.head, -0.25, 0.08, true);
-    d.pt(B.head, -0.36, -0.02);
-    d.pt(B.head, -0.27, -0.12, true);
-    d.pt(B.head, -0.31, -0.2);
-    d.pt(B.head, -0.25, -0.28, true);
-    d.pt(B.head, -0.04, -0.4);
-    d.pt(B.head, 0.25, -0.43);
-    d.pt(B.head, 0.48, -0.28);
+    // Back: tufts along the crown and sides, the lower third narrowing into a ragged nape.
+    d.pt(B.head, 0.55, 0.02);
+    d.pt(B.head, 0.6, 0.1, true);
+    d.pt(B.head, 0.52, 0.16, true);
+    d.pt(B.head, 0.5, 0.26);
+    d.pt(B.head, 0.38, 0.38);
+    d.pt(B.head, 0.36, 0.44, true);
+    d.pt(B.head, 0.24, 0.42, true);
+    d.pt(B.head, 0.05, 0.42);
+    d.pt(B.head, -0.04, 0.37, true);
+    d.pt(B.head, -0.14, 0.34);
+    d.pt(B.head, -0.24, 0.23);
+    d.pt(B.head, -0.28, 0.2, true);
+    d.pt(B.head, -0.23, 0.13, true);
+    d.pt(B.head, -0.33, 0.06, true);
+    d.pt(B.head, -0.26, 0.0, true);
+    d.pt(B.head, -0.35, -0.08, true);
+    d.pt(B.head, -0.26, -0.14, true);
+    d.pt(B.head, -0.28, -0.22, true);
+    d.pt(B.head, -0.14, -0.34);
+    d.pt(B.head, -0.02, -0.38, true);
+    d.pt(B.head, 0.02, -0.43, true);
+    d.pt(B.head, 0.22, -0.43);
+    d.pt(B.head, 0.36, -0.4);
+    d.pt(B.head, 0.42, -0.33, true);
+    d.pt(B.head, 0.5, -0.27);
+    d.pt(B.head, 0.62, -0.1, true);
   }
   pen.fill(ramp, 3, PARTH, g.hair, -1);
-  // A band of light on the crown, clumps in the highlight tone.
-  if (d.lod >= 1) {
-    poly(d, 0.5, -0.16, 0.42, 0.04, 0.32, 0.1, 0.34, -0.16);
-    pen.shade(g.hair, 1);
-    if (d.lod >= 2) {
-      poly(d, 0.2, -0.3, 0.24, -0.14, 0.1, -0.12, 0.06, -0.28);
-      pen.shade(g.hair, 1);
+  if (view === 3 || view === 4) {
+    // Seen from behind there is no face to carry the head: the hair is drawn in long clumps that
+    // fan from the crown to the nape. Round lights on a round skull are what made it a bowling ball.
+    const sh = view === 3 ? 0.08 : 0;
+    const clump = (a0: number, n0: number, a1: number, n1: number, w: number, delta: number) => {
+      const da = a1 - a0;
+      const dn = n1 - n0;
+      const l = Math.max(1e-4, Math.hypot(da, dn));
+      const oa = (-dn / l) * w;
+      const on = (da / l) * w;
+      pen.begin();
+      d.pt(B.head, a0, n0, true);
+      d.pt(B.head, (a0 + a1) * 0.5 + oa, (n0 + n1) * 0.5 + on);
+      d.pt(B.head, a1, n1, true);
+      d.pt(B.head, (a0 + a1) * 0.5 - oa, (n0 + n1) * 0.5 - on);
+      pen.shade(g.hair, delta);
+    };
+    if (d.lod >= 1) {
+      clump(0.5, -0.2 + sh, 0.12, -0.3 + sh, 0.07, 1);
+      clump(0.54, -0.03 + sh, 0.16, -0.06 + sh, 0.06, 1);
+      if (d.lod >= 2) {
+        clump(0.46, 0.2 + sh, 0.16, 0.26 + sh, 0.05, 1);
+        clump(0.4, -0.12 + sh, 0.02, -0.18 + sh, 0.04, -1);
+        clump(0.4, 0.09 + sh, 0.0, 0.12 + sh, 0.04, -1);
+        clump(0.04, 0.32 + sh, -0.2, 0.13 + sh, 0.05, -1);
+      }
     }
-  }
-  if (d.lod >= 2) {
-    poly(d, 0.3, 0.34, 0.1, 0.38, 0.06, 0.2, 0.26, 0.22);
-    pen.shade(g.hair, -1);
+  } else {
+    // A band of light on the crown, clumps in the highlight tone.
+    if (d.lod >= 1) {
+      poly(d, 0.5, -0.16, 0.42, 0.04, 0.32, 0.1, 0.34, -0.16);
+      pen.shade(g.hair, 1);
+      if (d.lod >= 2) {
+        poly(d, 0.2, -0.3, 0.24, -0.14, 0.1, -0.12, 0.06, -0.28);
+        pen.shade(g.hair, 1);
+      }
+    }
+    if (d.lod >= 2) {
+      poly(d, 0.3, 0.34, 0.1, 0.38, 0.06, 0.2, 0.26, 0.22);
+      pen.shade(g.hair, -1);
+    }
   }
 }
 
@@ -516,17 +571,12 @@ function hardHat(d: Draw, g: HeadGroups, view: ViewId, ramp: number) {
   const pen = d.pen;
   pen.begin();
   if (d.lod === 0) {
-    // At a distance the hat is its silhouette: a flat-bottomed dome with a brim past the head.
-    const side = view === 2 || view === 1 ? 0.14 : 0;
+    // At a distance the hat is its silhouette: a plain dome, and (below) a brim in the hat's own colour.
     d.pt(B.head, 0.62, 0.0, false);
     d.pt(B.head, 0.56, 0.3);
     d.pt(B.head, 0.3, 0.42);
-    d.pt(B.head, 0.2, 0.42, true);
-    d.pt(B.head, 0.18, 0.62 + side, true);
-    d.pt(B.head, 0.06, 0.66 + side, true);
-    d.pt(B.head, 0.06, -0.66, true);
-    d.pt(B.head, 0.18, -0.62, true);
-    d.pt(B.head, 0.2, -0.42, true);
+    d.pt(B.head, 0.18, 0.42, true);
+    d.pt(B.head, 0.18, -0.42, true);
     d.pt(B.head, 0.3, -0.42);
     d.pt(B.head, 0.56, -0.3);
   } else if (view === 2) {
@@ -581,6 +631,19 @@ function hardHat(d: Draw, g: HeadGroups, view: ViewId, ramp: number) {
     d.pt(B.head, 0.54, -0.25);
   }
   pen.fill(ramp, 3, PARTH, g.hat, -2);
+  if (d.lod === 0) {
+    // The brim: two rows of the hat's dark tone, a texel and a half past the dome, one shape with
+    // it. Two rows of ink would read as a stick through the head.
+    const past = 0.42 + 1.5 / d.S;
+    const rows = 2 / d.S;
+    pen.begin();
+    d.pt(B.head, 0.2, past, true);
+    d.pt(B.head, 0.2 - rows, past, true);
+    d.pt(B.head, 0.2 - rows, -past, true);
+    d.pt(B.head, 0.2, -past, true);
+    pen.fill(ramp, 2, PARTH, g.brim, 0);
+    pen.softEdge(g.brim);
+  }
   // Shadow on the away side of the dome.
   poly(d, 0.62, 0.22, 0.3, 0.24, 0.14, 0.2, 0.08, 0.7, 0.7, 0.7);
   pen.shade(g.hat, -1);
@@ -602,6 +665,24 @@ function hardHat(d: Draw, g: HeadGroups, view: ViewId, ramp: number) {
   }
 }
 
+/** A hard hat lying on the street at (x, y) head units, its dome toward (dirX, dirY): a corpse's hat. */
+export function fallenHat(d: Draw, g: HeadGroups, ramp: number, x: number, y: number, dirX: number, dirY: number) {
+  const ox = d.ox[B.head];
+  const oy = d.oy[B.head];
+  const ax = d.ax[B.head];
+  const ay = d.ay[B.head];
+  d.ox[B.head] = x;
+  d.oy[B.head] = y;
+  d.ax[B.head] = dirX;
+  d.ay[B.head] = dirY;
+  // (Seen from behind it is a dome with a lip all round: it does not need a face to go with it.)
+  hardHat(d, g, 4, ramp);
+  d.ox[B.head] = ox;
+  d.oy[B.head] = oy;
+  d.ax[B.head] = ax;
+  d.ay[B.head] = ay;
+}
+
 /** Paints the head for the view. */
 export function paintHead(d: Draw, s: HeadSpec, g: HeadGroups, view: ViewId) {
   const slack = s.dead && s.jaw > 0;
@@ -619,8 +700,32 @@ export function paintHead(d: Draw, s: HeadSpec, g: HeadGroups, view: ViewId) {
       ear(d, s.skin, g, -0.34, -0.1);
     }
   }
+  // The shadow the jaw casts on the neck (painted before the head, so only the rows below the chin
+  // show): what separates a face from a neck when they are the same skin.
+  if (view <= 1 && d.lod >= 1) {
+    const chin = slack ? -0.69 : -0.5;
+    const down = (slack ? 3 : 2) / d.S;
+    poly(d, -0.1, 0.42, chin - down, 0.26, chin - down, -0.26, -0.1, -0.42);
+    d.pen.shade(g.neck, 0, s.skin, 1);
+  }
   outline(d, tbl, s.skin, g);
   faceForm(d, g, view);
+  if (slack && d.lod >= 2 && view <= 2) {
+    // An ink line under the lower jaw, so it reads as a jaw hanging open, not the bottom of the head.
+    const pen = d.pen;
+    pen.begin();
+    if (view === 2) {
+      d.pt(B.head, -0.56, 0.24);
+      d.pt(B.head, -0.7, 0.1);
+      d.pt(B.head, -0.56, -0.02);
+    } else {
+      d.pt(B.head, -0.6, 0.18);
+      d.pt(B.head, -0.68, 0.09);
+      d.pt(B.head, -0.69, -0.02);
+      d.pt(B.head, -0.62, -0.12);
+    }
+    pen.stroke(g.head, 0, s.skin, 1);
+  }
   if (view <= 2) {
     if (s.dead) deadFace(d, s, g, view);
     else liveFace(d, s, g, view);

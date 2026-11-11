@@ -64,7 +64,7 @@ const zPose = (o: PoseKey): PoseKey => ({ cLean: 8, sLean: 6, lean: 4, hPitch: 1
 /** A zombie standing: weight on one leg, one shoulder dropped, an arm dragging, the head lolling. */
 const ZIDLE_HIPS: PoseKey = { px: 0.14, py: -0.08, tilt: 6, lean: 4 };
 export const ZIDLE: PoseKey[] = [
-  zPose({ ...ZIDLE_HIPS, sTilt: -5, cTilt: -9, cLean: 10, sLean: 8, hRoll: -13, aL: [2, 17, 14], aR: [14, 14, 30], lL: foot(1, ZIDLE_HIPS, 0.34, 0.06), lR: foot(-1, ZIDLE_HIPS, -0.62, 0.3, 0.02) }),
+  zPose({ ...ZIDLE_HIPS, sTilt: -5, cTilt: -9, cLean: 10, sLean: 8, hRoll: -13, aL: [2, 22, 14], aR: [14, 14, 30], lL: foot(1, ZIDLE_HIPS, 0.34, 0.06), lR: foot(-1, ZIDLE_HIPS, -0.62, 0.3, 0.02) }),
 ];
 
 /** A linear in-between of two keys (an animator's in-between; the keys hold the design). */
@@ -113,10 +113,10 @@ const ZS = {
   //        contact recoil               pass                  drag     | R contact recoil            pass                  through
   lz: [0.72, 0.52, 0.3, 0.06, -0.18, -0.42, -0.66, -0.52, -0.2, 0.14, 0.46, 0.68],
   llift: [0, 0, 0, 0, 0, 0, 0.1, 0.16, 0.18, 0.15, 0.07, 0.01],
-  lx: [0.3, 0.3, 0.3, 0.3, 0.3, 0.32, 0.32, 0.24, 0.14, 0.14, 0.22, 0.28],
+  lx: [0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.44, 0.36, 0.26, 0.26, 0.36, 0.44],
   rz: [-0.72, -0.58, -0.3, 0.06, 0.4, 0.62, 0.68, 0.46, 0.22, -0.04, -0.28, -0.52],
   rlift: [0.1, 0.15, 0.17, 0.13, 0.06, 0.01, 0, 0, 0, 0, 0, 0],
-  rx: [-0.32, -0.24, -0.14, -0.14, -0.22, -0.28, -0.3, -0.3, -0.3, -0.3, -0.3, -0.32],
+  rx: [-0.44, -0.36, -0.26, -0.26, -0.36, -0.44, -0.44, -0.44, -0.44, -0.44, -0.44, -0.44],
   // Hips: low on the two contacts (deeper on the bad leg), up over the passing leg.
   drop: [0.14, 0.2, 0.1, 0.0, 0.03, 0.08, 0.18, 0.27, 0.14, 0.01, 0.04, 0.09],
   // Weight goes over the stance foot.
@@ -157,6 +157,9 @@ export const ZWINDUP: PoseKey[] = [
   zw(WH2, 0.46, 0.46, -0.46, -0.72, { cLean: 22, hPitch: -14, hRoll: 2, cTilt: 2, aL: [112, 8, 16], aR: [120, 9, 14] }),
 ];
 
+/** Recovering: the same reach, the other hand leading (so the attack does not end on a mirror image). */
+export const ZRECOVER: PoseKey[] = [{ ...ZWINDUP[ZWINDUP.length - 1], leadL: true }];
+
 /** The lunge: the whole body thrown at the camera. */
 const LH: PoseKey = { py: -0.28, px: 0.05, lean: 16 };
 export const ZLUNGE: PoseKey[] = [
@@ -169,13 +172,36 @@ export const ZSTAGGER: PoseKey[] = [
   zPose({ py: -0.16, lean: -3, cLean: 6, sLean: 2, hPitch: 16, hRoll: -18, tilt: -6, sTilt: -10, aL: [10, 22, 40], aR: [-4, 28, 18], lL: [4, 10, 28], lR: [-8, 10, 12] }),
 ];
 
-/** Going down: knees go, the body folds forward and the arms lag behind it, then limp on the ground. */
+/** Falling from above (a ceiling drop): knees drawn up, arms up and slightly back, not a walk frame in mid-air. */
+export const ZFALL: PoseKey[] = [
+  { noGround: true, py: 0, lean: 4, cLean: 2, hPitch: -6, aL: [168, 16, 18], aR: [158, 18, 14], lL: [40, 8, 60], lR: [30, 12, 74] },
+];
+
+/**
+ * Going down: knees go, the body folds forward and the arms lag behind it, then limp on the ground.
+ * The last frame has its own front drawing (`corpse`, plotted in figure.ts): feet toward the
+ * viewer, the trunk foreshortened behind them, because the player shoots them head-on.
+ */
 export const ZDEATH: PoseKey[] = [
   zPose({ py: -0.3, lean: -10, cLean: -6, hPitch: -24, hRoll: 14, aL: [-10, 34, 30], aR: [-18, 40, 26], lL: [18, 10, 40], lR: [8, 14, 30] }),
   zPose({ py: -1.3, lean: 16, cLean: 34, sLean: 20, hPitch: 36, hRoll: -14, aL: [-28, 18, 24], aR: [-12, 22, 18], lL: [70, 14, 110], lR: [60, 18, 118] }),
   // Kneeling, folded right over; the arms come down last.
-  { noGround: true, py: -2.0, lean: 34, cLean: 40, sLean: 22, hPitch: 34, hRoll: -24, aL: [10, 14, 22], aR: [34, 18, 14], lL: [80, 14, 130], lR: [86, 18, 134] },
-  // Fallen on the back, seen from the side: flat on the street, arms out, knees loose.
+  {
+    noGround: true,
+    py: -2.0,
+    lean: 34,
+    cLean: 40,
+    sLean: 22,
+    hPitch: 34,
+    hRoll: -24,
+    aL: [10, 14, 22],
+    aR: [34, 18, 14],
+    lL: [80, 14, 130],
+    lR: [86, 18, 134],
+    // From the front the chest stays low and the head tips forward above the collar, chin on the chest.
+    front: { noGround: true, py: -2.0, lean: 12, cLean: 8, sLean: 6, hPitch: 26, hRoll: -14, aL: [6, 16, 20], aR: [16, 22, 20], lL: [80, 14, 130], lR: [86, 18, 134] },
+  },
+  // Fallen on the back, seen from the side: flat on the street, one knee loose, the head in line with the spine.
   {
     noGround: true,
     py: -2.86,
@@ -183,13 +209,12 @@ export const ZDEATH: PoseKey[] = [
     sLean: -3,
     cLean: -3,
     hPitch: 8,
-    hRoll: 30,
-    aL: [4, 76, 12],
-    aR: [0, 72, 22],
-    lL: [18, 12, 24],
-    lR: [6, 18, 16],
-    // The same body with its feet toward the viewer: the street's foreshortening, arms flung out, head fallen aside.
-    front: { noGround: true, py: -2.32, lean: -72, sLean: -2, cLean: -2, hPitch: 6, hRoll: 40, aL: [2, 78, 14], aR: [0, 70, 26], lL: [8, 22, 20], lR: [4, 30, 14] },
+    hRoll: 14,
+    aL: [2, 8, 16],
+    aR: [-6, 10, 26],
+    lL: [14, 8, 30],
+    lR: [4, 14, 12],
+    front: { noGround: true, corpse: true },
   },
 ];
 
@@ -219,18 +244,43 @@ const CW = {
   rlift: [0.05, 0.14, 0.2, 0.06, 0, 0, 0, 0],
   drop: [0.1, 0.05, 0.0, 0.04, 0.1, 0.05, 0.0, 0.04],
   px: [0.08, 0.14, 0.16, 0.1, -0.08, -0.14, -0.16, -0.1],
+  // Feet apart, the swing foot coming in over the step: the front view has a stride to show.
+  lx: [0.44, 0.44, 0.44, 0.44, 0.44, 0.34, 0.26, 0.36],
+  rx: [-0.44, -0.34, -0.26, -0.36, -0.44, -0.44, -0.44, -0.44],
 };
 function civWalkFrame(i: number): PoseKey {
   const swing = Math.sin((i / 8) * Math.PI * 2);
   const k: PoseKey = { px: CW.px[i], py: -CW.drop[i], lean: 3, sLean: 3, tilt: swing * 3, sTilt: -swing * 3, hPitch: -2, aL: [-swing * 14 + 4, 13, 20], aR: [swing * 14 + 6, 13, 24] };
-  return { ...k, lL: foot(1, k, 0.28 + (i >= 4 ? -0.08 : 0), CW.lz[i], CW.llift[i]), lR: foot(-1, k, -0.28 + (i < 4 ? 0.08 : 0), CW.rz[i], CW.rlift[i]) };
+  return { ...k, lL: foot(1, k, CW.lx[i], CW.lz[i], CW.llift[i]), lR: foot(-1, k, CW.rx[i], CW.rz[i], CW.rlift[i]) };
 }
 export const CIVWALK: PoseKey[] = Array.from({ length: 8 }, (_, i) => civWalkFrame(i));
 
-/** Cowering: crouched, knees in, arms up over the head. */
-export const CIVCOWER: PoseKey[] = [
-  { noReach: true, py: -1.1, lean: 22, sLean: 16, cLean: 14, hPitch: 24, hRoll: 6, aL: [110, 14, 118], aR: [124, 16, 122], lL: [64, 10, 118], lR: [74, 12, 116] },
-];
+/**
+ * Backing away from something: a wary shuffle, feet never crossing (the rear foot steps back while
+ * the front one slides in), so the two legs do not merge into one column from the side.
+ */
+const CB = {
+  frontZ: [0.9, 0.73, 0.57, 0.4, 0.4, 0.57, 0.73, 0.9],
+  frontLift: [0.0, 0.08, 0.1, 0.03, 0, 0, 0, 0],
+  rearZ: [-0.7, -0.53, -0.37, -0.2, -0.2, -0.37, -0.53, -0.7],
+  rearLift: [0, 0, 0, 0, 0.03, 0.1, 0.08, 0.0],
+  drop: [0.16, 0.14, 0.1, 0.14, 0.16, 0.14, 0.1, 0.14],
+};
+function civBackFrame(i: number): PoseKey {
+  const k: PoseKey = { px: 0.06, py: -CB.drop[i], lean: -2, sLean: 2, hPitch: -4, aL: [18, 16, 44], aR: [8, 16, 34] };
+  return { ...k, lL: foot(1, k, 0.4, CB.frontZ[i], CB.frontLift[i]), lR: foot(-1, k, -0.4, CB.rearZ[i], CB.rearLift[i]) };
+}
+export const CIVBACK: PoseKey[] = Array.from({ length: 8 }, (_, i) => civBackFrame(i));
+
+/**
+ * Cowering: crouched, knees in, arms up over the head. Three depths: the rig's head ducks and
+ * comes up, and the whole drawing has to duck with it, not the head slide down a still body.
+ */
+function cowerKey(py: number): PoseKey {
+  const k: PoseKey = { noReach: true, py, lean: 22, sLean: 16, cLean: 14, hPitch: 24, hRoll: 6, aL: [110, 14, 118], aR: [124, 16, 122] };
+  return { ...k, lL: foot(1, k, 0.32, 0.3), lR: foot(-1, k, -0.34, 0.24) };
+}
+export const CIVCOWER: PoseKey[] = [cowerKey(-1.25), cowerKey(-1.6), cowerKey(-1.95)];
 
 /** Pleading: on the feet, one arm stretched toward the player, the other against the chest. */
 export const CIVPLEAD: PoseKey[] = [
@@ -241,12 +291,15 @@ export const POSES = {
   zidle: ZIDLE,
   zshamble: ZSHAMBLE,
   zwindup: ZWINDUP,
+  zrecover: ZRECOVER,
   zlunge: ZLUNGE,
   zstagger: ZSTAGGER,
   zdeath: ZDEATH,
+  zfall: ZFALL,
   civstand: CIVSTAND,
   civrun: CIVRUN,
   civwalk: CIVWALK,
+  civback: CIVBACK,
   civcower: CIVCOWER,
   civplead: CIVPLEAD,
 } as const;

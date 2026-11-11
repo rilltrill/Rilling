@@ -23,11 +23,16 @@ const _v = new THREE.Vector3();
 const _c = new THREE.Vector3();
 /** Most rasters a frame (each ≈ 1 ms at the biggest size: the rest wait a frame or two). */
 export const MAX_RASTERS = 3;
+/** Milliseconds of rastering a frame may spend (the first raster always runs). */
+const RASTER_BUDGET_MS = 2.5;
 /** Whole figure texels tall (above: texels double). */
 export const MAX_FIGURE_PX = 440;
 const SHELF_STEP = 16;
 /** Neck bend past this (hu) is taken by moving the whole sprite: a head pulled off its neck is the worst of the two errors. */
 const NECK_BEND = 0.35;
+/** Most the drawn head may sink into the neck, and stretch out of it (hu). */
+const NECK_DOWN = 0.15;
+const NECK_UP = 0.2;
 /** Head-offset buckets a redraw may travel: a state change must not snap the head across the neck. */
 const HEAD_TRAVEL = 2;
 
@@ -59,6 +64,8 @@ export interface DrawnQuery {
   armsAlways: boolean;
   aL: [number, number, number];
   aR: [number, number, number];
+  /** The rig takes no more hits: the head stays where the drawing puts it instead of following the falling rig. */
+  free: boolean;
 }
 
 const DEG = 180 / Math.PI;
@@ -105,7 +112,7 @@ const ZERO_POSE: PoseKey = { px: 0, py: 0, pz: 0, lean: 0, tilt: 0, turn: 0, sLe
 
 
 export function newDrawnQuery(): DrawnQuery {
-  return { def: null, frames: null, frame: 0, flags: 0, scale: 1, head: new THREE.Vector3(), chest: new THREE.Vector3(), lockView: false, armsFromRig: false, armsAlways: false, aL: [0, 0, 0], aR: [0, 0, 0] };
+  return { def: null, frames: null, frame: 0, flags: 0, scale: 1, head: new THREE.Vector3(), chest: new THREE.Vector3(), lockView: false, armsFromRig: false, armsAlways: false, aL: [0, 0, 0], aR: [0, 0, 0], free: false };
 }
 
 interface Entry {
@@ -188,8 +195,9 @@ export class DrawnCast {
   private atlasReady = false;
   /** Per-figure-and-view centroid offsets (see `bias`). */
   private biases = new Map<number, Float32Array>();
-  /** Rasters this frame. */
+  /** Rasters this frame, and the milliseconds they took. */
   rasters = 0;
+  private rasterSpent = 0;
   // Stats.
   stats = { rasters: 0, hits: 0, misses: 0, near: 0, rasterMs: 0, entries: 0 };
 
@@ -241,6 +249,7 @@ export class DrawnCast {
   beginFrame() {
     this.frame++;
     this.rasters = 0;
+    this.rasterSpent = 0;
   }
 
   /** Bytes used on the GPU. */
@@ -350,7 +359,9 @@ export class DrawnCast {
     this.entryCount++;
     this.rasters++;
     this.stats.rasters++;
-    this.stats.rasterMs += performance.now() - t0;
+    const spent = performance.now() - t0;
+    this.rasterSpent += spent;
+    this.stats.rasterMs += spent;
     this.stats.entries = this.entryCount;
     return e;
   }
@@ -393,7 +404,7 @@ export class DrawnCast {
       return hit;
     }
     this.stats.misses++;
-    if (this.rasters < MAX_RASTERS) {
+    if (this.rasters < MAX_RASTERS && (this.rasters === 0 || this.rasterSpent < RASTER_BUDGET_MS)) {
       const e = this.raster(key, sub, q.def!, pose, view, size, hx, hy, flags, lod);
       if (e) return e;
     }
@@ -483,7 +494,7 @@ export class DrawnCast {
     if (shift > lim) shift = lim;
     if (shift < -lim) shift = -lim;
     let wantX = (rigHx - shift) * flip - (sk[0] + bias[0]) * S;
-    const wantY = rigHy - (sk[1] + bias[1]) * S;
+    let wantY = rigHy - (sk[1] + bias[1]) * S;
     // Only so much neck: the rest of a sideways miss moves the whole sprite.
     const bend = NECK_BEND * S;
     if (wantX > bend || wantX < -bend) {
@@ -493,9 +504,17 @@ export class DrawnCast {
       if (shift < -lim) shift = -lim;
       wantX = (rigHx - shift) * flip - (sk[0] + bias[0]) * S;
     }
-    // The offset is whole texels (every other one on big figures): the head then moves on the
-    // sprite's grid instead of jumping by a fraction of a head unit.
-    const tb = size < 100 ? 1 : 2;
+    // Once it stops being shootable the head lies where the drawing puts it.
+    if (q.free) wantX = wantY = 0;
+    // The neck has a limit in length as well as sideways: no stalk, no head sunk in the chest. Past
+    // it the head stays on the body; a ducking rig gets a ducking drawing instead (`civilianFrame`).
+    const wantLo = -NECK_DOWN * S;
+    const wantHi = NECK_UP * S;
+    if (wantY < wantLo) wantY = wantLo;
+    if (wantY > wantHi) wantY = wantHi;
+    // The offset is whole texels (every other one on big and on far figures): the head then moves
+    // on the sprite's grid instead of jumping by a fraction of a head unit, and far figures share rasters.
+    const tb = size < 60 || size >= 100 ? 2 : 1;
     const lm = Math.round(0.7 * S);
     let hxq = Math.round(Math.max(-lm, Math.min(lm, wantX)) / k / tb) * tb;
     let hyq = Math.round(Math.max(-lm, Math.min(lm, wantY)) / k / tb) * tb;

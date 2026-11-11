@@ -1399,13 +1399,16 @@ export class Civilian extends Entity {
   /** PIXEL WORLD 3 (`castlook=d`): round one draws the civilian in the flannel shirt. */
   override drawnFigure(q: DrawnQuery): boolean {
     if (this.look.outfit !== 'flannel' && !isDrawnEveryone()) return false;
-    const pick = civilianFrame(this.phase, this.phaseT, this.shot, this.age, this.travel);
+    const rh = this.rig.head.matrixWorld.elements;
+    const headH = (rh[13] - this.root.position.y) / (0.2928 * this.rig.scale);
+    const pick = civilianFrame(this.phase, this.phaseT, this.shot, this.age, this.travel, headH);
     q.def = FLANNEL;
     q.frames = pick.frames;
     q.frame = pick.frame;
     q.scale = this.rig.scale;
     q.flags = 0;
     q.lockView = this.shot;
+    q.free = this.shot && pick.frame >= 1;
     rigArms(q, this.rig.armL, this.rig.armR);
     q.armsAlways = false;
     const sm = this.rig.spine.matrixWorld.elements;

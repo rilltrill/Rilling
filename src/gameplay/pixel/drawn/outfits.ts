@@ -1,5 +1,5 @@
 import { B, band, type Draw, type Pt } from './figure';
-import { paintHead, type HeadGroups, type HeadSpec } from './head';
+import { fallenHat, paintHead, type HeadGroups, type HeadSpec } from './head';
 import { R } from './palette';
 import { J, type PoseKey, type ViewId } from './skeleton';
 import { CIVSTAND, ZIDLE } from './poses';
@@ -52,9 +52,11 @@ const G = {
   /** A thigh and shin drawn apart (a shin folded behind the thigh). */
   legNearB: 21,
   legFarB: 22,
+  /** A far hat's brim. */
+  brim: 23,
 } as const;
 
-const HG: HeadGroups = { head: G.head, hair: G.hair, hat: G.hat, ear: G.ear };
+const HG: HeadGroups = { head: G.head, hair: G.hair, hat: G.hat, ear: G.ear, neck: G.neck, brim: G.brim };
 
 const PARTH = 1;
 const PARTT = 2;
@@ -184,8 +186,12 @@ function foot(d: Draw, side: number, st: FootStyle, view: ViewId) {
   const c = Math.cos(p);
   const s = Math.sin(p);
   const group = side === 0 ? G.bootL : G.bootR;
-  const fx = (a: number, n: number) => d.cx + (ax + (n * c + a * s) * flip) * d.S;
-  const fy = (a: number, n: number) => d.cy - (ay + a * c - n * s) * d.S;
+  // Along the walk: the near foot is drawn bigger; the far one smaller and shorter, its heel up, only the toe cap to see.
+  const near = view === 0 || view === 4 ? d.near[side] : 0;
+  const scale = 1 + 0.1 * Math.max(0, near) - 0.08 * Math.max(0, -near);
+  const heelUp = 1 - 0.34 * Math.max(0, -near - 0.25);
+  const fx = (a: number, n: number) => d.cx + (ax + (n * c + a * s) * flip * scale) * d.S;
+  const fy = (a: number, n: number) => d.cy - (ay + (a * c - n * s) * scale * heelUp) * d.S;
   pen.begin();
   for (let i = 0; i < tbl.length; i++) {
     const q = tbl[i];
@@ -288,20 +294,25 @@ function jeansLeg(d: Draw, side: number, ramp: number, view: ViewId, group: numb
   const shinBack = d.shinBack[side] === 1;
   const g2 = group === G.legNear ? G.legNearB : G.legFarB;
   if (!shinBack) {
-    limbFill(d, tbl, map, ramp, group, PARTL, 3, -1);
-    legForm(d, map, group, breakT);
+    // (Along the walk: the near leg is drawn wider than the one going away.)
+    const near = view === 0 || view === 4 ? d.near[side] : 0;
+    const w = 1 + 0.08 * Math.max(0, near) - 0.05 * Math.max(0, -near);
+    d.pen.begin();
+    d.pts(tbl, map, w);
+    d.pen.fill(ramp, 3, PARTL, group, -1);
+    legForm(d, map, group, breakT, near);
   } else if (view === 0) {
     // Going away from the viewer: the shin first, the thigh over it.
     partLimb(d, tbl, map, 1, ramp, group, PARTL, -1);
-    legForm(d, map, group, breakT);
+    legForm(d, map, group, breakT, 0);
     partLimb(d, tbl, map, 0, ramp, g2, PARTL, -1);
-    legForm(d, map, g2, breakT);
+    legForm(d, map, g2, breakT, 0);
   } else {
     // From behind, a shin bent back comes toward the viewer: the thigh first.
     partLimb(d, tbl, map, 0, ramp, group, PARTL, -1);
-    legForm(d, map, group, breakT);
+    legForm(d, map, group, breakT, 0);
     partLimb(d, tbl, map, 1, ramp, g2, PARTL, -1);
-    legForm(d, map, g2, breakT);
+    legForm(d, map, g2, breakT, 0);
   }
 }
 
@@ -318,7 +329,7 @@ function plane(d: Draw, g: number, delta: number, ...p: number[]) {
  * it, then the lit front of the thigh (a hard diagonal at the hip crease), a diamond knee cap and a
  * straight shin. The cloth breaks in one or two shapes where it stacks above the boot (`breakT`).
  */
-function legForm(d: Draw, map: readonly number[], g: number, breakT: number) {
+function legForm(d: Draw, map: readonly number[], g: number, breakT: number, near: number) {
   d.wedge(LEG_SHADE_F, map, g);
   band(d, LEG_CORE, map, g, -2, 1);
   if (d.lod < 1) return;
@@ -329,6 +340,10 @@ function legForm(d: Draw, map: readonly number[], g: number, breakT: number) {
   const c = -a * 0.06;
   plane(d, g, 1, th, 0.06, c + 0.13, th, 0.2, c - 0.08, th, 0.62, c - 0.05, th, 0.72, c + 0.02, th, 0.5, c + 0.1);
   plane(d, g, 1, th, 0.9, c, th, 0.98, c + 0.09, sh, 0.08, c, th, 0.98, c - 0.09);
+  if (near > 0.3) {
+    // The knee coming forward: the top of the leg in shadow, the kneecap lit below it.
+    plane(d, g, -1, th, 0.66, -0.2, th, 0.66, 0.24, th, 0.82, 0.28, th, 0.84, -0.22);
+  }
   plane(d, g, 1, sh, 0.2, c + 0.04, sh, 0.2, c - 0.07, sh, 0.5, c - 0.05, sh, 0.5, c + 0.03);
   if (d.lod < 2) return;
   plane(d, g, 2, th, 0.93, c, th, 0.98, c + 0.05, sh, 0.05, c, th, 0.98, c - 0.05);
@@ -692,7 +707,11 @@ function reachArm(d: Draw, side: number, shirt: number, skin: number, level: num
     form(fx, fy, rx, ry, gs);
     const hg = hgroupNear;
     const hb = side === 0 ? B.haL : B.haR;
-    hand(d, handTbl, hb, skin, hg, 1);
+    // At a distance a grabbing hand is one solid mitt, a dozen texels across, cutting into the
+    // silhouette: fingers are not there to see, the shape coming at you is.
+    const lead = (side === 0) === (d.key.leadL === true);
+    if (d.S < 13.5) hand(d, HAND_MITT, hb, skin, hg, (lead ? 6.4 : 5.4) / d.S / 0.17);
+    else hand(d, handTbl, hb, skin, hg, lead ? 1.3 : 1);
     if (d.lod >= 2 && handTbl === HAND_SPLAY) {
       // Into the cupped palm: the dark of it, the heel of the hand lit, a crook in every finger.
       polyB(d, hb, [0.1, -0.2, 0.36, -0.3, 0.52, -0.16, 0.52, 0.1, 0.34, 0.2, 0.14, 0.16]);
@@ -923,13 +942,13 @@ function backCollar(d: Draw, view: ViewId, ramp: number) {
   if (view !== 3 && view !== 4) return;
   const pen = d.pen;
   pen.begin();
-  d.pt(B.chest, 0.74, 0.2, true);
-  d.pt(B.chest, 0.74, -0.2, true);
-  d.pt(B.chest, 0.42, -0.3, true);
-  d.pt(B.chest, 0.42, 0.3, true);
+  d.pt(B.chest, 0.62, 0.24, true);
+  d.pt(B.chest, 0.62, -0.24, true);
+  d.pt(B.chest, 0.42, -0.34, true);
+  d.pt(B.chest, 0.42, 0.34, true);
   pen.fill(ramp, 3, PARTT, G.collar, -2);
   if (d.lod >= 2) {
-    polyB(d, B.chest, [0.56, 0.32, 0.56, -0.32, 0.5, -0.32, 0.5, 0.32], true);
+    polyB(d, B.chest, [0.5, 0.36, 0.5, -0.36, 0.46, -0.36, 0.46, 0.36], true);
     pen.shade(G.collar, -1);
   }
 }
@@ -944,14 +963,140 @@ function workerArm(d: Draw, tbl: readonly Pt[], map: readonly number[], group: n
   } else stump(d, tbl, map, R.shirtGrey, group, level);
 }
 
-/** A neck stump for a headless figure. */
-function neckStump(d: Draw) {
+/** A neck stump for a headless figure: a short ragged column of skin above the collar, the wet end of it, a knob of bone. */
+function neckStump(d: Draw, skin: number) {
   const pen = d.pen;
-  polyB(d, B.neck, [-0.05, 0.3, 0.3, 0.26, 0.4, 0.1, 0.36, -0.14, 0.2, -0.28, -0.05, -0.3]);
+  polyB(d, B.neck, [-0.05, 0.25, 0.1, 0.23, 0.17, 0.14, 0.15, 0.02, 0.2, -0.1, 0.12, -0.22, -0.05, -0.25]);
+  pen.fill(skin, 2, PARTT, G.neck, 0);
+  polyB(d, B.neck, [0.09, 0.2, 0.2, 0.15, 0.18, 0.0, 0.23, -0.14, 0.09, -0.2]);
   pen.fill(R.blood, 2, PARTT, G.neck, 0);
-  polyB(d, B.neck, [0.1, 0.08, 0.28, 0.06, 0.3, -0.06, 0.12, -0.06]);
+  polyB(d, B.neck, [0.13, 0.06, 0.19, 0.03, 0.18, -0.05, 0.13, -0.05]);
   pen.shade(G.neck, 0, R.bone, 3);
 }
+
+// ─── A body on the street, seen from its feet ──────────────────────────────
+
+/** An arm for the lying body: a rounder shoulder, since the foreshortened trunk does not cover it. */
+const ARM_LYING: readonly Pt[] = [
+  [0, 0.02, 0.06],
+  [0, 0.14, 0.17],
+  [0, 0.34, 0.24],
+  [0, 0.62, 0.2],
+  [0, 0.92, 0.173],
+  [1, 0.06, 0.192],
+  [1, 0.3, 0.230],
+  [1, 0.62, 0.179],
+  [1, 0.9, 0.160],
+  [1, 1.0, 0.186, 1],
+  [1, 1.0, -0.186, 1],
+  [1, 0.9, -0.154],
+  [1, 0.55, -0.198],
+  [1, 0.22, -0.224],
+  [1, 0.02, -0.179],
+  [0, 0.88, -0.160],
+  [0, 0.55, -0.205],
+  [0, 0.26, -0.192],
+  [0, 0.1, -0.14],
+];
+
+interface CorpseStyle {
+  skin: number;
+  jeans: number;
+  foot: FootStyle;
+  head: HeadSpec;
+  /** Hard hat ramp, knocked off and lying by the head; −1 none. */
+  hat: number;
+  trunk(d: Draw): void;
+  arm(d: Draw, map: readonly number[], g: number, level: number, hb: number, hg: number): void;
+}
+
+/** A boot lying on its back, sole toward the viewer, toe up and fallen outward: the nearest thing on the sprite. */
+function soleBoot(d: Draw, side: number, st: FootStyle) {
+  const shin = side === 0 ? B.shL : B.shR;
+  const ax = d.ox[shin] + d.ax[shin] * d.A[shin];
+  const ay = d.oy[shin] + d.ay[shin] * d.A[shin];
+  const out = side === 0 ? 1 : -1;
+  const rot = out * 0.42;
+  const ux = Math.sin(rot);
+  const uy = Math.cos(rot);
+  const fx = (a: number, n: number) => d.cx + (ax + ux * a + uy * n) * d.S;
+  const fy = (a: number, n: number) => d.cy - (ay + uy * a - ux * n) * d.S;
+  const pen = d.pen;
+  const group = side === 0 ? G.bootL : G.bootR;
+  // The upper shows round the sole, longest at the toe.
+  const upper = [-0.4, 0.26, -0.26, 0.36, 0.1, 0.39, 0.46, 0.34, 0.62, 0.14, 0.62, -0.14, 0.46, -0.34, 0.1, -0.39, -0.26, -0.36, -0.4, -0.26];
+  pen.begin();
+  for (let i = 0; i < upper.length; i += 2) pen.add(fx(upper[i], upper[i + 1]), fy(upper[i], upper[i + 1]));
+  pen.fill(st.ramp, 3, PARTL, group, -1);
+  if (d.lod >= 1) {
+    pen.begin();
+    pen.add(fx(0.62, -0.28), fy(0.62, -0.28));
+    pen.add(fx(0.62, 0.28), fy(0.62, 0.28));
+    pen.add(fx(0.42, 0.28), fy(0.42, 0.28));
+    pen.add(fx(0.42, -0.28), fy(0.42, -0.28));
+    pen.shade(group, 1);
+  }
+  // The sole: rubber, a heel block and the ball of the foot with a waist between them, a couple of lugs.
+  const soleRamp = st.sole >= 0 ? st.sole : R.boot;
+  const soleTone = st.sole >= 0 ? 3 : 1;
+  const ball = [-0.06, 0.26, 0.1, 0.31, 0.38, 0.29, 0.52, 0.12, 0.52, -0.12, 0.38, -0.29, 0.1, -0.31, -0.06, -0.26];
+  pen.begin();
+  for (let i = 0; i < ball.length; i += 2) pen.add(fx(ball[i], ball[i + 1]), fy(ball[i], ball[i + 1]));
+  pen.shade(group, 0, soleRamp, soleTone);
+  const heel = [-0.34, 0.2, -0.22, 0.27, -0.12, 0.24, -0.12, -0.24, -0.22, -0.27, -0.34, -0.2];
+  pen.begin();
+  for (let i = 0; i < heel.length; i += 2) pen.add(fx(heel[i], heel[i + 1]), fy(heel[i], heel[i + 1]));
+  pen.shade(group, 0, soleRamp, soleTone);
+  if (d.lod >= 2) {
+    // Lugs: darker grooves across the ball of the foot.
+    const lug = (a: number) => {
+      pen.begin();
+      pen.add(fx(a, -0.22), fy(a, -0.22));
+      pen.add(fx(a + 0.07, 0.0), fy(a + 0.07, 0.0));
+      pen.add(fx(a, 0.22), fy(a, 0.22));
+      pen.stroke(group, 0, soleRamp, soleTone + (st.sole >= 0 ? -1 : 1));
+    };
+    lug(0.12);
+    lug(0.3);
+  }
+}
+
+function corpseFront(d: Draw, st: CorpseStyle) {
+  const pen = d.pen;
+  const lvlL = d.flags & 3;
+  const lvlR = (d.flags >> 2) & 3;
+  const headless = (d.flags & 16) !== 0;
+  // The arm out on the ground, under everything else.
+  st.arm(d, ARM_R, G.armFar, lvlR, B.haR, G.handF);
+  if (st.hat >= 0 && !headless) fallenHat(d, HG, st.hat, 0.84, 2.0, 0.28, 0.96);
+  shape(d, NECK_F, B.neck, st.skin, PARTH, G.neck, 2, 0);
+  if (headless) neckStump(d, st.skin);
+  else paintHead(d, st.head, HG, 0);
+  st.trunk(d);
+  seat(d, st.jeans, 0);
+  belt(d, R.belt, 0, st.hat >= 0);
+  // Across the belly, over the belt.
+  st.arm(d, ARM_L, G.armNear, lvlL, B.haL, G.handN);
+  const breakT = st.foot.shaft ? 0.44 : 0.82;
+  for (let side = 1; side >= 0; side--) {
+    const map = side === 0 ? LEG_L : LEG_R;
+    const g = side === 0 ? G.legNear : G.legFar;
+    pen.begin();
+    d.pts(LEG_F, map, 1.06);
+    pen.fill(st.jeans, 3, PARTL, g, -1);
+    legForm(d, map, g, breakT, 0);
+  }
+  soleBoot(d, 1, st.foot);
+  soleBoot(d, 0, st.foot);
+}
+
+function workerTrunk(d: Draw, view: ViewId, tbl: readonly Pt[], shirt: number) {
+  trunkFill(d, tbl, shirt, G.trunk);
+  trunkForm(d, G.trunk, view, false);
+  trunkFolds(d, G.trunk, view, false);
+}
+
+const WORK_HEAD_FALLEN: HeadSpec = { ...WORK_HEAD, hat: -1 };
 
 export const WORKER: FigureDef = {
   id: 0,
@@ -967,6 +1112,22 @@ export const WORKER: FigureDef = {
     const headless = (d.flags & 16) !== 0;
     const claw = d.lod >= 2 ? HAND_CLAW : HAND_MITT;
     const splay = HAND_SPLAY;
+    if (d.corpse) {
+      corpseFront(d, {
+        skin: R.skinDead,
+        jeans: R.denim,
+        foot: WORK_BOOT,
+        head: WORK_HEAD_FALLEN,
+        hat: R.hat,
+        trunk: (dd) => {
+          workerTrunk(dd, 0, TRUNK_F, shirt);
+          hiVisVest(dd, 0);
+          collar(dd, 0, shirt);
+        },
+        arm: (dd, map, g, level, hb, hg) => workerArm(dd, ARM_LYING, map, g, level, claw, hb, hg, 1),
+      });
+      return;
+    }
     if (view === 4) {
       if (d.reach[0] > 0) reachArm(d, 0, shirt, R.skinDead, lvlL, splay, G.handF);
       if (d.reach[1] > 0) reachArm(d, 1, shirt, R.skinDead, lvlR, splay, G.handN);
@@ -975,14 +1136,12 @@ export const WORKER: FigureDef = {
     legs(d, R.denim, view, WORK_BOOT);
     seat(d, R.denim, view);
     belt(d, R.belt, view, true);
-    trunkFill(d, trunkTbl, shirt, G.trunk);
-    trunkForm(d, G.trunk, view, false);
-    trunkFolds(d, G.trunk, view, false);
+    workerTrunk(d, view, trunkTbl, shirt);
     shape(d, NECK_F, B.neck, R.skinDead, PARTH, G.neck, 2, 0);
     hiVisVest(d, view);
     if (!isBack(view)) collar(d, view, shirt);
     else backCollar(d, view, shirt);
-    if (headless) neckStump(d);
+    if (headless) neckStump(d, R.skinDead);
     else paintHead(d, WORK_HEAD, HG, view);
     if (isSideish(view)) {
       workerArm(d, armTbl, ARM_R, G.armNear, lvlR, claw, B.haR, G.handN, view === 2 ? 0.7 : 0.85);
@@ -1117,6 +1276,25 @@ const SHIRT_S: readonly Pt[] = [
 
 const FLANNEL_HEAD: HeadSpec = { skin: R.skinLive, dead: false, hair: R.hairDark, hat: -1, jaw: 0.5 };
 
+/** The flannel over the trunk: the base is the plaid's open square (the cloth's lit red), the check runs over it, then the form. */
+function flannelTrunk(d: Draw, view: ViewId, tbl: readonly Pt[], shirt: number, cell: number) {
+  d.pen.begin();
+  d.pts(tbl, TRUNK_MAP);
+  d.pen.fill(shirt, 4, PARTT, G.trunk, -1);
+  check(d, G.trunk, B.chest, -1.1, 0.55, -0.9, 0.9, cell, 0);
+  check(d, G.trunk, B.pelvis, -0.16, 0.5, -0.9, 0.9, cell, 0);
+  trunkForm(d, G.trunk, view, true);
+  trunkFolds(d, G.trunk, view, true);
+  if (d.lod >= 1 && view === 0) {
+    // The button placket.
+    strokeB(d, B.chest, G.trunk, 0, [0.42, 0.02, -0.5, 0.02], R.flannelDark, 2);
+    strokeB(d, B.waist, G.trunk, 0, [0.5, 0.02, -0.25, 0.02], R.flannelDark, 2);
+    strokeB(d, B.pelvis, G.trunk, 0, [0.45, 0.02, 0.0, 0.02], R.flannelDark, 2);
+    for (const a of [0.34, 0.02, -0.3]) dotB(d, B.chest, G.trunk, a, 0.02, R.white, 4);
+    dotB(d, B.waist, G.trunk, 0.22, 0.02, R.white, 4);
+  }
+}
+
 export const FLANNEL: FigureDef = {
   id: 1,
   rest: CIVSTAND[0],
@@ -1141,6 +1319,25 @@ export const FLANNEL: FigureDef = {
       if (d.lod >= 1) rolledCuff(d, map, g, shirt, 0.32);
       hand(d, open, hb, R.skinLive, hg, narrow);
     };
+    if (d.corpse) {
+      corpseFront(d, {
+        skin: R.skinLive,
+        jeans: R.denimCiv,
+        foot: SNEAKER,
+        head: FLANNEL_HEAD,
+        hat: -1,
+        trunk: (dd) => {
+          flannelTrunk(dd, 0, SHIRT_F, shirt, cell);
+          collar(dd, 0, shirt);
+        },
+        arm: (dd, map, g, _level, hb, hg) => {
+          sleeve(dd, ARM_LYING, map, shirt, g, R.skinLive, 0.32, 4, false);
+          armCheck(map, g);
+          hand(dd, open, hb, R.skinLive, hg, 1);
+        },
+      });
+      return;
+    }
     if (view === 4) {
       if (d.reach[0] > 0) reachArm(d, 0, shirt, R.skinLive, 0, open, G.handF, R.skinLive);
       if (d.reach[1] > 0) reachArm(d, 1, shirt, R.skinLive, 0, open, G.handN, R.skinLive);
@@ -1148,23 +1345,7 @@ export const FLANNEL: FigureDef = {
     if (isSideish(view)) arm(ARM_L, G.armFar, B.haL, G.handF, view === 2 ? 0.75 : 0.9);
     legs(d, R.denimCiv, view, SNEAKER);
     seat(d, R.denimCiv, view);
-    d.pen.begin();
-    d.pts(trunkTbl, TRUNK_MAP);
-    // (The cloth's lit red is the plaid's open square; the bands step down from it.)
-    d.pen.fill(shirt, 4, PARTT, G.trunk, -1);
-    // The check runs over chest and belly, then the shadow shape goes over it.
-    check(d, G.trunk, B.chest, -1.1, 0.55, -0.9, 0.9, cell, 0);
-    check(d, G.trunk, B.pelvis, -0.16, 0.5, -0.9, 0.9, cell, 0);
-    trunkForm(d, G.trunk, view, true);
-    trunkFolds(d, G.trunk, view, true);
-    if (d.lod >= 1 && view === 0) {
-      // The button placket.
-      strokeB(d, B.chest, G.trunk, 0, [0.42, 0.02, -0.5, 0.02], R.flannelDark, 2);
-      strokeB(d, B.waist, G.trunk, 0, [0.5, 0.02, -0.25, 0.02], R.flannelDark, 2);
-      strokeB(d, B.pelvis, G.trunk, 0, [0.45, 0.02, 0.0, 0.02], R.flannelDark, 2);
-      for (const a of [0.34, 0.02, -0.3]) dotB(d, B.chest, G.trunk, a, 0.02, R.white, 4);
-      dotB(d, B.waist, G.trunk, 0.22, 0.02, R.white, 4);
-    }
+    flannelTrunk(d, view, trunkTbl, shirt, cell);
     shape(d, NECK_F, B.neck, R.skinLive, PARTH, G.neck, 2, 0);
     if (view <= 2) {
       // White tee in the open neck.

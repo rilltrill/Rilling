@@ -96,6 +96,10 @@ export interface PoseKey {
   fists?: boolean;
   /** A different drawing of this key for the front and back views (a lying body has its own foreshortening). */
   front?: PoseKey;
+  /** In a front-view reach, the left arm (not the right) is the one that comes in low and big. */
+  leadL?: boolean;
+  /** A body lying with its feet toward the viewer: joints come from a hand-plotted table, not the bones. */
+  corpse?: boolean;
 }
 
 /** Joint positions: figure frame (x, y, z); and, after `project`, screen hu (x right, y up) with z = toward the viewer. */

@@ -1,4 +1,4 @@
-import { CIVCOWER, CIVPLEAD, CIVRUN, CIVSTAND, CIVWALK, ZDEATH, ZIDLE, ZLUNGE, ZSHAMBLE, ZSTAGGER, ZWINDUP } from './poses';
+import { CIVBACK, CIVCOWER, CIVPLEAD, CIVRUN, CIVSTAND, ZDEATH, ZFALL, ZIDLE, ZLUNGE, ZRECOVER, ZSHAMBLE, ZSTAGGER, ZWINDUP } from './poses';
 import type { PoseKey } from './skeleton';
 
 /**
@@ -30,13 +30,13 @@ export function cycleFrame(phase: number, n: number): number {
  * A zombie: `state` and seconds in it; `windup` duration; `phase` the walk phase (radians, one
  * cycle = 2π); `speed` over ground (m/s); `deathT` the fall duration.
  */
-export function zombieFrame(state: string, t: number, windup: number, phase: number, speed: number, deathT: number): FramePick {
+export function zombieFrame(state: string, t: number, windup: number, phase: number, speed: number, deathT: number, air = 0): FramePick {
   if (state === 'dying') return pick(ZDEATH, Math.min(ZDEATH.length - 1, Math.floor((t / Math.max(0.1, deathT)) * ZDEATH.length)));
   if (state === 'stagger') return pick(ZSTAGGER, t < 0.14 ? 0 : 1);
-  if (state === 'windup' || state === 'recover') {
-    const p = t / Math.max(0.1, windup);
-    return pick(ZWINDUP, state === 'recover' ? ZWINDUP.length - 1 : Math.min(ZWINDUP.length - 1, Math.floor(p * ZWINDUP.length)));
-  }
+  if (state === 'recover') return pick(ZRECOVER, 0);
+  if (state === 'windup') return pick(ZWINDUP, Math.min(ZWINDUP.length - 1, Math.floor((t / Math.max(0.1, windup)) * ZWINDUP.length)));
+  // Dropped from above: a walk frame in mid-air reads as a hung mannequin.
+  if (state === 'entry' && air > 0.3) return pick(ZFALL, 0);
   if (state === 'lunge' || state === 'pounce') return pick(ZLUNGE, 0);
   if (speed < 0.25) return pick(ZIDLE, 0);
   return pick(ZSHAMBLE, cycleFrame(phase, ZSHAMBLE.length));
@@ -47,8 +47,11 @@ export const RUN_STRIDE = 2.0;
 /** Metres a walking step covers, backing away. */
 const BACK_STRIDE = 1.2;
 
+/** A rig head height (head units above the feet) → which cower key ducks that far. */
+const COWER_HEADS = [3.9, 3.55, 3.2];
+
 /** A civilian's phase → frame. `travel` = metres moved over the ground (the run cycle follows it, not the clock). */
-export function civilianFrame(phase: string, phaseT: number, shot: boolean, age: number, travel: number): FramePick {
+export function civilianFrame(phase: string, phaseT: number, shot: boolean, age: number, travel: number, headH = 4.2): FramePick {
   if (shot) return pick(ZDEATH, Math.min(ZDEATH.length - 1, Math.floor((age / 0.7) * ZDEATH.length)));
   switch (phase) {
     case 'flee':
@@ -59,10 +62,13 @@ export function civilianFrame(phase: string, phaseT: number, shot: boolean, age:
       return pick(CIVRUN, cycleFrame((travel / RUN_STRIDE) * Math.PI * 2, CIVRUN.length));
     case 'backaway':
       // The walk played backwards: facing the threat, stepping away from it.
-      return pick(CIVWALK, CIVWALK.length - 1 - cycleFrame((travel / BACK_STRIDE) * Math.PI * 2, CIVWALK.length));
+      return pick(CIVBACK, CIVBACK.length - 1 - cycleFrame((travel / BACK_STRIDE) * Math.PI * 2, CIVBACK.length));
     case 'cower':
-    case 'hide':
-      return pick(CIVCOWER, 0);
+    case 'hide': {
+      let best = 0;
+      for (let i = 1; i < COWER_HEADS.length; i++) if (Math.abs(COWER_HEADS[i] - headH) < Math.abs(COWER_HEADS[best] - headH)) best = i;
+      return pick(CIVCOWER, best);
+    }
     case 'plead':
     case 'startle':
     case 'grabbed':

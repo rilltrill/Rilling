@@ -514,15 +514,17 @@ export const PELVIS_S: readonly Pt[] = [
   [0, 0.42, -0.34],
 ];
 
-/** Neck, a tapered column that widens into the traps. */
+/** Neck: a column narrower than the jaw (the outline steps in under the chin), flaring into the traps. */
 export const NECK_F: readonly Pt[] = [
   [0, -0.2, 0.42],
-  [0, 0.0, 0.27],
-  [0, 0.3, 0.235],
+  [0, -0.04, 0.25],
+  [0, 0.14, 0.2],
+  [0, 0.3, 0.2],
   [0, 0.42, 0.2],
   [0, 0.42, -0.2],
-  [0, 0.3, -0.235],
-  [0, 0.0, -0.27],
+  [0, 0.3, -0.2],
+  [0, 0.14, -0.2],
+  [0, -0.04, -0.25],
   [0, -0.2, -0.42],
 ];
 

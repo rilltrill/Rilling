@@ -1,4 +1,4 @@
-import { J, HEADS, Skeleton, buildPose, project, type PoseKey, type ViewId } from './skeleton';
+import { BODY, J, HEADS, Skeleton, buildPose, project, type PoseKey, type ViewId } from './skeleton';
 import { IndexedCanvas, Pen, MAX_CANVAS } from './raster';
 import type { FigureDef } from './outfits';
 import type { BandRow } from './body';
@@ -68,6 +68,8 @@ export class Draw {
   ay = new Float32Array(B.count);
   /** Length along the axis that `along` = 1 means (hu): a limb's 2D length; 1 on body frames. */
   A = new Float32Array(B.count);
+  /** Scale on the normal (1 except where a bone is drawn foreshortened as a whole: a lying head). */
+  N = new Float32Array(B.count);
   /** Sign making `n > 0` lateral (front/back views) or screen right (the others). */
   sg = new Float32Array(B.count);
   time = 0;
@@ -79,6 +81,10 @@ export class Draw {
   readonly reach = new Float32Array(2);
   /** Front and back views: a shin folded back behind its thigh, left and right. */
   readonly shinBack = new Uint8Array(2);
+  /** How far each foot is toward (+1) or away from (−1) the viewer, as the floor plane draws it. */
+  readonly near = new Float32Array(2);
+  /** The lying body's hand-plotted drawing is in use. */
+  corpse = false;
 
   constructor(pen: Pen) {
     this.pen = pen;
@@ -97,6 +103,7 @@ export class Draw {
     this.ox[B.head] = sk.sx[J.head];
     this.oy[B.head] = sk.sy[J.head];
     this.A[B.head] = 1;
+    this.N[B.head] = 1;
     this.sg[B.head] = -1;
     let hx = sk.sx[J.head] - sk.sx[J.neck];
     let hy = sk.sy[J.head] - sk.sy[J.neck];
@@ -142,6 +149,7 @@ export class Draw {
     this.ax[b] = ax;
     this.ay[b] = ay;
     this.A[b] = unit > 0 ? 1 : l;
+    this.N[b] = 1;
     this.sg[b] = sg;
   }
 
@@ -155,11 +163,11 @@ export class Draw {
 
   /** Screen position (texels) of a control point; the base of everything a table says. */
   px(b: number, a: number, n: number) {
-    const o = this.ox[b] + this.ax[b] * a * this.A[b] + -this.ay[b] * n * this.sg[b];
+    const o = this.ox[b] + this.ax[b] * a * this.A[b] + -this.ay[b] * n * this.sg[b] * this.N[b];
     return this.cx + o * this.S;
   }
   py(b: number, a: number, n: number) {
-    const o = this.oy[b] + this.ay[b] * a * this.A[b] + this.ax[b] * n * this.sg[b];
+    const o = this.oy[b] + this.ay[b] * a * this.A[b] + this.ax[b] * n * this.sg[b] * this.N[b];
     return this.cy - o * this.S;
   }
 
@@ -168,11 +176,11 @@ export class Draw {
     this.pen.add(this.px(b, a, n), this.py(b, a, n), corner);
   }
 
-  /** Add a table; its bone numbers are indexes into `map`. */
-  pts(table: readonly Pt[], map: readonly number[]) {
+  /** Add a table; its bone numbers are indexes into `map`; `scale` widens the limb across its axis. */
+  pts(table: readonly Pt[], map: readonly number[], scale = 1) {
     for (let i = 0; i < table.length; i++) {
       const p = table[i];
-      this.pt(map[p[0]], p[1], p[2], p[3] === 1);
+      this.pt(map[p[0]], p[1], p[2] * scale, p[3] === 1);
     }
   }
 
@@ -227,8 +235,9 @@ export function band(d: Draw, tbl: readonly BandRow[], map: readonly number[], g
 
 /**
  * Front and back views: arms thrust along the view axis. Bones cannot show this (an arm aimed at
- * the camera projects straight up), so the drawing is placed by hand: hands rising thigh, chest,
- * face with the swing, wrists at the shoulders' width, big in front of the body.
+ * the camera projects straight up), so the drawing is placed by hand: one hand comes in low over
+ * the breastbone and big, the other reaches up at chin height off to the side. Hands never match:
+ * two hands at one height, the same distance out, read as a figure holding its own head.
  */
 function placeReach(d: Draw, key: PoseKey, view: ViewId) {
   const sk = d.sk;
@@ -244,10 +253,12 @@ function placeReach(d: Draw, key: PoseKey, view: ViewId) {
     const out = Math.sign(sk.sx[sh] - sk.sx[J.chest]) || (s === 0 ? 1 : -1);
     const x0 = sk.sx[sh];
     const y0 = sk.sy[sh];
-    // Low and close in at the start of the reach (the hands are in front of the chest), out to the
-    // shoulders' width by the end of it.
-    const wx = x0 + out * (-0.14 + 0.36 * t);
-    const wy = y0 - 0.75 + 0.8 * t;
+    const lead = (s === 0) === (key.leadL === true);
+    // Lead: rises from the belly to over the breastbone, near the centre line, big.
+    // Other: from low on its own side up to the chin, wide of the head.
+    const target = sk.sx[J.chest] + out * (lead ? 0.3 : 0.7);
+    const wx = x0 + (target - x0) * (0.3 + 0.7 * t);
+    const wy = lead ? y0 - 1.5 + 0.8 * t : y0 - 1.0 + 1.18 * t;
     const el = s === 0 ? J.elL : J.elR;
     const wr = s === 0 ? J.wrL : J.wrR;
     const tip = s === 0 ? J.tipL : J.tipR;
@@ -256,9 +267,81 @@ function placeReach(d: Draw, key: PoseKey, view: ViewId) {
     sk.sx[wr] = wx;
     sk.sy[wr] = wy;
     // Fingers aimed at the camera are short on screen: the hand is wide and squat, not tall.
-    const hl = 0.58 + 0.12 * t;
+    const hl = (lead ? 0.72 : 0.58) + 0.12 * t;
     sk.sx[tip] = wx + out * hl * (0.12 + 0.22 * t);
     sk.sy[tip] = wy + hl * 0.95;
+  }
+}
+
+/** How far toward or away from the viewer feet read on the street, hu of screen height per hu of depth. */
+const FLOOR_NEAR = 0.36;
+const FLOOR_FAR = 0.22;
+/** Most a stride-leading shin is drawn on screen, against its full length: the knee is coming at the viewer. */
+const NEAR_SHIN = 0.9;
+
+/**
+ * Depth drawn on the street, for the views that look along the walk: a foot coming at the viewer
+ * lands lower on the screen, one going away sits higher, and the near leg's knee and shin are drawn
+ * as the foreshortened part. Nothing is rotated: it is the floor plane a sprite artist plots by eye.
+ */
+function floorDepth(d: Draw, key: PoseKey, view: ViewId) {
+  const sk = d.sk;
+  d.near[0] = d.near[1] = 0;
+  if (view === 2 || key.noGround) return;
+  for (let s = 0; s < 2; s++) {
+    const kn = s === 0 ? J.kneeL : J.kneeR;
+    const an = s === 0 ? J.ankleL : J.ankleR;
+    const to = s === 0 ? J.toeL : J.toeR;
+    const zA = sk.sz[an];
+    const zK = sk.sz[kn];
+    sk.sy[kn] -= zK * (zK > 0 ? FLOOR_NEAR : FLOOR_FAR);
+    sk.sy[an] -= zA * (zA > 0 ? FLOOR_NEAR : FLOOR_FAR);
+    sk.sy[to] -= zA * (zA > 0 ? FLOOR_NEAR : FLOOR_FAR);
+    d.near[s] = Math.max(-1, Math.min(1, zA / 0.72));
+    if ((view === 0 || view === 4) && d.near[s] > 0.3) {
+      // The near leg: the knee comes forward over a shorter shin.
+      const L = Math.hypot(sk.sx[an] - sk.sx[kn], sk.sy[an] - sk.sy[kn]);
+      const short = BODY.shin * NEAR_SHIN;
+      if (L > short) {
+        const k = short / L;
+        sk.sx[kn] = sk.sx[an] + (sk.sx[kn] - sk.sx[an]) * k;
+        sk.sy[kn] = sk.sy[an] + (sk.sy[kn] - sk.sy[an]) * k;
+      }
+    }
+  }
+}
+
+/** A corpse seen from its feet, in head units, as a sprite artist plots it (x right, y up, on the street). */
+const CORPSE: readonly (readonly [number, number, number])[] = [
+  [J.pelvis, 0.0, 1.14],
+  [J.waist, 0.02, 1.42],
+  [J.chest, 0.0, 1.74],
+  [J.neck, -0.04, 2.0],
+  [J.head, 0.14, 2.28],
+  [J.shL, 0.58, 1.86],
+  [J.elL, 1.02, 1.52],
+  [J.wrL, 0.6, 1.26],
+  [J.tipL, 0.14, 1.22],
+  [J.shR, -0.58, 1.86],
+  [J.elR, -1.06, 1.52],
+  [J.wrR, -1.3, 1.0],
+  [J.tipR, -1.42, 0.6],
+  [J.hipL, 0.34, 1.02],
+  [J.kneeL, 0.48, 0.74],
+  [J.ankleL, 0.64, 0.46],
+  [J.toeL, 0.88, 0.86],
+  [J.hipR, -0.34, 1.02],
+  [J.kneeR, -0.44, 0.76],
+  [J.ankleR, -0.6, 0.46],
+  [J.toeR, -0.84, 0.84],
+];
+
+function placeCorpse(d: Draw) {
+  const sk = d.sk;
+  for (let i = 0; i < CORPSE.length; i++) {
+    const c = CORPSE[i];
+    sk.sx[c[0]] = c[1];
+    sk.sy[c[0]] = c[2];
   }
 }
 
@@ -310,10 +393,12 @@ export function makeFigureRenderer() {
   function paint(def: FigureDef, key: PoseKey, view: ViewId, pxTall: number, hx = 0, hy = 0, flags = 0, lod = -1) {
     canvas.clear();
     pen.reset();
+    if ((view === 0 || view === 4) && key.front) key = key.front;
+    // (A corpse has one drawing for the views that look along it.)
+    if (key.corpse) view = 0;
     d.view = view;
     d.flags = flags;
     const sk = d.sk;
-    if ((view === 0 || view === 4) && key.front) key = key.front;
     d.key = key;
     buildPose(sk, key, def.ground !== false && !key.noGround);
     project(sk, view);
@@ -324,9 +409,17 @@ export function makeFigureRenderer() {
     d.cx = canvas.w / 2;
     d.cy = canvas.h - 8;
     d.lod = lod >= 0 ? lod : lodFor(d.S, -1);
+    d.corpse = key.corpse === true;
+    if (d.corpse) placeCorpse(d);
+    else floorDepth(d, key, view);
     placeReach(d, key, view);
     placeShins(d, view);
     d.frames();
+    if (d.corpse) {
+      // Seen end on from the feet, the torso is short and the head small and far.
+      d.A[B.pelvis] = d.A[B.waist] = d.A[B.chest] = 0.6;
+      d.A[B.head] = d.N[B.head] = 0.72;
+    }
     // Sleeves flow into the shoulder, trousers into the hip: no seam line round the joint.
     const R = 0.38 * d.S;
     pen.suppress(d.cx + sk.sx[J.shL] * d.S, d.cy - sk.sy[J.shL] * d.S, R);

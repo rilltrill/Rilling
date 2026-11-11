@@ -112,6 +112,8 @@ export class Pen {
   private supN = 0;
   /** Paint serial of the group most recently filled, by group id. */
   private gOrder = new Uint16Array(256);
+  /** Groups whose outer edge takes a dark tone instead of the ink (a far hat's brim). */
+  private soft = new Uint8Array(256);
   /** Corners to take out of the outline (a figure has a few hundred at most). */
   private shaved = new Int32Array(8192);
 
@@ -126,8 +128,14 @@ export class Pen {
   reset() {
     this.lineDelta.fill(0);
     this.gOrder.fill(0);
+    this.soft.fill(0);
     this.serial = 0;
     this.supN = 0;
+  }
+
+  /** The group's outer edge takes its own tone, one step down, instead of the ink. */
+  softEdge(group: number) {
+    this.soft[group] = 1;
   }
 
   /** No interior line within radius `r` of (x, y) (texels). */
@@ -505,7 +513,7 @@ export class Pen {
         // Outer silhouette: an empty 4-neighbour.
         if (idx[k - 1] === 0 || idx[k + 1] === 0 || idx[k - w] === 0 || idx[k + w] === 0) {
           const r = Math.floor((idx[k] - 1) / RAMP_TONES);
-          idx[k] = 1 + r * RAMP_TONES + INK;
+          idx[k] = 1 + r * RAMP_TONES + (this.soft[group[k]] === 1 ? Math.max(1, c.base[k] - 1) : INK);
           continue;
         }
         const g = group[k];
