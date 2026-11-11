@@ -187,7 +187,7 @@ export class Draw {
    * A shadow shape on the away side of a limb: `inner` is its inner edge (bone, along, normal
    * magnitude toward the away side); the outside is closed well past the limb (the fill clips to `group`).
    */
-  wedge(inner: readonly Pt[], map: readonly number[], group: number, delta = -1) {
+  wedge(inner: readonly Pt[], map: readonly number[], group: number, delta = -1, relative = false) {
     const pen = this.pen;
     pen.begin();
     for (let i = 0; i < inner.length; i++) {
@@ -200,7 +200,8 @@ export class Draw {
       const b = map[p[0]];
       this.pt(b, p[1], (p[2] + 0.6) * this.away(b), true);
     }
-    pen.shade(group, delta);
+    if (relative) pen.darken(group, -delta);
+    else pen.shade(group, delta);
   }
 }
 
@@ -208,7 +209,7 @@ export class Draw {
  * A shaped form on one side of a limb: `side` −1 = toward the light, +1 = away. Rows are (bone,
  * along, near edge, far edge); `delta` tone steps from the base (never stacks with another shade).
  */
-export function band(d: Draw, tbl: readonly BandRow[], map: readonly number[], group: number, delta: number, side: number) {
+export function band(d: Draw, tbl: readonly BandRow[], map: readonly number[], group: number, delta: number, side: number, relative = false) {
   const pen = d.pen;
   pen.begin();
   const sign = side * d.away(map[tbl[0][0]]);
@@ -220,7 +221,8 @@ export function band(d: Draw, tbl: readonly BandRow[], map: readonly number[], g
     const r = tbl[i];
     d.pt(map[r[0]], r[1], r[3] * sign);
   }
-  pen.shade(group, delta);
+  if (relative) pen.darken(group, -delta);
+  else pen.shade(group, delta);
 }
 
 /**

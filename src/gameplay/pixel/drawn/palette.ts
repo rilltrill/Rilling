@@ -52,7 +52,7 @@ export const RAMPS: RampDef[] = [
   { name: 'blood', hex: 0x8a1414, kind: 'gore' },
   { name: 'bone', hex: 0xe2d8ba, kind: 'flat' },
   { name: 'eyeGlow', hex: 0xfff2a0, kind: 'flat', colors: [0x402018, 0x80401c, 0xc08030, 0xf2c850, 0xfff0a8, 0xffffff] },
-  { name: 'flannel', hex: 0xb4282e, kind: 'cloth' },
+  { name: 'flannel', hex: 0xb4282e, kind: 'cloth', colors: [0x180810, 0x4a0f1a, 0x7c1824, 0xb4282e, 0xd83c34, 0xee6e52] },
   { name: 'flannelDark', hex: 0x2c2c3a, kind: 'cloth' },
   { name: 'skinLive', hex: 0xd89a70, kind: 'live' },
   { name: 'denimCiv', hex: 0x3a5a94, kind: 'cloth', colors: [0x0e1730, 0x1c2f5c, 0x2a4680, 0x3a5a94, 0x5075ae, 0x6f92c6] },

@@ -409,6 +409,30 @@ if (which.has('canon')) {
     }
   }
 }
+if (which.has('sil')) {
+  // Solid black at 60 tall, x4, and the same figures in colour.
+  const rows = [['worker', WORKER, ['zidle', 'zshamble', 'zwindup', 'zlunge', 'zdeath']], ['flannel', FLANNEL, ['civstand', 'civrun', 'civplead', 'civcower']]];
+  const s = new Sheet(1880, 1060, 0x6f7f8c);
+  let y = 20;
+  for (const [name, def, poses] of rows) {
+    for (const solid of [true, false]) {
+      let x = 10;
+      for (const p of poses) {
+        const F = POSES[p];
+        const fr = p === 'zwindup' || p === 'zdeath' ? F.length - 1 : p === 'zshamble' || p === 'civrun' ? 1 : 0;
+        for (const v of [0, 1, 2]) {
+          const f = renderer.draw(def, F, fr, v, 60);
+          s.figure(f, x, y + (60 - f.h) * 4 + 8, 4, solid);
+          x += Math.max(f.w * 4, 110) + 14;
+        }
+        s.text(x - 100, y + 270, p);
+      }
+      y += 255;
+    }
+    y += 10;
+  }
+  s.save(`${out}/sil60.png`);
+}
 if (which.has('heads')) {
   // Heads in every view, x6, and hands and feet x4.
   const s = new Sheet(1880, 1040, 0x6f7f8c);

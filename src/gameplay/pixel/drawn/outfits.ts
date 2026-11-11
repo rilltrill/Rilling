@@ -509,8 +509,8 @@ function armForm(d: Draw, map: readonly number[], group: number) {
   }
 }
 
-/** Shows a limb as sleeve of `ramp` to the point `tRoll` on its second bone (rolled up: forearm skin below). */
-function sleeve(d: Draw, tbl: readonly Pt[], map: readonly number[], ramp: number, group: number, skin: number, tRoll: number) {
+/** Shows a limb as sleeve of `ramp` to the point `tRoll` on its second bone (rolled up: forearm skin below). `tone` and `form` leave a printed cloth to its own painter. */
+function sleeve(d: Draw, tbl: readonly Pt[], map: readonly number[], ramp: number, group: number, skin: number, tRoll: number, tone = 3, form = true) {
   const pen = d.pen;
   // Whole arm in skin first (when rolled), then the sleeve shape cut at the roll.
   if (tRoll < 1) limbFill(d, tbl, map, skin, group, PARTL, 3, -2);
@@ -524,9 +524,9 @@ function sleeve(d: Draw, tbl: readonly Pt[], map: readonly number[], ramp: numbe
     d.pt(map[1], tRoll, 0.3, true);
     d.pt(map[1], tRoll, -0.3, true);
   }
-  pen.fill(ramp, 3, PARTL, group, -2);
-  armForm(d, map, group);
-  if (d.lod >= 2) {
+  pen.fill(ramp, tone, PARTL, group, -2);
+  if (form) armForm(d, map, group);
+  if (d.lod >= 2 && form) {
     // Cloth bunches at the inner elbow; a seam from the shoulder.
     foldShape(d, map[0], group, 0.8, -0.14, 0.96, 0.08, 0.07);
     foldShape(d, map[1], group, 0.04, -0.14, 0.16, 0.08, 0.07);
@@ -907,7 +907,7 @@ export const WORKER: FigureDef = {
     const lvlR = (d.flags >> 2) & 3;
     const headless = (d.flags & 16) !== 0;
     const claw = d.lod >= 2 ? HAND_CLAW : HAND_MITT;
-    const splay = d.lod >= 2 ? HAND_SPLAY : HAND_MITT;
+    const splay = HAND_SPLAY;
     if (view === 4) {
       if (d.reach[0] > 0) reachArm(d, 0, shirt, R.skinDead, lvlL, splay, G.handF);
       if (d.reach[1] > 0) reachArm(d, 1, shirt, R.skinDead, lvlR, splay, G.handN);
@@ -1073,11 +1073,11 @@ export const FLANNEL: FigureDef = {
       check(d, g, map[1], -0.05, 0.3, -0.42, 0.42, cell * 0.8, 1);
     };
     const arm = (map: readonly number[], g: number, hb: number, hg: number, narrow: number) => {
-      sleeve(d, armTbl, map, shirt, g, R.skinLive, 0.32);
+      sleeve(d, armTbl, map, shirt, g, R.skinLive, 0.32, 4, false);
       armCheck(map, g);
-      d.wedge(ARM_SHADE_F, map, g);
-      band(d, ARM_CORE, map, g, -2, 1);
-      if (d.lod >= 1) band(d, DELTOID_LIT, map, g, 1, -1);
+      d.wedge(ARM_SHADE_F, map, g, -1, true);
+      band(d, ARM_CORE, map, g, -1, 1, true);
+      if (d.lod >= 1) band(d, DELTOID_LIT, map, g, 1, -1, true);
       hand(d, open, hb, R.skinLive, hg, narrow);
     };
     if (view === 4) {
@@ -1089,7 +1089,8 @@ export const FLANNEL: FigureDef = {
     seat(d, R.denimCiv, view);
     d.pen.begin();
     d.pts(trunkTbl, TRUNK_MAP);
-    d.pen.fill(shirt, 3, PARTT, G.trunk, -1);
+    // (The cloth's lit red is the plaid's open square; the bands step down from it.)
+    d.pen.fill(shirt, 4, PARTT, G.trunk, -1);
     // The check runs over chest and belly, then the shadow shape goes over it.
     check(d, G.trunk, B.chest, -1.1, 0.55, -0.9, 0.9, cell, 0);
     check(d, G.trunk, B.pelvis, -0.16, 0.5, -0.9, 0.9, cell, 0);
