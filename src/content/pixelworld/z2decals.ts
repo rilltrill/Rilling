@@ -13,14 +13,19 @@ import { darken, hash2 } from './surfaces';
  */
 
 
-const BLOOD = 0x6a0c0c;
+/**
+ * Blood is DRIED: a maroon that stays under the scenery's mid tones. (The first pass's saturated
+ * red was the colour of the hit flash and the blood FX, laid down the middle of the lane and
+ * across the walls enemies stand against: docs/pixelworld2/plan-z2.md §0.)
+ */
+const BLOOD = 0x561418;
 /** The grey the NEUTRAL stain decals are painted round (tinted per wall / floor / ceiling colour). */
 export const STAIN_BASE = 0xd0ccc4;
-const BLOOD_DARK = 0x3a0606;
+const BLOOD_DARK = 0x34100f;
 
 /** Wet-blood ramps (fresh red / old brown) for a painter. */
 function bloodRamps(k: { ramp(hex: number, o?: object): number }) {
-  return { fresh: k.ramp(BLOOD, { light: 0.45, sat: 1.15 }), old: k.ramp(BLOOD_DARK, { light: 0.4, sat: 1.1 }) };
+  return { fresh: k.ramp(BLOOD, { light: 0.22, sat: 0.95, dark: 0.5 }), old: k.ramp(BLOOD_DARK, { light: 0.2, sat: 0.9, dark: 0.55 }) };
 }
 
 /** An irregular blob mask (radius wobble) — true inside. */
