@@ -165,6 +165,7 @@ Earlier looks stay reachable in this branch's history (and the in-game **Setting
 | Version | Commit | What it is |
 |---|---|---|
 | Pixel cast (v3) | `dbb66ee` | Pixel-art characters, bosses, props and plants over the 3D environments. Playable copy: https://claude.ai/artifact/SxuHBiXEMmVwBSqiARdujb |
+| Pixel world (v5) | `b117d80` | First pass of the painted environments, with the contoured characters. Playable copy: https://claude.ai/artifact/1GjN6f6x9xZcDTY99NU823 (private). |
 | Classic 3D | `37d8ada` | The first build played on iPhone (retro-textured 3D characters). |
 
 To run one: `git checkout <commit> && npm ci && npm run dev`.
