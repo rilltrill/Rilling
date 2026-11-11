@@ -451,7 +451,7 @@ const paintCafe: PwPainter = (c, k) => {
   light(e, { moon: 0.9 });
 };
 
-const W4_COL: ElevWallColours = { wall: 0x5a3e2c, alt: 0x4a3626, brick: 0x704030, stone: 0x847a64, frame: 0x262320, curtain: 0x6a3a3a };
+const W4_COL: ElevWallColours = { wall: 0x7a5238, alt: 0x664430, brick: 0x784634, stone: 0x8c806a, frame: 0x262320, curtain: 0x6a3a3a };
 
 const paintW4: PwPainter = (c, k) => {
   const w = 16;

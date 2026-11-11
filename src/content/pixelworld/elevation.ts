@@ -1307,30 +1307,49 @@ export class Elev {
       const bwx1 = vx + (bx1 - vx) * sb;
       const bwy0 = vy + (yTop - vy) * sb;
       const bwy1 = vy + (yBot - vy) * sb;
-      // Ceiling.
-      c.poly([bx0, yTop, bx1, yTop, bwx1, bwy0, bwx0, bwy0], ceilR, lit ? 3 : 2, G);
+      // Ceiling: mid tone (a lit room is glow: its big planes stay well under the lamps and the game).
+      c.poly([bx0, yTop, bx1, yTop, bwx1, bwy0, bwx0, bwy0], ceilR, lit ? 2.6 : 2, G);
       for (let px = bx0; px < bx1; px++) {
         for (let py = yTop; py < bwy0; py++) {
           const d = (vy - py) / (vy - yTop);
           const lat = (px - vx) / d;
-          for (const a of [-0.28, 0.1, 0.42]) if (Math.abs(lat - a * cw) < 3) c.set(px, py, tube, lit ? 5 : 3, G);
+          for (const a of [-0.28, 0.1, 0.42]) if (Math.abs(lat - a * cw) < 3) c.set(px, py, tube, lit ? 4.6 : 3, G);
         }
       }
       // Floor: a perspective chequer.
-      c.poly([bx0, yBot, bx1, yBot, bwx1, bwy1, bwx0, bwy1], floorR, 2, G);
+      c.poly([bx0, yBot, bx1, yBot, bwx1, bwy1, bwx0, bwy1], floorR, lit ? 1.8 : 1.8, G);
       for (let py = Math.ceil(bwy1); py < yBot; py++) {
         const d = (py - vy) / (yBot - vy);
         const rowN = Math.floor(5 / d);
         for (let px = bx0; px < bx1; px++) {
           const colN = Math.floor((px - vx) / d / 14);
-          if ((rowN + colN) & 1) c.set(px, py, floorR, lit ? 3.2 : 2.6, G);
+          if ((rowN + colN) & 1) c.set(px, py, floorR, lit ? 2.6 : 2.2, G);
         }
       }
-      // Side walls (a stripe of shelf along them).
-      c.poly([bx0, yTop, bwx0, bwy0, bwx0, bwy1, bx0, yBot], wall, lit ? 2.3 : 1.7, G);
-      c.poly([bx1, yTop, bwx1, bwy0, bwx1, bwy1, bx1, yBot], wall, lit ? 2.6 : 1.9, G);
-      // Back wall.
-      c.rect(bwx0, bwy0, bwx1 - bwx0, bwy1 - bwy0, wall, lit ? 3 : 2, G);
+      // Side walls: a dado rail running back to the vanishing point, wallpaper dashes.
+      c.poly([bx0, yTop, bwx0, bwy0, bwx0, bwy1, bx0, yBot], wall, lit ? 1.7 : 1.5, G);
+      c.poly([bx1, yTop, bwx1, bwy0, bwx1, bwy1, bx1, yBot], wall, lit ? 2.0 : 1.7, G);
+      for (const sideX of [bx0, bx1 - 1]) {
+        const inner = sideX === bx0 ? bwx0 : bwx1;
+        const n = Math.round(Math.abs(inner - sideX));
+        for (let i = 0; i <= n; i++) {
+          const t = i / Math.max(1, n);
+          const rx = sideX + (inner - sideX) * t;
+          const railY = yTop + h * 0.62 + (bwy1 - yBot) * t * 0.55;
+          c.set(rx, railY, wall, 3.4, G);
+          c.set(rx, railY + 1, wall, 1, G);
+          for (let j = 5; j < 60; j += 11) c.set(rx, yTop + j * (1 - t * 0.4), wall, 2.6, G);
+        }
+      }
+      // Back wall: picture rail, wainscot below it.
+      c.rect(bwx0, bwy0, bwx1 - bwx0, bwy1 - bwy0, wall, lit ? 2.4 : 1.9, G);
+      c.hline(Math.round(bwx0), Math.round(bwy0) + 2, Math.round(bwx1 - bwx0), wall, 3.2, G);
+      {
+        const wy = Math.round(bwy0 + (bwy1 - bwy0) * 0.62);
+        c.hline(Math.round(bwx0), wy, Math.round(bwx1 - bwx0), wall, 3.4, G);
+        c.hline(Math.round(bwx0), wy + 1, Math.round(bwx1 - bwx0), wall, 1, G);
+        for (let i = 0; i < bwx1 - bwx0; i += 7) c.vline(Math.round(bwx0) + i, wy + 2, Math.round(bwy1) - wy - 2, wall, 1.6, G);
+      }
       c.vline(Math.round(bwx0), Math.round(bwy0), Math.round(bwy1 - bwy0), wall, 1, G);
       c.vline(Math.round(bwx1) - 1, Math.round(bwy0), Math.round(bwy1 - bwy0), wall, 1, G);
       c.hline(Math.round(bwx0), Math.round(bwy1) - 1, Math.round(bwx1 - bwx0), floorR, 1, G);
