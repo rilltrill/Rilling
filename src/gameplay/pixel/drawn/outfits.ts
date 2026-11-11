@@ -169,10 +169,12 @@ interface FootStyle {
   shaft: boolean;
   /** Rubber sole in its own colour (a sneaker). */
   sole: number;
+  /** The legs inside these feet, as a scale of the trouser width (the civilian is the slighter build). */
+  legW: number;
 }
 
-const WORK_BOOT: FootStyle = { s: BOOT_S, q: BOOT_Q, f: BOOT_F, ramp: R.boot, shaft: true, sole: -1 };
-const SNEAKER: FootStyle = { s: SHOE_S, q: SHOE_Q, f: SHOE_F, ramp: R.sneaker, shaft: false, sole: R.sole };
+const WORK_BOOT: FootStyle = { s: BOOT_S, q: BOOT_Q, f: BOOT_F, ramp: R.boot, shaft: true, sole: -1, legW: 1 };
+const SNEAKER: FootStyle = { s: SHOE_S, q: SHOE_Q, f: SHOE_F, ramp: R.sneaker, shaft: false, sole: R.sole, legW: 0.95 };
 
 function foot(d: Draw, side: number, st: FootStyle, view: ViewId) {
   const tbl = view === 2 ? st.s : view === 1 || view === 3 ? st.q : st.f;
@@ -288,7 +290,7 @@ function foot(d: Draw, side: number, st: FootStyle, view: ViewId) {
 }
 
 /** One leg of a pair of jeans: outline, then the forms and folds on it. */
-function jeansLeg(d: Draw, side: number, ramp: number, view: ViewId, group: number, breakT: number) {
+function jeansLeg(d: Draw, side: number, ramp: number, view: ViewId, group: number, breakT: number, legW: number) {
   const tbl = view === 2 ? LEG_S : view === 1 || view === 3 ? LEG_Q : LEG_F;
   const map = side === 0 ? LEG_L : LEG_R;
   const shinBack = d.shinBack[side] === 1;
@@ -296,7 +298,7 @@ function jeansLeg(d: Draw, side: number, ramp: number, view: ViewId, group: numb
   if (!shinBack) {
     // (Along the walk: the near leg is drawn wider than the one going away.)
     const near = view === 0 || view === 4 ? d.near[side] : 0;
-    const w = 1 + 0.08 * Math.max(0, near) - 0.05 * Math.max(0, -near);
+    const w = legW * (1 + 0.08 * Math.max(0, near) - 0.05 * Math.max(0, -near));
     d.pen.begin();
     d.pts(tbl, map, w);
     d.pen.fill(ramp, 3, PARTL, group, -1);
@@ -338,7 +340,7 @@ function legForm(d: Draw, map: readonly number[], g: number, breakT: number, nea
   const a = d.away(th);
   // Lit planes sit toward the light; n > 0 is the outer side of the limb.
   const c = -a * 0.06;
-  plane(d, g, 1, th, 0.06, c + 0.13, th, 0.2, c - 0.08, th, 0.62, c - 0.05, th, 0.72, c + 0.02, th, 0.5, c + 0.1);
+  plane(d, g, 1, th, 0.06, c + 0.12, th, 0.2, c - 0.07, th, 0.6, c - 0.05, th, 0.7, c + 0.01, th, 0.5, c + 0.09);
   plane(d, g, 1, th, 0.9, c, th, 0.98, c + 0.09, sh, 0.08, c, th, 0.98, c - 0.09);
   if (near > 0.3) {
     // The knee coming forward: the top of the leg in shadow, the kneecap lit below it.
@@ -370,7 +372,7 @@ function legs(d: Draw, jeansRamp: number, view: ViewId, foot_: FootStyle) {
     const side = order[i];
     const g = front ? (i === 0 ? farGroup : G.legNear) : side === 0 ? G.legFar : G.legNear;
     if ((!foot_.shaft && !d.shinBack[side]) || (d.shinBack[side] && view === 0)) foot(d, side, foot_, view);
-    jeansLeg(d, side, jeansRamp, view, g, foot_.shaft ? 0.44 : 0.82);
+    jeansLeg(d, side, jeansRamp, view, g, foot_.shaft ? 0.44 : 0.82, foot_.legW);
     if (foot_.shaft && !d.shinBack[side]) foot(d, side, foot_, view);
     if (d.shinBack[side] && view === 4) foot(d, side, foot_, view);
   }

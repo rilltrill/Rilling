@@ -514,6 +514,10 @@ if (which.has('r2')) {
   strip('s-stagger', WORKER, 'zstagger', [0, 2], null, 130, 2);
   strip('s-civ-states', FLANNEL, 'civcower', [0, 1, 2], null, 130, 2);
   strip('s-civ-plead', FLANNEL, 'civplead', [0, 1, 2], null, 130, 2);
+  strip('s-civback', FLANNEL, 'civback', [0, 2], null, 110, 2);
+  strip('s-recover', WORKER, 'zrecover', [0, 1, 2], null, 180, 2);
+  strip('s-fall', WORKER, 'zfall', [0, 1, 2], null, 130, 2);
+  strip('s-civ-death', FLANNEL, 'zdeath', [0, 1, 2], null, 130, 2);
 }
 
 if (which.has('check')) {

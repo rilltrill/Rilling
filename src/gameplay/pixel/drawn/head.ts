@@ -399,6 +399,12 @@ function ear(d: Draw, skin: number, g: HeadGroups, n: number, outer: number) {
 function hairShape(d: Draw, g: HeadGroups, ramp: number, view: ViewId) {
   const pen = d.pen;
   pen.begin();
+  // A small figure seen from behind has only this head and a neck: a thumb on a stick if both are
+  // literal. So the hair is a texel wider and comes down over the top of the neck.
+  const far = (view === 3 || view === 4) && d.lod <= 1;
+  const w = far ? 1.16 : 1;
+  const nape = far ? -0.1 : 0;
+  const pt = (a: number, n: number, corner?: boolean) => d.pt(B.head, a < -0.15 ? a + nape : a, n * w, corner);
   if (view === 0) {
     d.pt(B.head, 0.56, 0.02);
     d.pt(B.head, 0.62, 0.14, true);
@@ -446,51 +452,51 @@ function hairShape(d: Draw, g: HeadGroups, ramp: number, view: ViewId) {
     d.pt(B.head, 0.5, -0.4);
   } else if (view === 3) {
     // Three-quarter back: tufts break the outline, the hair tapers to the nape.
-    d.pt(B.head, 0.54, 0.02);
-    d.pt(B.head, 0.6, 0.14, true);
-    d.pt(B.head, 0.5, 0.24);
-    d.pt(B.head, 0.3, 0.36);
-    d.pt(B.head, 0.1, 0.36);
-    d.pt(B.head, -0.04, 0.3);
-    d.pt(B.head, -0.14, 0.2, true);
-    d.pt(B.head, -0.28, 0.14, true);
-    d.pt(B.head, -0.2, 0.06, true);
-    d.pt(B.head, -0.33, -0.02, true);
-    d.pt(B.head, -0.25, -0.1, true);
-    d.pt(B.head, -0.32, -0.2, true);
-    d.pt(B.head, -0.14, -0.33);
-    d.pt(B.head, 0.02, -0.45, true);
-    d.pt(B.head, 0.1, -0.5, true);
-    d.pt(B.head, 0.3, -0.46);
-    d.pt(B.head, 0.48, -0.26);
+    pt(0.54, 0.02);
+    pt(0.6, 0.14, true);
+    pt(0.5, 0.24);
+    pt(0.3, 0.36);
+    pt(0.1, 0.36);
+    pt(-0.04, 0.3);
+    pt(-0.14, 0.2, true);
+    pt(-0.28, 0.14, true);
+    pt(-0.2, 0.06, true);
+    pt(-0.33, -0.02, true);
+    pt(-0.25, -0.1, true);
+    pt(-0.32, -0.2, true);
+    pt(-0.14, -0.33);
+    pt(0.02, -0.45, true);
+    pt(0.1, -0.5, true);
+    pt(0.3, -0.46);
+    pt(0.48, -0.26);
   } else {
     // Back: tufts along the crown and sides, the lower third narrowing into a ragged nape.
-    d.pt(B.head, 0.55, 0.02);
-    d.pt(B.head, 0.6, 0.1, true);
-    d.pt(B.head, 0.52, 0.16, true);
-    d.pt(B.head, 0.5, 0.26);
-    d.pt(B.head, 0.38, 0.38);
-    d.pt(B.head, 0.36, 0.44, true);
-    d.pt(B.head, 0.24, 0.42, true);
-    d.pt(B.head, 0.05, 0.42);
-    d.pt(B.head, -0.04, 0.37, true);
-    d.pt(B.head, -0.14, 0.34);
-    d.pt(B.head, -0.24, 0.23);
-    d.pt(B.head, -0.28, 0.2, true);
-    d.pt(B.head, -0.23, 0.13, true);
-    d.pt(B.head, -0.33, 0.06, true);
-    d.pt(B.head, -0.26, 0.0, true);
-    d.pt(B.head, -0.35, -0.08, true);
-    d.pt(B.head, -0.26, -0.14, true);
-    d.pt(B.head, -0.28, -0.22, true);
-    d.pt(B.head, -0.14, -0.34);
-    d.pt(B.head, -0.02, -0.38, true);
-    d.pt(B.head, 0.02, -0.43, true);
-    d.pt(B.head, 0.22, -0.43);
-    d.pt(B.head, 0.36, -0.4);
-    d.pt(B.head, 0.42, -0.33, true);
-    d.pt(B.head, 0.5, -0.27);
-    d.pt(B.head, 0.62, -0.1, true);
+    pt(0.55, 0.02);
+    pt(0.6, 0.1, true);
+    pt(0.52, 0.16, true);
+    pt(0.5, 0.26);
+    pt(0.38, 0.38);
+    pt(0.36, 0.44, true);
+    pt(0.24, 0.42, true);
+    pt(0.05, 0.42);
+    pt(-0.04, 0.37, true);
+    pt(-0.14, 0.34);
+    pt(-0.24, 0.23);
+    pt(-0.28, 0.2, true);
+    pt(-0.23, 0.13, true);
+    pt(-0.33, 0.06, true);
+    pt(-0.26, 0.0, true);
+    pt(-0.35, -0.08, true);
+    pt(-0.26, -0.14, true);
+    pt(-0.28, -0.22, true);
+    pt(-0.14, -0.34);
+    pt(-0.02, -0.38, true);
+    pt(0.02, -0.43, true);
+    pt(0.22, -0.43);
+    pt(0.36, -0.4);
+    pt(0.42, -0.33, true);
+    pt(0.5, -0.27);
+    pt(0.62, -0.1, true);
   }
   pen.fill(ramp, 3, PARTH, g.hair, -1);
   if (view === 3 || view === 4) {
