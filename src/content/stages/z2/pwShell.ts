@@ -7,7 +7,7 @@ import { hash2 } from '../../pixelworld/surfaces';
 import { z2CeilingTile, z2GlazedTile, z2PaintTile, z2RailTile, z2SheetVinylTile, z2SkirtingTile, z2VinylTile } from '../../pixelworld/z2surfaces';
 import { z2DangleCard, z2VentModule } from '../../pixelworld/z2objects';
 import {
-  bloodPoolDecal, bloodWipeDecal, brokenTilesDecal, bloodWordsDecal, ceilingHoleDecal, ceilingStainDecal, dragTrailTile, drainDecal, floorCrackDecal, floorStainDecal, handprintDecal,
+  bloodPoolDecal, bloodSmearDecal, bloodWipeDecal, brokenTilesDecal, bloodWordsDecal, ceilingHoleDecal, ceilingStainDecal, dragTrailTile, drainDecal, floorCrackDecal, floorStainDecal, handprintDecal,
   papersDecal, pictureGhostDecal, pillsDecal, spatterDecal, trayDecal, wallCrackDecal, waterStainDecal, ceilingGrimeDecal, mopSplashDecal,
 } from '../../pixelworld/z2decals';
 import { fixture, nightWindow, troffer, type FixtureKind } from '../../pixelworld/z2modules';
@@ -206,11 +206,12 @@ function handleShell(tc: TagCtx): boolean | undefined {
       return true;
     }
     case 'smear': {
-      const len = info.len as number;
-      const w = info.w as number;
-      // A short smear: a piece of the drag trail ribbon.
+      // A short smear at its painted size (the ends are painted out, not cut).
+      const t = bloodSmearDecal(a, hsh > 0.5 ? 1 : 0);
+      const w = t.w / t.density;
+      const h = t.h / t.density;
       b.setMatrix(m);
-      b.rect(_o.set(-Math.max(0.25, w) , 0.008, len / 2), X, NZ, Math.max(0.5, w * 2), len, dragTrailTile(a), { u0: 0, v0: Math.floor(hsh * 96) });
+      b.rect(_o.set(-w / 2, 0.008, h / 2), X, NZ, w, h, t);
       b.setMatrix(null);
       return true;
     }
@@ -222,23 +223,27 @@ function handleShell(tc: TagCtx): boolean | undefined {
         const z1 = info.z1 as number;
         const y = (info.y as number) + 0.007;
         const pts: THREE.Vector3[] = [];
-        const n = Math.max(2, Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 1.5));
+        // Whole 2 m runs: both ends of the ribbon then fall in the tile's lifts, not across the smear.
+        const len = Math.hypot(x1 - x0, z1 - z0);
+        const run = Math.min(1, Math.max(2, Math.floor(len / 2) * 2) / len);
+        const n = Math.max(2, Math.ceil((len * run) / 1.5));
         for (let i = 0; i <= n; i++) {
-          const k = i / n;
+          const k = (i / n) * run;
           const wob = Math.sin(k * 9 + x0) * 0.12;
           pts.push(new THREE.Vector3(x0 + (x1 - x0) * k + wob * (z1 - z0 ? 1 : 0), y, z0 + (z1 - z0) * k + wob * (x1 - x0 ? 1 : 0)));
         }
         // Ribbon points are in the root frame (the trail was built in it).
-        b.ribbon(pts, 0.8, dragTrailTile(a), { y: 0 });
+        b.ribbon(pts, 0.8, dragTrailTile(a, hsh > 0.5 ? 1 : 0), { y: 0 });
       }
       return true;
     }
     case 'pool': {
       const r = info.r as number;
-      const t = bloodPoolDecal(a, Math.floor(hsh * 3));
-      const w = Math.max(1.3, r * 2.4);
-      const h = (w * 56) / 64;
-      const ang = hsh * 6.28;
+      // Painted size (the big painting for a wide spill); a quarter turn keeps its texels on the floor's grid.
+      const t = bloodPoolDecal(a, Math.floor(hsh * 3), r > 0.66);
+      const w = t.w / t.density;
+      const h = t.h / t.density;
+      const ang = Math.floor(hsh * 4) * (Math.PI / 2);
       const c = Math.cos(ang);
       const s = Math.sin(ang);
       b.setMatrix(m);
@@ -252,8 +257,8 @@ function handleShell(tc: TagCtx): boolean | undefined {
     case 'wallSmear': {
       const big = info.big as boolean;
       const t = big ? (hsh > 0.5 ? bloodWipeDecal(a, 0) : handprintDecal(a, 0)) : hsh > 0.6 ? spatterDecal(a) : handprintDecal(a, 1);
-      const w = t.w / PW_TPM;
-      const h = t.h / PW_TPM;
+      const w = t.w / t.density;
+      const h = t.h / t.density;
       lay(b, m, _o.set(-w / 2, -h / 2 - (big ? 0.1 : 0), 0.008), X, Y, w, h, t);
       return true;
     }
@@ -271,13 +276,13 @@ function handleShell(tc: TagCtx): boolean | undefined {
           const px = cx + (hash2(i, Math.round(cx * 3), 11) * 2 - 1) * rx;
           const pz = cz + (hash2(i, Math.round(cz * 3), 12) * 2 - 1) * rz;
           const t = papersDecal(a, (i + Math.round(cx)) % 3);
-          const ang = hash2(i, 3, Math.round(cx + cz)) * 6.28;
+          const ang = Math.floor(hash2(i, 3, Math.round(cx + cz)) * 4) * (Math.PI / 2);
           const c = Math.cos(ang);
           const s = Math.sin(ang);
           _u.set(c, 0, s);
           _v.set(s, 0, -c);
-          const w = 56 / PW_TPM;
-          const h = 48 / PW_TPM;
+          const w = t.w / t.density;
+          const h = t.h / t.density;
           _o.set(px, y + (pw.nDecal++ % 5) * 0.0012, pz).addScaledVector(_u, -w / 2).addScaledVector(_v, -h / 2);
           b.rect(_o, _u, _v, w, h, t);
         }
@@ -683,9 +688,9 @@ export function scatter(pw: Z2PixelWorld, b: PwBatch, pieces: Piece[], zone: str
           if (h > 0.05) continue;
           const r = hash2(gx, gz, 41);
           const t = r < 0.3 ? floorStainDecal(a, gx & 1) : r < 0.55 ? floorCrackDecal(a) : r < 0.7 ? pillsDecal(a) : r < 0.85 ? papersDecal(a, (gx + gz) % 3) : drainDecal(a);
-          const w = t.w / PW_TPM;
-          const hh = t.h / PW_TPM;
-          const ang = Math.floor(r * 40) * 0.6;
+          const w = t.w / t.density;
+          const hh = t.h / t.density;
+          const ang = Math.floor(r * 40) * (Math.PI / 2);
           const c = Math.cos(ang);
           const s = Math.sin(ang);
           _u.set(c, 0, s);
@@ -713,8 +718,8 @@ export function scatter(pw: Z2PixelWorld, b: PwBatch, pieces: Piece[], zone: str
         const h = hash2(Math.round(start * 3) + i * 7, Math.round(fc * 3) + side, 43);
         const t = wallDecal(pw, p, h, ext);
         if (!t) continue;
-        const w = t.w / PW_TPM;
-        const hh = t.h / PW_TPM;
+        const w = t.w / t.density;
+        const hh = t.h / t.density;
         if (w > len - 0.3 || hh > sy - 0.15) continue;
         const y0 = p.kind === 'wallLo' ? bx.min.y + Math.min(sy - hh - 0.05, 0.15 + hash2(i, 5, 7) * 0.5) : bx.min.y + Math.min(sy - hh - 0.1, 0.25 + hash2(i, 9, 7) * Math.max(0, Math.min(1.4, sy - hh - 0.4)));
         const off = 0.006 + (pw.nDecal++ % 3) * 0.002;

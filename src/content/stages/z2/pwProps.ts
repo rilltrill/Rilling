@@ -446,7 +446,9 @@ function handleProps(tc: TagCtx): boolean | undefined {
       pw.bills.add(_p.x, _p.y, _p.z, t, t.h / PW_TPM, { flip: hsh > 0.5 });
       if (info.kind === 'corpse') {
         const pt = bloodPoolDecal(a, 2);
-        b.rect(_o.set(_p.x - 0.8, _p.y + 0.009 + (pw.nDecal++ % 3) * 0.001, _p.z + 0.7), X, NZ, 1.6, 1.4, pt);
+        const ptw = pt.w / pt.density;
+        const pth = pt.h / pt.density;
+        b.rect(_o.set(_p.x - ptw / 2, _p.y + 0.009 + (pw.nDecal++ % 3) * 0.001, _p.z + pth / 2), X, NZ, ptw, pth, pt);
       }
       return true;
     }
