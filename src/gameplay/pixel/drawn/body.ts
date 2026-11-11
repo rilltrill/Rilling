@@ -16,10 +16,11 @@ export const LEG_R = [B.thR, B.shR] as const;
 
 /** Front: deltoid cap, biceps tapering into the elbow, forearm swell, wrist; the sleeve hangs loose at the cuff. */
 export const ARM_F: readonly Pt[] = [
-  [0, -0.03, 0.04],
-  [0, 0.0, 0.256],
-  [0, 0.15, 0.335],
-  [0, 0.36, 0.25],
+  [0, -0.04, 0.06],
+  [0, 0.02, 0.18],
+  [0, 0.1, 0.28],
+  [0, 0.22, 0.335],
+  [0, 0.4, 0.25],
   [0, 0.62, 0.192],
   [0, 0.92, 0.173],
   [1, 0.06, 0.192],
@@ -41,10 +42,11 @@ export const ARM_F: readonly Pt[] = [
 
 /** Three-quarter: the near arm reads wider at the shoulder than the far one tapers. */
 export const ARM_Q: readonly Pt[] = [
-  [0, -0.03, 0.04],
-  [0, 0.0, 0.243],
-  [0, 0.15, 0.288],
-  [0, 0.4, 0.218],
+  [0, -0.04, 0.06],
+  [0, 0.02, 0.17],
+  [0, 0.1, 0.25],
+  [0, 0.22, 0.288],
+  [0, 0.44, 0.218],
   [0, 0.7, 0.179],
   [0, 0.94, 0.166],
   [1, 0.08, 0.198],
@@ -66,10 +68,11 @@ export const ARM_Q: readonly Pt[] = [
 
 /** Side view: a lean arm, deltoid over the shoulder, biceps forward, elbow point back. */
 export const ARM_S: readonly Pt[] = [
-  [0, -0.03, 0.04],
-  [0, 0.0, 0.218],
-  [0, 0.18, 0.269],
-  [0, 0.45, 0.256],
+  [0, -0.04, 0.06],
+  [0, 0.02, 0.15],
+  [0, 0.1, 0.22],
+  [0, 0.24, 0.269],
+  [0, 0.48, 0.256],
   [0, 0.72, 0.192],
   [0, 0.92, 0.154],
   [1, 0.06, 0.179],

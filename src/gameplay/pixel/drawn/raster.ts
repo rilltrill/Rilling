@@ -563,7 +563,8 @@ export class Pen {
     // Pixel-perfect outline: a corner texel with empty space on two adjacent sides and the
     // silhouette turning through it is taken out, so the line steps diagonally instead of in L-shapes.
     this.shaveCorners(x0, y0, x1, y1);
-    this.dropSpecks(x0, y0, x1, y1);
+    // (Specks only happen on small figures; big ones skip the search.)
+    if (y1 - y0 < 130) this.dropSpecks(x0, y0, x1, y1);
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         const k = y * w + x;
