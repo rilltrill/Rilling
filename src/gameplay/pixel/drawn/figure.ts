@@ -39,6 +39,15 @@ const CANVAS = MAX_CANVAS;
 const AWAY_X = 0.62;
 const AWAY_Y = -0.78;
 
+/** Level of detail from texels per head unit. `prev` (−1 = none) holds a figure that hovers at a threshold on one drawing. */
+export function lodFor(hpx: number, prev: number): number {
+  const lod = hpx < 11 ? 0 : hpx < 18 ? 1 : hpx < 30 ? 2 : 3;
+  if (prev < 0 || lod === prev) return lod;
+  const T = LOD_AT[Math.max(lod, prev) - 1];
+  return Math.abs(hpx - T) < 0.5 ? prev : lod;
+}
+const LOD_AT = [11, 18, 30];
+
 /** Everything a table's painter needs for one figure being drawn. */
 export class Draw {
   readonly pen: Pen;
@@ -200,7 +209,7 @@ export function makeFigureRenderer() {
   const d = new Draw(pen);
 
   /** Paint figure `def` in pose `key` into the canvas; `pxTall` = texels of a 6.25-head figure. */
-  function paint(def: FigureDef, key: PoseKey, view: ViewId, pxTall: number, hx = 0, hy = 0, flags = 0) {
+  function paint(def: FigureDef, key: PoseKey, view: ViewId, pxTall: number, hx = 0, hy = 0, flags = 0, lod = -1) {
     canvas.clear();
     pen.reset();
     d.view = view;
@@ -208,13 +217,13 @@ export function makeFigureRenderer() {
     const sk = d.sk;
     buildPose(sk, key, def.ground !== false && !key.noGround);
     project(sk, view);
-    sk.sx[J.head] += hx * 0.1;
-    sk.sy[J.head] += hy * 0.1;
     d.S = pxTall / HEADS;
+    // (The aim-fair head offset comes in whole texels: the head steps on the sprite's own grid.)
+    sk.sx[J.head] += hx / d.S;
+    sk.sy[J.head] += hy / d.S;
     d.cx = canvas.w / 2;
     d.cy = canvas.h - 8;
-    const hpx = d.S;
-    d.lod = hpx < 11 ? 0 : hpx < 18 ? 1 : hpx < 30 ? 2 : 3;
+    d.lod = lod >= 0 ? lod : lodFor(d.S, -1);
     d.frames();
     // Sleeves flow into the shoulder, trousers into the hip: no seam line round the joint.
     const R = 0.38 * d.S;

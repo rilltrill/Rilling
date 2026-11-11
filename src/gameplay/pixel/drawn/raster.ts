@@ -13,8 +13,8 @@
 export const RAMP_TONES = 6;
 /** Tone of the ink line round the silhouette. */
 export const INK = 0;
-/** Biggest figure canvas (texels): above about 340 texels tall a figure is at the lens. */
-export const MAX_CANVAS = 480;
+/** Biggest figure canvas (texels): a figure sized 440 with its arms raised stands about 1.6 times that. */
+export const MAX_CANVAS = 720;
 
 /** Group that takes no interior line against its neighbours. */
 export const NO_LINE = 0;
@@ -50,15 +50,25 @@ export class IndexedCanvas {
     this.part = new Uint8Array(n);
     this.group = new Uint8Array(n);
     this.order = new Uint16Array(n);
-    this.clear();
+    this.x0 = w;
+    this.y0 = h;
+    this.x1 = -1;
+    this.y1 = -1;
   }
 
+  /** Empties what the last figure touched (a raster pays for its own area, not the whole canvas). */
   clear() {
-    this.idx.fill(0);
-    this.base.fill(0);
-    this.part.fill(0);
-    this.group.fill(0);
-    this.order.fill(0);
+    if (this.x1 >= this.x0) {
+      for (let y = this.y0; y <= this.y1; y++) {
+        const a = y * this.w + this.x0;
+        const b = y * this.w + this.x1 + 1;
+        this.idx.fill(0, a, b);
+        this.base.fill(0, a, b);
+        this.part.fill(0, a, b);
+        this.group.fill(0, a, b);
+        this.order.fill(0, a, b);
+      }
+    }
     this.x0 = this.w;
     this.y0 = this.h;
     this.x1 = -1;

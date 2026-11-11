@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { makeFigureRenderer } from './figure';
+import { lodFor, makeFigureRenderer } from './figure';
 import type { FigureDef } from './outfits';
-import { RAMP_TONES } from './raster';
+import { MAX_CANVAS, RAMP_TONES } from './raster';
 import { HEADS, J, type PoseKey, type ViewId } from './skeleton';
 import { RAMPS, rampColors } from './palette';
 import { POSE_INDEX } from './poses';
@@ -26,6 +26,10 @@ export const MAX_RASTERS = 3;
 /** Whole figure texels tall (above: texels double). */
 export const MAX_FIGURE_PX = 440;
 const SHELF_STEP = 16;
+/** Neck bend past this (hu) is taken by moving the whole sprite: a head pulled off its neck is the worst of the two errors. */
+const NECK_BEND = 0.35;
+/** Head-offset buckets a redraw may travel: a state change must not snap the head across the neck. */
+const HEAD_TRAVEL = 2;
 
 /** Figure sizes come in steps: 2 px at figures up to 100 tall, then 4. */
 export function sizeStep(px: number): number {
@@ -75,25 +79,27 @@ function bucket(v: number, lo: number, n: number): number {
   return Math.max(0, Math.min(n - 1, Math.round((v - lo) / 20)));
 }
 
-const _pk: PoseKey = {};
-const _aL: [number, number, number, number] = [0, 0, 0, 0];
-const _aR: [number, number, number, number] = [0, 0, 0, 0];
-
-/** Scratch pose: `key` with its arms replaced by the query's rig arms (quantised). */
-function withRigArms(key: PoseKey, q: DrawnQuery): PoseKey {
-  Object.assign(_pk, ZERO_POSE, key);
-  _aL[0] = bucket(q.aL[0], -60, 12) * 20 - 60;
-  _aL[1] = key.aL?.[1] ?? 10;
-  _aL[2] = bucket(q.aL[2], 0, 8) * 20;
-  _aL[3] = key.aL?.[3] ?? 0;
-  _aR[0] = bucket(q.aR[0], -60, 12) * 20 - 60;
-  _aR[1] = key.aR?.[1] ?? 10;
-  _aR[2] = bucket(q.aR[2], 0, 8) * 20;
-  _aR[3] = key.aR?.[3] ?? 0;
-  _pk.aL = _aL;
-  _pk.aR = _aR;
-  return _pk;
+/** The sprite's own pose: `key` with its arms replaced by the query's rig arms (quantised). */
+function withRigArms(key: PoseKey, q: DrawnQuery, st: DrawnSprite): PoseKey {
+  const pk = st.scratch;
+  Object.assign(pk, ZERO_POSE, key);
+  const aL = st.scratchL;
+  const aR = st.scratchR;
+  aL[0] = bucket(q.aL[0], -60, 12) * 20 - 60;
+  aL[1] = key.aL?.[1] ?? 10;
+  aL[2] = bucket(q.aL[2], 0, 8) * 20;
+  aL[3] = key.aL?.[3] ?? 0;
+  aR[0] = bucket(q.aR[0], -60, 12) * 20 - 60;
+  aR[1] = key.aR?.[1] ?? 10;
+  aR[2] = bucket(q.aR[2], 0, 8) * 20;
+  aR[3] = key.aR?.[3] ?? 0;
+  pk.aL = aL;
+  pk.aR = aR;
+  return pk;
 }
+
+const projX = (P: ArrayLike<number>, gw: number, x: number, z: number) => (((P[0] * x + P[8] * z) / -z) * 0.5 + 0.5) * gw;
+const projY = (P: ArrayLike<number>, gh: number, y: number, z: number) => (((P[5] * y + P[9] * z) / -z) * 0.5 + 0.5) * gh;
 
 const ZERO_POSE: PoseKey = { px: 0, py: 0, pz: 0, lean: 0, tilt: 0, turn: 0, sLean: 0, sTilt: 0, sTurn: 0, cLean: 0, cTilt: 0, cTurn: 0, hPitch: 0, hRoll: 0, hYaw: 0, noGround: false };
 
@@ -103,7 +109,9 @@ export function newDrawnQuery(): DrawnQuery {
 }
 
 interface Entry {
+  /** The two halves of the cache key (small integers: `Map` lookups stay free of boxed numbers). */
   key: number;
+  sub: number;
   x: number;
   y: number;
   w: number;
@@ -135,7 +143,7 @@ export interface DrawnSprite {
   left: number;
   bottom: number;
   depth: number;
-  /** The drawing asked for (tools re-render it to read its parts). */
+  /** The drawing asked for (tools re-render it to read its parts); the head offset in texels. */
   size: number;
   hx: number;
   hy: number;
@@ -143,10 +151,18 @@ export interface DrawnSprite {
   pose: PoseKey | null;
   def: FigureDef | null;
   flags: number;
+  /** Level of detail (with hysteresis, so a figure hovering at a threshold does not flicker between two drawings). */
+  lod: number;
+  /** Set when `pose` holds the rig's arms, so it is rebuilt only when they change. */
+  frames: readonly PoseKey[] | null;
+  arms: number;
+  scratch: PoseKey;
+  scratchL: [number, number, number, number];
+  scratchR: [number, number, number, number];
 }
 
 export function newDrawnSprite(): DrawnSprite {
-  return { view: 0, mirror: false, k: 1, left: 0, bottom: 0, depth: 1, size: 0, hx: 0, hy: 0, frame: 0, pose: null, def: null, flags: 0 };
+  return { view: 0, mirror: false, k: 1, left: 0, bottom: 0, depth: 1, size: 0, hx: 0, hy: 0, frame: 0, pose: null, def: null, flags: 0, lod: -1, frames: null, arms: 0, scratch: {}, scratchL: [0, 0, 0, 0], scratchR: [0, 0, 0, 0] };
 }
 
 export type Placement = Entry | 'away' | 'near' | 'wait';
@@ -159,10 +175,15 @@ export class DrawnCast {
   private colors = rampColors();
   private renderer: THREE.WebGLRenderer | null;
   private fig = makeFigureRenderer();
-  private entries = new Map<number, Entry>();
+  private entries = new Map<number, Map<number, Entry>>();
+  private entryCount = 0;
+  /** Arm-bucket tuples seen so far, as small numbers (the cache key has no room for the raw product). */
+  private armIds = new Map<number, number>();
+  /** Head and chest joints of a (pose, frame, view), computed once: placement runs on every redraw. */
+  private jointCache = new Map<number, Float32Array>();
   private shelves: Shelf[] = [];
   private nextShelfY = 0;
-  private upload = new Uint8Array(480 * 480);
+  private upload = new Uint8Array(MAX_CANVAS * MAX_CANVAS);
   private frame = 0;
   private atlasReady = false;
   /** Per-figure-and-view centroid offsets (see `bias`). */
@@ -190,8 +211,12 @@ export class DrawnCast {
     this.setStageLight(0, 0);
   }
 
-  /** The stage's colour lookup: `step` whole tones for everything but the ink; ramps darker than `floor` (display luma) stay. */
-  setStageLight(step: number, floor: number) {
+  /**
+   * The stage's colour lookup: `step` whole tones for everything but the ink; ramps darker than
+   * `floor` (display luma) stay; every tone then leans `tintAmt` toward the stage's key colour, once
+   * at stage load, so a figure takes the colour of the place it stands in.
+   */
+  setStageLight(step: number, floor: number, tint = 0, tintAmt = 0) {
     const c = this.colors;
     const n = RAMPS.length;
     for (let r = 0; r < n; r++) {
@@ -202,9 +227,10 @@ export class DrawnCast {
         const tt = t === 0 ? 0 : Math.max(1, Math.min(RAMP_TONES - 1, t + s));
         const col = c[r * RAMP_TONES + tt];
         const i = (r * RAMP_TONES + t) * 4;
-        this.pal[i] = (col >> 16) & 255;
-        this.pal[i + 1] = (col >> 8) & 255;
-        this.pal[i + 2] = col & 255;
+        const a = t === 0 ? tintAmt * 0.5 : tintAmt;
+        this.pal[i] = Math.round(((col >> 16) & 255) * (1 - a) + ((tint >> 16) & 255) * a);
+        this.pal[i + 1] = Math.round(((col >> 8) & 255) * (1 - a) + ((tint >> 8) & 255) * a);
+        this.pal[i + 2] = Math.round((col & 255) * (1 - a) + (tint & 255) * a);
         this.pal[i + 3] = 255;
       }
     }
@@ -222,8 +248,36 @@ export class DrawnCast {
     return ATLAS * ATLAS + RAMP_TONES * RAMPS.length * 4;
   }
 
-  private static key(fig: number, pose: number, frame: number, view: number, size: number, hx: number, hy: number, flags: number, arms: number): number {
-    return size + 1000 * (fig + 16 * (pose + 32 * (frame + 12 * (view + 8 * (hx + 16 * (hy + 16 * (flags + 32 * arms)))))));
+  private static key(fig: number, pose: number, frame: number, view: number, size: number): number {
+    return size + 1000 * (fig + 16 * (pose + 32 * (frame + 16 * view)));
+  }
+
+  private static sub(hx: number, hy: number, flags: number, arms: number, lod: number): number {
+    return hx + 32 * (hy + 64 * (flags + 32 * (lod + 4 * arms)));
+  }
+
+  private lookup(key: number, sub: number): Entry | undefined {
+    const m = this.entries.get(key);
+    return m ? m.get(sub) : undefined;
+  }
+
+  /** A small number for this tuple of arm buckets (the table is only ever flushed with the frames that use it). */
+  private armId(raw: number): number {
+    let id = this.armIds.get(raw);
+    if (id === undefined) {
+      if (this.armIds.size >= 1000) {
+        this.armIds.clear();
+        this.entries.clear();
+        this.entryCount = 0;
+        for (const s of this.shelves) {
+          s.entries.length = 0;
+          s.x = 0;
+        }
+      }
+      id = this.armIds.size + 1;
+      this.armIds.set(raw, id);
+    }
+    return id;
   }
 
   /** Puts a shelf for a figure `h` tall; may evict the least recently used shelf. */
@@ -244,7 +298,11 @@ export class DrawnCast {
     let lru: Shelf | null = null;
     for (const s of this.shelves) if (s.h >= H && (!lru || s.last < lru.last)) lru = s;
     if (!lru) return null;
-    for (const e of lru.entries) this.entries.delete(e.key);
+    for (const e of lru.entries) {
+      const m = this.entries.get(e.key);
+      if (m && m.delete(e.sub)) this.entryCount--;
+      if (m && m.size === 0) this.entries.delete(e.key);
+    }
     lru.entries.length = 0;
     lru.x = 0;
     lru.last = this.frame;
@@ -252,10 +310,10 @@ export class DrawnCast {
   }
 
   /** Raster `def` into the atlas. Null when no budget or no space. */
-  private raster(key: number, def: FigureDef, pose: PoseKey, view: ViewId, size: number, hx: number, hy: number, flags: number): Entry | null {
+  private raster(key: number, sub: number, def: FigureDef, pose: PoseKey, view: ViewId, size: number, hx: number, hy: number, flags: number, lod: number): Entry | null {
     const t0 = performance.now();
     const f = this.fig;
-    f.paint(def, pose, view, size, hx, hy, flags);
+    f.paint(def, pose, view, size, hx, hy, flags, lod);
     const { canvas, d } = f;
     const w = canvas.x1 - canvas.x0 + 1;
     const h = canvas.y1 - canvas.y0 + 1;
@@ -281,13 +339,19 @@ export class DrawnCast {
       }
     }
     this.uploadRegion(x, y, w, h);
-    const e: Entry = { key, x, y, w, h, gx: d.cx - canvas.x0, gy: d.cy - canvas.y0, shelf, used: this.frame };
+    const e: Entry = { key, sub, x, y, w, h, gx: d.cx - canvas.x0, gy: d.cy - canvas.y0, shelf, used: this.frame };
     shelf.entries.push(e);
-    this.entries.set(key, e);
+    let m = this.entries.get(key);
+    if (!m) {
+      m = new Map();
+      this.entries.set(key, m);
+    }
+    m.set(sub, e);
+    this.entryCount++;
     this.rasters++;
     this.stats.rasters++;
     this.stats.rasterMs += performance.now() - t0;
-    this.stats.entries = this.entries.size;
+    this.stats.entries = this.entryCount;
     return e;
   }
 
@@ -315,10 +379,13 @@ export class DrawnCast {
    * The frame to show for a query: the exact one, or one rastered now while there is budget; else
    * the nearest cached size of the same drawing (null only if nothing like it has been drawn yet).
    */
-  frameFor(q: DrawnQuery, pose: PoseKey, fig: number, poseId: number, frameIndex: number, view: ViewId, size: number, hx: number, hy: number, arms: number): Entry | null {
+  frameFor(q: DrawnQuery, st: DrawnSprite, pose: PoseKey, fig: number, poseId: number, frameIndex: number, view: ViewId, size: number, hx: number, hy: number, tb: number, arms: number, lod: number): Entry | null {
     const flags = q.flags;
-    const key = DrawnCast.key(fig, poseId, frameIndex, view, size, hx + 7, hy + 7, flags, arms);
-    const hit = this.entries.get(key);
+    const key = DrawnCast.key(fig, poseId, frameIndex, view, size);
+    const hb = Math.round(hx / tb) + 16;
+    const vb = Math.round(hy / tb) + 32;
+    const sub = DrawnCast.sub(hb, vb, flags, arms, lod);
+    const hit = this.lookup(key, sub);
     if (hit) {
       this.stats.hits++;
       hit.used = this.frame;
@@ -327,7 +394,7 @@ export class DrawnCast {
     }
     this.stats.misses++;
     if (this.rasters < MAX_RASTERS) {
-      const e = this.raster(key, q.def!, pose, view, size, hx, hy, flags);
+      const e = this.raster(key, sub, q.def!, pose, view, size, hx, hy, flags, lod);
       if (e) return e;
     }
     // Nearest cached size of this drawing.
@@ -335,7 +402,7 @@ export class DrawnCast {
       for (let sgn = -1; sgn <= 1; sgn += 2) {
         const sz = size + d * 2 * sgn;
         if (sz < 20) continue;
-        const near = this.entries.get(DrawnCast.key(fig, poseId, frameIndex, view, sz, hx + 7, hy + 7, flags, arms));
+        const near = this.lookup(DrawnCast.key(fig, poseId, frameIndex, view, sz), sub);
         if (near) {
           this.stats.near++;
           near.used = this.frame;
@@ -360,13 +427,13 @@ export class DrawnCast {
     _v.copy(_rp).applyMatrix4(inv);
     const D = -_v.z;
     if (D < cam.near * 2) return 'near';
-    const projX = (x: number, z: number) => (((P[0] * x + P[8] * z) / -z) * 0.5 + 0.5) * gw;
-    const projY = (y: number, z: number) => (((P[5] * y + P[9] * z) / -z) * 0.5 + 0.5) * gh;
-    const gx = projX(_v.x, _v.z);
-    const gy = projY(_v.y, _v.z);
-    if (gx < -0.2 * gw || gx > 1.2 * gw || gy < -0.4 * gh || gy > 1.5 * gh) return 'away';
+    const gx = projX(P, gw, _v.x, _v.z);
+    const gy = projY(P, gh, _v.y, _v.z);
     // Size: the rig's height at the ground point's depth, in frame pixels; texels double past the cap.
     const full = q.scale * 1.83 * ((P[5] * gh) / (2 * D));
+    // Off screen is judged on the figure's whole rectangle: at melee range its feet are below the
+    // frame while its chest fills it, and the drawing must not give way to the hidden rig.
+    if (gx < -0.2 * gw - 0.5 * full || gx > 1.2 * gw + 0.5 * full || gy + full < 0 || gy > 1.5 * gh) return 'away';
     const k = full > MAX_FIGURE_PX ? Math.ceil(full / MAX_FIGURE_PX) : 1;
     // A size change is only taken once it has really moved (a figure walking toward the camera
     // would otherwise miss the cache on every redraw for a texel of height).
@@ -390,34 +457,58 @@ export class DrawnCast {
     const v = st.view;
     const flip = st.mirror ? -1 : 1;
     const frames = q.frames!;
-    let pose = frames[q.frame];
     let arms = 0;
     if (q.armsFromRig && (q.armsAlways || v === 1 || v === 2 || v === 3)) {
-      pose = withRigArms(pose, q);
-      arms = 1 + bucket(q.aL[0], -60, 12) + 12 * (bucket(q.aL[2], 0, 8) + 8 * (bucket(q.aR[0], -60, 12) + 12 * bucket(q.aR[2], 0, 8)));
+      arms = this.armId(1 + bucket(q.aL[0], -60, 12) + 12 * (bucket(q.aL[2], 0, 8) + 8 * (bucket(q.aR[0], -60, 12) + 12 * bucket(q.aR[2], 0, 8))));
     }
+    const poseId = poseIdOf(frames);
+    let pose: PoseKey;
+    if (arms === 0) pose = frames[q.frame];
+    else if (st.arms === arms && st.frames === frames && st.frame === q.frame && st.pose === st.scratch) pose = st.scratch;
+    else pose = withRigArms(frames[q.frame], q, st);
+    st.arms = arms;
+    st.frames = frames;
     const bias = this.bias(q.def!, v);
-    const sk = this.joints(pose, v);
+    const sk = this.jointsOf(pose, poseId, q.frame, v);
     const S = (size * k) / HEADS;
     // Aim fairness: the sprite's torso goes over the rig's torso, its head over the rig's head
     // (each measured at its drawn centre).
     _v.copy(q.chest).applyMatrix4(inv);
-    const rigCx = projX(_v.x, _v.z) - gx;
+    const rigCx = projX(P, gw, _v.x, _v.z) - gx;
     _v.copy(q.head).applyMatrix4(inv);
-    const rigHx = projX(_v.x, _v.z) - gx;
-    const rigHy = projY(_v.y, _v.z) - gy;
-    let shift = Math.round(rigCx - flip * (sk.sx[J.chest] + bias[2]) * S);
+    const rigHx = projX(P, gw, _v.x, _v.z) - gx;
+    const rigHy = projY(P, gh, _v.y, _v.z) - gy;
+    let shift = Math.round(rigCx - flip * (sk[2] + bias[2]) * S);
     const lim = Math.round(1.2 * S);
     if (shift > lim) shift = lim;
     if (shift < -lim) shift = -lim;
-    let hxq = Math.round(((rigHx - shift) * flip - (sk.sx[J.head] + bias[0]) * S) / (S * 0.1));
-    let hyq = Math.round((rigHy - (sk.sy[J.head] + bias[1]) * S) / (S * 0.1));
-    hxq = Math.max(-7, Math.min(7, hxq));
-    hyq = Math.max(-7, Math.min(7, hyq));
-    // (The same hysteresis for the head offset: a bucket's edge must not flicker between frames.)
-    if (Math.abs(hxq - st.hx) <= 1) hxq = st.hx;
-    if (Math.abs(hyq - st.hy) <= 1) hyq = st.hy;
-    const entry = this.frameFor(q, pose, q.def!.id, poseIdOf(frames), q.frame, v, size, hxq, hyq, arms);
+    let wantX = (rigHx - shift) * flip - (sk[0] + bias[0]) * S;
+    const wantY = rigHy - (sk[1] + bias[1]) * S;
+    // Only so much neck: the rest of a sideways miss moves the whole sprite.
+    const bend = NECK_BEND * S;
+    if (wantX > bend || wantX < -bend) {
+      const over = Math.round(wantX > 0 ? wantX - bend : wantX + bend);
+      shift += over * flip;
+      if (shift > lim) shift = lim;
+      if (shift < -lim) shift = -lim;
+      wantX = (rigHx - shift) * flip - (sk[0] + bias[0]) * S;
+    }
+    // The offset is whole texels (every other one on big figures): the head then moves on the
+    // sprite's grid instead of jumping by a fraction of a head unit.
+    const tb = size < 100 ? 1 : 2;
+    const lm = Math.round(0.7 * S);
+    let hxq = Math.round(Math.max(-lm, Math.min(lm, wantX)) / k / tb) * tb;
+    let hyq = Math.round(Math.max(-lm, Math.min(lm, wantY)) / k / tb) * tb;
+    if (st.size !== 0) {
+      const tx = Math.round(st.hx / tb) * tb;
+      const ty = Math.round(st.hy / tb) * tb;
+      const dx = hxq - tx;
+      const dy = hyq - ty;
+      hxq = Math.abs(dx) <= tb ? tx : tx + Math.max(-HEAD_TRAVEL * tb, Math.min(HEAD_TRAVEL * tb, dx));
+      hyq = Math.abs(dy) <= tb ? ty : ty + Math.max(-HEAD_TRAVEL * tb, Math.min(HEAD_TRAVEL * tb, dy));
+    }
+    const lod = lodFor(size / HEADS, st.size === 0 ? -1 : st.lod);
+    const entry = this.frameFor(q, st, pose, q.def!.id, poseId, q.frame, v, size, hxq, hyq, tb, arms, lod);
     if (!entry) return 'wait';
     st.k = k;
     st.size = size;
@@ -427,6 +518,7 @@ export class DrawnCast {
     st.def = q.def;
     st.frame = q.frame;
     st.flags = q.flags;
+    st.lod = lod;
     st.depth = Math.max(D, cam.near * 4) - Math.min(0.1, D * 0.02);
     const gxs = st.mirror ? entry.w - entry.gx : entry.gx;
     st.left = Math.round(gx) + shift - gxs * k;
@@ -435,9 +527,9 @@ export class DrawnCast {
   }
 
   /** Re-renders a frame's part map (tests / aim tools): width, height and the buffer of PART codes. */
-  debugParts(def: FigureDef, pose: PoseKey, view: ViewId, size: number, hx: number, hy: number, flags: number) {
+  debugParts(def: FigureDef, pose: PoseKey, view: ViewId, size: number, hx: number, hy: number, flags: number, lod = -1) {
     const f = this.fig;
-    f.paint(def, pose, view, size, hx, hy, flags);
+    f.paint(def, pose, view, size, hx, hy, flags, lod);
     const c = f.canvas;
     const w = c.x1 - c.x0 + 1;
     const h = c.y1 - c.y0 + 1;
@@ -492,9 +584,15 @@ export class DrawnCast {
     return b;
   }
 
-  /** Pose joints for placement (the skeleton of the pose that would be rastered). */
-  joints(pose: PoseKey, view: ViewId) {
-    return this.fig.pose(pose, view);
+  /** Head x, y and chest x, y (hu) of a pose in a view. Arms do not move them, so rig arms need no entry of their own. */
+  private jointsOf(pose: PoseKey, poseId: number, frame: number, view: ViewId): Float32Array {
+    const id = poseId * 128 + frame * 8 + view;
+    let j = this.jointCache.get(id);
+    if (j) return j;
+    const sk = this.fig.pose(pose, view);
+    j = new Float32Array([sk.sx[J.head], sk.sy[J.head], sk.sx[J.chest], sk.sy[J.chest]]);
+    this.jointCache.set(id, j);
+    return j;
   }
 
   dispose() {
