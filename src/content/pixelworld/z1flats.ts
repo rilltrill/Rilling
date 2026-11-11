@@ -67,6 +67,7 @@ function light(e: Elev, o: { moon?: number; foot?: number; right?: number } = {}
   e.value((_x, y) => (y > e.Y(2.2) ? Math.min(1, (y - e.Y(2.2)) / (e.Y(0.3) - e.Y(2.2))) * foot : 0), -1);
   e.value((x, y) => Math.max(0, 1 - y / (H * 0.5)) * Math.max(0, 1.1 - x / (W * 0.65)) * moon, 1);
   e.value((x) => Math.max(0, (x - W * 0.62) / (W * 0.38)) * right, -1);
+  e.footGrime();
   e.ink();
 }
 
@@ -266,12 +267,7 @@ const paintBoarded: PwPainter = (c, k) => {
   // Boards over the whole front, the paint already on them.
   const gx0 = e.X(0.7);
   const gx1 = e.X(13.4);
-  for (let x = gx0; x < gx1; x += 22) {
-    const bh = 64 + (x % 16);
-    c.rect(x + 1, e.Y(3.4), 20, bh, e.r.wood, 2.4 + (x % 3) * 0.3);
-    c.vline(x + 1, e.Y(3.4), bh, e.r.wood, 3.6);
-    c.vline(x + 20, e.Y(3.4), bh, e.r.wood, 1);
-  }
+  e.planks(gx0, e.Y(3.4), gx1 - gx0, e.Y(0.4) - e.Y(3.4));
   e.tag(e.X(1.4), e.Y(3.0), 'KEEP OUT', 0xc8e070, 0x2a3a1a, 3);
   e.tag(e.X(8.6), e.Y(2.4), 'NO EXIT', 0xe058a0, 0x2a1228, 2);
   e.crack(e.X(3.2), e.Y(10.7), 50);

@@ -89,6 +89,8 @@ const PAINTED: Record<number, number> = { 0x445670: 0x445670 };
 export const Z1_GAIN = 1.3;
 /** Flats are painted as seen: their gain puts the wall at the mood's pivot (the moon lights them all alike). */
 export const Z1_FLAT_GAIN = 2.6;
+/** The square has the butcher's red lamp and the floodlights on top of the moon: its flats need less of it. */
+const Z1_FLAT_GAIN_SQUARE = 1.7;
 
 const STONE_LIGHT = 0x86827a;
 const STONE_DARK = 0x4a4a52;
@@ -389,7 +391,7 @@ export class Z1PixelWorld {
       const mesh = b.build(undefined, { gain: Z1_GAIN });
       if (mesh) zones[id].add(mesh);
     }
-    this.flats.finish(zones, Z1_FLAT_GAIN);
+    this.flats.finish(zones, (id) => (id === 'E' ? Z1_FLAT_GAIN_SQUARE : Z1_FLAT_GAIN));
     // Dynamic pieces: world-space geometry under a moving / toggled parent (undo the parent's transform).
     for (const { b, parent, local, swap, anim } of this.dynBatches) {
       if (anim && !this.fireMat) {

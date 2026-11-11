@@ -143,10 +143,10 @@ export class Z1Flats {
   }
 
   /** Build the flats' meshes (one draw call a zone) after the atlas is painted. */
-  finish(zones: Record<ZoneId, THREE.Group>, gain: number) {
+  finish(zones: Record<ZoneId, THREE.Group>, gain: (id: ZoneId) => number) {
     this.atlas.build();
     for (const [id, b] of this.batches) {
-      const mesh = b.build(undefined, { gain });
+      const mesh = b.build(undefined, { gain: gain(id) });
       if (mesh) zones[id].add(mesh);
     }
   }

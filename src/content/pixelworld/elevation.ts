@@ -99,8 +99,8 @@ export function elevRamps(k: PwKit, o: ElevWallColours): ElevRamps {
     ink: k.ramp(0x201c30, { light: 0.3, dark: 0.5 }),
     soot: k.ramp(0x2c2838, { light: 0.25, dark: 0.5, sat: 0.6 }),
     rust: k.ramp(0x8a4a24, { light: 0.4 }),
-    glassDark: k.ramp(0x2c3a5c, { light: 0.46, sat: 1.05, dark: 0.45 }),
-    glassSky: k.ramp(0x6880b4, { light: 0.5, sat: 0.9 }),
+    glassDark: k.ramp(0x1f2a48, { light: 0.4, sat: 1.0, dark: 0.45 }),
+    glassSky: k.ramp(0x4e6696, { light: 0.46, sat: 0.9 }),
     lamp: k.ramp(0xeab664, { light: 0.32, sat: 1.0, dark: 0.55 }),
     lampDeep: k.ramp(0xb0632e, { light: 0.34, sat: 1.05, dark: 0.45 }),
     curtain: k.ramp(o.curtain ?? 0x9a4a3a, { light: 0.38, sat: 0.9, dark: 0.5 }),
@@ -503,7 +503,7 @@ export class Elev {
       const yy = y + this.sag(x, salt);
       for (let j = 0; j < h; j++) {
         if (!this.inWall(x, yy + j) && j < h - 1) continue;
-        const t = j === 0 ? 4 : j === h - 1 ? 1 : 3;
+        const t = j === 0 ? 3.6 : j === h - 1 ? 1 : 2.8;
         c.set(x, yy + j, ramp, t);
       }
       for (let j = 0; j < (o.shadow ?? 2); j++) this.c.shift(x, yy + h + j, j === 0 ? -1.5 : -0.8);
@@ -706,17 +706,17 @@ export class Elev {
     if (kind === 'boarded' || kind === 'bricked') return;
     const f = r.frame;
     const meet = y + Math.round(h * (0.44 + hash2(v, 1, 5) * 0.06));
-    // Frame.
-    c.rect(x + 1, y + 1, w - 2, 2, f, 3);
-    c.rect(x + 1, y + h - 3, w - 2, 2, f, 2);
-    c.rect(x + 1, y + 1, 2, h - 2, f, 3);
-    c.rect(x + w - 3, y + 1, 2, h - 2, f, 2);
-    c.hline(x + 1, y + 1, w - 2, f, 4);
-    c.vline(x + 1, y + 1, h - 2, f, 4);
+    // Frame: dull paint, one highlight row on the top rail and the left stile only.
+    c.rect(x + 1, y + 1, w - 2, 2, f, 2.2);
+    c.rect(x + 1, y + h - 3, w - 2, 2, f, 1.6);
+    c.rect(x + 1, y + 1, 2, h - 2, f, 2.2);
+    c.rect(x + w - 3, y + 1, 2, h - 2, f, 1.6);
+    c.hline(x + 1, y + 1, w - 2, f, 3.2);
+    c.vline(x + 1, y + 1, h - 2, f, 3);
     // Meeting rail, its underside dark.
-    c.hline(x + 3, meet, w - 6, f, 4);
-    c.hline(x + 3, meet + 1, w - 6, f, 3);
-    c.hline(x + 3, meet + 2, w - 6, f, 1);
+    c.hline(x + 3, meet, w - 6, f, 3.2);
+    c.hline(x + 3, meet + 1, w - 6, f, 2.2);
+    c.hline(x + 3, meet + 2, w - 6, f, 0.6);
     // Glazing bars: two-over-two on most (some single panes, one lost its bar).
     if (hash2(v, 2, 5) > 0.3 && kind !== 'broken') {
       const mx = x + Math.round(w / 2) + Math.round((hash2(v, 3, 5) - 0.5) * 2);
@@ -778,72 +778,95 @@ export class Elev {
     }
     const lit = kind === 'lit' || kind === 'curtain' || kind === 'blind' || kind === 'figure' || kind === 'tv';
     if (lit) {
-      // A room behind it: a lit back wall, the ceiling's glow, the lamp's pool.
+      // A dim room behind it: never a flat yellow pane. The body of the window is the deep warm
+      // tone, with the light only where a lamp hangs (a small bright core), wallpaper dashes, shadows of furniture.
       const tv = kind === 'tv';
-      const lampRamp = tv ? k.ramp(0x7ab0e8, { light: 0.34 }) : r.lamp;
-      c.rect(x, y, w, h, lampRamp, 3, G);
+      const tvR = k.ramp(0x5a86c8, { light: 0.34 });
+      const body = tv ? tvR : r.lampDeep;
       for (let j = 0; j < h; j++) {
-        const t = j < 5 ? 4.4 : j > h - 6 ? 2.2 : 3.2;
-        for (let i = 0; i < w; i++) c.set(x + i, y + j, lampRamp, t, G);
+        for (let i = 0; i < w; i++) {
+          const d = (i & 3) === 1 && ((j + (i >> 2)) & 7) < 5 ? 0.5 : 0;
+          c.set(x + i, y + j, body, (j < h * 0.45 ? 3 : 2.3) + d, G);
+        }
       }
-      // Things in the room: a picture, a shade, furniture tops.
+      // The lamp's pool: an ellipse of lit wall, its core small and warm.
+      const lx = x + Math.round(w * (0.3 + hash2(v, 1, 9) * 0.4));
+      const ly = y + Math.round(h * 0.28);
+      if (tv) {
+        c.rect(x + 3, y + h - 15, w - 6, 13, tvR, 2, G);
+        c.rect(x + 6, y + h - 12, w - 12, 8, tvR, 4.2, G);
+      } else {
+        c.ellipse(lx, ly, w * 0.42, h * 0.36, r.lamp, 2.6, G);
+        c.ellipse(lx, ly, w * 0.26, h * 0.2, r.lamp, 3.6, G);
+        c.rect(lx - 2, y, 5, 8, r.ink, 1, G);
+        c.ellipse(lx, y + 9, 4, 2, r.lamp, 4.6, G);
+      }
+      // Furniture, a picture, a figure's shadow: one of a handful.
       const u = v % 5;
       if (u === 0) {
-        c.rect(x + 3, y + 7, 7, 9, r.lampDeep, 1, G);
-        c.frame(x + 2, y + 6, 9, 11, r.lampDeep, 0, G);
+        c.rect(x + 3, y + 8, 7, 10, r.lampDeep, 1, G);
+        c.frame(x + 2, y + 7, 9, 12, r.ink, 1, G);
       } else if (u === 1) {
-        // A hanging shade and its pool.
-        c.vline(x + w - 8, y, 6, r.lampDeep, 1, G);
-        c.rect(x + w - 11, y + 6, 8, 3, r.lampDeep, 2, G);
+        c.rect(x + 2, y + h - 12, 11, 12, r.ink, 0.6, G);
+        c.hline(x + 2, y + h - 12, 11, r.lampDeep, 2.4, G);
       } else if (u === 2) {
-        c.rect(x + 2, y + h - 11, 10, 11, r.lampDeep, 1, G);
-        c.rect(x + 2, y + h - 11, 10, 1, r.lampDeep, 3, G);
+        for (let i = 0; i < 5; i++) c.rect(x + w - 12, y + 9 + i * 7, 8, 5, r.lampDeep, 1.2 + (i & 1) * 0.8, G);
+      } else if (u === 3) {
+        // A plant on a sill.
+        c.ellipse(x + w * 0.7, y + h - 12, 6, 6, r.ink, 1, G);
+        c.rect(x + w * 0.7 - 3, y + h - 7, 6, 7, r.wood, 2, G);
       }
       if (kind === 'curtain') {
-        // Two curtains pulled apart, folds drawn; the left a bit further than the right.
-        const hl = Math.round(w * 0.34 + hash2(v, 2, 9) * 3);
-        const hr = Math.round(w * 0.26 + hash2(v, 3, 9) * 3);
+        const hl = Math.round(w * 0.3 + hash2(v, 2, 9) * 3);
+        const hr = Math.round(w * 0.22 + hash2(v, 3, 9) * 3);
         const cramp = v % 2 ? r.curtain : r.curtainB;
         for (let j = 0; j < h; j++) {
           const sway = Math.round(Math.sin(j * 0.21 + v) * 1.4);
-          for (let i = 0; i < hl + sway; i++) c.set(x + i, y + j, cramp, 1.5 + ((i + 2) % 4 === 0 ? 1.6 : 0), G);
-          for (let i = 0; i < hr - sway; i++) c.set(x + w - 1 - i, y + j, cramp, 1.4 + ((i + 1) % 4 === 0 ? 1.6 : 0), G);
+          for (let i = 0; i < hl + sway; i++) c.set(x + i, y + j, cramp, (j < 4 ? 2.6 : 1.6) + ((i + 2) % 4 === 0 ? 1.2 : 0), G);
+          for (let i = 0; i < hr - sway; i++) c.set(x + w - 1 - i, y + j, cramp, (j < 4 ? 2.6 : 1.5) + ((i + 1) % 4 === 0 ? 1.2 : 0), G);
         }
-        c.hline(x, y, w, r.lampDeep, 1, G);
+        c.hline(x, y + 1, w, r.ink, 1, G);
       } else if (kind === 'blind') {
-        // Blind pulled most of the way: slats, a warm strip at the bottom.
-        const down = Math.round(h * (0.55 + hash2(v, 5, 9) * 0.25));
-        for (let j = 0; j < down; j++) c.hline(x, y + j, w, r.lampDeep, j % 3 === 0 ? 1 : 2.6, G);
-        c.hline(x, y + down, w, r.lampDeep, 0, G);
+        const down = Math.round(h * (0.5 + hash2(v, 5, 9) * 0.3));
+        for (let j = 0; j < down; j++) c.hline(x, y + j, w, r.lampDeep, j % 3 === 2 ? 1 : 2.2, G);
+        c.hline(x, y + down, w, r.ink, 0.5, G);
+        c.rect(x + w * 0.5 - 1, y + down, 2, 3, r.stone, 3, G);
       } else if (kind === 'figure') {
-        // A person at the window: head and shoulders, one hand flat on the glass.
-        const fx = x + Math.round(w * (0.4 + hash2(v, 6, 9) * 0.2));
+        const fx = x + Math.round(w * (0.42 + hash2(v, 6, 9) * 0.2));
         const by = y + h - 1;
-        c.ellipse(fx, y + h * 0.42, 5, 6, r.ink, 0);
-        c.poly([fx - 9, by, fx - 7, y + h * 0.56, fx + 7, y + h * 0.56, fx + 10, by], r.ink, 0);
-        c.rect(fx + 8, y + h * 0.3, 3, 6, r.ink, 0);
-        c.rect(fx + 9, y + h * 0.3 - 3, 1, 3, r.ink, 0);
-        c.rect(fx + 7, y + h * 0.4, 3, 8, r.ink, 0);
+        c.ellipse(fx, y + h * 0.42, 5, 6, r.ink, 0.4, G);
+        c.poly([fx - 10, by, fx - 7, y + h * 0.56, fx + 7, y + h * 0.56, fx + 11, by], r.ink, 0.4, G);
+        c.rect(fx + 8, y + h * 0.28, 3, 7, r.ink, 0.4, G);
+        c.rect(fx + 7, y + h * 0.38, 3, 9, r.ink, 0.4, G);
+        c.rect(fx - 11, y + h * 0.5, 3, 7, r.ink, 0.4, G);
+        c.rect(x + w * 0.2, y + h * 0.3, 2, 8, r.lamp, 4, G);
       }
       return;
     }
-    // Unlit panes: the night in them, a reflected streak, a star crack.
+    // Unlit panes: the night in them — dark glass, a broken reflection, sometimes a torn blind or cardboard.
     const dark = kind !== 'moon';
-    c.rect(x, y, w, h, r.glassDark, 2);
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) c.tone[(y + j) * c.w + x + i] = dark ? 1.6 + (j < h * 0.25 ? 0.6 : 0) : 3 - (j / h) * 1.6;
-    // Sky reflection: a band across the top-left, stepped.
-    const bx = Math.round(hash2(v, 3, 3) * (w - 6));
     for (let j = 0; j < h; j++) {
-      const c0 = bx + Math.round(j * 0.7) - (j >> 4);
-      for (let i = 0; i < 4 + (j % 9 < 3 ? 2 : 0); i++) {
-        const px = x + ((c0 + i) % w);
-        if (px >= x + w) continue;
-        c.set(px, y + j, r.glassSky, dark ? 1.4 : 3.4);
+      for (let i = 0; i < w; i++) {
+        const t = dark ? 1.2 + (j < 5 ? -0.4 : 0.3 * ((i + (j >> 2)) & 1)) : 3 - (j / h) * 1.8;
+        c.set(x + i, y + j, r.glassDark, t);
+      }
+    }
+    // The reflection: a stepped diagonal band, each pane catching it at a different place.
+    const panes = 2;
+    for (let p = 0; p < panes; p++) {
+      const py0 = y + (p * h) / panes;
+      const py1 = y + ((p + 1) * h) / panes;
+      const bx = Math.round(hash2(v, p, 3) * (w - 6));
+      for (let j = Math.floor(py0); j < py1; j++) {
+        const c0 = bx + Math.round((j - py0) * 0.6);
+        for (let i = 0; i < 3 + (j % 9 < 3 ? 2 : 0); i++) {
+          const px = x + ((c0 + i) % w);
+          c.set(px, j, r.glassSky, dark ? 1.7 + (i === 0 ? 0.9 : 0) : 3.6);
+        }
       }
     }
     if (kind === 'broken') {
-      // A hole: jagged glass round black, a corner of it still catching the light.
-      c.rect(x, y, w, h, r.ink, 0);
+      c.rect(x, y, w, h, r.ink, 0.5);
       const n = 11;
       for (let i = 0; i < n; i++) {
         const side = i % 4;
@@ -851,9 +874,8 @@ export class Elev {
         const py = side === 0 ? y : side === 2 ? y + h - 1 : y + Math.floor(hash2(v, i, 13) * h);
         const ex = x + w / 2 + (hash2(v, i, 17) - 0.5) * w * 0.6;
         const ey = y + h / 2 + (hash2(v, i, 19) - 0.5) * h * 0.6;
-        c.poly([px, py, px + 3, py, ex, ey], r.glassSky, i % 3 === 0 ? 4 : 2);
+        c.poly([px, py, px + 3, py, ex, ey], r.glassSky, i % 3 === 0 ? 3.6 : 1.6);
       }
-      // A rag of curtain hanging out.
       const hx = x + Math.round(hash2(v, 2, 19) * (w - 8));
       for (let j = 0; j < h * 0.75; j++) {
         const sw = 5 + Math.round(Math.sin(j * 0.3) * 1.2);
@@ -861,13 +883,23 @@ export class Elev {
       }
       return;
     }
-    // Star crack on some.
-    if (hash2(v, 7, 3) > 0.7) {
+    // A torn blind or a square of cardboard taped in a pane, on some.
+    const w2 = v % 4;
+    if (w2 === 1) {
+      const down = Math.round(h * 0.3 + hash2(v, 3, 7) * 12);
+      for (let j = 0; j < down; j++) for (let i = (j >> 2) & 1 ? 0 : 1; i < w; i += 3) c.set(x + i, y + j, r.curtainB, 1 + ((j + i) % 5 === 0 ? 1 : 0));
+    } else if (w2 === 2) {
+      const py = y + h - 16;
+      c.rect(x + 3, py, w - 6, 13, r.wood, 2.6);
+      c.frame(x + 3, py, w - 6, 13, r.wood, 3.6);
+      c.hline(x + 6, py + 5, w - 12, r.wood, 1.4);
+    }
+    if (hash2(v, 7, 3) > 0.74) {
       const cx = x + 4 + Math.floor(hash2(v, 8, 3) * (w - 8));
       const cy = y + 4 + Math.floor(hash2(v, 9, 3) * (h - 8));
       for (let a = 0; a < 5; a++) {
         const ang = (a / 5) * 6.28 + hash2(v, a, 21);
-        c.line(cx, cy, cx + Math.round(Math.cos(ang) * (3 + (a % 3) * 3)), cy + Math.round(Math.sin(ang) * (3 + (a % 3) * 3)), r.glassSky, 4);
+        c.line(cx, cy, cx + Math.round(Math.cos(ang) * (3 + (a % 3) * 3)), cy + Math.round(Math.sin(ang) * (3 + (a % 3) * 3)), r.glassSky, 3.4);
       }
     }
     void seed;
@@ -892,12 +924,34 @@ export class Elev {
         if (f <= 0) continue;
         const whole = Math.floor(f);
         const frac = f - whole;
-        // Round to whole tones; only the fraction close to .5 is dithered between them.
-        const up = frac > 0.5 + seam ? 1 : frac < 0.5 - seam ? 0 : bayer(x, y) < (frac - (0.5 - seam)) / (2 * seam) ? 1 : 0;
+        // Whole tones with a hand-shaped edge: a slow wobble moves the threshold, and only a
+        // hair's width at the edge is dithered, however gentle the gradient is.
+        const wob = (vnoise2(x, y, 9, 7, this.seed + 401) - 0.5) * 0.22;
+        const v = frac + wob;
+        const up = v > 0.5 + seam * 0.16 ? 1 : v < 0.5 - seam * 0.16 ? 0 : bayer(x, y) < 0.5 ? 1 : 0;
         const step = whole + up;
         if (step) c.shift(x, y, sign * step);
       }
     }
+    return this;
+  }
+
+  /** Rising damp and street grime along the foot of the wall: a ragged band, darker, with moss flecks at the very bottom. */
+  footGrime(heightM = 0.9): this {
+    const { c, x0, x1, H, seed, r } = this;
+    const moss = this.k.ramp(0x4a5a30, { light: 0.3, sat: 0.8, dark: 0.45 });
+    for (let x = x0; x < x1; x++) {
+      const top = H - Math.round((heightM * this.tpm) * (0.55 + vnoise(x, 23, seed + 501) * 0.7));
+      for (let y = top; y < H; y++) {
+        if (!c.at(x, y) || c.flag[y * c.w + x] & PWF.GLOW) continue;
+        c.shift(x, y, y > H - 6 ? -2 : -1);
+      }
+      if (hash2(x >> 1, 3, seed) > 0.8) {
+        const y = H - 2 - Math.floor(hash2(x, 5, seed) * 8);
+        if (c.at(x, y)) c.ramp[y * c.w + x] = moss;
+      }
+    }
+    void r;
     return this;
   }
 
@@ -945,6 +999,39 @@ export class Elev {
     }
     for (let i = 0; i < W * H; i++) {
       if (out[i]) c.tone[i] = Math.min(c.tone[i], 0.6);
+    }
+    return this;
+  }
+
+  /** Vertical boards nailed over an opening, each drawn: width and height vary, grain, knots, nails, gaps at the top. */
+  planks(x: number, y: number, w: number, h: number): this {
+    const { c, r, seed } = this;
+    let px = x;
+    let i = 0;
+    while (px < x + w) {
+      const bw = 14 + Math.round(hash2(i, 3, seed) * 10);
+      const inset = Math.round(hash2(i, 5, seed) * 6);
+      const bh = h - inset - Math.round(hash2(i, 7, seed) * 8);
+      const base = 2.2 + hash2(i, 9, seed) * 1.2;
+      const yy = y + inset;
+      for (let j = 0; j < bh; j++) {
+        for (let k = 0; k < bw; k++) {
+          // Grain: long wandering lines, a knot or two.
+          const grain = vnoise2(px + k, j, 2.4, 40, seed + 23);
+          const t = base + (grain > 0.62 ? 0.8 : grain < 0.34 ? -0.7 : 0);
+          c.set(px + k, yy + j, r.wood, k === 0 ? t + 1 : k === bw - 1 ? 1 : t);
+        }
+      }
+      // Knots, nails, a split.
+      if (hash2(i, 11, seed) > 0.5) c.ellipse(px + bw * 0.5, yy + bh * (0.3 + hash2(i, 13, seed) * 0.4), 2.4, 3.2, r.wood, 1);
+      for (const ny of [yy + 4, yy + bh - 6]) {
+        c.set(px + 3, ny, r.iron, 4);
+        c.set(px + bw - 4, ny + 1, r.iron, 4);
+      }
+      if (hash2(i, 15, seed) > 0.6) c.vline(px + 5 + (i % 6), yy + 10, Math.round(bh * 0.45), r.wood, 0.8);
+      // The gap under the board's foot shows the dark.
+      px += bw + (hash2(i, 17, seed) > 0.75 ? 2 : 1);
+      i++;
     }
     return this;
   }
@@ -1146,157 +1233,231 @@ export class Elev {
     return this;
   }
 
-  /** What is behind a shop's glass: `kind` decides the goods; the night and the reflections go over it. */
-  room(x: number, y: number, w: number, h: number, kind: RoomKind, o: { lit?: boolean; hex?: number } = {}): this {
-    const { c, r, k, seed } = this;
+  /**
+   * What is behind a shop's glass: the space divided into bays, each its own small room drawn in
+   * one-point perspective (ceiling tubes converging, chequered floor, side walls) with the goods of
+   * `kind` on its back wall and in front. Lit rooms are GLOW (they ignore the night); a dark shop
+   * keeps the same drawing in deep tones. Reflections of the street run over the glass.
+   */
+  room(x: number, y: number, w: number, h: number, kind: RoomKind, o: { lit?: boolean; hex?: number; bays?: number } = {}): this {
+    const { c, k, seed } = this;
     const lit = o.lit ?? true;
     const G = lit ? PWF.GLOW : 0;
-    const wallHex = o.hex ?? (lit ? 0xc89a50 : 0x4a5468);
+    const wallHex = o.hex ?? (lit ? 0xb88a4a : 0x3a4458);
     const wall = k.ramp(wallHex, { light: 0.34, sat: lit ? 1 : 0.8, dark: 0.45 });
-    const floorR = k.ramp(lit ? mix(wallHex, 0x503828, 0.6) : 0x323a4a, { light: 0.36, dark: 0.45 });
-    const ceil = k.ramp(lit ? mix(wallHex, 0xffe8b8, 0.4) : 0x3a4254, { light: 0.34 });
-    const ROWS = h;
-    // Back wall.
-    c.rect(x, y, w, ROWS, wall, lit ? 3 : 2, G);
-    // Ceiling with tubes; floor with a drawn chequer and the goods' feet.
-    const cH = 7;
-    const fH = 11;
-    c.rect(x, y, w, cH, ceil, lit ? 3 : 2, G);
-    c.hline(x, y + cH, w, wall, 1, G);
-    c.rect(x, y + ROWS - fH, w, fH, floorR, 2, G);
-    c.hline(x, y + ROWS - fH, w, floorR, 4, G);
-    for (let i = 0; i < w; i += 32) {
-      if (lit) c.rect(x + 8 + i, y + 2, 20, 2, ceil, 5, G);
+    const floorHex = lit ? mix(wallHex, 0x503828, 0.55) : 0x2c3442;
+    const floorR = k.ramp(floorHex, { light: 0.34, dark: 0.45 });
+    const ceilR = k.ramp(lit ? mix(wallHex, 0xf0d8a8, 0.4) : 0x323a4c, { light: 0.34 });
+    const tube = k.ramp(lit ? 0xfff0c8 : 0x8a90a0, { light: 0.3 });
+    const bays = o.bays ?? Math.max(1, Math.round(w / 104));
+    const yTop = y;
+    const yBot = y + h;
+    for (let b = 0; b < bays; b++) {
+      const bx0 = Math.round(x + (w * b) / bays);
+      const bx1 = Math.round(x + (w * (b + 1)) / bays);
+      const cw = bx1 - bx0;
+      const vx = bx0 + cw * (0.42 + hash2(b, 1, seed) * 0.16);
+      const vy = yTop + h * 0.42;
+      const sb = 0.58;
+      const bwx0 = vx + (bx0 - vx) * sb;
+      const bwx1 = vx + (bx1 - vx) * sb;
+      const bwy0 = vy + (yTop - vy) * sb;
+      const bwy1 = vy + (yBot - vy) * sb;
+      // Ceiling.
+      c.poly([bx0, yTop, bx1, yTop, bwx1, bwy0, bwx0, bwy0], ceilR, lit ? 3 : 2, G);
+      for (let px = bx0; px < bx1; px++) {
+        for (let py = yTop; py < bwy0; py++) {
+          const d = (vy - py) / (vy - yTop);
+          const lat = (px - vx) / d;
+          for (const a of [-0.28, 0.1, 0.42]) if (Math.abs(lat - a * cw) < 3) c.set(px, py, tube, lit ? 5 : 3, G);
+        }
+      }
+      // Floor: a perspective chequer.
+      c.poly([bx0, yBot, bx1, yBot, bwx1, bwy1, bwx0, bwy1], floorR, 2, G);
+      for (let py = Math.ceil(bwy1); py < yBot; py++) {
+        const d = (py - vy) / (yBot - vy);
+        const rowN = Math.floor(5 / d);
+        for (let px = bx0; px < bx1; px++) {
+          const colN = Math.floor((px - vx) / d / 14);
+          if ((rowN + colN) & 1) c.set(px, py, floorR, lit ? 3.2 : 2.6, G);
+        }
+      }
+      // Side walls (a stripe of shelf along them).
+      c.poly([bx0, yTop, bwx0, bwy0, bwx0, bwy1, bx0, yBot], wall, lit ? 2.3 : 1.7, G);
+      c.poly([bx1, yTop, bwx1, bwy0, bwx1, bwy1, bx1, yBot], wall, lit ? 2.6 : 1.9, G);
+      // Back wall.
+      c.rect(bwx0, bwy0, bwx1 - bwx0, bwy1 - bwy0, wall, lit ? 3 : 2, G);
+      c.vline(Math.round(bwx0), Math.round(bwy0), Math.round(bwy1 - bwy0), wall, 1, G);
+      c.vline(Math.round(bwx1) - 1, Math.round(bwy0), Math.round(bwy1 - bwy0), wall, 1, G);
+      c.hline(Math.round(bwx0), Math.round(bwy1) - 1, Math.round(bwx1 - bwx0), floorR, 1, G);
+      this.goods(Math.round(bwx0) + 1, Math.round(bwy0) + 2, Math.round(bwx1 - bwx0) - 2, Math.round(bwy1 - bwy0) - 3, kind, wall, lit, b);
+      this.frontOfShop(bx0, yTop, cw, h, kind, lit, b);
     }
-    for (let j = 0; j < fH; j += 3) {
-      for (let i = (j / 3) & 1 ? 6 : 0; i < w; i += 12) c.rect(x + i, y + ROWS - fH + j, 6, 3, floorR, 3.4, G);
-    }
-    // Goods by kind.
-    const midY = y + cH;
-    const midH = ROWS - cH - fH;
-    this.goods(x, midY, w, midH, kind, wall, lit);
-    // Reflections on the glass: a band of street night across the glass, and a pale diagonal.
-    for (let j = 0; j < ROWS; j++) {
+    // Reflections on the glass: a diagonal band of the street's night, on lit rooms a paler one.
+    for (let j = 0; j < h; j++) {
       for (let i = 0; i < w; i++) {
         const d = i - j * 0.7;
-        if (((d + w) % 170) < 8 && !lit) c.tone[(y + j) * c.w + x + i] += 1.2;
-        if (((d + 30) % 131) < 4 && lit) c.tone[(y + j) * c.w + x + i] += 0.8;
+        const idx = (y + j) * c.w + x + i;
+        if (((d + w * 2) % 150) < 7) c.tone[idx] = Math.min(5, c.tone[idx] + (lit ? 0.7 : 1.1));
       }
     }
-    void r;
-    void seed;
     return this;
   }
 
-  private goods(x: number, y: number, w: number, h: number, kind: RoomKind, wall: number, lit: boolean) {
+  /** The goods against a room's back wall. */
+  private goods(x: number, y: number, w: number, h: number, kind: RoomKind, wall: number, lit: boolean, bay: number) {
     const { c, r, k, seed } = this;
     const G = lit ? PWF.GLOW : 0;
-    const shelf = (sy: number) => {
-      c.rect(x, sy, w, 3, r.wood, lit ? 2.4 : 1.5, G);
-      c.hline(x, sy, w, r.wood, lit ? 4 : 2, G);
-      c.hline(x, sy + 3, w, wall, 1, G);
+    const shelf = (sy: number, sh = 2) => {
+      c.rect(x, sy, w, sh, r.wood, lit ? 2.4 : 1.5, G);
+      c.hline(x, sy, w, r.wood, lit ? 3.8 : 2, G);
+      c.hline(x, sy + sh, w, wall, 1, G);
     };
     const palette = [0xc84a4a, 0x3a7ad0, 0xe8c83a, 0x4aa86a, 0xe8d8c0, 0xc8742a].map((hx) => k.ramp(hx, { light: 0.38, sat: 0.9, dark: 0.5 }));
     if (kind === 'laundry') {
-      // A row of front-loaders along the back, a folding table, a line of shirts.
-      const my = y + Math.round(h * 0.36);
-      const my1 = y + h - 4;
-      for (let i = 2; i + 26 < w; i += 29) {
+      // Front loaders along the back, shirts on a rail above them.
+      const my = y + Math.round(h * 0.42);
+      const my1 = y + h - 2;
+      for (let i = 2; i + 20 < w; i += 22) {
         const col = palette[4];
-        c.rect(x + i, my, 26, my1 - my, col, 3.5, G);
-        c.frame(x + i, my, 26, my1 - my, r.iron, 2, G);
-        const cx = x + i + 13;
-        const cy = my + Math.round((my1 - my) * 0.55);
-        c.ellipse(cx, cy, 8, 8, r.ink, 1, G);
-        c.ellipse(cx, cy, 6, 6, r.glassSky, 3, G);
-        c.rect(x + i + 2, my + 3, 8, 3, r.iron, 1, G);
+        c.rect(x + i, my, 20, my1 - my, col, 3.4, G);
+        c.frame(x + i, my, 20, my1 - my, r.iron, 2, G);
+        const cx = x + i + 10;
+        const cy = my + Math.round((my1 - my) * 0.56);
+        c.ellipse(cx, cy, 6, 6, r.ink, 1, G);
+        c.ellipse(cx, cy, 4, 4, r.glassSky, 3.2, G);
+        c.rect(x + i + 2, my + 2, 6, 2, r.iron, 1, G);
       }
-      for (let i = 4; i < w; i += 19) {
-        const sy = y + 2;
-        const col = palette[((i / 19) | 0) % 6];
-        c.rect(x + i, sy, 12, 16, col, 3, G);
-        c.rect(x + i - 2, sy + 1, 2, 7, col, 2.6, G);
-        c.rect(x + i + 12, sy + 1, 2, 7, col, 2.6, G);
-        c.hline(x + i - 1, sy, 14, r.iron, 3, G);
+      for (let i = 3; i < w - 12; i += 15) {
+        const col = palette[((i / 15 + bay * 2) | 0) % 6];
+        const sy = y + 2 + (i % 3);
+        c.rect(x + i, sy, 10, 13, col, 3, G);
+        c.rect(x + i - 2, sy + 1, 2, 6, col, 2.4, G);
+        c.rect(x + i + 10, sy + 1, 2, 6, col, 2.4, G);
       }
     } else if (kind === 'pawn') {
-      shelf(y + Math.round(h * 0.3));
-      shelf(y + Math.round(h * 0.62));
-      // Guitars, a saxophone, clocks and televisions: drawn shapes, never the same twice.
-      for (let i = 4; i < w - 22; ) {
-        const pick = hash2(i, 3, seed);
-        const sy = y + (hash2(i, 5, seed) > 0.5 ? 2 : Math.round(h * 0.34));
+      shelf(y + Math.round(h * 0.32));
+      shelf(y + Math.round(h * 0.68));
+      let i = 2;
+      while (i < w - 18) {
+        const pick = hash2(i, bay + 3, seed);
+        const sy = y + (i % 2 ? 2 : Math.round(h * 0.36));
         if (pick < 0.3) {
-          c.ellipse(x + i + 8, sy + 14, 7, 9, r.wood, 3, G);
-          c.rect(x + i + 7, sy, 2, 10, r.wood, 3.6, G);
-          c.ellipse(x + i + 8, sy + 14, 2, 3, r.ink, 0, G);
-        } else if (pick < 0.6) {
-          c.rect(x + i, sy + 3, 20, 16, r.iron, 2, G);
-          c.rect(x + i + 2, sy + 5, 13, 11, r.glassSky, 3, G);
-          c.hline(x + i + 3, sy + 7, 8, r.glassSky, 4.5, G);
+          c.ellipse(x + i + 7, sy + 13, 6, 8, r.wood, 3, G);
+          c.rect(x + i + 6, sy, 2, 9, r.wood, 3.6, G);
+          c.ellipse(x + i + 7, sy + 13, 1.6, 2, r.ink, 0, G);
+        } else if (pick < 0.62) {
+          c.rect(x + i, sy + 3, 18, 14, r.iron, 2, G);
+          c.rect(x + i + 2, sy + 5, 12, 9, r.glassSky, 3, G);
+          c.hline(x + i + 3, sy + 6, 8, r.glassSky, 4.6, G);
+          c.vline(x + i + 8, sy + 5, 9, r.ink, 1, G);
         } else {
-          c.rect(x + i + 1, sy + 4, 10, 12, palette[(i / 5) % 6 | 0], 3, G);
-          c.rect(x + i + 3, sy + 2, 6, 2, palette[(i / 5) % 6 | 0], 4, G);
+          const col = palette[(i / 5) % 6 | 0];
+          c.rect(x + i + 1, sy + 4, 9, 11, col, 3, G);
+          c.rect(x + i + 3, sy + 2, 5, 2, col, 4, G);
         }
-        i += 22 + Math.round(hash2(i, 9, seed) * 6);
+        i += 20 + Math.round(hash2(i, bay, seed + 9) * 6);
       }
     } else if (kind === 'liquor') {
       for (let row = 0; row < 3; row++) {
-        const sy = y + 2 + Math.round((row * h) / 3.1);
-        shelf(sy + Math.round(h / 3.1) - 3);
-        for (let i = 3; i < w - 8; ) {
-          const col = palette[(hash2(i, row, seed) * 6) | 0];
-          const bh = 8 + Math.round(hash2(i, row + 7, seed) * 8);
-          const by = sy + Math.round(h / 3.1) - 3 - bh;
-          c.rect(x + i, by, 5, bh, col, 2.5, G);
-          c.rect(x + i + 2, by - 3, 1, 3, col, 2, G);
+        const sy = y + 1 + Math.round((row * h) / 3);
+        shelf(sy + Math.round(h / 3) - 2);
+        let i = 2;
+        while (i < w - 6) {
+          const col = palette[(hash2(i, row + bay, seed) * 6) | 0];
+          const bh = 7 + Math.round(hash2(i, row + 7, seed) * 7);
+          const by = sy + Math.round(h / 3) - 2 - bh;
+          c.rect(x + i, by, 4, bh, col, 2.4, G);
+          c.rect(x + i + 1, by - 3, 2, 3, col, 2, G);
           c.vline(x + i, by, bh, col, 3.8, G);
-          c.hline(x + i + 1, by + bh - 4, 3, r.stone, 4, G);
-          i += 6 + Math.round(hash2(i, row, seed + 3) * 3);
+          c.hline(x + i, by + bh - 4, 3, r.stone, 4, G);
+          i += 5 + Math.round(hash2(i, row, seed + 3) * 3);
         }
       }
     } else if (kind === 'cafe' || kind === 'bar') {
-      // Tables and stools in silhouette, a back counter, hanging lamps.
-      const cy = y + Math.round(h * 0.5);
-      c.rect(x, cy, w, h - (cy - y) - 8, r.wood, lit ? 2.4 : 1.2, G);
-      c.hline(x, cy, w, r.wood, lit ? 4 : 2, G);
-      for (let i = 10; i < w - 12; i += 34 + (i % 11)) {
-        c.vline(x + i + 6, cy - 7, 7, r.iron, 2, G);
-        c.rect(x + i, cy - 2, 13, 2, r.iron, 1, G);
-        c.rect(x + i + 2, y, 8, 2, r.iron, 1, G);
-        c.ellipse(x + i + 6, y + 8, 5, 3, kind === 'bar' ? palette[0] : r.lamp, lit ? 4 : 1.4, G);
+      const cy = y + Math.round(h * 0.55);
+      c.rect(x, cy, w, h - (cy - y), r.wood, lit ? 2.3 : 1.2, G);
+      c.hline(x, cy, w, r.wood, lit ? 3.8 : 2, G);
+      // Back bar: bottles or cups, a coffee machine, a mirror.
+      for (let i = 4; i < w - 6; i += 7 + (i % 4)) {
+        const col = palette[((i * 3) >> 2) % 6];
+        const bh = kind === 'bar' ? 9 + (i % 5) : 6;
+        c.rect(x + i, cy - bh, 4, bh, col, 2.6, G);
+        c.rect(x + i + 1, cy - bh - 2, 2, 2, col, 2, G);
       }
-      for (let i = 8; i < w - 8; i += 16) {
-        c.rect(x + i, y + h - 18, 9, 3, r.iron, lit ? 1.4 : 0.6, G);
-        c.vline(x + i + 4, y + h - 16, 10, r.iron, 1, G);
+      if (kind === 'cafe') {
+        c.rect(x + w * 0.5 - 8, cy - 14, 18, 14, r.stone, 3.2, G);
+        c.rect(x + w * 0.5 - 6, cy - 12, 14, 6, r.ink, 1, G);
+      } else {
+        c.rect(x + w * 0.2, y + 2, w * 0.6, Math.round(h * 0.3), palette[0], 3.2, G);
+        c.frame(x + w * 0.2, y + 2, w * 0.6, Math.round(h * 0.3), r.ink, 1, G);
       }
     } else if (kind === 'lobby') {
-      // A reception desk, key rack, potted palm.
-      const dy = y + Math.round(h * 0.56);
-      c.rect(x + 6, dy, w - 12, h - (dy - y) - 3, r.wood, 2.6, G);
-      c.hline(x + 6, dy, w - 12, r.wood, 4, G);
-      for (let i = 12; i < w - 12; i += 15) c.vline(x + i, dy + 2, h - (dy - y) - 5, r.wood, 1.6, G);
-      for (let i = 0; i < 9; i++) {
-        c.rect(x + 8 + i * 12, y + 8, 7, 9, r.iron, 2, G);
-        c.set(x + 9 + i * 12, y + 11, palette[2], 4, G);
+      const dy = y + Math.round(h * 0.58);
+      c.rect(x + 3, dy, w - 6, h - (dy - y) - 1, r.wood, 2.6, G);
+      c.hline(x + 3, dy, w - 6, r.wood, 4, G);
+      for (let i = 8; i < w - 8; i += 12) c.vline(x + i, dy + 2, h - (dy - y) - 4, r.wood, 1.6, G);
+      for (let i = 0; i < Math.floor((w - 8) / 11); i++) {
+        c.rect(x + 4 + i * 11, y + 4, 7, 8, r.iron, 2, G);
+        c.set(x + 5 + i * 11, y + 7, palette[2], 4, G);
       }
+      // A framed film poster or two on the wall behind the desk.
+      c.rect(x + w * 0.12, y + 4, 12, 15, palette[0], 3, G);
+      c.frame(x + w * 0.12, y + 4, 12, 15, r.ink, 1, G);
+      c.rect(x + w * 0.74, y + 4, 12, 15, palette[1], 3, G);
+      c.frame(x + w * 0.74, y + 4, 12, 15, r.ink, 1, G);
     } else if (kind === 'closed') {
-      // Empty racks, a toppled chair: the dark interior of a shop nobody is coming back to.
-      shelf(y + Math.round(h * 0.4));
-      for (let i = 6; i < w - 30; i += 40 + (i % 13)) {
-        c.rect(x + i, y + Math.round(h * 0.4) - 7, 18, 7, palette[(i >> 3) % 6], 1.4, G);
-      }
-      c.rect(x + w * 0.4, y + h - 14, 22, 3, r.wood, 2, G);
+      shelf(y + Math.round(h * 0.42));
+      for (let i = 4; i < w - 22; i += 30 + (i % 13)) c.rect(x + i, y + Math.round(h * 0.42) - 6, 12, 6, palette[((i >> 2) + bay) % 6], 1.6, G);
     } else if (kind === 'meats') {
-      const hy = y + 3;
-      c.hline(x, hy, w, r.iron, 4, G);
-      for (let i = 8; i < w - 8; i += 22) {
+      c.hline(x, y + 2, w, r.iron, 4, G);
+      for (let i = 6; i < w - 10; i += 18) {
         const col = k.ramp(0x7a2018, { light: 0.34, dark: 0.45 });
-        c.vline(x + i + 6, hy, 6, r.iron, 3, G);
-        c.ellipse(x + i + 6, hy + 22, 7, 13, col, (u, v) => 2 + (u < 0 ? 1 : 0) - v, G);
+        c.vline(x + i + 5, y + 2, 5, r.iron, 3, G);
+        c.ellipse(x + i + 5, y + 18, 5, 11, col, (u, v) => 2 + (u < 0 ? 1 : 0) - v, G);
       }
     }
-    void wall;
+  }
+
+  /** What stands near the glass: rails, tables, display stands (drawn big: close to the viewer). */
+  private frontOfShop(x: number, y: number, w: number, h: number, kind: RoomKind, lit: boolean, bay: number) {
+    const { c, r, seed } = this;
+    const G = lit ? PWF.GLOW : 0;
+    const base = y + h;
+    if (kind === 'pawn' || kind === 'closed') {
+      // A low display: boxes and a gun rack in silhouette against the lit room.
+      c.rect(x + 2, base - 9, w - 4, 9, r.wood, lit ? 2 : 1.2, G);
+      c.hline(x + 2, base - 9, w - 4, r.wood, lit ? 3.4 : 2, G);
+    } else if (kind === 'laundry') {
+      // A folding table with a basket.
+      c.rect(x + w * 0.1, base - 22, w * 0.5, 3, r.stone, lit ? 3.4 : 2, G);
+      for (const lx of [0.14, 0.54]) c.vline(x + w * lx, base - 19, 19, r.iron, 2, G);
+      c.rect(x + w * 0.32, base - 32, 14, 10, r.stone, 2.2, G);
+    } else if (kind === 'cafe' || kind === 'bar') {
+      // Stools and table tops, near and dark.
+      for (let i = 6; i < w - 10; i += 28 + (i % 6)) {
+        c.rect(x + i, base - 26, 13, 2, r.ink, 0.6, G);
+        c.vline(x + i + 6, base - 24, 24, r.ink, 0.5, G);
+        c.rect(x + i + 2, base - 2, 9, 2, r.ink, 0.5, G);
+      }
+    } else if (kind === 'lobby') {
+      // A velvet rope and two brass posts across the front of the room.
+      for (const lx of [0.15, 0.85]) {
+        c.rect(x + w * lx - 2, base - 14, 4, 14, r.stone, 3.6, G);
+        c.ellipse(x + w * lx, base - 16, 3, 3, r.stone, 4, G);
+      }
+      for (let i = 0; i <= 40; i++) {
+        const t = i / 40;
+        const sy = base - 15 + Math.round(Math.sin(t * Math.PI) * 6);
+        c.set(x + w * (0.15 + 0.7 * t), sy, r.curtain, 3, G);
+      }
+    } else if (kind === 'liquor') {
+      // A wine rack in front of the back wall.
+      c.rect(x + 2, base - 16, w - 4, 16, r.wood, 1.6, G);
+      for (let i = 4; i < w - 4; i += 6) c.vline(x + i, base - 16, 16, r.wood, 3.4, G);
+    }
+    void seed;
+    void bay;
   }
 }
 
