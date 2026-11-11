@@ -135,6 +135,8 @@ const paintPawn: PwPainter = (c, k) => {
   e.shopfront(e.X(0.8), e.X(14.5), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'pawn'), door: e.X(15.2), doorKind: 'lit', frameRamp: e.r.iron, riser: e.k.ramp(0x4a3a2a, { light: 0.36 }) });
   e.pilaster(e.x0, e.Y(GROUND_H), e.H, 10);
   e.pilaster(e.X(17.3), e.Y(GROUND_H), e.H, 10);
+  e.fixture(e.X(0.2), e.Y(2.2), 'meter');
+  e.bills(e.X(14.4), e.Y(2.4), 26, 46);
   e.crack(e.X(2.8), e.Y(8.9), 26);
   e.pocks(e.X(4), e.Y(5.5), 280, 60, 16);
   lampPool(e, 9, 5.8, 60, 68);
@@ -184,6 +186,8 @@ const paintLaundry: PwPainter = (c, k) => {
   const sy = e.Y(3.65);
   e.shopfront(e.X(0.8), e.X(13.9), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'laundry', { hex: 0x8aa8a0 }), door: e.X(14.8), doorKind: 'lit', riser: e.k.ramp(0x3a5060, { light: 0.36 }) });
   e.pilaster(e.X(0.35), e.Y(GROUND_H - 0.1), e.H, 9);
+  e.fixture(e.X(16.5), e.Y(1.8), 'box');
+  e.bills(e.X(16.4), e.Y(3.4), 46, 40);
   e.scorch(e.X(7.4), sillOf(e, 1) - 54, 30, 66);
   e.crack(e.X(6.6), e.Y(13.4), 42);
   e.crack(e.X(12.8), e.Y(8.2), 30);
@@ -224,6 +228,8 @@ const paintRialto: PwPainter = (c, k) => {
   e.shopfront(e.X(2.6), e.X(17.4), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'lobby', { hex: 0xb86a4a }), door: e.X(9), doorKind: 'lit', frameRamp: e.k.ramp(0x241a1e, { light: 0.36 }), riser: e.k.ramp(0x5a1a24, { light: 0.36 }) });
   e.pilaster(e.X(2.2), e.Y(4.5), e.H, 10);
   e.pilaster(e.X(17.5), e.Y(4.5), e.H, 10);
+  e.bills(e.X(0.5), e.Y(3.8), 50, 62);
+  e.bills(e.X(17.7), e.Y(3.6), 50, 50);
   e.crack(e.X(15.5), e.Y(8.7), 34);
   e.pocks(e.X(3), e.Y(10), 400, 120, 22);
   // The marquee's warm spill on the brick above it.
@@ -270,6 +276,8 @@ const paintBoarded: PwPainter = (c, k) => {
   e.planks(gx0, e.Y(3.4), gx1 - gx0, e.Y(0.4) - e.Y(3.4));
   e.tag(e.X(1.4), e.Y(3.0), 'KEEP OUT', 0xc8e070, 0x2a3a1a, 3);
   e.tag(e.X(8.6), e.Y(2.4), 'NO EXIT', 0xe058a0, 0x2a1228, 2);
+  e.bills(e.X(14.2), e.Y(2.6), 40, 50);
+  e.fixture(e.X(0.2), e.Y(1.8), 'meter');
   e.crack(e.X(3.2), e.Y(10.7), 50);
   e.pocks(e.X(1), e.Y(8.5), 420, 120, 34);
   light(e, { moon: 0.6, foot: 1.2 });
@@ -295,6 +303,9 @@ const paintLiquor: PwPainter = (c, k) => {
   e.band(e.Y(GROUND_H + 0.1), 4, e.r.stone);
   const sy = e.Y(3.8);
   e.shopfront(e.X(0.8), e.X(13.2), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'liquor', { hex: 0xb07a44 }), door: e.X(13.6), doorKind: 'lit', riser: e.k.ramp(0x5a2a2a, { light: 0.34 }) });
+  e.fixture(e.X(14.1), e.Y(2.2), 'meter');
+  e.fixture(e.X(0.1), e.Y(3.2), 'vent');
+  e.bills(e.X(13.9), e.Y(3.4), 30, 40);
   e.pocks(e.X(1), e.Y(7), 300, 60, 14);
   // A security grille, half up.
   for (let x = e.X(0.9); x < e.X(13.2); x += 2) c.vline(x, sy + 30, 56, e.r.iron, 1 + ((x >> 1) & 1));
@@ -309,6 +320,25 @@ const paintBillboardBlock: PwPainter = (c, k) => {
   const h = buildingH(3);
   const e = new Elev(c, k, 97, BLUE_COL);
   roofStuff(e, h, [['aerial', 1.6, 2], ['chim', 12.4, 1.0]]);
+  // The rooftop billboard: a torn advert on a steel frame, behind the parapet.
+  {
+    const bx0 = e.X(4.6);
+    const bx1 = e.X(11.2);
+    const by0 = e.Y(h + 3.3);
+    const by1 = e.Y(h + 0.9);
+    for (const lx of [bx0 + 18, bx1 - 18, (bx0 + bx1) / 2]) {
+      c.rect(lx - 1, by1, 3, e.Y(h) - by1, e.r.iron, 2);
+      c.line(lx - 16, e.Y(h) - 2, lx, by1 + 2, e.r.iron, 2);
+    }
+    const ad = k.ramp(0xa84a30, { light: 0.4, sat: 1.0, dark: 0.45 });
+    const cream = k.ramp(0xd8c8a0, { light: 0.34 });
+    c.rect(bx0, by0, bx1 - bx0, by1 - by0, ad, 3);
+    c.frame(bx0, by0, bx1 - bx0, by1 - by0, e.r.iron, 2);
+    drawText(c, 'DRINK', bx0 + 20, by0 + 14, FONT_BOLD, cream, 4, { scale: 2 });
+    drawText(c, 'COLA', bx0 + 44, by0 + 42, FONT_BOLD, cream, 3.6, { scale: 2 });
+    c.poly([bx1 - 66, by0, bx1 - 30, by0, bx1 - 50, by1 - 18], 0, 0);
+    c.poly([bx0 + 6, by1, bx0 + 70, by1, bx0 + 16, by1 - 26], 0, 0);
+  }
   e.parapet(0, w, h - 0.2);
   e.parapet(10.2, 14, h + 0.3);
   e.bite(6.8, 1.0, 0.4);
@@ -335,6 +365,8 @@ const paintBillboardBlock: PwPainter = (c, k) => {
   e.tag(e.X(8.4), e.Y(1.9), 'DEAD', 0x60c8d8, 0x12282a, 2);
   e.pocks(e.X(1), e.Y(7), 300, 60, 18);
   e.drainpipe(13.5, h - 1);
+  e.bills(e.X(4.2), e.Y(2.3), 34, 44);
+  e.fixture(e.X(11.0), e.Y(2.4) + 60, 'box');
   light(e, { moon: 0.9 });
 };
 
@@ -371,6 +403,8 @@ const paintHotel: PwPainter = (c, k) => {
   const sy = e.Y(3.8);
   e.shopfront(e.X(1.1), e.X(20.3), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'lobby', { hex: 0xc4894a }), door: e.X(10.0), doorKind: 'lit', bays: 7, frameRamp: e.k.ramp(0x2a241f, { light: 0.34 }), riser: e.k.ramp(0x5c3a30, { light: 0.34 }) });
   e.drainpipe(0.45, h - 0.3);
+  e.bills(e.X(20.5), e.Y(3.2), 40, 60);
+  e.fixture(e.X(0.8), e.Y(2.0), 'meter');
   e.scorch(e.X(16.7), sillOf(e, 1) - 54, 32, 66);
   e.crack(e.X(9), e.Y(12.3), 46);
   lampPool(e, 11, 7.2, 90, 100);
@@ -403,6 +437,8 @@ const paintCafe: PwPainter = (c, k) => {
   e.band(e.Y(GROUND_H - 0.1), 5, e.r.stone);
   const sy = e.Y(3.8);
   e.shopfront(e.X(0.9), e.X(14.4), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'cafe', { hex: 0xa07840 }), door: e.X(15), doorKind: 'lit', frameRamp: e.k.ramp(0x2a3a2a, { light: 0.34 }), riser: e.k.ramp(0x4a3a2a, { light: 0.34 }) });
+  e.bills(e.X(16.0), e.Y(3.8), 42, 56);
+  e.fixture(e.X(16.2), e.Y(1.6), 'box');
   e.crack(e.X(5), e.Y(9.0), 28);
   e.pocks(e.X(1), e.Y(7.6), 340, 50, 12);
   light(e, { moon: 0.9 });
@@ -438,6 +474,9 @@ const paintW4: PwPainter = (c, k) => {
   c.rect(dx + 14, e.Y(2.7), 30, 26, e.r.glassDark, 2);
   e.drainpipe(15.5, h - 1);
   e.tag(e.X(1.0), e.Y(1.7), 'RUN', 0xe89a38, 0x3a1e08, 2);
+  e.bills(e.X(10.2), e.Y(2.2), 40, 44);
+  e.fixture(e.X(5.5), e.Y(2.2), 'meter');
+  e.fixture(e.X(5.5), e.Y(3.5), 'vent');
   e.pocks(e.X(1), e.Y(8.5), 380, 90, 22);
   light(e, { moon: 1.0 });
 };
@@ -475,6 +514,7 @@ const paintW6: PwPainter = (c, k) => {
   e.tag(sx0 + 40, sy + 26, 'THEY ARE', 0xe058a0, 0x2a1228, 3);
   e.tag(sx0 + 240, sy + 50, 'INSIDE', 0x70e0a0, 0x12301e, 3);
   e.window(e.X(15.0) - 14, e.Y(2.9), 28, 46, 'dark', { head: 'lintel' });
+  e.fixture(e.X(14.6), e.Y(1.1), 'box');
   e.pocks(e.X(1), e.Y(8.5), 380, 110, 26);
   light(e, { moon: 0.8, foot: 1.1 });
 };
@@ -498,6 +538,7 @@ const paintBar: PwPainter = (c, k) => {
   const sy = e.Y(3.9);
   e.shopfront(e.X(0.8), e.X(11.2), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'bar', { hex: 0x9a4a72 }), door: e.X(11.6), doorKind: 'lit', frameRamp: e.k.ramp(0x241a24, { light: 0.34 }), riser: e.k.ramp(0x3a2234, { light: 0.34 }) });
   neonWash(e, 2.5, 10.5, GROUND_H - 0.2, GROUND_H + 1.0, 0x8a3a60);
+  e.bills(e.X(11.8), e.Y(3.6), 30, 44);
   e.pocks(e.X(1), e.Y(7), 300, 50, 12);
   light(e, { moon: 0.8 });
 };
@@ -539,33 +580,58 @@ const paintMeats: PwPainter = (c, k) => {
   light(e, { moon: 0.7, foot: 0.8, right: 0.5 });
 };
 
-const BANK_COL: ElevWallColours = { wall: 0x6a665c, alt: 0x5a564e, brick: 0x6a3a2e, stone: 0x989484, frame: 0x24242a };
+const BANK_COL: ElevWallColours = { wall: 0x7a6e5a, alt: 0x665c4c, brick: 0x6a3a2e, stone: 0x908672, frame: 0x24242a };
 
 const paintBank: PwPainter = (c, k) => {
   const w = 20;
   const h = buildingH(2);
   const e = new Elev(c, k, 193, BANK_COL);
-  roofStuff(e, h, [['vent', 4.2], ['chim', 16.8, 1.0]]);
+  roofStuff(e, h, [['vent', 4.2], ['chim', 16.8, 1.0], ['aerial', 2.4, 2]]);
   e.parapet(0, w, h);
-  e.parapet(1.6, 18.4, h + 0.55);
-  e.steppedGable(10, 3.6, h + 1.5, 3);
-  e.bite(17.0, 1.1, 0.5);
-  e.fill(e.r.stone);
-  // Coursed stone drawn in big blocks: a bank's wall, broad joints, a few cracked.
-  e.courses({ ramp: e.r.stone, density: 0.86, patch: 200, course: 11, len: 24 });
-  e.cornice(e.Y(h - 0.7), { ramp: e.r.stone });
-  e.coping(e.r.stone);
-  drawText(c, 'FIRST NATIONAL', e.X(10) - textWidth('FIRST NATIONAL', FONT_BOLD, { spacing: 1 }) / 2, e.Y(h - 1.0), FONT_BOLD, e.r.ink, 1, { spacing: 1 });
-  // Pilasters and tall windows over a heavy door.
-  for (const x of [1.3, 5.1, 8.7, 12.5, 16.1, 18.0]) e.pilaster(e.X(x), e.Y(h - 1.3), e.Y(GROUND_H - 2.5), 11);
-  row(e, 0, [3.2, 6.9, 10.7, 14.5, 17.1 - 0.0], ['dark', 'moon', 'dark', 'lit', 'dark'], { w: 34, h: 66, head: 'arch' });
+  e.parapet(1.6, 18.4, h + 0.45);
+  e.curvedGable(10, 4.2, h + 1.2);
+  e.bite(17.0, 1.1, 0.45);
+  e.fill();
+  // Coursed stone: long, low blocks with a shadow joint, drawn in patches like the brick.
+  e.courses({ ramp: e.r.wall, density: 0.7, patch: 110, course: 8, len: 22 });
+  e.patch(e.X(0.8), e.Y(8.6), 130, 44, e.r.alt);
+  e.bareBrick(e.X(18.3), e.Y(9.2), 14, 22, 4);
+  e.cornice(e.Y(h - 0.7), { gaps: [[e.X(16.9), e.X(18.2)]] });
+  e.coping(e.r.stone, 3, [[e.X(16.9), e.X(18.2)]]);
+  drawText(c, 'FIRST NATIONAL', e.X(10) - textWidth('FIRST NATIONAL', FONT_BOLD, { spacing: 1 }) / 2, e.Y(h - 0.95), FONT_BOLD, e.r.ink, 1, { spacing: 1 });
+  // A pedimented centre over four pilasters (drawn: fluted, with a capital), then the arched windows.
+  const yCap = e.Y(h - 1.3);
+  const yBase = e.Y(GROUND_H - 1.8);
+  for (const x of [5.0, 8.0, 12.0, 15.0]) {
+    e.pilaster(e.X(x) - 6, yCap + 6, yBase, 12);
+    for (let i = 3; i < 11; i += 3) c.vline(e.X(x) - 6 + i, yCap + 8, yBase - yCap - 10, e.r.stone, 2.2);
+    c.rect(e.X(x) - 8, yCap, 16, 6, e.r.stone, 3);
+    c.hline(e.X(x) - 8, yCap, 16, e.r.stone, 4);
+    c.hline(e.X(x) - 8, yCap + 5, 16, e.r.stone, 1);
+  }
+  // Triangle pediment over the centre with a clock in it.
+  const px0 = e.X(4.2);
+  const px1 = e.X(15.8);
+  const py1 = e.Y(h - 1.05);
+  const py0 = e.Y(h + 0.15);
+  c.poly([px0, py1, px1, py1, (px0 + px1) / 2, py0], e.r.stone, 3);
+  c.line(px0, py1, (px0 + px1) / 2, py0, e.r.stone, 4);
+  c.line(px1, py1, (px0 + px1) / 2, py0, e.r.stone, 1);
+  c.ellipse((px0 + px1) / 2, py1 - 20, 12, 12, e.r.ink, 1);
+  c.ellipse((px0 + px1) / 2, py1 - 20, 10, 10, e.r.lamp, 3, PWF.GLOW);
+  c.line((px0 + px1) / 2, py1 - 20, (px0 + px1) / 2 + 5, py1 - 25, e.r.ink, 0.5, PWF.GLOW);
+  c.line((px0 + px1) / 2, py1 - 20, (px0 + px1) / 2 - 1, py1 - 12, e.r.ink, 0.5, PWF.GLOW);
+  row(e, 0, [2.8, 6.5, 13.5, 17.2], ['dark', 'moon', 'lit', 'dark'], { w: 32, h: 66, head: 'arch' });
+  row(e, 0, [10], ['figure'], { w: 34, h: 70, head: 'arch' });
   e.band(e.Y(GROUND_H - 0.1), 7, e.r.stone);
   // Ground floor: barred windows, the night deposit, a heavy door (the board sign goes above it).
   const sy = e.Y(3.6);
-  e.shopfront(e.X(1.0), e.X(19.0), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'closed', { lit: false, hex: 0x3a4a60 }), door: e.X(9), doorKind: 'dark', bays: 6, riser: e.r.stone, frameRamp: e.k.ramp(0x2a2a30, { light: 0.34 }) });
+  e.shopfront(e.X(1.0), e.X(19.0), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'closed', { lit: false, hex: 0x323e50 }), door: e.X(9), doorKind: 'dark', bays: 6, riser: e.r.stone, frameRamp: e.k.ramp(0x2a2a30, { light: 0.34 }) });
   for (let x = e.X(1.0); x < e.X(19); x += 3) c.vline(x, e.Y(2.8), 60, e.r.iron, 1 + (x & 1));
   e.crack(e.X(3.5), e.Y(9.3), 30);
+  e.crack(e.X(16.4), e.Y(7.5), 34);
   e.pocks(e.X(2), e.Y(9), 460, 110, 20);
+  e.fixture(e.X(0.3), e.Y(2.0), 'box');
   light(e, { moon: 0.9, foot: 0.8, right: 0.5 });
 };
 

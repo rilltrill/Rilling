@@ -245,6 +245,8 @@ export class Z1PixelWorld {
    * Call after every `convertZone`, before `finish`.
    */
   convertDyn(town: Town) {
+    // Wall glows on the old facade line have nothing to land on once a flat swung back from it.
+    town.pools.dropWallsWhere((d) => this.flats.swungAt(d.x, d.z));
     // The diner's buzzing 'r' (the classic overlay is a dark block letter).
     let sign: THREE.Object3D | null = null;
     town.zones.A.traverse((o) => {

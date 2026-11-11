@@ -32,6 +32,9 @@ interface Placement {
 /** How far a raked flat is turned (radians). */
 export const FLAT_RAKE = (25 * Math.PI) / 180;
 
+/** Dev: `&pwflats=parallel` stages every flat on the old street face, `&pwflats=<degrees>` rakes them that much (look-dev). */
+const FLAT_MODE = typeof location === 'undefined' ? '' : new URLSearchParams(location.search).get('pwflats') ?? '';
+
 /** Buildings drawn so far, by the facade centre's world position (rounded x, z). */
 const AT: Record<string, Placement> = {
   // East side of Main Street, from the barricade to the burning car.
@@ -68,6 +71,13 @@ export class Z1Flats {
   readonly atlas = new PwAtlas('z1-flats', { upscale: false });
   private batches = new Map<ZoneId, PwBatch>();
   private tiles = new Map<string, import('../../pixelworld/atlas').PwTile>();
+  /** Old facade lines of the flats that were swung back: wall light decals there have nothing to land on. */
+  private swung: { x: number; z: number; r: number }[] = [];
+
+  /** Did a flat swing back from this point of its old facade (x, z)? */
+  swungAt(x: number, z: number): boolean {
+    return this.swung.some((s) => Math.hypot(s.x - x, s.z - z) < s.r);
+  }
 
   /** Is this building group drawn as a flat? */
   has(g: THREE.Object3D): boolean {
@@ -92,10 +102,12 @@ export class Z1Flats {
     // (The square's west-side block faces east: its far end is local +x like the street's west side.)
     const east = g.position.x > 0;
     const farLocalX = east ? -rec.w / 2 : rec.w / 2;
-    if (p.staging === 'raked') {
+    const staging: FlatStaging = FLAT_MODE === 'parallel' ? 'parallel' : FLAT_MODE && !Number.isNaN(Number(FLAT_MODE)) && p.staging === 'raked' ? 'raked' : p.staging;
+    const rake = FLAT_MODE && !Number.isNaN(Number(FLAT_MODE)) ? (Number(FLAT_MODE) * Math.PI) / 180 : FLAT_RAKE;
+    if (staging === 'raked') {
       g.updateMatrix();
       const pivot = new THREE.Vector3(farLocalX, 0, 0).applyMatrix4(g.matrix);
-      const yaw = (east ? 1 : -1) * FLAT_RAKE;
+      const yaw = (east ? 1 : -1) * rake;
       const rel = g.position.clone().sub(pivot).applyAxisAngle(Y, yaw);
       g.position.copy(pivot).add(rel);
       g.rotation.y += yaw;
@@ -103,6 +115,7 @@ export class Z1Flats {
       const nearS = new THREE.Vector3(-farLocalX, 0, 0);
       g.updateMatrix();
       this.wedge(ground, sidewalkAtlas, g.matrix, pivot, nearS);
+      this.swung.push({ x: pivot.x, z: pivot.z, r: rec.w * 1.05 });
     }
     g.updateMatrixWorld(true);
     this.lay(b, g, def);

@@ -140,6 +140,12 @@ export class LightPools {
     return this.defs.length - 1;
   }
 
+  /** ART: PIXEL WORLD: drop wall glows that have no wall any more (a flat swung back from the old facade line). */
+  dropWallsWhere(pred: (d: Readonly<PoolDef>) => boolean) {
+    // (Dark, not removed: the flicker animations hold instance indices.)
+    for (const d of this.defs) if (d.wallYaw !== undefined && pred(d)) d.k = 0;
+  }
+
   /** Base colour of instance i (for runtime flicker). */
   colorOf(i: number): { color: number; k: number } {
     return this.defs[i];

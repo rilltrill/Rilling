@@ -1036,6 +1036,48 @@ export class Elev {
     return this;
   }
 
+  /** A clump of bills pasted over each other at eye level. */
+  bills(x: number, y: number, w: number, h: number): this {
+    const { k, seed, r } = this;
+    const hexes = [0xb8a878, 0x8a4a3a, 0x4a6a8a, 0xc8b89a, 0x6a7a3a];
+    let px = x;
+    let i = 0;
+    while (px < x + w - 10) {
+      const bw = 14 + Math.round(hash2(i, 3, seed) * 14);
+      const bh = 16 + Math.round(hash2(i, 5, seed) * 14);
+      const by = y + Math.round(hash2(i, 7, seed) * Math.max(1, h - bh));
+      this.poster(px, by, bw, bh, hexes[Math.floor(hash2(i, 9, seed) * hexes.length)]);
+      px += Math.round(bw * 0.7);
+      i++;
+    }
+    void k;
+    void r;
+    return this;
+  }
+
+  /** A little wall hardware: a gas meter box, a louvred vent, a pipe stub, a junction box. */
+  fixture(x: number, y: number, kind: 'meter' | 'vent' | 'box'): this {
+    const { c, r } = this;
+    if (kind === 'meter') {
+      c.rect(x, y, 16, 22, r.iron, 2.4);
+      c.hline(x, y, 16, r.iron, 4);
+      c.rect(x + 2, y + 3, 12, 6, r.glassDark, 2);
+      c.ellipse(x + 8, y + 15, 4, 4, r.iron, 1.4);
+      c.vline(x + 7, y + 22, 8, r.iron, 2);
+      c.shift(x + 16, y + 2, -1);
+    } else if (kind === 'vent') {
+      c.rect(x, y, 20, 12, r.stone, 2.6);
+      c.frame(x, y, 20, 12, r.stone, 1);
+      for (let j = 2; j < 11; j += 2) c.hline(x + 1, y + j, 18, r.iron, 1);
+    } else {
+      c.rect(x, y, 14, 16, r.rust, 2.4);
+      c.hline(x, y, 14, r.rust, 3.6);
+      c.rect(x + 3, y + 4, 8, 8, r.iron, 1.4);
+      c.vline(x + 6, y + 16, 12, r.iron, 2);
+    }
+    return this;
+  }
+
   // ─── More of the drawing ──────────────────────────────────────────────────
 
   /** A cast-iron drainpipe with its brackets and a rusty shoe. */
