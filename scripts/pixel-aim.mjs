@@ -6,7 +6,7 @@
  * screen pixel — and reports which part it hits. A drawn head must be a head hit.
  *
  *   node scripts/pixel-aim.mjs --base http://localhost:5701 \
- *     --place "walker@office:-1:4,walker@worker:1:5:30:windup=0.8,raptor@red:0:8:70" [--extra "&castlook=b"]
+ *     --place "walker@office:-1:4,walker@worker:1:5:30:windup=0.8,raptor@red:0:8:70,civ@worker:1:6:0:plead" [--extra "&castlook=b"]
  */
 import { chromium } from '@playwright/test';
 
@@ -63,7 +63,11 @@ await page.evaluate(async (place) => {
   for (const p of place) {
     const pos = camPos.clone().addScaledVector(fwd, p.f).addScaledVector(right, p.r);
     pos.y = w.groundAt(pos.x, pos.z);
-    const e = reg.createEnemy(p.id, w, { pos, frame: 'world', entry: 'walk', hpMul: 1, speedMul: 1, opts: p.variant ? { variant: p.variant } : {} });
+    let e;
+    if (p.id === 'civ') {
+      const { Civilian } = await import('/src/gameplay/Civilian.ts');
+      e = new Civilian(w, pos, 'world', p.variant ?? 'worker', { act: p.acts || 'plead' });
+    } else e = reg.createEnemy(p.id, w, { pos, frame: 'world', entry: 'walk', hpMul: 1, speedMul: 1, opts: p.variant ? { variant: p.variant } : {} });
     w.add(e);
     list.push({ e, p });
   }
@@ -129,10 +133,10 @@ const res = await page.evaluate(async () => {
       let sy = 0;
       let n = 0;
       const pts = [];
-      const W = st ? part.w : f.W;
+      const tw = st ? part.w : f.W;
       const H2 = st ? part.h : f.H;
       for (let y = 0.5; y < H2; y++) {
-        for (let x = 0.5; x < W; x++) {
+        for (let x = 0.5; x < tw; x++) {
           const q = st ? { layer: 0, part: drawnAt(x, y) } : f.sample(x, y);
           if (q.layer >= 0 && q.part === code) {
             sx += x;

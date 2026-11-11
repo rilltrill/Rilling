@@ -748,13 +748,15 @@ export interface SpriteStats {
 }
 
 /** Scene-linear colour → the sRGB display colour the retro pass shows (ACES × exposure). */
+/** ACES-ish tone curve on one channel (a plain function, so the per-sprite path allocates no closure). */
+function toneChannel(x: number, exposure: number): number {
+  x *= exposure;
+  const y = Math.min(1, Math.max(0, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)));
+  return Math.pow(y, 1 / 2.2);
+}
+
 function toDisplay(c: THREE.Color, exposure: number, out: THREE.Color): THREE.Color {
-  const f = (x: number) => {
-    x *= exposure;
-    const y = Math.min(1, Math.max(0, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)));
-    return Math.pow(y, 1 / 2.2);
-  };
-  return out.setRGB(f(c.r), f(c.g), f(c.b), THREE.LinearSRGBColorSpace);
+  return out.setRGB(toneChannel(c.r, exposure), toneChannel(c.g, exposure), toneChannel(c.b, exposure), THREE.LinearSRGBColorSpace);
 }
 
 function sizeClass(n: number): number {

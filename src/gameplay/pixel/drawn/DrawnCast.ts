@@ -441,7 +441,7 @@ export class DrawnCast {
     if (st.size !== 0 && Math.abs(full / k - st.size) < (st.size < 100 ? 2 : 4)) size = st.size;
     // View: the figure's forward against the camera, nearest drawn view (with hysteresis).
     _c.setFromMatrixPosition(cam.matrixWorld).sub(_rp);
-    const cl = Math.hypot(_c.x, _c.z);
+    const cl = Math.sqrt(_c.x * _c.x + _c.z * _c.z);
     if (cl > 1e-4 && !q.lockView) {
       _c.x /= cl;
       _c.z /= cl;
