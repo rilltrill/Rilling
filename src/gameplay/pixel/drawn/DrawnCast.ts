@@ -29,7 +29,7 @@ const RASTER_BUDGET_MS = 2.5;
 export const MAX_FIGURE_PX = 440;
 const SHELF_STEP = 16;
 /** Neck bend past this (hu) is taken by moving the whole sprite: a head pulled off its neck is the worst of the two errors. */
-const NECK_BEND = 0.35;
+const NECK_BEND = 0.24;
 /** Most the drawn head may sink into the neck, and stretch out of it (hu). */
 const NECK_DOWN = 0.15;
 /** See `bias`: hu toward the leading side. */

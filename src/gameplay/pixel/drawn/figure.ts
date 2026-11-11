@@ -77,6 +77,8 @@ export class Draw {
   flags = 0;
   /** The pose being drawn. */
   key: PoseKey = {};
+  /** Head offset placed by the aim-fair anchor (hu): the head moves over, but only tilts a quarter of it. */
+  headDx = 0;
   /** Front and back views: an arm thrust at or away from the viewer (0 no, else 0..1 how far up), left and right. */
   readonly reach = new Float32Array(2);
   /** Front and back views: a shin folded back behind its thigh, left and right. */
@@ -105,7 +107,8 @@ export class Draw {
     this.A[B.head] = 1;
     this.N[B.head] = 1;
     this.sg[B.head] = -1;
-    let hx = sk.sx[J.head] - sk.sx[J.neck];
+    // (Most of an aim-fair sideways offset is a slide, not a broken neck: only a quarter tilts the head.)
+    let hx = sk.sx[J.head] - sk.sx[J.neck] - this.headDx * 0.75;
     let hy = sk.sy[J.head] - sk.sy[J.neck];
     // Folded right over toward or away from the viewer, the neck points down the screen; a head
     // never hangs upside down in those views (it foreshortens instead).
@@ -404,6 +407,7 @@ export function makeFigureRenderer() {
     project(sk, view);
     d.S = pxTall / HEADS;
     // (The aim-fair head offset comes in whole texels: the head steps on the sprite's own grid.)
+    d.headDx = hx / d.S;
     sk.sx[J.head] += hx / d.S;
     sk.sy[J.head] += hy / d.S + (def.neck ?? 0);
     d.cx = canvas.w / 2;
