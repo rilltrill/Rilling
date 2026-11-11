@@ -1227,10 +1227,12 @@ export class Elev {
     const doorW = 44;
     const dx = o.door === undefined ? null : Math.max(x0 + 2, Math.min(x1 - doorW - 2, o.door));
     // Fascia: a painted board under a moulding (the sign goes on it as a separate card).
-    c.rect(x0 - 3, yTop, x1 - x0 + 6, fasH, fas, 2);
-    c.hline(x0 - 3, yTop, x1 - x0 + 6, fas, 4);
-    c.hline(x0 - 3, yTop + 1, x1 - x0 + 6, fas, 3);
-    c.hline(x0 - 3, yTop + fasH - 1, x1 - x0 + 6, fas, 1);
+    // Fascia: follows the sag of the wall (a board's edge, not a ruler's), with a hand-drawn underline.
+    for (let x = x0 - 3; x < x1 + 3; x++) {
+      const yy = yTop + this.sag(x, 13);
+      for (let j = 0; j < fasH; j++) c.set(x, yy + j, fas, j === 0 ? 4 : j === 1 ? 3 : j === fasH - 1 ? 1 : 2);
+      c.shift(x, yy + fasH, -1.2);
+    }
     // Transom panes, dull glass over the door height.
     c.rect(x0, yTop + fasH, x1 - x0, 8, r.ink, 1);
     for (let x = x0 + 2; x < x1 - 2; x += 13) c.rect(x, yTop + fasH + 1, 11, 6, r.glassDark, 2 + (x % 3 === 0 ? 0.8 : 0));
@@ -1249,8 +1251,11 @@ export class Elev {
     c.hline(x0, yGlass, roomW, fr, 2);
     // Riser / stallboard: panels, damp at the foot.
     c.rect(x0 - 3, yBase, x1 - x0 + 6, riserH, riser, 2);
-    c.hline(x0 - 3, yBase, x1 - x0 + 6, riser, 4);
-    c.hline(x0 - 3, yBase + 1, x1 - x0 + 6, fr, 1);
+    for (let x = x0 - 3; x < x1 + 3; x++) {
+      const yy = yBase + this.sag(x, 21);
+      c.set(x, yy, riser, 4);
+      c.set(x, yy + 1, fr, 1);
+    }
     for (let x = x0 + 5; x < x1 - 20; x += 36) {
       c.rect(x, yBase + 5, 30, riserH - 10, riser, 1);
       c.hline(x, yBase + 5, 30, riser, 0);
@@ -1339,6 +1344,15 @@ export class Elev {
           c.set(rx, railY, wall, 3.4, G);
           c.set(rx, railY + 1, wall, 1, G);
           for (let j = 5; j < 60; j += 11) c.set(rx, yTop + j * (1 - t * 0.4), wall, 2.6, G);
+          // Panel uprights every so often: pilasters along the wall (closer together further in).
+          if (i % Math.max(8, Math.round(26 * (1 - t * 0.5))) === 0) {
+            const y0 = yTop + (bwy0 - yTop) * t + 3;
+            const y1 = yBot + (bwy1 - yBot) * t;
+            for (let yy = Math.round(y0); yy < y1; yy++) {
+              c.set(rx, yy, wall, 3, G);
+              c.set(rx + 1, yy, wall, 1, G);
+            }
+          }
         }
       }
       // Back wall: picture rail, wainscot below it.
@@ -1361,7 +1375,7 @@ export class Elev {
       for (let i = 0; i < w; i++) {
         const d = i - j * 0.7;
         const idx = (y + j) * c.w + x + i;
-        if (((d + w * 2) % 150) < 7) c.tone[idx] = Math.min(5, c.tone[idx] + (lit ? 0.7 : 1.1));
+        if (((d + w * 2) % 150) < 5) c.tone[idx] = Math.min(5, c.tone[idx] + (lit ? 0.4 : 1.1));
       }
     }
     return this;
