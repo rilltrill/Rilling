@@ -127,11 +127,11 @@ function* light(e: Elev, o: { moon?: number; foot?: number; right?: number } = {
   const foot = o.foot ?? 1;
   const moon = o.moon ?? 1;
   const right = o.right ?? 0.8;
-  e.value((_x, y) => (y > e.Y(2.2) ? Math.min(1, (y - e.Y(2.2)) / (e.Y(0.3) - e.Y(2.2))) * foot : 0), -1);
+  e.value((_x, y) => (y > e.Y(2.2) ? Math.min(1, (y - e.Y(2.2)) / (e.Y(0.3) - e.Y(2.2))) * foot : 0), -1, 0.14, { y0: e.Y(2.2) });
   yield;
-  e.value((x, y) => Math.max(0, 1 - y / (H * 0.5)) * Math.max(0, 1.1 - x / (W * 0.65)) * moon, 1);
+  e.value((x, y) => Math.max(0, 1 - y / (H * 0.5)) * Math.max(0, 1.1 - x / (W * 0.65)) * moon, 1, 0.14, { y1: Math.ceil(H * 0.5), x1: Math.ceil(W * 0.72) });
   yield;
-  e.value((x) => Math.max(0, (x - W * 0.62) / (W * 0.38)) * right, -1);
+  e.value((x) => Math.max(0, (x - W * 0.62) / (W * 0.38)) * right, -1, 0.14, { x0: Math.floor(W * 0.62) });
   // The block across the street throws a long shadow over the lower wall: one big diagonal shape, drawn by hand.
   // (Its edge is the block's own roofline: runs and steps, not a smooth wave.)
   yield;
@@ -142,7 +142,7 @@ function* light(e: Elev, o: { moon?: number; foot?: number; right?: number } = {
     const h = hash2(i, 3, seed + 12);
     return (h > 0.7 ? 2.4 : h > 0.34 ? 1.2 : 0.2) + (hash2(i + 1, 3, seed + 12) > 0.5 && (x % stepW) / stepW > 0.8 ? 0.6 : 0);
   };
-  e.value((x, y) => (y > e.Y(GROUND_H + 1.0 + roofOpp(x)) + (x / W) * 40 ? 1 : 0), -1);
+  e.value((x, y) => (y > e.Y(GROUND_H + 1.0 + roofOpp(x)) + (x / W) * 40 ? 1 : 0), -1, 0.14, { y0: e.Y(GROUND_H + 3.6) });
   yield;
   e.footGrime();
   e.ink();
@@ -875,9 +875,9 @@ const paintCornerW: PwPainter = function* (c, k) {
   // The ghost sign, fading across most of the wall between the floors.
   const gy = e.Y(9.3);
   const gx = e.X(1.0);
-  e.ghostGround(gx, gy, 300, 54, e.r.stone);
-  drawText(c, "DR KELSO'S", gx + 14, gy + 9, FONT_BOLD, e.r.alt, 1.7, { spacing: 1, scale: 2 });
-  drawText(c, 'TONIC', gx + 14, gy + 37, FONT_BOLD, e.r.brick, 2.2, { spacing: 2 });
+  e.ghostGround(gx, gy, 320, 70, e.r.stone);
+  drawText(c, "DR KELSO'S", gx + 10, gy + 8, FONT_BOLD, e.r.wall, 1.4, { spacing: 1, scale: 2 });
+  drawText(c, 'TONIC', gx + 10, gy + 38, FONT_BOLD, e.r.brick, 1.9, { spacing: 2, scale: 2 });
   row(e, 1, [11.0], ['lit'], { w: 34, dy: -2 });
   row(e, 0, [2.0, 5.2, 8.6, 11.8], ['dark', 'curtain', 'blind', 'boarded'], { w: 32, dy: 6 });
   e.band(e.Y(GROUND_H - 0.1), 5, e.r.stone, { salt: 5 });

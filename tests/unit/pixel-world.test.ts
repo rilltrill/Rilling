@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
+import { Z1Flats } from '../../src/content/stages/z1/pwFlats';
 import { ART_NAMES, ART_STYLES, artCast, artWorld, envPending, isArtStyle, nextArt, pixelWorld } from '../../src/core/art';
 import { DEFAULT_SETTINGS } from '../../src/core/types';
 import { migrateArt, Save } from '../../src/core/Save';
@@ -777,19 +778,69 @@ describe('PixelWorld stages (budgets, gameplay unchanged)', () => {
     const flats = pwMeshes(px).filter((m) => m.name === 'pw:z1-flats');
     expect(flats.length).toBeGreaterThan(0);
     let verts = 0;
+    let square = 0;
     for (const m of flats) {
       const p = m.geometry.getAttribute('position');
       for (let i = 0; i < p.count; i++) {
         const x = p.getX(i);
+        const y = p.getY(i);
         const z = p.getZ(i);
-        if (z < -205 || Math.abs(x) > 24) continue; // the square's flats and anything off Main Street
+        if (z < -205) {
+          if (Math.abs(z) > 340) continue;
+          square++;
+          // The boss square: PRIME MEATS, the bank and the hotel on the north row (old facade z −304, footprint back to −320),
+          // the shuttered block raked back inside the west block's own footprint (x −82 … −66, z −304 … −284).
+          expect(z).toBeLessThanOrEqual(-283.5);
+          expect(z).toBeGreaterThanOrEqual(-320.5);
+          expect(x).toBeGreaterThanOrEqual(-91);
+          expect(x).toBeLessThanOrEqual(-29);
+          if (z > -301) expect(x).toBeLessThanOrEqual(-64.5);
+          continue;
+        }
+        if (Math.abs(x) > 24) continue; // anything off Main Street
         verts++;
         // Facades at ±9.5; cards (awnings, fire escapes) stand at most 1 m in front of a flat, footprints reach 14.5 m back.
-        expect(Math.abs(x)).toBeGreaterThanOrEqual(8.5);
+        // The Rialto's marquee (the classic overhang) is the one thing that reaches out over the pavement, at head height and up.
+        if (y < 2.6) expect(Math.abs(x)).toBeGreaterThanOrEqual(8.5);
+        else expect(Math.abs(x)).toBeGreaterThanOrEqual(6.2);
         expect(Math.abs(x)).toBeLessThanOrEqual(9.5 + 14.5);
       }
     }
     expect(verts).toBeGreaterThan(0);
+    expect(square).toBeGreaterThan(0);
+  });
+
+  it('z1: wall glows stay on where the wall still stands (a raked flat only darkens its own stretch)', () => {
+    const f = new Z1Flats();
+    const atlas = new PwAtlas('flats-glow-test');
+    const ground = new PwBatch(atlas);
+    const group = (x: number, z: number, w: number, ry: number) => {
+      const g = new THREE.Group();
+      g.position.set(x, 0, z);
+      g.rotation.y = ry;
+      g.userData.pwBuilding = { w };
+      g.updateMatrixWorld(true);
+      return g;
+    };
+    const E = Math.PI / 2;
+    // Stage every raked flat whose old facade could reach these glows, as the stage does.
+    for (const [x, z, w, ry] of [
+      [9.5, 5, 18, -E], // pawn
+      [9.5, -13, 18, -E], // laundry
+      [9.5, -50, 16, -E], // boarded
+      [-9.5, 5, 22, E], // hotel
+      [-9.5, -32, 16, E], // w4 (its old near end is the diner's far side)
+      [-9.5, -81, 14, E], // bar
+      [-66, -294, 20, E], // the shuttered block, next to PRIME MEATS
+    ] as const) f.stage('A', group(x, z, w, ry), ground, atlas);
+    // Dark: glows on the old facades that swung back.
+    expect(f.swungAt(9.45, 5)).toBe(true); // pawn
+    expect(f.swungAt(-9.45, 13.6)).toBe(true); // hotel
+    expect(f.swungAt(-9.45, -81)).toBe(true); // bar
+    // Lit: the diner's neon, the Rialto's marquee wash and PRIME MEATS' red: their walls have not moved.
+    expect(f.swungAt(-9.15, -49)).toBe(false);
+    expect(f.swungAt(9.45, -32)).toBe(false);
+    expect(f.swungAt(-58, -303.94)).toBe(false);
   });
 
   it('z1 in PIXEL WORLD plays exactly like PIXEL CAST (stage simulator)', { timeout: 300_000 }, () => {

@@ -1005,12 +1005,16 @@ export class Elev {
     const { c, r } = this;
     const yFoot = yTop + h;
     const hw = halfW;
+    // The passage: a vault receding in stepped rings of whole tones toward the yard at the far end, cobbled floor running in.
     for (let y = yTop; y < yFoot; y++) {
       const v = (y - yTop) / Math.max(1, hw * 0.9);
       const span = v >= 1 ? hw : Math.round(hw * Math.sqrt(Math.max(0, 1 - (1 - v) * (1 - v))));
-      for (let x = cx - span - 3; x <= cx + span + 3; x++) {
-        const inside = Math.abs(x - cx) <= span;
-        if (inside) c.set(x, y, r.ink, 0.5 + (y > yFoot - 16 ? 0.6 : 0));
+      for (let x = cx - span; x <= cx + span; x++) {
+        const dx = Math.abs(x - cx);
+        const ring = Math.max(dx / hw, 1 - (y - yTop) / (h * 0.8));
+        const t = ring > 0.72 ? 1.5 : ring > 0.46 ? 1.1 : 0.7;
+        c.set(x, y, r.alt, t);
+        if (y > yFoot - 22 && ((x >> 3) + (y >> 2)) % 2 === 0) c.set(x, y, r.stone, 1.5);
       }
     }
     // Voussoirs.
@@ -1462,7 +1466,7 @@ export class Elev {
    * values round to WHOLE tones). Dither appears only in the seam between two whole tones, a few
    * texels wide (`seam`, in tone units), never as a screen-door over the wall.
    */
-  value(field: (x: number, y: number) => number, strength: number, seam = 0.14): this {
+  value(field: (x: number, y: number) => number, strength: number, seam = 0.14, box?: { x0?: number; x1?: number; y0?: number; y1?: number }): this {
     const { c, W, H } = this;
     const sign = Math.sign(strength);
     const abs = Math.abs(strength);
@@ -1476,8 +1480,13 @@ export class Elev {
     }
     const wob = this.wob;
     const { ramp, flag, tone } = c;
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
+    // (`box`: where the field can be non-zero. A pass over the top half need not visit the bottom.)
+    const y0 = Math.max(0, box?.y0 ?? 0);
+    const y1 = Math.min(H, box?.y1 ?? H);
+    const x0 = Math.max(0, box?.x0 ?? 0);
+    const x1 = Math.min(W, box?.x1 ?? W);
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
         const i = y * W + x;
         if (!ramp[i] || flag[i] & PWF.GLOW) continue;
         const f = field(x, y) * abs;
@@ -1868,7 +1877,7 @@ export class Elev {
         }
         if (!this.inWall(px, py)) continue;
         // On shutters the paint takes the slat's own light: it is sprayed on metal, not printed over it.
-        const base = o.metal ? 2.2 + (c.toneAt(px, py) - 2.4) * 0.75 : 3;
+        const base = o.metal ? 2.6 + (c.toneAt(px, py) - 2.4) * 0.75 : 3;
         c.set(px, py, fill, base + ((mx + my) % 7 === 0 ? 0.6 : 0));
       }
     }

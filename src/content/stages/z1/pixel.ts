@@ -30,6 +30,7 @@ import { Z1Square } from './pwSquare';
 import { Z1Street } from './pwStreet';
 import { Z1Props } from './pwProps';
 import { Z1Flats } from './pwFlats';
+import { MAIN_FACADE } from './layout';
 import { DINER_SIGN_STRUTS, dinerSignLayout, paintDinerSign } from '../../pixelworld/z1dinerflat';
 import { PW_PARTS, type PwPart } from './setpieces';
 import { repaintable } from '../../pixelworld/retexture';
@@ -122,7 +123,7 @@ export const Z1_MOOD: Partial<PwMood> = { pivot: 0.55, tint: 0.8, shade: 0x9a90e
 export class Z1PixelWorld {
   /** Set before any material is made: every PixelWorld material of the stage is lit under it. */
   readonly mood = pwMood(Z1_MOOD);
-  readonly atlas = new PwAtlas('z1');
+  readonly atlas = new PwAtlas('z1', { skyline: true }); // (skyline packing: the flats' texels are paid for by the slack the shelves left)
   readonly skyAtlas = new PwAtlas('z1-sky', { levels: 1 });
   private batches = new Map<ZoneId, PwBatch>();
   private rule: TileRule;
@@ -251,6 +252,8 @@ export class Z1PixelWorld {
   convertDyn(town: Town) {
     // Wall glows on the old facade line have nothing to land on once a flat swung back from it.
     town.pools.dropWallsWhere((d) => this.flats.swungAt(d.x, d.z));
+    // The diner's neon glow used to land on a 9 m black board; the drawn sign is a shaped sheet with night round it.
+    town.pools.shrinkWallsWhere((d) => d.x === -MAIN_FACADE + 0.35 && d.z === -49, 2.7);
     // The diner's buzzing 'r' (the classic overlay is a dark block letter).
     let sign: THREE.Object3D | null = null;
     town.zones.A.traverse((o) => {

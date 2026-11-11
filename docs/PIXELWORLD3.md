@@ -77,3 +77,27 @@ In PIXEL WORLD the visible boxes are deleted (the hidden boxes stay for gameplay
   (2.6; 1.7 in the square, zone E) so a wall lands on the mood's pivot and shows as painted.
 - A new building: add a painter in `z1flats.ts` (or `<stage>flats.ts`), an entry in `Z1_FLATS`, and its world position in `AT`.
 
+### Round 2 (what the judges asked for, as built)
+
+Rules the kit now enforces, so every later stage inherits them:
+
+- **A card is not a rectangle.** `Elev.sides('pier' | 'stone', …)` gives each end a drawn pier or stone return (a 12 to 19 texel face with its side in dark tones), brick toothing up the top third (courses stepping 4 to 10 texels), and an edge that wobbles 1 to 3 texels every 6 to 10 rows. `lift` (stretches of roofline a course or more up or down, built in steps), `cornerBite` (20–60 texels of a corner gone) and `collapse` (a storey fallen in, joists left sticking out) are how a roofline is drawn; every building takes at least two height changes away from its gable.
+- **No long line survives.** `cornice` and `band` are broken every 80–110 texels (2.5–3.5 m) by a pier block, a 6–14 texel drop, or 20–40 texels gone with raw brick showing (`breaks(salt)`). Bites and collapses cut the cornice automatically. The shopfront fascia gets the same treatment, as do the chrome bands of the diner.
+- **Brick is drawn where the eye goes.** `brick({ amount })` records the wall's share of drawn brick (30–40 %); `finish()` places coursed groups of 3–8 bricks (lit top, shadowed foot and joint) by a coarse attention grid: the corners, along the top, under the sills, round the damage. The rest of the wall stays two flat tones. `courses` remains only for patches of bare brick inside a hole.
+- **Damage cuts.** `breach(cx, cy, rx, ry, { lintel, rubble })` is decided brick by brick (the outline is the bricks that went), drawn over the architecture so it breaks the cornice and takes window heads with it, leaves a ragged inner edge of raw brick, charred joists, a lit lip and rubble stains running down. `bite`/`collapse` draw a torn edge along their outline (`dressBites`).
+- **Windows.** Night glass is near black with one low moon streak on one pane; about one in four has a crack, in three different shapes; more blinds and curtains in the upper rows.
+- **Metal is a thing.** `rollerShutter`: 7-texel slats in three tones, dented, per-bay value, guide rails, heavy bottom rail with padlocks, `raised` for a bay stuck half up on a black interior. `tag(..., { metal: true })` takes the slat's own light, runs step at each slat. `bars` for security grilles (fewer, heavier, cross-rails, one bent, one gone).
+- **Foot grime** is per building and climbs under what feeds it: downpipes, doors, breaches and scorches each record a splash; `footGrime` no longer lays one band along every wall.
+- **Roof cards are seen to land**: tanks and the billboard have 5–6 texel rim-lit steel legs and braces on a drawn strip of roof; `ROOF` cards stand 0.6 m lower so a dropped stretch of roofline never shows a card's foot.
+- Painters are generators: `yield` between passes (`light`, `value`) so no paint slice runs long (`PwPainter` may return a generator).
+
+The set, round 2:
+
+- The two buildings past the crossing are flats (`'-9,-110'`, `'10,-110'` in `AT`): the street side raked (a re-used painting, tinted: only seen in passing), the end wall `end: {...}` square to the crossing, one a broken parapet with a tank and a big ghost sign, one with a stepped parapet climbing to a round corner turret. No box faces at the crawlers hold.
+- The diner is a cut-out front (`z1dinerflat.ts`): `Z1Flats.stageDiner` lays one card with holes where the glass and door are; the room behind it, the panes and burst openings are the classic ones, untouched. Chrome bands and enamel step 1–2 texels panel by panel, panels missing, a neon tube dead in stretches; the "Diner" sign is a shaped sheet on struts with bent tubes (`paintDinerBacking`, same layout as the buzzing r's overlay).
+- The Rialto's marquee is three cards (`stageMarquee`): a shaped face with a stepped crest and scalloped valance, a tin soffit in three tones with rows of little bulbs, a flared end. The chase bulbs animate on the old rows, on the face.
+- The boss square's hotel box is gone (no side wall beside PRIME MEATS), its flat re-using the hotel painting; the bank is a real pediment with dentils, columns on steps and a clock in a stone round.
+- Structure varies by building: recessed centre bay (pawn), bay window column (cafe), tall narrow house jammed against a lower range (w4), stair windows stepping up one end (w6), top storey half fallen (liquor), a carriage arch through the shutters (the shuttered block), three tall arched lights instead of window rows (Rialto).
+- The rake is still 25 degrees; the teeth option (`&pwflats=teeth`, three steep wings cut along drawn piers) was tried and not kept because (see the report) the wings are mostly hidden behind each other.
+- Budgets: `wall glows` are dropped only on the stretch of old facade that actually swung back (`swungAt` is a span, not a circle).
+

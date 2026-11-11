@@ -146,6 +146,11 @@ export class LightPools {
     for (const d of this.defs) if (d.wallYaw !== undefined && pred(d)) d.k = 0;
   }
 
+  /** Pull wall glows in (a light that lands on a smaller thing than the wall it was made for). */
+  shrinkWallsWhere(pred: (d: Readonly<PoolDef>) => boolean, r: number) {
+    for (const d of this.defs) if (d.wallYaw !== undefined && pred(d)) d.r = r;
+  }
+
   /** Base colour of instance i (for runtime flicker). */
   colorOf(i: number): { color: number; k: number } {
     return this.defs[i];
