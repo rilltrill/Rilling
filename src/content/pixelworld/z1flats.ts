@@ -619,7 +619,7 @@ const paintW6: PwPainter = function* (c, k) {
   e.bite(9.6, 1.5, 0.75);
   e.cornerBite(true, 30, 24);
   e.fill();
-  e.brick({ amount: 0.36 });
+  e.brick({ amount: 0.26 });
   e.cornice(e.Y(h - 0.85), { gaps: [[e.X(9.4), e.X(11.4)]] });
   e.coping(e.r.stone, 3, [[e.X(9.4), e.X(11.4)]]);
   yield;
@@ -733,15 +733,15 @@ const paintBank: PwPainter = function* (c, k) {
   e.cornice(e.Y(h - 0.7), { h: 15 });
   e.coping(S, 3, [[e.X(16.8), e.X(19.2)]]);
   yield;
-  // The frieze: a plain stone band with the letters cut clear into it (seven rows of bold capitals), its ends worn away.
+  // The frieze: one word, cut large into a stone panel between the middle columns (seven-row capitals broke into fragments at the boss's distance).
   {
-    const fy = e.Y(h - 1.2);
-    const tw = textWidth('FIRST NATIONAL', FONT_BOLD, { spacing: 1 });
+    const fy = e.Y(h - 1.18);
+    const tw = textWidth('NATIONAL', FONT_BOLD, { spacing: 1, scale: 2 });
     const fx = e.X(10) - tw / 2;
-    for (let x = fx - 8; x < fx + tw + 8; x++) {
-      for (let y = fy - 3; y < fy + 12; y++) c.set(x, y, S, y === fy - 3 ? 3.9 : y === fy + 11 ? 1.2 : 3.0 + (hash2(x >> 3, y, 193) > 0.84 ? -0.5 : 0));
+    for (let x = fx - 10; x < fx + tw + 10; x++) {
+      for (let y = fy - 3; y < fy + 18; y++) c.set(x, y, S, y === fy - 3 ? 3.9 : y === fy + 17 ? 1.2 : 3.0 + (hash2(x >> 3, y, 193) > 0.84 ? -0.5 : 0));
     }
-    drawText(c, 'FIRST NATIONAL', fx, fy, FONT_BOLD, e.r.ink, 0.9, { spacing: 1 });
+    drawText(c, 'NATIONAL', fx, fy, FONT_BOLD, e.r.ink, 0.9, { spacing: 1, scale: 2 });
   }
   // The pediment: tympanum recessed a tone, raking cornices with dentils, a black cast shadow under them.
   const cx = e.X(10);
@@ -823,7 +823,9 @@ const paintBank: PwPainter = function* (c, k) {
   e.window(e.X(6.6) - 18, e.Y(2.9), 36, 48, 'blind', { head: 'lintel' });
   e.window(e.X(13.4) - 18, e.Y(2.9), 36, 48, 'dark', { head: 'lintel' });
   const dcx = e.X(10);
-  c.rect(dcx - 34, e.Y(3.6), 68, e.Y(0.72) - e.Y(3.6), S, 3);
+  // (The door surround in shade: it stands back between the columns, so no flat pale slab sits above the door.)
+  c.rect(dcx - 34, e.Y(3.6), 68, e.Y(0.72) - e.Y(3.6), S, (_x, y) => (y < e.Y(3.1) ? 1.4 : 1.9));
+  for (let y = e.Y(3.6); y < e.Y(0.72); y++) c.set(dcx - 34 + e.lean(y, 7), y, S, 2.7);
   c.frame(dcx - 34, e.Y(3.6), 68, e.Y(0.72) - e.Y(3.6), stoneDark, 1);
   c.rect(dcx - 26, e.Y(3.3), 52, e.Y(0.72) - e.Y(3.3), e.r.ink, 0.8);
   c.rect(dcx - 24, e.Y(3.1), 23, e.Y(0.72) - e.Y(3.1), e.k.ramp(0x5a4228, { light: 0.34 }), 2.2);
@@ -849,6 +851,10 @@ const paintBank: PwPainter = function* (c, k) {
   e.pocks(e.X(2), e.Y(9), 460, 110, 20);
   e.fixture(e.X(0.3), e.Y(2.0), 'box');
   yield* light(e, { moon: 0.9, foot: 0.6, right: 0.5 });
+  // The bay over the door stands back between its columns: shadow from the entablature, to the columns' own edges (a whole-tone shape, no stray pale patch).
+  const bay0 = e.X(8.2) + 12;
+  const bay1 = e.X(11.8) - 12;
+  e.value((x, y) => (x > bay0 && x < bay1 && y > e.Y(h - 1.65) + 10 && y < e.Y(3.6) ? 1 : 0), -1, 0.14, { x0: bay0 - 2, x1: bay1 + 2, y0: e.Y(h - 1.65) + 6, y1: e.Y(3.6) + 2 });
 };
 
 const SHUT_COL: ElevWallColours = { wall: 0x856a50, alt: 0x745c44, brick: 0x6e3a2c, stone: 0x9a8e74, frame: 0x2e2822, curtain: 0x8a5a3a };

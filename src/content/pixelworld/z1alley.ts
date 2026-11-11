@@ -150,7 +150,6 @@ export interface Z1AlleyTiles {
   roadClosed: PwTile;
   newsFront: PwTile;
   mailbox: PwTile;
-  slats: PwTile;
   pole: PwTile;
   lampHead: PwTile;
 }
@@ -164,7 +163,6 @@ export function z1AlleyTiles(a: PwAtlas): Z1AlleyTiles {
     roadClosed: a.tile('z1al|roadclosed', 80, 19, paintRoadClosed),
     newsFront: neutral(a.tile('z1al|newsbox', 16, 30, paintNewsBox), NEUTRAL_HEX),
     mailbox: a.tile('z1al|mailbox', 16, 24, paintMailbox),
-    slats: a.tile('z1al|slats', 32, 16, paintSlats, { wrap: true }),
     pole: a.tile('z1al|pole', 16, 64, paintPole, { wrap: true }),
     lampHead: a.tile('z1al|lamphead', 30, 16, paintLampHead),
   };
@@ -279,14 +277,6 @@ function paintMailbox(c: PwCanvas, k: PwKit) {
   c.rect(2, 4, 12, 2, b, 1);
   drawText(c, 'US', 4, 9, FONT_3x5, w, 3);
   drawText(c, 'MAIL', 0, 16, FONT_3x5, w, 3);
-}
-
-/** Bench slats (wrap): weathered boards, gaps, bolt heads. */
-function paintSlats(c: PwCanvas, k: PwKit) {
-  const wd = k.ramp(0x5c4432, { light: 0.4 });
-  for (let y = 0; y < c.h; y++) c.rect(0, y, c.w, 1, wd, y % 5 === 0 ? 1 : y % 5 === 1 ? 4 : 3);
-  for (let x = 4; x < c.w; x += 16) c.set(x, 2, wd, 5);
-  c.scatter(k.rng, 0, 0, c.w, c.h, 6, 0, -1, { shapes: 3 });
 }
 
 /** Lamp pole (wrap along v): painted steel with a lit left flank, flaking paint, stapled bills low down. */

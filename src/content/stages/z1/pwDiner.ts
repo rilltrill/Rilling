@@ -3,7 +3,6 @@ import type { PwAtlas, PwTile } from '../../pixelworld/atlas';
 import { PwBatch, type PwRectOpts } from '../../pixelworld/batch';
 import { PW_TPM, PWF } from '../../pixelworld/canvas';
 import { FONT_5x7, neonText, textWidth } from '../../pixelworld/font';
-import { roofTile } from '../../pixelworld/surfaces';
 import { z1DinerTiles, type Z1DinerTiles } from '../../pixelworld/z1diner';
 import { dinerSignLayout } from '../../pixelworld/z1dinerflat';
 
@@ -74,10 +73,8 @@ const DRAWN_FRONT = new Set(['kick', 'stripe', 'checker', 'header', 'mullion', '
 
 export class Z1Diner {
   readonly t: Z1DinerTiles;
-  private roof: PwTile;
   constructor(atlas: PwAtlas) {
     this.t = z1DinerTiles(atlas);
-    this.roof = roofTile(atlas, { hex: 0x2a2b31 });
   }
 
   /** Paint the diner under `root` (if any); returns the replaced classic meshes. */
@@ -112,31 +109,6 @@ export class Z1Diner {
       switch (part) {
         case 'shell':
           boxFaces(b, p.width, p.height, p.depth, all(t.panel));
-          break;
-        case 'roof':
-          boxFaces(b, p.width, p.height, p.depth, { py: this.roof, pz: t.flute, px: t.panel, nx: t.panel, nz: t.panel, ny: t.panel });
-          // Roof clutter breaking the box: two exhaust fans (crossed cut-outs) on the roof deck.
-          for (const fx of [-5.5, 6.2]) {
-            const fw = t.fan.w / PW_TPM;
-            const fh = t.fan.h / PW_TPM;
-            const y0 = p.height / 2;
-            const z0 = -1.5;
-            b.rect(_o.set(fx - fw / 2, y0, z0), X, Y, fw, fh, t.fan);
-            b.rect(_o.set(fx + fw / 2, y0, z0 - 0.02), NX, Y, fw, fh, t.fan, { flipU: true });
-            b.rect(_o.set(fx, y0, z0 + fw / 2), NZ, Y, fw, fh, t.fan);
-          }
-          break;
-        case 'kick':
-        case 'header':
-        case 'mullion':
-        case 'doorHead':
-          boxFaces(b, p.width, p.height, p.depth, { pz: t.flute, px: t.flute, nx: t.flute, py: t.flute, ny: t.flute });
-          break;
-        case 'stripe':
-          boxFaces(b, p.width, p.height, p.depth, { pz: t.stripe, px: t.stripe, nx: t.stripe, py: t.flute, ny: t.flute });
-          break;
-        case 'checker':
-          boxFaces(b, p.width, p.height, p.depth, { pz: t.checker, px: t.checker, nx: t.checker, py: t.flute, ny: t.flute });
           break;
         case 'backWall':
           boxFaces(b, p.width, p.height, p.depth, { pz: t.wall });
