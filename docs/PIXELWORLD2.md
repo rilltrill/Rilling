@@ -101,9 +101,9 @@ blocks next to the camera; that is a safety net, not the art: an upscaled tile h
 shapes but no new detail, and at 2–4 m it is still a texel of 2–1 pixels. Paint natively
 wherever the player looks. (`&pwdebug=mag` shows where: anything orange or red.)
 
-Budget (per stage, all atlases, all levels): ≤ 48 MB of texture memory; paint ≤ 1.2 s on the
+Budget (per stage, all atlases, all levels): ≤ 48 MiB of texture memory; paint ≤ 1.2 s on the
 test box for a cold load (it runs in slices behind the intro card and is stored after the
-first run). Spend texels where the rail camera is: unique paint near, tinted wrap tiles far.
+first run; z1 with drawn flats is about 2 s, see docs/PIXELWORLD3.md). Spend texels where the rail camera is: unique paint near, tinted wrap tiles far.
 
 ## 4. Painting rules
 

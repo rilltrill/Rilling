@@ -1123,7 +1123,7 @@ backdrops, the store, deferred paint) works as described, on new formats.
   below 32 on purpose (d1's river at 16), FLORA plants close to the camera (their own atlas,
   not upscaled) — and everything `flat` and `tiny` measure, which is paint and light.
 - **Budgets** (per stage, all atlases, all levels; the bytes are the same on the GPU and in
-  the CPU copy): ≤ 48 MB, every atlas ≤ 4096 on a side, cold paint ≤ 1.2 s on the test box.
+  the CPU copy): ≤ 48 MiB, every atlas ≤ 4096 on a side, cold paint ≤ 1.2 s on the test box (z1 with drawn flats: about 2 s, the figure the PIXELWORLD3 brief allows; it still needs the owner's sign-off).
 
   | stage | atlases as stored (MB) | total | paint, JIT-warm (node, min of 4) | cold load: build / paint in frames / total | warm total |
   |---|---|---|---|---|---|
@@ -1559,7 +1559,7 @@ screen-door over every painted colour, and no colour on screen that anyone had p
 
 ### Drawn flats (PIXEL WORLD 3: buildings as 2D cards)
 
-Where a stage has them (round 1: z1 Main Street beats 0–5 and the boss square) buildings are drawn flats instead of painted boxes, staged per building (parallel / raked / facing) with their hidden occluders untouched: `pixelworld/elevation.ts` is the illustration kit, `pixelworld/z1flats.ts` the pictures, `stages/z1/pwFlats.ts` the staging (`&pwflats=parallel|<degrees>` for look-dev). `docs/PIXELWORLD3.md` describes it as built.
+Where a stage has them (round 1: z1 Main Street beats 0–5 and the boss square) buildings are drawn flats instead of painted boxes (the diner's front and the Rialto's marquee included: `pixelworld/z1dinerflat.ts`), staged per building (parallel / raked / facing, the two corners past the crossing with an `end` flat square to the crossing) with their hidden occluders untouched: `pixelworld/elevation.ts` is the illustration kit, `pixelworld/z1flats.ts` the pictures, `stages/z1/pwFlats.ts` the staging (`&pwflats=parallel|<degrees>` for look-dev). `docs/PIXELWORLD3.md` describes it as built.
 
 ### Round 5 (review fixes, PIXEL WORLD only unless noted)
 
