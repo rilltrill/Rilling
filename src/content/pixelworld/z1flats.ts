@@ -1,6 +1,6 @@
 import type { PwPainter } from './atlas';
 import { bayer, PWF } from './canvas';
-import { Elev, FLAT_PAD, FLAT_TPM, mix, vnoise, type ElevWallColours, type RoomKind, type WinKind } from './elevation';
+import { Elev, FLAT_PAD, FLAT_TPM, vnoise, type ElevWallColours, type RoomKind, type WinKind } from './elevation';
 import { drawText, FONT_BOLD, FONT_5x7, textWidth } from './font';
 
 /**
@@ -118,14 +118,14 @@ function light(e: Elev, o: { moon?: number; foot?: number; right?: number } = {}
   e.value((_x, y) => (y > e.Y(2.2) ? Math.min(1, (y - e.Y(2.2)) / (e.Y(0.3) - e.Y(2.2))) * foot : 0), -1);
   e.value((x, y) => Math.max(0, 1 - y / (H * 0.5)) * Math.max(0, 1.1 - x / (W * 0.65)) * moon, 1);
   e.value((x) => Math.max(0, (x - W * 0.62) / (W * 0.38)) * right, -1);
+  // The block across the street throws a long shadow over the lower wall: one big diagonal shape, drawn by hand.
+  const seed = e.seed;
+  e.value((x, y) => {
+    const edge = e.Y(GROUND_H + 1.2 + 2.4 * vnoise(x, 120, seed + 12)) + (x / W) * 42;
+    return y > edge ? 1 : 0;
+  }, -1);
   e.footGrime();
   e.ink();
-}
-
-/** A street lamp's pool on the wall: whole tones, warm inner ring, the centre a little under the lamp head. */
-function lampPool(e: Elev, xM: number, yM = 6.2, rx = 74, ry = 96) {
-  const hot = e.k.ramp(mix(0xcf8a40, 0x8a6a4a, 0.4), { light: 0.3, sat: 1.0, dark: 0.45 });
-  e.pool(e.X(xM), e.Y(yM), rx, ry, 1, hot);
 }
 
 /** Neon throwing colour on the wall under a sign: a strip of the wall in the colour, ragged top, no ring. */
@@ -179,7 +179,6 @@ const paintPawn: PwPainter = (c, k) => {
   e.bills(e.X(14.4), e.Y(2.4), 26, 46);
   e.crack(e.X(2.8), e.Y(8.9), 26);
   e.pocks(e.X(4), e.Y(5.5), 280, 60, 16);
-  lampPool(e, 9, 5.8, 60, 68);
   light(e);
 };
 
@@ -268,7 +267,6 @@ const paintRialto: PwPainter = (c, k) => {
   e.pocks(e.X(3), e.Y(10), 400, 120, 22);
   // The marquee's warm spill on the brick above it.
   neonWash(e, 3, 17, GROUND_H - 0.3, GROUND_H + 1.5, 0x9a5238);
-  lampPool(e, 8.5, 6.6, 84, 90);
   light(e, { moon: 1.0, right: 0.6 });
 };
 
@@ -418,7 +416,6 @@ const paintHotel: PwPainter = (c, k) => {
   e.fixture(e.X(0.8), e.Y(2.0), 'meter');
   e.scorch(e.X(16.7), sillOf(e, 1) - 54, 32, 66);
   e.crack(e.X(9), e.Y(12.3), 46);
-  lampPool(e, 11, 7.2, 90, 100);
   e.pocks(e.X(2), e.Y(9), 420, 200, 28);
   light(e, { moon: 1.1 });
 };

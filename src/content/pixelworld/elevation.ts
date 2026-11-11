@@ -781,7 +781,7 @@ export class Elev {
       // A dim room behind it: never a flat yellow pane. The body of the window is the deep warm
       // tone, with the light only where a lamp hangs (a small bright core), wallpaper dashes, shadows of furniture.
       const tv = kind === 'tv';
-      const tvR = k.ramp(0x5a86c8, { light: 0.34 });
+      const tvR = k.ramp(0x3f5f94, { light: 0.34 });
       const body = tv ? tvR : r.lampDeep;
       for (let j = 0; j < h; j++) {
         for (let i = 0; i < w; i++) {
@@ -794,7 +794,7 @@ export class Elev {
       const ly = y + Math.round(h * 0.28);
       if (tv) {
         c.rect(x + 3, y + h - 15, w - 6, 13, tvR, 2, G);
-        c.rect(x + 6, y + h - 12, w - 12, 8, tvR, 4.2, G);
+        c.rect(x + 6, y + h - 12, w - 12, 8, tvR, 3.6, G);
       } else {
         c.ellipse(lx, ly, w * 0.42, h * 0.36, r.lamp, 2.6, G);
         c.ellipse(lx, ly, w * 0.26, h * 0.2, r.lamp, 3.6, G);
@@ -1039,7 +1039,7 @@ export class Elev {
   /** A clump of bills pasted over each other at eye level. */
   bills(x: number, y: number, w: number, h: number): this {
     const { k, seed, r } = this;
-    const hexes = [0xb8a878, 0x8a4a3a, 0x4a6a8a, 0xc8b89a, 0x6a7a3a];
+    const hexes = [0x8a8068, 0x6a4a3a, 0x445064, 0x8c8470, 0x5a6240];
     let px = x;
     let i = 0;
     while (px < x + w - 10) {
@@ -1165,9 +1165,11 @@ export class Elev {
   poster(x: number, y: number, w: number, h: number, hex: number): this {
     const { c, k, r, rng } = this;
     const ramp = k.ramp(hex, { light: 0.4, sat: 0.8, dark: 0.5 });
-    c.rect(x, y, w, h, ramp, 3);
-    c.rect(x + 2, y + 2, w - 4, Math.max(1, Math.round(h * 0.35)), ramp, 1);
-    for (let i = 0; i < 3; i++) c.hline(x + 3, y + Math.round(h * 0.45) + i * 3, w - 6, ramp, 2 - (i & 1));
+    c.rect(x, y, w, h, ramp, 2.6);
+    c.rect(x + 2, y + 2, w - 4, Math.max(1, Math.round(h * 0.35)), ramp, 1.2);
+    for (let i = 0; i < 3; i++) c.hline(x + 3, y + Math.round(h * 0.45) + i * 3, w - 6, ramp, 1.8 - (i & 1) * 0.6);
+    // Dirt on the paper: a corner gone darker, a streak.
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) if (hash2(x + i, y + j, 77) < 0.1) c.shift(x + i, y + j, -1);
     // Torn corner, a curled edge, the bill's shadow on the wall.
     const tearY = y + h - 4 - Math.floor(rng.next() * 6);
     for (let i = 0; i < w; i++) if (i % 7 < 4) c.set(x + i, tearY + (i & 1), r.ink, 1);
@@ -1291,7 +1293,7 @@ export class Elev {
     const floorR = k.ramp(floorHex, { light: 0.34, dark: 0.45 });
     const ceilR = k.ramp(lit ? mix(wallHex, 0xf0d8a8, 0.4) : 0x323a4c, { light: 0.34 });
     const tube = k.ramp(lit ? 0xfff0c8 : 0x8a90a0, { light: 0.3 });
-    const bays = o.bays ?? Math.max(1, Math.round(w / 104));
+    const bays = o.bays ?? Math.max(1, Math.round(w / 180));
     const yTop = y;
     const yBot = y + h;
     for (let b = 0; b < bays; b++) {
@@ -1428,26 +1430,49 @@ export class Elev {
         c.rect(x + i + 1, cy - bh - 2, 2, 2, col, 2, G);
       }
       if (kind === 'cafe') {
-        c.rect(x + w * 0.5 - 8, cy - 14, 18, 14, r.stone, 3.2, G);
-        c.rect(x + w * 0.5 - 6, cy - 12, 14, 6, r.ink, 1, G);
+        const cx0 = x + w * (0.25 + (((bay * 37) % 5) / 5) * 0.5);
+        if (bay % 2 === 0) {
+          c.rect(cx0 - 8, cy - 14, 18, 14, r.stone, 3.2, G);
+          c.rect(cx0 - 6, cy - 12, 14, 6, r.ink, 1, G);
+        } else {
+          // A cake stand under a dome.
+          c.ellipse(cx0, cy - 10, 8, 8, r.glassSky, 3.4, G);
+          c.rect(cx0 - 6, cy - 9, 12, 7, palette[0], 3.4, G);
+          c.hline(cx0 - 8, cy - 2, 16, r.wood, 3, G);
+        }
       } else {
         c.rect(x + w * 0.2, y + 2, w * 0.6, Math.round(h * 0.3), palette[0], 3.2, G);
         c.frame(x + w * 0.2, y + 2, w * 0.6, Math.round(h * 0.3), r.ink, 1, G);
       }
     } else if (kind === 'lobby') {
       const dy = y + Math.round(h * 0.58);
-      c.rect(x + 3, dy, w - 6, h - (dy - y) - 1, r.wood, 2.6, G);
-      c.hline(x + 3, dy, w - 6, r.wood, 4, G);
-      for (let i = 8; i < w - 8; i += 12) c.vline(x + i, dy + 2, h - (dy - y) - 4, r.wood, 1.6, G);
-      for (let i = 0; i < Math.floor((w - 8) / 11); i++) {
-        c.rect(x + 4 + i * 11, y + 4, 7, 8, r.iron, 2, G);
-        c.set(x + 5 + i * 11, y + 7, palette[2], 4, G);
+      const mode = bay % 3;
+      if (mode === 0) {
+        // Reception: a long desk, the key rack, a framed poster.
+        c.rect(x + 3, dy, w - 6, h - (dy - y) - 1, r.wood, 2.6, G);
+        c.hline(x + 3, dy, w - 6, r.wood, 4, G);
+        for (let i = 8; i < w - 8; i += 12) c.vline(x + i, dy + 2, h - (dy - y) - 4, r.wood, 1.6, G);
+        for (let i = 0; i < Math.floor((w - 8) / 11); i++) {
+          c.rect(x + 4 + i * 11, y + 4, 7, 8, r.iron, 2, G);
+          c.set(x + 5 + i * 11, y + 7, palette[(i + bay) % 6], 4, G);
+        }
+      } else if (mode === 1) {
+        // The grand stair going up to the left, a banister, a potted palm.
+        for (let i = 0; i < 9; i++) c.rect(x + 2 + i * 7, y + h - 3 - i * 4, w * 0.5, 4, r.wood, 3 - (i & 1) * 0.8, G);
+        c.line(x + 2, y + h - 2, x + 2 + 8 * 7, y + h - 3 - 8 * 4 - 8, r.wood, 4.4, G);
+        c.ellipse(x + w * 0.82, y + h - 16, 6, 8, r.stone, 1.6, G);
+        c.rect(x + w * 0.82 - 4, y + h - 9, 8, 9, r.wood, 2.4, G);
+      } else {
+        // A bench, a chandelier, framed views.
+        c.rect(x + 5, dy + 4, w * 0.4, 5, r.wood, 2.6, G);
+        c.hline(x + 5, dy + 4, w * 0.4, r.wood, 3.8, G);
+        for (const fx of [0.14, 0.42]) c.vline(x + w * fx, dy + 9, h - (dy - y) - 10, r.wood, 1.6, G);
+        c.ellipse(x + w * 0.65, y + 8, 7, 4, r.lamp, 4, G);
+        c.rect(x + w * 0.2, y + 3, 14, 10, palette[3], 2.6, G);
+        c.frame(x + w * 0.2, y + 3, 14, 10, r.ink, 1, G);
+        c.rect(x + w * 0.7, y + 3, 14, 10, palette[1], 2.6, G);
+        c.frame(x + w * 0.7, y + 3, 14, 10, r.ink, 1, G);
       }
-      // A framed film poster or two on the wall behind the desk.
-      c.rect(x + w * 0.12, y + 4, 12, 15, palette[0], 3, G);
-      c.frame(x + w * 0.12, y + 4, 12, 15, r.ink, 1, G);
-      c.rect(x + w * 0.74, y + 4, 12, 15, palette[1], 3, G);
-      c.frame(x + w * 0.74, y + 4, 12, 15, r.ink, 1, G);
     } else if (kind === 'closed') {
       shelf(y + Math.round(h * 0.42));
       for (let i = 4; i < w - 22; i += 30 + (i % 13)) c.rect(x + i, y + Math.round(h * 0.42) - 6, 12, 6, palette[((i >> 2) + bay) % 6], 1.6, G);
