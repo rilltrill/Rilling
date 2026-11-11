@@ -112,6 +112,8 @@ export class Pen {
   private supN = 0;
   /** Paint serial of the group most recently filled, by group id. */
   private gOrder = new Uint16Array(256);
+  /** Corners to take out of the outline (a figure has a few hundred at most). */
+  private shaved = new Int32Array(8192);
 
   constructor(c: IndexedCanvas) {
     this.c = c;
@@ -448,6 +450,37 @@ export class Pen {
   }
 
   /**
+   * Removes the outer corner of an L in the outline: a texel with empty neighbours on two adjacent
+   * sides whose other two neighbours are filled (the outline would otherwise be two texels wide there).
+   */
+  private shaveCorners(x0: number, y0: number, x1: number, y1: number) {
+    const c = this.c;
+    const w = c.w;
+    const idx = c.idx;
+    // Judged on the outline as filled, then removed together (removing as it scans would unzip a limb).
+    let n = 0;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const k = y * w + x;
+        if (idx[k] === 0) continue;
+        const L = idx[k - 1] === 0;
+        const R = idx[k + 1] === 0;
+        const U = idx[k - w] === 0;
+        const D = idx[k + w] === 0;
+        const open = (L ? 1 : 0) + (R ? 1 : 0) + (U ? 1 : 0) + (D ? 1 : 0);
+        if (open !== 2 || (L && R) || (U && D)) continue;
+        if (n < this.shaved.length) this.shaved[n++] = k;
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      const k = this.shaved[i];
+      idx[k] = 0;
+      c.part[k] = 0;
+      c.group[k] = 0;
+    }
+  }
+
+  /**
    * Ends the figure. The ink line round the silhouette of the UNION (never per part: no paper
    * doll), then the thinner interior lines, on the nearer side of every boundary between groups.
    */
@@ -462,6 +495,9 @@ export class Pen {
     const y1 = Math.min(h - 2, c.y1);
     const group = c.group;
     const order = c.order;
+    // Pixel-perfect outline: a corner texel with empty space on two adjacent sides and the
+    // silhouette turning through it is taken out, so the line steps diagonally instead of in L-shapes.
+    this.shaveCorners(x0, y0, x1, y1);
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         const k = y * w + x;

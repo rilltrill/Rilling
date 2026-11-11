@@ -307,9 +307,9 @@ function deadFace(d: Draw, s: HeadSpec, g: HeadGroups, view: ViewId) {
     }
   }
   if (lod >= 2) {
-    // Blood out of the corner of the mouth, down the jaw.
-    poly(d, bot + 0.04, mid + w * 0.8, bot, mid + w * 1.02, -0.7, mid + w * 0.86, -0.7, mid + w * 0.55);
-    pen.shade(g.head, 0, R.blood, 2);
+    // A thin run of blood from the far corner of the mouth, leaving the chin skin.
+    poly(d, bot - 0.02, mid + w * 0.7, bot - 0.01, mid + w * 0.94, -0.68, mid + w * 0.92, -0.68, mid + w * 0.72);
+    pen.shade(g.head, 0, R.blood, 3);
   }
 }
 
