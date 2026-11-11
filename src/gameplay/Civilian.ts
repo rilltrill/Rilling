@@ -9,6 +9,10 @@ import { buildHumanoid, type HumanoidRig } from '../content/kit/humanoid';
 import { Kit } from '../content/kit/ModelKit';
 import { bakeHumanoid, releaseGeos, ZT, type BakedHumanoid, type ZSurface } from '../content/enemies/zombieKit';
 import { humanLook, paintHuman, type HumanLook, type HumanPose } from '../content/pixel/human';
+import { rigArms, type DrawnQuery } from './pixel/drawn/DrawnCast';
+import { FLANNEL } from './pixel/drawn/outfits';
+import { civilianFrame } from './pixel/drawn/states';
+import { isDrawnEveryone } from './pixel/look';
 import type { PixelFigure } from './pixel/figure';
 import { CIV_STAMP, HAND } from './pixel/stamps';
 import {
@@ -1342,11 +1346,15 @@ export class Civilian extends Entity {
    * put until they're rescued; then they jog off the edge (PerchedCivilian drops
    * them to the ground).
    */
+  /** Metres moved over the ground so far (the drawn run cycle follows this, not the clock). */
+  private travel = 0;
+
   private step(dir: THREE.Vector3, dist: number) {
     if (dist <= 0 || (this.perched && this.phase !== 'leave')) return;
     const p = this.root.position;
     p.x += dir.x * dist;
     p.z += dir.z * dist;
+    this.travel += dist;
     if (!this.perched) p.y = this.world.groundAt(p.x, p.z);
   }
 
@@ -1386,6 +1394,28 @@ export class Civilian extends Entity {
     } else p.bubble = this.bubble;
     p.speed = this.phase === 'flee' || this.phase === 'leave' || this.phase === 'stumble' || this.phase === 'arrive' ? this.speed : 0;
     return paintHuman(f, this.rig, this.look, p);
+  }
+
+  /** PIXEL WORLD 3 (`castlook=d`): round one draws the civilian in the flannel shirt. */
+  override drawnFigure(q: DrawnQuery): boolean {
+    if (this.look.outfit !== 'flannel' && !isDrawnEveryone()) return false;
+    const rh = this.rig.head.matrixWorld.elements;
+    const headH = (rh[13] - this.root.position.y) / (0.2928 * this.rig.scale);
+    const pick = civilianFrame(this.phase, this.phaseT, this.shot, this.age, this.travel, headH);
+    q.def = FLANNEL;
+    q.frames = pick.frames;
+    q.frame = pick.frame;
+    q.scale = this.rig.scale;
+    q.flags = 0;
+    q.lockView = this.shot;
+    q.free = this.shot && pick.frame >= 1;
+    rigArms(q, this.rig.armL, this.rig.armR);
+    q.armsAlways = false;
+    const sm = this.rig.spine.matrixWorld.elements;
+    q.chest.set(sm[12] + sm[4] * 0.22, sm[13] + sm[5] * 0.22, sm[14] + sm[6] * 0.22);
+    const hm = this.rig.head.matrixWorld.elements;
+    q.head.set(hm[12] + hm[4] * 0.13, hm[13] + hm[5] * 0.13, hm[14] + hm[6] * 0.13);
+    return true;
   }
 
   override onShot(hit: ShotHit): ShotOutcome {

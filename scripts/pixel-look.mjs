@@ -59,7 +59,7 @@ await page.addInitScript(() => {
 });
 const zooArg = stage.startsWith('zoo') ? '&zoo=none' : '';
 // --extra "&castlook=b": more URL flags (the PIXEL CAST 2 cel look).
-await page.goto(`${base}/?stage=${stage}${zooArg}&god=1&retro=${retro}&seed=7&mute=1&art=3d${args.extra ?? ''}`, { waitUntil: 'load' });
+await page.goto(`${base}/?stage=${stage}${zooArg}&god=1&retro=${retro}&seed=7&mute=1&art=${args.art ?? '3d'}${args.extra ?? ''}`, { waitUntil: 'load' });
 const t0 = Date.now();
 while (Date.now() - t0 < 25000) {
   await page.waitForTimeout(250);

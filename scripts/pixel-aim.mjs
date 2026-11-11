@@ -6,7 +6,7 @@
  * screen pixel — and reports which part it hits. A drawn head must be a head hit.
  *
  *   node scripts/pixel-aim.mjs --base http://localhost:5701 \
- *     --place "walker@office:-1:4,walker@worker:1:5:30:windup=0.8,raptor@red:0:8:70" [--extra "&castlook=b"]
+ *     --place "walker@office:-1:4,walker@worker:1:5:30:windup=0.8,raptor@red:0:8:70,civ@worker:1:6:0:plead" [--extra "&castlook=b"]
  */
 import { chromium } from '@playwright/test';
 
@@ -49,7 +49,8 @@ for (let i = 0; i < 100; i++) {
 await page.evaluate(async (place) => {
   const g = window.__game;
   const w = g.world;
-  const reg = await import('/src/content/registry.ts');
+  const regUrl = performance.getEntriesByType('resource').map((r) => r.name).find((n) => n.includes('/src/content/registry.ts')) ?? '/src/content/registry.ts';
+  const reg = await import(regUrl);
   const threeUrl = performance.getEntriesByType('resource').map((r) => r.name).find((n) => /\/deps\/three\.js/.test(n));
   const THREE = await import(threeUrl);
   const cam = w.camera;
@@ -63,7 +64,14 @@ await page.evaluate(async (place) => {
   for (const p of place) {
     const pos = camPos.clone().addScaledVector(fwd, p.f).addScaledVector(right, p.r);
     pos.y = w.groundAt(pos.x, pos.z);
-    const e = reg.createEnemy(p.id, w, { pos, frame: 'world', entry: 'walk', hpMul: 1, speedMul: 1, opts: p.variant ? { variant: p.variant } : {} });
+    let e;
+    if (p.id === 'civ') {
+      // (The module instance the running game already loaded: a dev server serves an edited file
+      // with a cache-busting query, and a fresh import of the plain path would be a second copy.)
+      const civUrl = performance.getEntriesByType('resource').map((r) => r.name).find((n) => n.includes('/src/gameplay/Civilian.ts')) ?? '/src/gameplay/Civilian.ts';
+      const { Civilian } = await import(civUrl);
+      e = new Civilian(w, pos, 'world', p.variant ?? 'worker', { act: p.acts || 'plead' });
+    } else e = reg.createEnemy(p.id, w, { pos, frame: 'world', entry: 'walk', hpMul: 1, speedMul: 1, opts: p.variant ? { variant: p.variant } : {} });
     w.add(e);
     list.push({ e, p });
   }
@@ -114,16 +122,26 @@ const res = await page.evaluate(async () => {
       continue;
     }
     const want = { head: 1, torso: 2 };
-    const row = { who: `${p.id}@${p.variant ?? ''}${p.acts ? ' ' + p.acts : ''}`, texels: `${f.W}x${f.H} k${f.kpx}` };
+    // A drawn figure (castlook=d): read its frame's part map instead of the GPU figure.
+    const st = s.drawn && s.drawn.pose ? s.drawn : null;
+    const part = st ? sp.drawn.debugParts(st.def, st.pose, st.view, st.size, st.hx, st.hy, st.flags, st.lod) : null;
+    const drawnAt = (cx, cy) => {
+      // cx, cy = sprite texels from the left / top (the image as displayed).
+      const col = st.mirror ? part.w - 1 - Math.floor(cx) : Math.floor(cx);
+      return part.part[Math.floor(cy) * part.w + col];
+    };
+    const row = { who: `${p.id}@${p.variant ?? ''}${p.acts ? ' ' + p.acts : ''}`, texels: st ? `${part.w}x${part.h} drawn view ${st.view}${st.mirror ? ' mirrored' : ''}` : `${f.W}x${f.H} k${f.kpx}` };
     for (const [name, code] of Object.entries(want)) {
       // Centroid of the texels the sprite draws as that part, nudged to the nearest such texel.
       let sx = 0;
       let sy = 0;
       let n = 0;
       const pts = [];
-      for (let y = 0.5; y < f.H; y++) {
-        for (let x = 0.5; x < f.W; x++) {
-          const q = f.sample(x, y);
+      const tw = st ? part.w : f.W;
+      const H2 = st ? part.h : f.H;
+      for (let y = 0.5; y < H2; y++) {
+        for (let x = 0.5; x < tw; x++) {
+          const q = st ? { layer: 0, part: drawnAt(x, y) } : f.sample(x, y);
           if (q.layer >= 0 && q.part === code) {
             sx += x;
             sy += y;
@@ -149,8 +167,8 @@ const res = await page.evaluate(async () => {
       }
       [cx, cy] = best;
       // Texel → retro px → NDC → raycast against the game's own hitboxes.
-      const rx = f.ox + cx * f.kpx;
-      const ry = f.oy + cy * f.kpx;
+      const rx = st ? st.left + cx * st.k : f.ox + cx * f.kpx;
+      const ry = st ? st.bottom + (part.h - cy) * st.k : f.oy + cy * f.kpx;
       const ndc = new THREE.Vector2((rx / sp.gridW) * 2 - 1, (ry / sp.gridH) * 2 - 1);
       ray.setFromCamera(ndc, cam);
       const hits = ray.intersectObjects(w.shootables.active(), false);

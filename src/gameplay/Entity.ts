@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Frame, HitPart, WeaponId } from '../core/types';
 import type { World } from './World';
 import type { PixelFigure } from './pixel/figure';
+import type { DrawnQuery } from './pixel/drawn/DrawnCast';
 
 /** Data describing a bullet hitting a shootable mesh. */
 export interface ShotHit {
@@ -78,6 +79,8 @@ export abstract class Entity {
 
   /** Same, for a part this entity flung into the world (see `looseParts`). */
   paintPart?(obj: THREE.Object3D, f: PixelFigure): boolean;
+  /** PIXEL WORLD 3 (`castlook=d`): the drawn figure to show this redraw; false = paint as before. */
+  drawnFigure?(q: DrawnQuery): boolean;
 
   /** Called by World once when added. */
   onAdded(): void {}

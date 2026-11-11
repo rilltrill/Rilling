@@ -9,6 +9,9 @@ import type { Entity } from '../../src/gameplay/Entity';
 import { PixelFigure, PART, MAX_PRIMS, MAX_LAYERS, type FigureSample } from '../../src/gameplay/pixel/figure';
 import { CIV_STAMP, STAMP, stampReach } from '../../src/gameplay/pixel/stamps';
 import { nullHud } from './sim';
+import { DrawnCast, newDrawnSprite } from '../../src/gameplay/pixel/drawn/DrawnCast';
+import { setCastLook } from '../../src/gameplay/pixel/look';
+import { drawnAim, drawnReport } from './drawnAim';
 
 /**
  * PixelCast alignment for every civilian pose (the act repertoire in
@@ -259,6 +262,30 @@ describe('PixelCast alignment: civilian acts (sprite parts land on the hitboxes)
       ray.setFromCamera(new THREE.Vector2().copy(h.clone().project(camera) as unknown as THREE.Vector2), camera);
       const hit = ray.intersectObjects(world.shootables.objects, false)[0];
       expect((hit?.object.userData.shot as { owner: Entity } | undefined)?.owner).toBe(g);
+    }
+  });
+});
+
+describe('civilian alignment — drawn figure (castlook=d)', () => {
+  it('the flannel civilian: head and torso line up in every act it stands in', () => {
+    setCastLook('d');
+    try {
+      const rows: [string, ReturnType<typeof drawnAim>][] = [];
+      const dc = new DrawnCast(null);
+      for (const ph of ['plead', 'flee', 'backaway'] as CivPhase[]) {
+        for (const yaw of [0, 40, 160]) {
+          const { world, camera } = makeWorld();
+          const c = new Civilian(world, new THREE.Vector3(-0.3, 0, -6), 'world', 'worker', { act: 'plead' });
+          world.add(c);
+          c.debugPose(ph, 0.4);
+          c.root.rotation.y = Math.atan2(0.3, 6) + (yaw * Math.PI) / 180;
+          rows.push([`civ ${ph} y${yaw}`, drawnAim(world, camera, c, dc, newDrawnSprite())]);
+        }
+      }
+      const rep = drawnReport(rows);
+      expect(rep.bad, rep.bad.join('; ')).toEqual([]);
+    } finally {
+      setCastLook('b');
     }
   });
 });

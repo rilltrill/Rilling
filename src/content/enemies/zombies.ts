@@ -8,6 +8,10 @@ import { registerEnemy } from '../registry';
 import { Kit } from '../kit/ModelKit';
 import type { HumanoidRig, Limb } from '../kit/humanoid';
 import type { PixelFigure } from '../../gameplay/pixel/figure';
+import { rigArms, type DrawnQuery } from '../../gameplay/pixel/drawn/DrawnCast';
+import { WORKER } from '../../gameplay/pixel/drawn/outfits';
+import { zombieFrame } from '../../gameplay/pixel/drawn/states';
+import { isDrawnEveryone } from '../../gameplay/pixel/look';
 import { humanMem, paintHuman, paintLooseArm, type HumanPose } from '../pixel/human';
 import { paintBloaterBelly, paintBruteArmour, paintBruteScars, paintCrawlerWaist, paintPustules, paintSac, paintSpitterVeins } from '../pixel/zombieParts';
 import { HAND } from '../../gameplay/pixel/stamps';
@@ -204,6 +208,30 @@ export abstract class Zombie extends Enemy {
     const k = Math.max(this.kHead, this.kTorso, this.kArmL, this.kArmR) * this.flinch;
     p.squash = this.state === 'dying' ? 0 : k * k;
     return paintHuman(f, this.r, this.b.look, p);
+  }
+
+  /** PIXEL WORLD 3 (`castlook=d`): round one draws the construction worker. */
+  override drawnFigure(q: DrawnQuery): boolean {
+    if (!this.pixelArt || !this.r || !this.b || (this.b.look.outfit !== 'worker' && !isDrawnEveryone())) return false;
+    const air = this.state === 'entry' ? this.root.position.y - this.groundY(this.root.position.x, this.root.position.z) : 0;
+    const pick = zombieFrame(this.state, this.stateTime, this.windup, this.phase, this.state === 'dying' ? 0 : this.groundSpeed, 0.62, air);
+    q.def = WORKER;
+    q.frames = pick.frames;
+    q.frame = pick.frame;
+    q.scale = this.r.scale;
+    q.flags = this.severed[0] | (this.severed[1] << 2) | (this.headless ? 16 : 0);
+    q.lockView = this.state === 'dying';
+    // Dying takes no more hits: once it starts to fall, the head rests where the drawing puts it.
+    q.free = this.state === 'dying' && pick.frame >= 1;
+    rigArms(q, this.r.armL, this.r.armR);
+    q.armsAlways = false;
+    // (Rig pivots stay live; the baked meshes' matrices do not. The torso hitbox centre is 22 cm up the spine.)
+    const sm = this.r.spine.matrixWorld.elements;
+    q.chest.set(sm[12] + sm[4] * 0.22, sm[13] + sm[5] * 0.22, sm[14] + sm[6] * 0.22);
+    const hm = this.r.head.matrixWorld.elements;
+    const hs = 0.13 * this.b.look.headSize;
+    q.head.set(hm[12] + hm[4] * hs, hm[13] + hm[5] * hs, hm[14] + hm[6] * hs);
+    return true;
   }
 
   override paintPart(obj: THREE.Object3D, f: PixelFigure): boolean {

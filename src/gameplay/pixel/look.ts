@@ -18,7 +18,7 @@
  * read once when this module loads).
  */
 
-export type CastLookId = '0' | 'b';
+export type CastLookId = '0' | 'b' | 'd';
 
 export interface CastStyle {
   id: CastLookId;
@@ -43,18 +43,22 @@ export interface CastStyle {
   small: number;
   /** Figures at least this tall get full dark ink where a limb crosses the trunk. */
   big: number;
+  /** Humanoids are shown as drawn figures (`gameplay/pixel/drawn`), not painted over the rig. */
+  drawn?: boolean;
 }
 
 export const CAST_STYLES: Record<CastLookId, CastStyle> = {
   '0': { id: '0', name: 'CONTOUR (before)', cel: 0, base: 3, shadow: 1, line: 1, hi: 0, ink: 0.42, band: 0, ground: 0, small: 45, big: 110 },
   b: { id: 'b', name: 'CEL', cel: 2, base: 3, shadow: 1, line: 1, hi: 2, ink: 0.5, band: 0.5, ground: 1, small: 70, big: 110 },
+  // PIXEL WORLD 3 (docs/PIXELWORLD3.md): people are drawn (`drawn/`), everything else stays CEL.
+  d: { id: 'd', name: 'DRAWN', cel: 2, base: 3, shadow: 1, line: 1, hi: 2, ink: 0.5, band: 0.5, ground: 1, small: 70, big: 110, drawn: true },
 };
 
 /** The look used when nothing selects one (`&castlook=`, `CASTLOOK`). */
 export const DEFAULT_CAST_LOOK: CastLookId = 'b';
 
 export function isCastLook(v: unknown): v is CastLookId {
-  return v === '0' || v === 'b';
+  return v === '0' || v === 'b' || v === 'd';
 }
 
 function envLook(): CastLookId {
@@ -66,6 +70,17 @@ function envLook(): CastLookId {
 
 let current: CastStyle = CAST_STYLES[envLook()];
 let version = 0;
+
+/** Look-dev: every zombie walker shows the worker figure, every civilian the flannel one (`&drawnfig=all`; round one only draws two outfits). */
+let drawnEveryone = false;
+
+export function setDrawnEveryone(on: boolean) {
+  drawnEveryone = on;
+}
+
+export function isDrawnEveryone(): boolean {
+  return drawnEveryone;
+}
 
 /** The active style. */
 export function castStyle(): CastStyle {
@@ -112,6 +127,9 @@ export interface CastStageLight {
   accentAmount: number;
   /** Screen-space direction TOWARD the accent light (x right, y up). */
   accentDir: readonly [number, number];
+  /** The key colour of the place (sRGB hex) and how far every drawn figure's palette leans to it. */
+  tint: number;
+  tintAmt: number;
   /** Contact shadow colour (sRGB hex: the stage's deepest shadow tone) and its opacity. */
   ground: number;
   groundAlpha: number;
@@ -121,23 +139,23 @@ export interface CastStageLight {
   fog: number;
 }
 
-const DAY: CastStageLight = { step: 0, floor: 0.12, accent: 0xfff0c0, accentAmount: 0, accentDir: [-0.5, 0.86], ground: 0x1c1830, groundAlpha: 0.5, skirt: false, fog: 0.5 };
-const NIGHT: CastStageLight = { step: -1, floor: 0.24, accent: 0x9cc4ff, accentAmount: 0, accentDir: [0.5, 0.86], ground: 0x0e0c1e, groundAlpha: 0.6, skirt: false, fog: 0.5 };
+const DAY: CastStageLight = { step: 0, floor: 0.12, accent: 0xfff0c0, accentAmount: 0, accentDir: [-0.5, 0.86], tint: 0, tintAmt: 0, ground: 0x1c1830, groundAlpha: 0.5, skirt: false, fog: 0.5 };
+const NIGHT: CastStageLight = { step: -1, floor: 0.24, accent: 0x9cc4ff, accentAmount: 0, accentDir: [0.5, 0.86], tint: 0x304878, tintAmt: 0.08, ground: 0x0e0c1e, groundAlpha: 0.6, skirt: false, fog: 0.5 };
 
 /** Per stage id (`StageDef.id`); stages not listed fall back to DAY / NIGHT by how dark their fog is. */
 export const CAST_STAGE_LIGHT: Record<string, CastStageLight> = {
   // z1: night street, wet asphalt — sodium lamps and neon overhead: a step down, warm accents from above.
-  z1: { ...NIGHT, accent: 0xffc070, accentAmount: 0.5, accentDir: [0.25, 0.97], skirt: true },
+  z1: { ...NIGHT, accent: 0xffc070, accentAmount: 0.5, accentDir: [0.25, 0.97], tint: 0xc08850, tintAmt: 0.07, skirt: true },
   // z2: hospital — failing fluorescent tubes: no step down, no coloured source.
-  z2: { step: 0, floor: 0.17, accent: 0xd8ffe8, accentAmount: 0, accentDir: [0, 1], ground: 0x12202a, groundAlpha: 0.5, skirt: false, fog: 0.5 },
+  z2: { step: 0, floor: 0.17, accent: 0xd8ffe8, accentAmount: 0, accentDir: [0, 1], tint: 0x4f9a8c, tintAmt: 0.1, ground: 0x12202a, groundAlpha: 0.5, skirt: false, fog: 0.5 },
   // z3: dusk bridge — fires behind the horde: a step down, orange accents from the upper right.
-  z3: { step: -1, floor: 0.24, accent: 0xff9a48, accentAmount: 0.6, accentDir: [0.6, 0.8], ground: 0x1a1024, groundAlpha: 0.55, skirt: false, fog: 0.5 },
+  z3: { step: -1, floor: 0.24, accent: 0xff9a48, accentAmount: 0.6, accentDir: [0.6, 0.8], tint: 0xc86a30, tintAmt: 0.18, ground: 0x1a1024, groundAlpha: 0.55, skirt: false, fog: 0.5 },
   // d1: day jungle — even daylight.
   d1: { ...DAY },
   // d2: lab / greenhouse — cool skylight, no coloured source.
-  d2: { step: 0, floor: 0.14, accent: 0xc8f4ff, accentAmount: 0, accentDir: [0, 1], ground: 0x101c28, groundAlpha: 0.5, skirt: false, fog: 0.5 },
+  d2: { step: 0, floor: 0.14, accent: 0xc8f4ff, accentAmount: 0, accentDir: [0, 1], tint: 0x68a8c8, tintAmt: 0.08, ground: 0x101c28, groundAlpha: 0.5, skirt: false, fog: 0.5 },
   // d3: storm night, wet ground — a step down; lightning-blue accents from above.
-  d3: { ...NIGHT, accent: 0xb8d0ff, accentAmount: 0.45, accentDir: [-0.2, 0.98], skirt: true },
+  d3: { ...NIGHT, accent: 0xb8d0ff, accentAmount: 0.45, accentDir: [-0.2, 0.98], tint: 0x4868a0, tintAmt: 0.1, skirt: true },
 };
 
 /** The stage light for `stageId`; `dark` (0 day .. 1 night, from the stage's fog) picks the fallback. */

@@ -161,8 +161,8 @@ describe('cel figure helpers', () => {
 });
 
 describe('the look table', () => {
-  it('holds the first look and the cel look only; stage lights are a small named table', () => {
-    expect(Object.keys(CAST_STYLES).sort()).toEqual(['0', 'b']);
+  it('holds the first look, the cel look and the drawn look; stage lights are a small named table', () => {
+    expect(Object.keys(CAST_STYLES).sort()).toEqual(['0', 'b', 'd']);
     expect(isCastLook('b')).toBe(true);
     expect(isCastLook('a')).toBe(false);
     expect(isCastLook('c')).toBe(false);

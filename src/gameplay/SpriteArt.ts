@@ -10,6 +10,9 @@ import { buildPalette, linearToOklab, PALETTE_MAX, paletteRamps, type PaletteId 
 import { PixelFigure } from './pixel/figure';
 import { PixelCast, type CastEnv } from './pixel/PixelCast';
 import { castStageLight, castStyle, castStyleVersion } from './pixel/look';
+import { ATLAS_SIZE, DrawnCast, newDrawnQuery, newDrawnSprite, type DrawnSprite } from './pixel/drawn/DrawnCast';
+import { RAMP_TONES } from './pixel/drawn/raster';
+import { RAMPS } from './pixel/drawn/palette';
 
 /**
  * ART: SPRITES — every character (enemies, bosses, civilians), plus the things
@@ -563,6 +566,42 @@ const SHOW_FRAG = /* glsl */ `
   }
 `;
 
+/**
+ * DRAWN FIGURES (`castlook=d`): shows one frame of the indexed atlas. Same snapping to the frame
+ * grid as the other sprites, but flat (one depth for the figure) and the colour comes from the
+ * palette: stage light is a lookup, not a repaint.
+ */
+const DRAWN_FRAG = /* glsl */ `
+  precision highp float;
+  uniform sampler2D map;   // the atlas of palette indices
+  uniform sampler2D tPal;  // ${RAMP_TONES} tones x ${RAMPS.length} ramps
+  uniform vec4 uRect;      // atlas texel rectangle: x, y, w, h
+  uniform vec2 uFlip;      // x > 0.5: mirrored
+  uniform vec4 uFlash;     // rgb, amount
+  uniform float uExp;
+  uniform vec4 uFog;       // display rgb, amount
+  varying vec2 vUv;
+  ${TONE}
+  void main() {
+    vec2 t = min(floor(vec2(vUv.x, 1.0 - vUv.y) * uRect.zw), uRect.zw - 1.0);
+    if (uFlip.x > 0.5) t.x = uRect.z - 1.0 - t.x;
+    float v = floor(texture2D(map, (uRect.xy + t + 0.5) / vec2(${ATLAS_SIZE}.0)).r * 255.0 + 0.5);
+    if (v < 0.5) discard;
+    v -= 1.0;
+    float tone = mod(v, ${RAMP_TONES}.0);
+    float ramp = floor(v / ${RAMP_TONES}.0);
+    vec3 c = texture2D(tPal, vec2((tone + 0.5) / ${RAMP_TONES}.0, (ramp + 0.5) / ${RAMPS.length}.0)).rgb;
+    c = mix(c, uFog.rgb, uFog.a);
+    vec3 y = pow(c, vec3(2.2));
+    vec3 rgb = invAces(y) / uExp;
+    float l = dot(y, vec3(0.2126, 0.7152, 0.0722));
+    rgb = mix(rgb, uFlash.rgb * (0.45 + 0.75 * smoothstep(0.0, 0.1, l)), uFlash.a);
+    gl_FragColor = vec4(rgb, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
+
 /** Blob shadows under sprites (one instanced draw): a two-tone pixel ellipse, crisp on the retro pixel grid. */
 const SHADOW_VERT = /* glsl */ `
   varying vec2 vUv;
@@ -649,6 +688,11 @@ interface Sprite {
   away: boolean;
   /** Draw calls its last bake cost (visible meshes + the pixel pass). */
   cost: number;
+  /** The sprite's own display material; `mat` is this one unless it is shown as a drawn figure. */
+  baseMat: THREE.ShaderMaterial;
+  /** PIXEL WORLD 3: its drawn figure's material and current view (only for sprites shown that way). */
+  drawnMat?: THREE.ShaderMaterial;
+  drawn?: DrawnSprite;
   /** Retro pixels per texel at the last bake. */
   k: number;
   /** Unit direction camera → sprite at the last bake (re-bake when it turns). */
@@ -684,6 +728,8 @@ export interface SpriteStats {
   fallbacksTotal: number;
   /** Live 3D parts drawn over sprites this frame. */
   live3d: number;
+  /** Drawn figures shown (`castlook=d`) this frame. */
+  drawn2d: number;
   /** PixelCast paints (hand-drawn pixel art) this frame, and CPU ms they took (smoothed). */
   paints: number;
   paintMs: number;
@@ -702,13 +748,15 @@ export interface SpriteStats {
 }
 
 /** Scene-linear colour → the sRGB display colour the retro pass shows (ACES × exposure). */
+/** ACES-ish tone curve on one channel (a plain function, so the per-sprite path allocates no closure). */
+function toneChannel(x: number, exposure: number): number {
+  x *= exposure;
+  const y = Math.min(1, Math.max(0, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)));
+  return Math.pow(y, 1 / 2.2);
+}
+
 function toDisplay(c: THREE.Color, exposure: number, out: THREE.Color): THREE.Color {
-  const f = (x: number) => {
-    x *= exposure;
-    const y = Math.min(1, Math.max(0, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)));
-    return Math.pow(y, 1 / 2.2);
-  };
-  return out.setRGB(f(c.r), f(c.g), f(c.b), THREE.LinearSRGBColorSpace);
+  return out.setRGB(toneChannel(c.r, exposure), toneChannel(c.g, exposure), toneChannel(c.b, exposure), THREE.LinearSRGBColorSpace);
 }
 
 function sizeClass(n: number): number {
@@ -813,6 +861,11 @@ export class SpriteArt {
   readonly group = new THREE.Group();
   private shadows: THREE.InstancedMesh;
   private shadowMat: THREE.ShaderMaterial;
+  /** PIXEL WORLD 3: drawn figures (`castlook=d`); their billboards share this material's program. */
+  private drawn: DrawnCast;
+  private drawnMat: THREE.ShaderMaterial;
+  private drawnQuery = newDrawnQuery();
+  private fogDisplay = new THREE.Color();
   look: SpriteLook = { ...DEFAULT_LOOK };
   readonly stats: SpriteStats = {
     sprites: 0,
@@ -836,6 +889,7 @@ export class SpriteArt {
     texels: 0,
     impostors: 0,
     impostorsTotal: 0,
+    drawn2d: 0,
   };
   /** PixelCast: characters with a painter (`Entity.paintPixels`) are drawn as pixel art. */
   private cast: PixelCast;
@@ -854,6 +908,7 @@ export class SpriteArt {
   private frameImpostors = 0;
   private framePaintMs = 0;
   private frameFigureMs = 0;
+  private drawnStage = '';
 
   private sprites = new Map<THREE.Object3D, Sprite>();
   private free = new Map<string, THREE.WebGLRenderTarget[]>();
@@ -999,6 +1054,23 @@ export class SpriteArt {
     this.group.add(this.shadows);
     world.scene.add(this.group);
     world.fx.setGibSprites(true, this.targetU);
+    this.drawn = new DrawnCast(renderer);
+    this.drawnMat = new THREE.ShaderMaterial({
+      vertexShader: SHOW_VERT,
+      fragmentShader: DRAWN_FRAG,
+      uniforms: {
+        map: { value: this.drawn.atlas },
+        tPal: { value: this.drawn.palette },
+        uRect: { value: new THREE.Vector4(0, 0, 1, 1) },
+        uFlip: { value: new THREE.Vector2(0, 0) },
+        uFlash: { value: new THREE.Vector4(1, 1, 1, 0) },
+        uExp: this.expU,
+        uFog: { value: new THREE.Vector4(0, 0, 0, 0) },
+        uTarget: this.targetU,
+        uPx: { value: new THREE.Vector2(1, 1) },
+      },
+      fog: false,
+    });
     this.cast = new PixelCast(renderer);
     // Two small programs: compile now, so even a run without warm-up (attract demo) doesn't hitch.
     this.cast.precompile();
@@ -1068,6 +1140,15 @@ export class SpriteArt {
       }
     }
     this.syncEntities();
+    this.drawn.beginFrame();
+    // The fog colour of a drawn sprite, tone mapped once a frame instead of once a sprite.
+    const fogC = this.world.scene.fog?.color;
+    if (fogC) toDisplay(fogC, this.expU.value, this.fogDisplay);
+    if (this.drawnStage !== (this.world.stage?.id ?? '')) {
+      this.drawnStage = this.world.stage?.id ?? '';
+      const sl = castStageLight(this.world.stage?.id, this.night);
+      this.drawn.setStageLight(sl.step, sl.floor, sl.tint, sl.tintAmt);
+    }
     w.scene.updateMatrixWorld();
     // Nothing moves until the main render: it can skip its own matrix pass (restored in endFrame).
     w.scene.matrixWorldAutoUpdate = false;
@@ -1349,6 +1430,7 @@ export class SpriteArt {
         prims: 0,
         away: false,
         cost: 8,
+        baseMat: mat,
         k: 1,
         dir: new THREE.Vector3(0, 0, -1),
         pending: 0,
@@ -1366,6 +1448,7 @@ export class SpriteArt {
     this.restoreModel(s);
     this.group.remove(s.mesh);
     s.mat.dispose();
+    if (s.baseMat !== s.mat) s.baseMat.dispose();
     if (s.rt) this.giveBack(s.rtKey, s.rt);
     this.sprites.delete(obj);
   }
@@ -1704,6 +1787,14 @@ export class SpriteArt {
   private paint(s: Sprite, cam: THREE.PerspectiveCamera): boolean | null {
     const e = s.e;
     const root = s.obj === e.root;
+    if (root && castStyle().drawn && e.drawnFigure) {
+      const drawn = this.paintDrawn(s, cam);
+      if (drawn !== null) return drawn;
+    }
+    if (s.mesh.material !== s.baseMat) {
+      s.mesh.material = s.baseMat;
+      s.mat = s.baseMat;
+    }
     if (root ? !e.paintPixels : !e.paintPart) return null;
     const t0 = performance.now();
     const f = this.figure;
@@ -1803,6 +1894,120 @@ export class SpriteArt {
     return true;
   }
   private paintStack: THREE.Object3D[] = [];
+
+  /** Where the drawn head is relative to the drawn ground point, in rig metres (test / tools). */
+  private drawnSpriteOf(s: Sprite): DrawnSprite {
+    if (!s.drawn) s.drawn = newDrawnSprite();
+    return s.drawn;
+  }
+
+  /**
+   * PIXEL WORLD 3: show this entity as a drawn figure. The rig stays the hitbox: the entity says
+   * which drawing (and where its rig's head and chest are), this places the sprite so the feet are
+   * on the ground point, the chest over the rig's chest and the head over the rig's head.
+   * null = no figure for this entity (paint it as before).
+   */
+  private paintDrawn(s: Sprite, cam: THREE.PerspectiveCamera): boolean | null {
+    const e = s.e;
+    const q = this.drawnQuery;
+    q.flags = 0;
+    if (!e.drawnFigure!(q) || !q.frames || !q.def) return null;
+    const t0 = performance.now();
+    const gw = this.gridW;
+    const gh = this.gridH;
+    const root = s.obj;
+    const st = this.drawnSpriteOf(s);
+    const r = this.drawn.place(cam, root, q, gw, gh, st);
+    if (r === 'away') {
+      s.ready = false;
+      s.away = true;
+      s.cost = 1;
+      return false;
+    }
+    if (r === 'wait') {
+      // Nothing like it drawn yet (and no budget): stay as is; try again next frame.
+      s.next = this.world.time;
+      return s.ready;
+    }
+    if (r === 'near') return null; // Through the lens: the impostor handles near clipping.
+    const P = cam.projectionMatrix.elements;
+    const D = st.depth;
+    const entry = r;
+    const k = st.k;
+    const left = st.left;
+    const bottom = st.bottom;
+    if (s.mesh.material !== this.drawnMatOf(s)) s.mesh.material = this.drawnMatOf(s);
+    const dm = s.drawnMat!;
+    const u = dm.uniforms;
+    (u.uRect.value as THREE.Vector4).set(entry.x, entry.y, entry.w, entry.h);
+    (u.uFlip.value as THREE.Vector2).set(st.mirror ? 1 : 0, 0);
+    // Fog, as for the other painted sprites, in whole steps.
+    const sl = castStageLight(this.world.stage?.id, this.night);
+    let fa = 0;
+    const fog = this.world.scene.fog as THREE.Fog | THREE.FogExp2 | null;
+    if (fog) {
+      let a: number;
+      if ((fog as THREE.FogExp2).isFogExp2) {
+        const dd = (fog as THREE.FogExp2).density * D;
+        a = 1 - Math.exp(-dd * dd);
+      } else {
+        const fl = fog as THREE.Fog;
+        a = THREE.MathUtils.clamp((D - fl.near) / Math.max(1e-3, fl.far - fl.near), 0, 1);
+      }
+      fa = Math.round(a * sl.fog * 6) / 6;
+      (u.uFog.value as THREE.Vector4).set(this.fogDisplay.r, this.fogDisplay.g, this.fogDisplay.b, fa);
+    }
+    // Billboard: the sprite's ground point on the rig's, snapped to whole frame pixels.
+    const w = entry.w;
+    const h = entry.h;
+    const rx0 = (left / gw) * 2 - 1;
+    const ry0 = (bottom / gh) * 2 - 1;
+    const rx1 = ((left + w * k) / gw) * 2 - 1;
+    const ry1 = ((bottom + h * k) / gh) * 2 - 1;
+    const cx = (rx0 + rx1) / 2;
+    const cy = (ry0 + ry1) / 2;
+    const hx = (rx1 - rx0) / 2;
+    const hy = (ry1 - ry0) / 2;
+    const Dq = Math.max(D, cam.near * 4) - Math.min(0.1, D * 0.02);
+    const qx = ((cx + P[8]) * Dq) / P[0];
+    const qy = ((cy + P[9]) * Dq) / P[5];
+    const mesh = s.mesh;
+    mesh.position.set(qx, qy, -Dq).applyMatrix4(cam.matrixWorld);
+    mesh.quaternion.copy(cam.getWorldQuaternion(_q));
+    mesh.scale.set((2 * hx * Dq) / P[0], (2 * hy * Dq) / P[5], 1);
+    _v.setFromMatrixPosition(root.matrixWorld);
+    s.offset.subVectors(mesh.position, _v);
+    s.dir.setFromMatrixPosition(cam.matrixWorld).subVectors(mesh.position, s.dir).normalize();
+    s.shadowR = 0.3 * q.scale;
+    s.tw = w;
+    s.th = h;
+    s.k = k;
+    s.gw = gw;
+    s.gh = gh;
+    s.ready = true;
+    s.away = false;
+    s.cost = 1;
+    s.keepAny = false;
+    this.frameTexels += w * h;
+    this.framePaints++;
+    this.framePaintMs += performance.now() - t0;
+    this.stats.drawn2d++;
+    return true;
+  }
+
+  private drawnMatOf(s: Sprite): THREE.ShaderMaterial {
+    if (!s.drawnMat) {
+      const m = this.drawnMat.clone();
+      m.uniforms.map.value = this.drawn.atlas;
+      m.uniforms.tPal.value = this.drawn.palette;
+      m.uniforms.uExp = this.expU;
+      m.uniforms.uTarget = this.targetU;
+      m.uniforms.uFlash.value = new THREE.Vector4(1, 1, 1, 0);
+      s.drawnMat = m;
+      s.mat = m;
+    }
+    return s.drawnMat;
+  }
 
   /** Stage light tint, night rim and fog for a painted sprite (display space). */
   private castEnv(f: PixelFigure) {
@@ -2086,6 +2291,8 @@ export class SpriteArt {
     this.shadowMat.dispose();
     this.shadows.dispose();
     this.cast.dispose();
+    this.drawn.dispose();
+    this.drawnMat.dispose();
     this.showMat.dispose();
     this.quad.dispose();
     this.group.parent?.remove(this.group);
