@@ -182,7 +182,8 @@ describe('the look table', () => {
       expect(CEL_HAND[pose]).toHaveLength(3);
       for (const size of CEL_HAND[pose]) {
         expect(size).toHaveLength(8);
-        for (const id of size) expect(stampInfo(id).w).toBeGreaterThanOrEqual(9);
+        // The hand's long side: a hand pointing straight up or down is narrower than it is long.
+        for (const id of size) expect(Math.max(stampInfo(id).w, stampInfo(id).h)).toBeGreaterThanOrEqual(9);
       }
     }
     // Living eyes carry no white below the M size (a lone white pixel reads as a glowing pin).
