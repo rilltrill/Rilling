@@ -68,7 +68,7 @@ function placementOf(g: THREE.Object3D): Placement | null {
 }
 
 export class Z1Flats {
-  readonly atlas = new PwAtlas('z1-flats', { upscale: false });
+  readonly atlas = new PwAtlas('z1-flats', { upscale: false, skyline: true });
   private batches = new Map<ZoneId, PwBatch>();
   private tiles = new Map<string, import('../../pixelworld/atlas').PwTile>();
   /** Old facade lines of the flats that were swung back: wall light decals there have nothing to land on. */

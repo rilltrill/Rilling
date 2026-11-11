@@ -366,7 +366,7 @@ export class PwAtlas {
    */
   constructor(
     readonly name: string,
-    readonly o: { levels?: number; maxSize?: number; upscale?: boolean } = {},
+    readonly o: { levels?: number; maxSize?: number; upscale?: boolean; skyline?: boolean } = {},
   ) {}
 
   /** Painted levels of a tile at its painted size. */
@@ -451,7 +451,7 @@ export class PwAtlas {
     let d = cache.get(sig);
     const cached = !!d;
     if (!d) {
-      const job = layoutAtlas(this.name, sig, list, this.paintedLevels, this.o.maxSize ?? 4096);
+      const job = layoutAtlas(this.name, sig, list, this.paintedLevels, this.o.maxSize ?? 4096, this.o.skyline);
       d = job.data;
       cache.set(sig, d);
       if (collectUnsaved) unsaved.push(d);
@@ -580,7 +580,7 @@ export function paintTile(key: string, w: number, h: number, paint: PwPainter, p
  * the job that paints it: one step per tile (paint, upscale, copy into its levels),
  * then one per tile and level (the palette-faithful reduction).
  */
-function layoutAtlas(name: string, sig: string, list: { tile: PwTile; paint: PwPainter; frames: number }[], painted: number, maxSize: number): PaintJob {
+function layoutAtlas(name: string, sig: string, list: { tile: PwTile; paint: PwPainter; frames: number }[], painted: number, maxSize: number, skyline = false): PaintJob {
   const levels = storedLevels(painted, list);
   const A = Math.max(1, 1 << (levels - 1));
   // Shelf packing, tallest first, into a power-of-two width (sizes in STORED texels).
@@ -591,23 +591,66 @@ function layoutAtlas(name: string, sig: string, list: { tile: PwTile; paint: PwP
   let W = 256;
   while ((W < widest || W * W < area * 1.15) && W < maxSize) W *= 2;
   const order = [...items].sort((a, b) => b.ah - a.ah || b.aw - a.aw);
-  let sx = 0;
-  let sy = 0;
-  let shelf = 0;
-  for (const it of order) {
-    if (sx + it.aw > W) {
-      sx = 0;
-      sy += shelf;
-      shelf = 0;
+  let top = 0;
+  if (skyline) {
+    // Skyline, tallest first: each rect drops to the lowest place it fits. For big unequal rects
+    // (whole-building flats) shelves waste a third of the texture; this is nearly tight.
+    const line: { x: number; w: number; y: number }[] = [{ x: 0, w: W, y: 0 }];
+    for (const it of order) {
+      let bestI = -1;
+      let bestY = Infinity;
+      for (let i = 0; i < line.length; i++) {
+        if (line[i].x + it.aw > W) continue;
+        let y = 0;
+        let span = it.aw;
+        for (let j = i; j < line.length && span > 0; j++) {
+          y = Math.max(y, line[j].y);
+          span -= line[j].w;
+        }
+        if (y < bestY) {
+          bestY = y;
+          bestI = i;
+        }
+      }
+      it.x = line[bestI].x;
+      it.y = bestY;
+      // Replace the segments the rect covers with one segment on top of it.
+      const seg = { x: it.x, w: it.aw, y: bestY + it.ah };
+      const out: typeof line = [];
+      for (const l of line) {
+        const l1 = l.x + l.w;
+        if (l1 <= seg.x || l.x >= seg.x + seg.w) out.push(l);
+        else {
+          if (l.x < seg.x) out.push({ x: l.x, w: seg.x - l.x, y: l.y });
+          if (l1 > seg.x + seg.w) out.push({ x: seg.x + seg.w, w: l1 - seg.x - seg.w, y: l.y });
+        }
+      }
+      out.push(seg);
+      out.sort((a, b) => a.x - b.x);
+      line.length = 0;
+      line.push(...out);
+      top = Math.max(top, seg.y);
     }
-    it.x = sx;
-    it.y = sy;
-    sx += it.aw;
-    shelf = Math.max(shelf, it.ah);
+  } else {
+    let sx = 0;
+    let sy = 0;
+    let shelf = 0;
+    for (const it of order) {
+      if (sx + it.aw > W) {
+        sx = 0;
+        sy += shelf;
+        shelf = 0;
+      }
+      it.x = sx;
+      it.y = sy;
+      sx += it.aw;
+      shelf = Math.max(shelf, it.ah);
+    }
+    top = sy + shelf;
   }
   // Height: only aligned (WebGL2 mips any size; a power of two would waste up to half the atlas).
-  const H = Math.max(A, alignUp(sy + shelf, Math.max(A, 16)));
-  if (W < widest || H > maxSize) throw new Error(`pixelworld atlas '${name}' overflow: ${Math.max(W, widest)}×${sy + shelf} > ${maxSize} (opt far tiles out of the 2× fallback, or split the atlas)`);
+  const H = Math.max(A, alignUp(top, Math.max(A, 16)));
+  if (W < widest || H > maxSize) throw new Error(`pixelworld atlas '${name}' overflow: ${Math.max(W, widest)}×${top} > ${maxSize} (opt far tiles out of the 2× fallback, or split the atlas)`);
   const out: PwLevel[] = [makeLevel(W, H)];
   // Levels: down to 1×1 (those past `levels` stay blank); one level only for backdrops.
   if (levels > 1) {

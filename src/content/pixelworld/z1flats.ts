@@ -33,8 +33,59 @@ export interface FlatDef {
   cards?: FlatCardDef[];
 }
 
-function flat(id: string, w: number, hCard: number, paint: PwPainter, cards?: FlatCardDef[]): FlatDef {
-  return { id, w, hCard, tw: Math.round(w * FLAT_TPM) + FLAT_PAD * 2, th: Math.round(hCard * FLAT_TPM), paint, cards };
+/** Roof clutter: separate cut-out cards standing behind the wall (a little parallax, and no paint wasted on empty sky). */
+type RoofKind = 'tank' | 'chim' | 'chim3' | 'vent' | 'aerial';
+type RoofItem = readonly [RoofKind, number, number?];
+const ROOF: Record<string, readonly RoofItem[]> = {
+  laundry: [['chim', 2.6, 1.0], ['chim3', 9.7, 1.3], ['tank', 15.0], ['aerial', 6.4, 3], ['vent', 12.4]],
+  pawn: [['chim', 3.4, 1.0], ['vent', 7.4], ['aerial', 13.6, 3], ['chim3', 15.4, 1.3]],
+  rialto: [['chim', 2.2, 1.1], ['aerial', 5.2, 2], ['vent', 15.8], ['chim', 17.8, 1.0]],
+  boarded: [['tank', 12.2], ['chim', 2.8, 1.0], ['vent', 7.4]],
+  liquor: [['chim3', 3.2, 1.3], ['vent', 9.6], ['tank', 12.8], ['aerial', 6.2, 3]],
+  billblock: [['aerial', 1.6, 2], ['chim', 12.4, 1.0]],
+  hotel: [['chim3', 3, 1.3], ['chim', 7.2, 1.0], ['aerial', 11.2, 3], ['vent', 15.4], ['chim3', 19.2, 1.3]],
+  cafe: [['chim', 3.4, 1.0], ['tank', 13.6], ['aerial', 7.5, 3]],
+  w4: [['tank', 3.2], ['chim', 11.4, 1.0], ['vent', 7.6]],
+  w6: [['chim', 2.5, 1.0], ['vent', 8.2], ['aerial', 11.8, 2]],
+  bar: [['chim', 2.4, 1.0], ['tank', 10.6], ['vent', 6.6]],
+  meats: [['chim', 2.2, 1.0], ['chim3', 13.8, 1.3], ['vent', 11.2]],
+  bank: [['vent', 4.2], ['chim', 16.8, 1.0], ['aerial', 2.4, 2]],
+  shutterblock: [['chim', 3.0, 1.0], ['tank', 15.2], ['aerial', 9.6, 2]],
+};
+
+const WALL_ROOF: ElevWallColours = { wall: 0x6a6a70, brick: 0x76402f, stone: 0x908a7c };
+
+/** The card of one roof item (its Elev sized to the item), standing on the wall's top line behind it. */
+function roofCard(buildingId: string, i: number, it: RoofItem, wM: number, hTop: number): FlatCardDef {
+  const [kind, xM, a] = it;
+  const cw = kind === 'tank' ? 3.1 : kind === 'aerial' ? 1.4 : (a ?? (kind === 'chim3' ? 1.4 : 1.1)) + 0.6;
+  const ch = kind === 'tank' ? 3.9 : kind === 'chim3' ? 3.6 : kind === 'chim' ? 2.7 : kind === 'aerial' ? 3.2 : 1.2;
+  const seed = (i + 1) * 37 + buildingId.length * 91;
+  return {
+    id: `r${i}`,
+    tw: Math.round(cw * FLAT_TPM),
+    th: Math.round(ch * FLAT_TPM),
+    x: xM - wM / 2,
+    y: hTop - 0.25,
+    z: -1.1 - (i % 3) * 0.3,
+    paint: (c, k) => {
+      const e = new Elev(c, k, seed, WALL_ROOF, 0);
+      const mid = cw / 2;
+      if (kind === 'tank') e.tank(mid, ch - 3.1, { w: 2.5, h: 2.1 });
+      else if (kind === 'chim') e.chimney(mid, a ?? 1, ch - 0.15, 0, { pots: 2 });
+      else if (kind === 'chim3') e.chimney(mid, a ?? 1.3, ch - 0.15, 0, { pots: 3 });
+      else if (kind === 'vent') e.vent(mid, 0.05);
+      else e.aerial(mid, 0.05, ch - 0.1, a ?? 2);
+      e.ink();
+    },
+  };
+}
+
+/** A building's flat: `hCard` = street to the top of its tallest wall (the roof clutter is cards behind it). */
+function flat(id: string, w: number, h: number, gable: number, paint: PwPainter, cards?: FlatCardDef[]): FlatDef {
+  const hCard = h + gable + 0.25;
+  const roof = (ROOF[id] ?? []).map((it, i) => roofCard(id, i, it, w, h));
+  return { id, w, hCard, tw: Math.round(w * FLAT_TPM) + FLAT_PAD * 2, th: Math.round(hCard * FLAT_TPM), paint, cards: [...roof, ...(cards ?? [])] };
 }
 
 const GROUND_H = 4.6;
@@ -92,16 +143,6 @@ function neonWash(e: Elev, x0M: number, x1M: number, y0M: number, y1M: number, h
   }
 }
 
-function roofStuff(e: Elev, h: number, kinds: (['tank' | 'chim' | 'chim3' | 'vent' | 'aerial', number, number?])[]) {
-  for (const [what, x, a] of kinds) {
-    if (what === 'tank') e.tank(x, h + 0.2, { w: 2.5, h: 2.1 });
-    else if (what === 'chim') e.chimney(x, a ?? 1, h + 2.1, h + 0.2, { pots: 2 });
-    else if (what === 'chim3') e.chimney(x, a ?? 1.4, h + 3.1, h + 0.2, { pots: 3 });
-    else if (what === 'vent') e.vent(x, h + 0.1);
-    else if (what === 'aerial') e.aerial(x, h + 0.2, 3, a ?? 2);
-  }
-}
-
 // ─── Main Street, east side ─────────────────────────────────────────────────
 
 const PAWN_COL: ElevWallColours = { wall: 0x7a6a48, alt: 0x6a5a3e, brick: 0x703a2a, stone: 0xa49a7e, frame: 0x3a3226, curtain: 0x8a4a2a };
@@ -110,7 +151,6 @@ const paintPawn: PwPainter = (c, k) => {
   const w = 18;
   const h = buildingH(2);
   const e = new Elev(c, k, 41, PAWN_COL);
-  roofStuff(e, h, [['chim', 3.4, 1.0], ['vent', 7.4], ['aerial', 13.6, 3], ['chim3', 15.4, 1.3]]);
   e.parapet(0, w, h - 0.1);
   e.parapet(4.5, 13.5, h + 0.75);
   e.curvedGable(9, 4.5, h + 1.6);
@@ -149,11 +189,6 @@ const paintLaundry: PwPainter = (c, k) => {
   const w = 18;
   const h = buildingH(4);
   const e = new Elev(c, k, 31, LAUNDRY_COL);
-  e.chimney(2.6, 1.0, h + 2.4, h + 0.2, { pots: 2 });
-  e.chimney(9.7, 1.3, h + 3.2, h + 0.2, { pots: 3 });
-  e.tank(15.0, h + 0.3, { w: 2.5, h: 2.1 });
-  e.aerial(6.4, h + 0.3, 3.1, 3);
-  e.vent(12.4, h + 0.2);
   e.parapet(0, w, h - 0.05);
   e.parapet(0, 5.5, h - 0.45);
   e.curvedGable(9.2, 3.4, h + 1.1);
@@ -202,7 +237,6 @@ const paintRialto: PwPainter = (c, k) => {
   const w = 20;
   const h = buildingH(3);
   const e = new Elev(c, k, 53, RIALTO_COL);
-  roofStuff(e, h, [['chim', 2.2, 1.1], ['aerial', 5.2, 2], ['vent', 15.8], ['chim', 17.8, 1.0]]);
   e.parapet(0, w, h);
   e.steppedGable(10, 5.5, h + 1.5, 4);
   e.bite(17.6, 1.2, 0.55);
@@ -244,7 +278,6 @@ const paintBoarded: PwPainter = (c, k) => {
   const w = 16;
   const h = buildingH(3);
   const e = new Elev(c, k, 67, BOARDED_COL);
-  roofStuff(e, h, [['tank', 12.2], ['chim', 2.8, 1.0], ['vent', 7.4]]);
   e.parapet(0, w, h + 0.1);
   e.parapet(0, 3.5, h + 0.6);
   e.bite(6.6, 2.4, 0.95);
@@ -289,7 +322,6 @@ const paintLiquor: PwPainter = (c, k) => {
   const w = 16;
   const h = buildingH(2);
   const e = new Elev(c, k, 79, LIQUOR_COL);
-  roofStuff(e, h, [['chim3', 3.2, 1.3], ['vent', 9.6], ['tank', 12.8], ['aerial', 6.2, 3]]);
   e.parapet(0, w, h);
   e.steppedGable(8, 3.2, h + 0.9, 3);
   e.bite(1.0, 0.8, 0.3);
@@ -319,26 +351,6 @@ const paintBillboardBlock: PwPainter = (c, k) => {
   const w = 14;
   const h = buildingH(3);
   const e = new Elev(c, k, 97, BLUE_COL);
-  roofStuff(e, h, [['aerial', 1.6, 2], ['chim', 12.4, 1.0]]);
-  // The rooftop billboard: a torn advert on a steel frame, behind the parapet.
-  {
-    const bx0 = e.X(4.6);
-    const bx1 = e.X(11.2);
-    const by0 = e.Y(h + 3.3);
-    const by1 = e.Y(h + 0.9);
-    for (const lx of [bx0 + 18, bx1 - 18, (bx0 + bx1) / 2]) {
-      c.rect(lx - 1, by1, 3, e.Y(h) - by1, e.r.iron, 2);
-      c.line(lx - 16, e.Y(h) - 2, lx, by1 + 2, e.r.iron, 2);
-    }
-    const ad = k.ramp(0xa84a30, { light: 0.4, sat: 1.0, dark: 0.45 });
-    const cream = k.ramp(0xd8c8a0, { light: 0.34 });
-    c.rect(bx0, by0, bx1 - bx0, by1 - by0, ad, 3);
-    c.frame(bx0, by0, bx1 - bx0, by1 - by0, e.r.iron, 2);
-    drawText(c, 'DRINK', bx0 + 20, by0 + 14, FONT_BOLD, cream, 4, { scale: 2 });
-    drawText(c, 'COLA', bx0 + 44, by0 + 42, FONT_BOLD, cream, 3.6, { scale: 2 });
-    c.poly([bx1 - 66, by0, bx1 - 30, by0, bx1 - 50, by1 - 18], 0, 0);
-    c.poly([bx0 + 6, by1, bx0 + 70, by1, bx0 + 16, by1 - 26], 0, 0);
-  }
   e.parapet(0, w, h - 0.2);
   e.parapet(10.2, 14, h + 0.3);
   e.bite(6.8, 1.0, 0.4);
@@ -378,7 +390,6 @@ const paintHotel: PwPainter = (c, k) => {
   const w = 22;
   const h = buildingH(4);
   const e = new Elev(c, k, 113, HOTEL_COL);
-  roofStuff(e, h, [['chim3', 3, 1.3], ['chim', 7.2, 1.0], ['aerial', 11.2, 3], ['vent', 15.4], ['chim3', 19.2, 1.3]]);
   e.parapet(0, w, h - 0.05);
   e.curvedGable(11, 5, h + 1.3);
   e.bite(19.6, 1.3, 0.5);
@@ -418,7 +429,6 @@ const paintCafe: PwPainter = (c, k) => {
   const w = 18;
   const h = buildingH(2);
   const e = new Elev(c, k, 127, CAFE_COL);
-  roofStuff(e, h, [['chim', 3.4, 1.0], ['tank', 13.6], ['aerial', 7.5, 3]]);
   e.parapet(0, w, h + 0.1);
   e.steppedGable(9, 3.4, h + 1.0, 3);
   e.bite(15.6, 1.5, 0.5);
@@ -450,7 +460,6 @@ const paintW4: PwPainter = (c, k) => {
   const w = 16;
   const h = buildingH(3);
   const e = new Elev(c, k, 139, W4_COL);
-  roofStuff(e, h, [['tank', 3.2], ['chim', 11.4, 1.0], ['vent', 7.6]]);
   e.parapet(0, w, h);
   e.curvedGable(8, 2.6, h + 0.8);
   e.bite(11.6, 1.0, 0.4);
@@ -487,7 +496,6 @@ const paintW6: PwPainter = (c, k) => {
   const w = 16;
   const h = buildingH(3);
   const e = new Elev(c, k, 151, W6_COL);
-  roofStuff(e, h, [['chim', 2.5, 1.0], ['vent', 8.2], ['aerial', 11.8, 2]]);
   e.parapet(0, w, h + 0.1);
   e.parapet(0, 6.4, h + 0.55);
   e.bite(9.6, 1.5, 0.75);
@@ -525,7 +533,6 @@ const paintBar: PwPainter = (c, k) => {
   const w = 14;
   const h = buildingH(2);
   const e = new Elev(c, k, 163, BAR_COL);
-  roofStuff(e, h, [['chim', 2.4, 1.0], ['tank', 10.6], ['vent', 6.6]]);
   e.parapet(0, w, h);
   e.steppedGable(7, 2.4, h + 0.7, 3);
   e.fill();
@@ -551,7 +558,6 @@ const paintMeats: PwPainter = (c, k) => {
   const w = 16;
   const h = buildingH(2);
   const e = new Elev(c, k, 181, MEATS_COL);
-  roofStuff(e, h, [['chim', 2.2, 1.0], ['chim3', 13.8, 1.3], ['vent', 11.2]]);
   e.parapet(0, w, h + 0.05);
   e.steppedGable(8, 4.4, h + 1.3, 4);
   e.bite(1.4, 0.8, 0.3);
@@ -586,7 +592,6 @@ const paintBank: PwPainter = (c, k) => {
   const w = 20;
   const h = buildingH(2);
   const e = new Elev(c, k, 193, BANK_COL);
-  roofStuff(e, h, [['vent', 4.2], ['chim', 16.8, 1.0], ['aerial', 2.4, 2]]);
   e.parapet(0, w, h);
   e.parapet(1.6, 18.4, h + 0.45);
   e.curvedGable(10, 4.2, h + 1.2);
@@ -641,7 +646,6 @@ const paintShutterBlock: PwPainter = (c, k) => {
   const w = 20;
   const h = buildingH(3);
   const e = new Elev(c, k, 207, SHUT_COL);
-  roofStuff(e, h, [['chim', 3.0, 1.0], ['tank', 15.2], ['aerial', 9.6, 2]]);
   e.parapet(0, w, h + 0.05);
   e.curvedGable(10, 4.4, h + 1.2);
   e.bite(17.0, 1.2, 0.5);
@@ -761,6 +765,39 @@ function fireEscape(id: string, floors: number, x: number, z: number): FlatCardD
   };
 }
 
+/** A rooftop advert on a steel frame (a card behind the parapet of `w`-wide building). */
+function billboardCard(w: number): FlatCardDef {
+  const tw = Math.round(7.2 * FLAT_TPM);
+  const th = Math.round(4.0 * FLAT_TPM);
+  return {
+    id: 'bb',
+    tw,
+    th,
+    x: 7.9 - w / 2,
+    y: buildingH(3) - 0.4,
+    z: -1.0,
+    paint: (c, k) => {
+      const iron = k.ramp(0x363842, { light: 0.4, sat: 0.6, dark: 0.45 });
+      const ad = k.ramp(0xa84a30, { light: 0.4, sat: 1.0, dark: 0.45 });
+      const cream = k.ramp(0xd8c8a0, { light: 0.34 });
+      const y0 = 8;
+      const y1 = th - 30;
+      for (const lx of [24, tw - 24, tw / 2]) {
+        c.rect(lx - 1, y1, 3, th - y1, iron, 2);
+        c.line(lx - 16, th - 2, lx, y1 + 2, iron, 2);
+      }
+      c.rect(0, y0, tw, y1 - y0, ad, 3);
+      c.frame(0, y0, tw, y1 - y0, iron, 2);
+      drawText(c, 'DRINK', 24, y0 + 12, FONT_BOLD, cream, 4, { scale: 2 });
+      drawText(c, 'COLA', 56, y0 + 42, FONT_BOLD, cream, 3.6, { scale: 2 });
+      // Torn away in great strips, the bare hoarding behind.
+      c.poly([tw - 66, y0, tw - 30, y0, tw - 50, y1 - 18], 0, 0);
+      c.poly([6, y1, 70, y1, 16, y1 - 26], 0, 0);
+      c.outline(0, true);
+    },
+  };
+}
+
 /** Three gold balls on a bracket (the pawnbroker's sign). */
 function pawnBalls(): FlatCardDef {
   return {
@@ -792,20 +829,20 @@ const AW_NAVY = 0x253a6a;
 const AW_CREAM = 0xb0a68a;
 
 export const Z1_FLATS: FlatDef[] = [
-  flat('pawn', 18, buildingH(2) + 3.4, paintPawn, [pawnBalls()]),
-  flat('laundry', 18, buildingH(4) + 4.2, paintLaundry, [awning('awn', 13.6, AW_NAVY, AW_CREAM, -1.6, 3.3, 0.75), fireEscape('fe', 4, 4.8, 0.45)]),
-  flat('rialto', 20, buildingH(3) + 3.4, paintRialto),
-  flat('boarded', 16, buildingH(3) + 3.8, paintBoarded, [awning('awn', 14, 0x6a2424, AW_CREAM, -0.4, 3.3, 0.7, { torn: true })]),
-  flat('liquor', 16, buildingH(2) + 3.4, paintLiquor),
-  flat('billblock', 14, buildingH(3) + 3.4, paintBillboardBlock, [fireEscape('fe', 3, -3.2, 0.45)]),
-  flat('hotel', 22, buildingH(4) + 3.6, paintHotel, [awning('awn', 19.5, 0x5a1a1a, AW_CREAM, 0, 3.4, 0.8)]),
-  flat('cafe', 18, buildingH(2) + 3.6, paintCafe, [awning('awn', 13.8, 0x7a5a1f, AW_CREAM, -1.6, 3.3, 0.75)]),
-  flat('w4', 16, buildingH(3) + 3.8, paintW4, [fireEscape('fe', 3, 3.8, 0.45)]),
-  flat('w6', 16, buildingH(3) + 3.0, paintW6),
-  flat('bar', 14, buildingH(2) + 3.4, paintBar),
-  flat('meats', 16, buildingH(2) + 3.6, paintMeats),
-  flat('bank', 20, buildingH(2) + 3.0, paintBank),
-  flat('shutterblock', 20, buildingH(3) + 4.0, paintShutterBlock, [awning('awn', 18.5, 0x2a4a3a, AW_CREAM, 0, 3.35, 0.8)]),
+  flat('pawn', 18, buildingH(2), 1.6, paintPawn, [pawnBalls()]),
+  flat('laundry', 18, buildingH(4), 1.15, paintLaundry, [awning('awn', 13.6, AW_NAVY, AW_CREAM, -1.6, 3.3, 0.75), fireEscape('fe', 4, 4.8, 0.45)]),
+  flat('rialto', 20, buildingH(3), 1.5, paintRialto),
+  flat('boarded', 16, buildingH(3), 0.6, paintBoarded, [awning('awn', 14, 0x6a2424, AW_CREAM, -0.4, 3.3, 0.7, { torn: true })]),
+  flat('liquor', 16, buildingH(2), 0.9, paintLiquor),
+  flat('billblock', 14, buildingH(3), 0.3, paintBillboardBlock, [fireEscape('fe', 3, -3.2, 0.45), billboardCard(14)]),
+  flat('hotel', 22, buildingH(4), 1.3, paintHotel, [awning('awn', 19.5, 0x5a1a1a, AW_CREAM, 0, 3.4, 0.8)]),
+  flat('cafe', 18, buildingH(2), 1.0, paintCafe, [awning('awn', 13.8, 0x7a5a1f, AW_CREAM, -1.6, 3.3, 0.75)]),
+  flat('w4', 16, buildingH(3), 0.8, paintW4, [fireEscape('fe', 3, 3.8, 0.45)]),
+  flat('w6', 16, buildingH(3), 0.6, paintW6),
+  flat('bar', 14, buildingH(2), 0.7, paintBar),
+  flat('meats', 16, buildingH(2), 1.3, paintMeats),
+  flat('bank', 20, buildingH(2), 1.3, paintBank),
+  flat('shutterblock', 20, buildingH(3), 1.2, paintShutterBlock, [awning('awn', 18.5, 0x2a4a3a, AW_CREAM, 0, 3.35, 0.8)]),
 ];
 
 void ({} as RoomKind);
