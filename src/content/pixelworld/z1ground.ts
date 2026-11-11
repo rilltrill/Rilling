@@ -3,7 +3,7 @@ import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { blob, Brush2, dashAt, discBlob, shore } from './brush2';
 import { drawText, FONT_BOLD } from './font';
 import { cells, darken, hash2, smooth } from './surfaces';
-import { drainGrate, flagCourses, leaf, manhole, pothole, wearFlags, z1GroundRamps, type Z1GroundRamps } from './z1road';
+import { drainGrate, leaf, manhole, pothole, z1GroundRamps, type Z1GroundRamps } from './z1road';
 
 /**
  * MAIN STREET (z1) ground painters for ART: PIXEL WORLD — the wet night street
@@ -159,8 +159,7 @@ const PAVER = 12;
 /**
  * The town square's paving FIELD, 512 × 512 at 64 texels a metre (8 m, wraps both ways): four
  * 4 m panels in a frame of brick soldier courses. Two panels are granite setts in herringbone
- * (no joint runs to the horizon), two are old flags in courses of uneven depth; every stone a
- * flat tone with a lit far / left arris and its joint in shadow, tones changing in runs. The
+ * (no joint runs to the horizon), two are hand-laid setts and flags (`layStones`). The
  * brick bands are worn: bricks replaced in a darker clay, a few gone and made good with tar,
  * moss in the joints. Rain lies in the dished flags as strokes of sky.
  */
@@ -242,6 +241,360 @@ function brickBand(b: Brush2, rng: PwRng, P: Z1GroundRamps, brick: number, brick
   }
 }
 
+/** One stone of `layStones`: canvas texels, `body` its tone before the form is drawn. */
+interface LaidStone {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  flag: boolean;
+  body: number;
+  used?: boolean;
+}
+
+/** −1, 0 or +1 from a hash (a stone's edge set a little off the line). */
+const tri = (h: number) => (h < 0.34 ? -1 : h > 0.66 ? 1 : 0);
+
+/**
+ * Hand-laid stone over a rectangle, in one ramp: setts 0.45 × 0.3 m in runs of three rows, flags
+ * 0.7–0.9 m between them, packed lowest-first so the bands wander and no joint runs on past two
+ * stones. Every stone is a form (lit far / left arris, shadow inside the near / right edge, a joint
+ * on those two sides only, corners clipped); tone moves one step in runs of neighbours; a few
+ * stones are replaced in a lighter piece. Over the form: events every 2–3 m (a flag broken in
+ * three with a sunk piece holding water, a corner gone to dirt and moss, a brass stud, a slot
+ * drain), then long wet sheets a tone or two down, with rungs of sky and glinting joints.
+ */
+function layStones(b: Brush2, rng: PwRng, k: PwKit, P: Z1GroundRamps, x0: number, y0: number, w: number, h: number, seed: number, o: { tpm: number; sheets: number; wrapY?: boolean; eventCell?: number }) {
+  const s = o.tpm / PW_TPM_MID;
+  const R = b.R;
+  const T = b.T;
+  const J = Math.max(1, Math.round(2 * s));
+  const JOG = Math.max(1, Math.round(2 * s));
+  const wrapY = !!o.wrapY;
+  // The packing grid: half a sett across, one sett deep.
+  const nc = Math.max(2, Math.round(w / (14.5 * s)));
+  const nr = Math.max(2, Math.round(h / (19 * s)));
+  const colX = (c: number) => Math.round((c * w) / nc);
+  const rowY = (r: number) => Math.round((r * h) / nr);
+  const top = new Int32Array(nc);
+  const limit = new Int32Array(nc);
+  for (let c = 0; c < nc; c++) {
+    // (Wrapping: the seam is staggered too, so it is no straight joint.)
+    top[c] = wrapY ? Math.floor(hash2(c >> 1, seed, 501) * 3) : 0;
+    limit[c] = top[c] + nr;
+  }
+  const PERIOD = 5.5;
+  const phase = (c: number, r: number) => {
+    const v = r + Math.sin(c * 0.31 + seed) * 1.6 + Math.sin(c * 0.83 + seed * 2) * 0.7;
+    return ((v % PERIOD) + PERIOD) % PERIOD;
+  };
+  const edgeRow = new Int32Array(nc + 1).fill(-99);
+  const edgeRun = new Int32Array(nc + 1);
+  const stones: LaidStone[] = [];
+  for (let guard = 0; guard < nc * nr * 2; guard++) {
+    let c = -1;
+    let best = 1 << 30;
+    for (let i = 0; i < nc; i++) {
+      if (top[i] < limit[i] && top[i] < best) {
+        best = top[i];
+        c = i;
+      }
+    }
+    if (c < 0) break;
+    const r = top[c];
+    let L = 1;
+    while (c + L < nc && top[c + L] === r && r < limit[c + L]) L++;
+    let sw = 2;
+    let sh = 1;
+    let isFlag = false;
+    if (phase(c, r) >= 3 && L >= 3) {
+      sw = L >= 4 && hash2(c, r, seed + 3) > 0.5 ? 4 : 3;
+      sh = hash2(c, r, seed + 4) > 0.6 ? 3 : 2;
+      for (let i = 0; i < sw; i++) sh = Math.min(sh, limit[c + i] - r);
+      isFlag = sh >= 2;
+    }
+    if (!isFlag) {
+      sw = L >= 2 ? 2 : 1;
+      sh = 1;
+    }
+    // A head joint never runs straight on past two stones: slide it half a sett.
+    if (edgeRow[c + sw] === r && edgeRun[c + sw] >= 1) {
+      if (L >= sw + 1 && !(isFlag && sw >= 4)) sw++;
+      else if (sw > 1) sw--;
+    }
+    stones.push({ x: x0 + colX(c), y: y0 + rowY(r), w: colX(c + sw) - colX(c), h: rowY(r + sh) - rowY(r), flag: isFlag, body: 3 });
+    for (let i = 0; i < sw; i++) top[c + i] = r + sh;
+    const e = c + sw;
+    edgeRun[e] = edgeRow[e] === r ? edgeRun[e] + 1 : 1;
+    edgeRow[e] = r + sh;
+  }
+  stones.sort((a, q) => a.y - q.y || a.x - q.x);
+
+  // Tone: one step, in runs of neighbours; a replaced lighter stone every 4 m.
+  const nCells = Math.max(2, Math.round(b.w / (58 * s)));
+  for (const st of stones) st.body = smooth(st.x + st.w / 2, st.y + st.h / 2, b.w, b.h, nCells, seed + 21) < 0.5 ? 2 : 3;
+  const nearest = (px: number, py: number, want: 'any' | 'flag' | 'sett') => {
+    let found: LaidStone | undefined;
+    let bd = Infinity;
+    for (const st of stones) {
+      if (st.used || (want === 'flag' && !st.flag) || (want === 'sett' && st.flag)) continue;
+      const d = (st.x + st.w / 2 - px) ** 2 + (st.y + st.h / 2 - py) ** 2;
+      if (d < bd) {
+        bd = d;
+        found = st;
+      }
+    }
+    return found;
+  };
+  const m4 = Math.round(4 * o.tpm);
+  for (let gy = 0; gy < h; gy += m4) {
+    for (let gx = 0; gx < w; gx += m4) {
+      const st = nearest(x0 + gx + rng.int(0, m4 - 1), y0 + gy + rng.int(0, m4 - 1), 'sett');
+      if (st) {
+        st.body = Math.min(4, st.body + 1);
+        st.used = true;
+      }
+    }
+  }
+
+  // Each stone's far and left edges are set a little off the grid; a later stone trims the one before.
+  const ids = new Int32Array(w * h).fill(-1);
+  const wy = (y: number) => ((y % h) + h) % h;
+  const OVER = JOG + 1;
+  stones.forEach((st, n) => {
+    const lx = st.x - x0;
+    const ly = st.y - y0;
+    const dl = lx === 0 ? Math.min(0, tri(hash2(n, 1, seed + 11))) * JOG : tri(hash2(n, 1, seed + 11)) * JOG;
+    const dt = ly === 0 && !wrapY ? Math.min(0, tri(hash2(n, 2, seed + 11))) * JOG : tri(hash2(n, 2, seed + 11)) * JOG;
+    for (let yy = ly + dt; yy < ly + st.h + OVER; yy++) {
+      if (!wrapY && (yy < 0 || yy >= h)) continue;
+      const iy = wrapY ? wy(yy) : yy;
+      for (let xx = Math.max(0, lx + dl); xx < Math.min(w, lx + st.w + OVER); xx++) ids[iy * w + xx] = n;
+    }
+  });
+  const idAt = (x: number, y: number) => {
+    if (x < 0 || x >= w) return -2;
+    if (wrapY) return ids[wy(y) * w + x];
+    return y < 0 || y >= h ? -2 : ids[y * w + x];
+  };
+  // The form of every stone.
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y0 + y) * b.w + x0 + x;
+      const me = ids[y * w + x];
+      const jr = idAt(x + 1, y) !== me || idAt(x + J, y) !== me;
+      const jd = idAt(x, y + 1) !== me || idAt(x, y + J) !== me;
+      const l = idAt(x - 1, y) !== me;
+      const u = idAt(x, y - 1) !== me;
+      const sr = idAt(x + J + 1, y) !== me;
+      const sd = idAt(x, y + J + 1) !== me;
+      if (me < 0 || jr || jd || (l && u) || (l && sd) || (u && sr) || (sr && sd)) {
+        R[i] = P.concDark;
+        T[i] = 0;
+        continue;
+      }
+      R[i] = P.flag;
+      T[i] = Math.min(4, Math.max(1, stones[me].body + (u || l ? 1 : sr || sd ? -1 : 0)));
+    }
+  }
+
+  // A flag is no plate: some carry a lobe of wear a step down or, scrubbed clean, a step up (never a stamp on every stone).
+  for (const st of stones) {
+    if (!st.flag || hash2(st.x, st.y, seed + 41) < 0.6) continue;
+    const mw = Math.max(4, Math.round(st.w * (0.4 + rng.next() * 0.3)));
+    const mh = Math.max(3, Math.round(st.h * (0.35 + rng.next() * 0.3)));
+    const m = shore(rng, mw, mh, 0.7);
+    const ax = st.x + rng.int(2, Math.max(2, st.w - J - mw - 2));
+    const ay = st.y + rng.int(2, Math.max(2, st.h - J - mh - 2));
+    const dt = rng.chance(0.3) ? 1 : -1;
+    for (let y = 0; y < mh; y++) {
+      for (let x = 0; x < mw; x++) {
+        const i = m.m[y * mw + x] ? b.at(ax + x, ay + y) : -1;
+        if (i >= 0 && R[i] === P.flag && T[i] === st.body) T[i] = Math.min(4, Math.max(1, T[i] + dt));
+      }
+    }
+  }
+
+  // Events, one to a cell of 2–3 m.
+  const brass = k.ramp(0xb08a3a, { light: 0.45 });
+  const dirt = k.ramp(0x4a3d2e, { light: 0.3, sat: 0.7, dark: 0.55 });
+  const cell = Math.round((o.eventCell ?? 2.5) * o.tpm);
+  for (let gy = 0; gy < h; gy += cell) {
+    for (let gx = 0; gx < w; gx += cell) {
+      const kind = rng.next();
+      const st = nearest(x0 + gx + rng.int(0, cell - 1), y0 + gy + rng.int(0, cell - 1), kind < 0.4 || kind >= 0.85 ? 'flag' : 'any');
+      if (!st) continue;
+      st.used = true;
+      if (kind < 0.4) sunkFlag(b, rng, P, st, J, s);
+      else if (kind < 0.7) brokenCorner(b, rng, P, dirt, st, J);
+      else if (kind < 0.85) b.formMask({ m: new Uint8Array([0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0]), w: 4, h: 4 }, st.x + (st.w >> 1) - 3, st.y + (st.h >> 1) - 3, { raised: true, ramp: brass, tone: 2, cast: 1 });
+      else {
+        const dw = st.w - J - Math.round(8 * s);
+        const dh = Math.max(4, Math.round(8 * s));
+        const ax = st.x + Math.round(4 * s);
+        const ay = st.y + ((st.h - J - dh) >> 1);
+        for (let yy = 0; yy < dh; yy++) {
+          for (let xx = 0; xx < dw; xx++) {
+            b.set(ax + xx, ay + yy, P.iron, xx === 0 || yy === 0 ? 3 : xx === dw - 1 || yy === dh - 1 ? 1 : xx % 4 < 2 ? 0 : 2);
+          }
+        }
+      }
+    }
+  }
+
+  // Wet sheets: long lobes lying across several stones, a tone down, two at the core; sky in rungs, glints in the joints.
+  for (let n = 0; n < o.sheets; n++) {
+    const across = rng.chance(0.85);
+    const L = Math.round(rng.int(128, 256) * s);
+    const S = Math.round(rng.int(48, 80) * s);
+    const sw = Math.min(w, across ? L : S);
+    const sh = Math.min(h, across ? S : L);
+    const sx = x0 + rng.int(0, Math.max(0, w - sw));
+    const yy0 = Math.round(((n + rng.next() * 0.7) * h) / o.sheets);
+    const sy = y0 + (wrapY ? yy0 : Math.min(Math.max(0, h - sh), yy0));
+    const m = shore(rng, sw, sh, 0.85);
+    const cw = Math.max(3, Math.round(sw * 0.5));
+    const ch = Math.max(3, Math.round(sh * 0.5));
+    const core = shore(rng, cw, ch, 0.7);
+    const cx = Math.round((sw - cw) / 2 + rng.spread(sw * 0.12));
+    const cy = Math.round((sh - ch) / 2 + rng.spread(sh * 0.12));
+    for (let yy = 0; yy < sh; yy++) {
+      for (let xx = 0; xx < sw; xx++) {
+        if (!m.m[yy * sw + xx]) continue;
+        const i = b.at(sx + xx, sy + yy);
+        if (i < 0) continue;
+        const u = xx - cx;
+        const v = yy - cy;
+        const inCore = u >= 0 && v >= 0 && u < cw && v < ch && core.m[v * cw + u] === 1;
+        if (R[i] === P.flag) T[i] = Math.max(1, T[i] - (inCore ? 2 : 1));
+        else if (R[i] === P.concDark && T[i] === 0 && dashAt(sx + xx + sy + yy, seed + 31, 2, 5, 5, 14)) {
+          R[i] = P.sky;
+          T[i] = 1;
+        }
+      }
+    }
+    for (let ry = rng.int(3, 6); ry < sh - 3; ry += Math.max(4, Math.round(rng.int(5, 9) * s))) {
+      for (let q = 0; q < (sw > 120 * s ? 3 : 1); q++) {
+        const len = rng.int(6, Math.max(7, Math.min(20, sw - 4)));
+        const ax = rng.int(1, Math.max(2, sw - len - 1));
+        for (let e = 0; e < len; e++) {
+          for (const rr of [ry, ry + 1]) {
+            if (rr >= sh || !m.m[rr * sw + ax + e]) continue;
+            const i = b.at(sx + ax + e, sy + rr);
+            if (i >= 0 && (R[i] === P.flag || R[i] === P.concDark)) {
+              R[i] = P.sky;
+              T[i] = e === 0 || e === len - 1 ? 2 : 3;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/** A flag broken in three from a point inside it, one piece sunk a step and standing in water. */
+function sunkFlag(b: Brush2, rng: PwRng, P: Z1GroundRamps, st: LaidStone, J: number, s: number) {
+  const bw = st.w - J;
+  const bh = st.h - J;
+  const cx = bw * (0.35 + rng.next() * 0.3);
+  const cy = bh * (0.35 + rng.next() * 0.3);
+  const a0 = -2.6 + rng.spread(0.4);
+  const a1 = -0.5 + rng.spread(0.4);
+  const a2 = 1.5 + rng.spread(0.4);
+  const ph = rng.next() * 6.283;
+  const piece = (x: number, y: number) => {
+    const u = x - cx;
+    const v = y - cy;
+    const a = Math.atan2(v, u) + Math.sin(Math.hypot(u, v) * 0.45 + ph) * 0.14;
+    return a >= a0 && a < a1 ? 0 : a >= a1 && a < a2 ? 1 : 2;
+  };
+  const sunk = rng.int(0, 2);
+  let sum = 0;
+  let cnt = 0;
+  for (let y = 1; y < bh - 1; y++) {
+    for (let x = 1; x < bw - 1; x++) {
+      const i = b.at(st.x + x, st.y + y);
+      if (i < 0) continue;
+      const p = piece(x, y);
+      if (p !== piece(x + 1, y) || p !== piece(x, y + 1)) {
+        b.R[i] = P.concDark;
+        b.T[i] = 0;
+        continue;
+      }
+      const atEdge = p !== piece(x - 1, y) || p !== piece(x, y - 1);
+      if (p === sunk) {
+        sum += y;
+        cnt++;
+        if (atEdge || x === 1 || y === 1) {
+          b.R[i] = P.flag;
+          b.T[i] = 1;
+        } else {
+          b.R[i] = P.water;
+          b.T[i] = 2;
+        }
+      } else if (atEdge) b.T[i] = Math.min(4, b.T[i] + 1);
+    }
+  }
+  if (!cnt) return;
+  const r0 = Math.round(sum / cnt);
+  for (const ry of [r0, r0 + Math.max(3, Math.round(5 * s))]) {
+    for (let x = 2; x < bw - 2; x++) {
+      if (!dashAt(x, ry + 12, 6, 14, 1, 3)) continue;
+      for (const y of [ry, ry + 1]) {
+        const i = b.at(st.x + x, st.y + y);
+        if (i >= 0 && y < bh - 1 && piece(x, y) === sunk && b.R[i] === P.water) {
+          b.R[i] = P.sky;
+          b.T[i] = 3;
+        }
+      }
+    }
+  }
+}
+
+/** A corner of a stone gone, the hole filled with dirt and a lobe or two of moss. */
+function brokenCorner(b: Brush2, rng: PwRng, P: Z1GroundRamps, dirt: number, st: LaidStone, J: number) {
+  const bw = st.w - J;
+  const bh = st.h - J;
+  const rx = Math.max(5, Math.round(bw * (st.flag ? 0.32 : 0.5)));
+  const ry = Math.max(4, Math.round(bh * (st.flag ? 0.4 : 0.6)));
+  const cx = rng.chance(0.5) ? 0 : bw;
+  const cy = rng.chance(0.5) ? 0 : bh;
+  const m = shore(rng, rx * 2, ry * 2, 0.8);
+  const inside = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= bw || y >= bh) return false;
+    const u = x - cx + rx;
+    const v = y - cy + ry;
+    return u >= 0 && v >= 0 && u < rx * 2 && v < ry * 2 && m.m[v * rx * 2 + u] === 1;
+  };
+  for (let y = 0; y < bh; y++) {
+    for (let x = 0; x < bw; x++) {
+      const i = b.at(st.x + x, st.y + y);
+      if (i < 0) continue;
+      if (inside(x, y)) {
+        b.R[i] = dirt;
+        b.T[i] = inside(x, y - 1) ? 2 : 1;
+      } else if (inside(x + 1, y) || inside(x, y + 1)) b.T[i] = Math.min(4, b.T[i] + 1);
+      else if (inside(x - 1, y) || inside(x, y - 1)) b.T[i] = Math.max(1, b.T[i] - 1);
+    }
+  }
+  for (let n = rng.int(2, 3); n > 0; n--) {
+    const mw = Math.max(3, Math.round(rx * (0.5 + rng.next() * 0.4)));
+    const mh = Math.max(3, Math.round(ry * (0.4 + rng.next() * 0.3)));
+    const lobe = blob(rng, mw, mh, 2, 0.6);
+    const ax = (cx ? bw - rx : 0) + rng.int(0, Math.max(0, rx - mw));
+    const ay = (cy ? bh - ry : 0) + rng.int(0, Math.max(0, ry - mh));
+    for (let y = 0; y < mh; y++) {
+      for (let x = 0; x < mw; x++) {
+        if (!lobe.m[y * mw + x] || !inside(ax + x, ay + y)) continue;
+        const i = b.at(st.x + ax + x, st.y + ay + y);
+        if (i < 0) continue;
+        b.R[i] = P.moss;
+        b.T[i] = y === 0 || !lobe.m[(y - 1) * mw + x] ? 4 : 3;
+      }
+    }
+  }
+}
+
 function paintSquareField(c: PwCanvas, k: PwKit) {
   const P = z1GroundRamps(k);
   const rng = k.rng;
@@ -271,8 +624,7 @@ function paintSquareField(c: PwCanvas, k: PwKit) {
         }
         b.sheen(rng, x0, y0, n, n, 26, P.sky, 2, { min: 5, max: 10, fat: 0, drifts: 7, only: (r) => r === P.flag || r === P.blue });
       } else {
-        const flags = flagCourses(b, rng, P, x0, y0, n, n, seed + px * 3 + py * 5);
-        wearFlags(b, rng, P, flags, { cracks: 2, wet: 0.5 });
+        layStones(b, rng, k, P, x0, y0, n, n, seed + px * 3 + py * 5, { tpm: PW_TPM_MID, sheets: 1 });
       }
     }
   }
@@ -301,10 +653,10 @@ function paintSquareField(c: PwCanvas, k: PwKit) {
 export const Z1_PATH_W = 384;
 
 /**
- * The path from Second Street to PRIME MEATS: broad old flags in courses across it — the calmest
+ * The path from Second Street to PRIME MEATS: hand-laid setts and flags (`layStones`) — the calmest
  * paving in the square, for this is where the horde walks and the Butcher fights — between two
- * cast-iron slot drains and a brick soldier course at each edge. The flags keep to two tones and
- * their joints; the wear (a crack, rain in a dished stone, a tarred corner) is sparse and low.
+ * cast-iron slot drains and a brick soldier course at each edge. The body stays within three
+ * adjacent tones; the wet sheets and the wear are low in value.
  */
 export function z1SquarePathTile(atlas: PwAtlas): PwTile {
   return atlas.tile('z1square|path', Z1_PATH_W, 512, (c, k) => {
@@ -316,9 +668,7 @@ export function z1SquarePathTile(atlas: PwAtlas): PwTile {
     const W = c.w;
     const H = c.h;
     const D = 12; // drain width
-    const flags = flagCourses(b, rng, P, BAND + D, 0, W - 2 * (BAND + D), H, 1300, 54);
-    // (Courses are cut to wrap: the last one runs to the tile's end.)
-    wearFlags(b, rng, P, flags, { cracks: 2 });
+    layStones(b, rng, k, P, BAND + D, 0, W - 2 * (BAND + D), H, 1300, { tpm: PW_TPM_MID, sheets: 3, wrapY: true });
     for (const side of [0, 1]) {
       brickBand(b, rng, P, brick, brickDark, side ? W - BAND : 0, 0, BAND, H, false, 1310 + side);
       // Slot drain: a cast channel cover, a slot every 6 texels, bolted every 2 m.
@@ -354,9 +704,7 @@ export function z1ApronTile(atlas: PwAtlas): PwTile {
     const W = c.w;
     const H = c.h;
     // (Row 0 = the shop front; the doorway is at the middle of the top edge.)
-    const flags = flagCourses(b, rng, P, 0, 0, W, H, 1400, 40);
-    for (const s of flags) if (s.ramp === P.cast) for (let y = 0; y < s.h; y++) for (let x = 0; x < s.w; x++) if (b.R[(s.y + y) * W + s.x + x] === P.cast) b.R[(s.y + y) * W + s.x + x] = P.flag;
-    wearFlags(b, rng, P, flags.map((s) => ({ ...s, ramp: s.ramp === P.cast ? P.flag : s.ramp })), { cracks: 3 });
+    layStones(b, rng, k, P, 0, 0, W, H, 1400, { tpm: PW_TPM, sheets: 1, eventCell: 3.5 });
     // The hosed fan: a wet lobe from the door, a step down, frayed, strokes of sky in it.
     const fw = 250;
     const fh = 150;

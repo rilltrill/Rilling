@@ -1328,10 +1328,10 @@ export const Z1_CROSSWALK_W = 768;
 export const Z1_CROSSWALK_H = 256;
 
 /**
- * A zebra crossing as paint ON the road (a cut-out laid a few millimetres over it): eleven bars,
- * each worn the way crossings wear — rubbed through in two bands where the wheels run, chipped
- * at the ends, cracked where the road under it cracked — and a stop line. Kept to the paint's
- * middle tones (this is the enemies' floor: nothing white).
+ * A zebra crossing as paint ON the road (a cut-out laid a few millimetres over it): eleven bars
+ * and a stop line, worn the way crossings wear — scrubbed to streaks along the traffic in the four
+ * wheel paths, nearly whole between them, ragged at the ends, chipped in small clusters, the road's
+ * cracks running on through. Tone 3 with tone-4 remnants (this is the enemies' floor: nothing white).
  */
 export function z1CrosswalkTile(atlas: PwAtlas): PwTile {
   return atlas.tile('z1crosswalk', Z1_CROSSWALK_W, Z1_CROSSWALK_H, (c, k) => {
@@ -1339,53 +1339,137 @@ export function z1CrosswalkTile(atlas: PwAtlas): PwTile {
     const rng = k.rng;
     const b = new Brush2(c);
     const W = c.w;
+    const H = c.h;
     const BAR0 = 6;
     const BAR1 = 198;
+    const paint = k.ramp(0x82848c, { light: 0.24, sat: 0.6, dark: 0.45 });
     const tracks = [-TRACK_OUT, -TRACK_IN, TRACK_IN, TRACK_OUT].map((t) => W / 2 + t);
-    // Rub the paint through in a lobe (a long hole down the travel line), leaving a ragged, lit-edged shore.
-    const rub = (x: number, y: number, w: number, h: number, lobes: number) => {
-      const hole = blob(rng, w, h, lobes, 0.5);
-      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (hole.m[yy * w + xx] && c.at(x + xx, y + yy) === P.white) c.ramp[(y + yy) * W + x + xx] = 0;
+    /** 1 inside a wheel path, falling to 0 over the 8 texels beside it. */
+    const wheel = (x: number) => tracks.reduce((m, t) => Math.max(m, Math.min(1, (TRACK_HALF + 8 - Math.abs(x - t)) / 8)), 0);
+    const clear = (x: number, y: number) => {
+      if (c.at(x, y) === paint) c.ramp[y * W + x] = 0;
     };
-    for (let bar = 0; bar < 11; bar++) {
-      const x0 = Math.round((0.6 + bar * 1.1 - 0.275) * 64);
-      const bw = 35;
-      c.rect(x0, BAR0, bw, BAR1 - BAR0, P.white, 3);
-      // Wheel paths cross the bars: two or three long lobes where a track runs under this bar, a chip or two elsewhere.
-      for (const t of tracks) {
-        const d = Math.abs(x0 + bw / 2 - t);
-        if (d > 44) continue;
-        const n = d < 22 ? 3 : 2;
-        for (let i = 0; i < n; i++) {
-          const hw = rng.int(12, 24);
-          const hh = rng.int(40, 96);
-          rub(Math.round(t - hw / 2 + rng.spread(8)), BAR0 + rng.int(-10, BAR1 - BAR0 - hh + 10), hw, hh, 4);
+    const lay = (x0: number, y0: number, bw: number, bh: number) => {
+      c.rect(x0, y0, bw, bh, paint, 3);
+      // Tyres scrub the paint into streaks along the traffic, asphalt between them; a streak left standing is broken along its length.
+      let gap = false;
+      for (let x = x0; x < x0 + bw; ) {
+        const sw = rng.int(2, 4);
+        const w = wheel(x + sw / 2);
+        gap = w > 0.15 && !gap && rng.next() < 0.45 + 0.35 * w;
+        const adv = gap ? rng.int(1, 3) : sw;
+        if (gap) {
+          for (let y = y0; y < y0 + bh; y++) for (let q = 0; q < adv; q++) clear(x + q, y);
+        } else if (w > 0.15) {
+          for (let y = y0 + rng.int(0, 10); y < y0 + bh; ) {
+            const on = rng.int(12, 44);
+            const off = Math.round(rng.int(8, 22) * w);
+            for (let yy = y + on; yy < Math.min(y + on + off, y0 + bh); yy++) for (let q = 0; q < sw; q++) clear(x + q, yy);
+            y += on + off;
+          }
+        }
+        x += adv;
+      }
+      // The ends ragged over 3–4 texels in bites 2–5 wide, the long edges nibbled less.
+      for (let x = x0; x < x0 + bw; ) {
+        const g = rng.int(2, 5);
+        const a = rng.int(0, 4);
+        const d = rng.int(0, 4);
+        for (let q = 0; q < g; q++) {
+          for (let j = 0; j < a; j++) clear(x + q, y0 + j);
+          for (let j = 0; j < d; j++) clear(x + q, y0 + bh - 1 - j);
+        }
+        x += g;
+      }
+      for (let y = y0; y < y0 + bh; ) {
+        const g = rng.int(3, 9);
+        const a = rng.int(0, 2);
+        const d = rng.int(0, 2);
+        for (let q = 0; q < g; q++) {
+          for (let j = 0; j < a; j++) clear(x0 + j, y + q);
+          for (let j = 0; j < d; j++) clear(x0 + bw - 1 - j, y + q);
+        }
+        y += g;
+      }
+      // Chips in small clusters, 2–5 texels each; none may open a hole wider than 6.
+      const clusters = Math.round((bw * bh) / 420);
+      for (let n = 0; n < clusters; n++) {
+        const cx = x0 + rng.int(0, bw - 1);
+        const cy = y0 + rng.int(0, bh - 1);
+        if (wheel(cx) > 0.6) continue;
+        for (let q = rng.int(3, 6); q > 0; q--) {
+          const cw = rng.int(2, 5);
+          const ch = rng.int(2, 5);
+          const ax = cx + rng.int(-6, 6);
+          const ay = cy + rng.int(-8, 8);
+          let room = true;
+          for (let y = ay; y < ay + ch && room; y++) {
+            let run = cw;
+            for (let x = ax - 1; x >= x0 && c.at(x, y) !== paint; x--) run++;
+            for (let x = ax + cw; x < x0 + bw && c.at(x, y) !== paint; x++) run++;
+            if (run > 6) room = false;
+          }
+          if (!room) continue;
+          for (let y = ay; y < ay + ch; y++) {
+            for (let x = ax; x < ax + cw; x++) {
+              if (cw > 2 && ch > 2 && (x === ax || x === ax + cw - 1) && (y === ay || y === ay + ch - 1)) continue;
+              clear(x, y);
+            }
+          }
         }
       }
-      for (let i = 0; i < 2; i++) rub(x0 + rng.int(-4, bw - 8), BAR0 + rng.int(0, BAR1 - BAR0 - 20), rng.int(6, 12), rng.int(12, 30), 2);
-      // The bar's ends are scuffed back unevenly.
-      rub(x0 + rng.int(-4, 10), BAR0 - 6, rng.int(16, 30), rng.int(8, 16), 2);
-      rub(x0 + rng.int(-4, 10), BAR1 - rng.int(6, 12), rng.int(16, 30), 16, 2);
-      // A crack carried up through the paint.
-      if (bar % 3 === 1) b.crack(rng, x0 + 2, rng.int(BAR0 + 30, BAR1 - 30), bw - 3, rng.spread(0.5), { ramp: P.tar, tone: 1, lip: 0 });
-    }
-    // The stop line, 40 cm; the lanes' wheels have rubbed four gaps in it.
-    c.rect(20, 226, W - 40, 26, P.white, 3);
-    for (const t of tracks) for (let i = 0; i < 2; i++) rub(Math.round(t - 18 + rng.spread(10)), 220 + rng.int(0, 8), rng.int(20, 40), rng.int(14, 30), 3);
-    rub(W / 2 - 8, 222, 16, 34, 2);
-    for (let i = 0; i < 8; i++) rub(rng.int(20, W - 40), 222 + rng.int(0, 20), rng.int(8, 14), rng.int(6, 12), 2);
-    // Paint has a thickness: its left edge lit, its right and near edges a step down; edges nibbled in dashes.
-    for (let y = 1; y < c.h - 1; y++) {
-      for (let x = 1; x < W - 1; x++) {
-        const i = y * W + x;
-        if (c.ramp[i] !== P.white) continue;
-        const l = c.ramp[i - 1] !== P.white;
-        const r = c.ramp[i + 1] !== P.white;
-        const d = c.ramp[i + W] !== P.white;
-        if ((l || r) && dashAt(y, x, 2, 4, 4, 10)) c.ramp[i] = 0;
-        else c.tone[i] = l ? 4 : r || d ? 2 : 3;
+      // Where the paint has held: thin runs along the traffic, a step brighter.
+      for (let n = Math.max(1, Math.round((bw * bh) / 2400)); n > 0; n--) {
+        const mw = rng.int(3, 7);
+        const mh = rng.int(14, Math.min(60, bh - 2));
+        const m = blob(rng, mw, mh, 3, 0.6);
+        const ax = x0 + rng.int(0, bw - mw);
+        const ay = y0 + rng.int(0, bh - mh);
+        for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) if (m.m[y * mw + x] && c.at(ax + x, ay + y) === paint) c.tone[(ay + y) * W + ax + x] = 4;
+      }
+    };
+    for (let bar = 0; bar < 11; bar++) lay(Math.round((0.6 + bar * 1.1 - 0.275) * 64), BAR0, 35, BAR1 - BAR0);
+    // The stop line, 40 cm.
+    lay(20, 226, W - 40, 26);
+    // The wet lies down the wheel paths as it does on the road: where a sheet crosses the paint, the paint sinks a tone.
+    const sheets: { sx: number; sy: number; sw: number; sh: number; m: Uint8Array }[] = [];
+    for (const t of tracks) {
+      for (let n = 0; n < 2; n++) {
+        if (!rng.chance(0.7)) continue;
+        const sw = rng.int(36, 64);
+        const sh = rng.int(70, 130);
+        const sx = Math.round(t - sw / 2 + rng.spread(10));
+        const sy = BAR0 + rng.int(-6, BAR1 - BAR0 - sh + 6);
+        const m = shore(rng, sw, sh, 0.8).m;
+        for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) if (m[y * sw + x] && c.at(sx + x, sy + y) === paint) c.tone[(sy + y) * W + sx + x] = Math.max(1, c.tone[(sy + y) * W + sx + x] - 1);
+        sheets.push({ sx, sy, sw, sh, m });
       }
     }
+    // Every bar has a 1-texel edge of road dirt (a streak one texel wide keeps its tone, or it would vanish).
+    for (let y = 1; y < H - 1; y++) {
+      for (let x = 1; x < W - 1; x++) {
+        const i = y * W + x;
+        if (c.ramp[i] !== paint) continue;
+        const l = c.ramp[i - 1] !== paint;
+        const r = c.ramp[i + 1] !== paint;
+        if ((l || r || c.ramp[i - W] !== paint || c.ramp[i + W] !== paint) && !(l && r)) c.tone[i] = Math.min(c.tone[i], 2);
+      }
+    }
+    // Rungs of sky across the wet paint, two texels high.
+    for (const s of sheets) {
+      for (let ry = 4; ry < s.sh - 4; ry += rng.int(7, 12)) {
+        const len = rng.int(6, 20);
+        const ax = rng.int(2, Math.max(3, s.sw - len - 2));
+        for (let q = 0; q < len; q++) {
+          for (const rr of [ry, ry + 1]) {
+            if (s.m[rr * s.sw + ax + q] && c.at(s.sx + ax + q, s.sy + rr) === paint) c.set(s.sx + ax + q, s.sy + rr, P.sky, q === 0 || q === len - 1 ? 3 : 4);
+          }
+        }
+      }
+    }
+    // The road's cracks carried on through the paint, one texel, dark.
+    for (let i = 0; i < 7; i++) b.crack(rng, rng.int(10, W - 320), rng.int(BAR0 + 12, BAR1 - 12), rng.int(200, 520), rng.spread(0.22), { ramp: P.tar, tone: 1, lip: 0, fat: 0, wander: 0.5, branch: 0.02 });
+    for (let bar = 1; bar < 11; bar += 3) b.crack(rng, Math.round((0.6 + bar * 1.1 - 0.275) * 64) + rng.int(6, 28), BAR0 + rng.int(0, 60), rng.int(40, 120), Math.PI / 2 + rng.spread(0.3), { ramp: P.tar, tone: 1, lip: 0, fat: 0, wander: 0.5 });
   }, { density: PW_TPM_MID });
 }
 
