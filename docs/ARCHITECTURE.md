@@ -1557,6 +1557,10 @@ screen-door over every painted colour, and no colour on screen that anyone had p
   swaying vegetation (the FLORA billboards of PIXEL CAST), the helipad edge lights, the jeep's
   glass / lamps, FX.
 
+### Drawn flats (PIXEL WORLD 3: buildings as 2D cards)
+
+Where a stage has them (round 1: z1 Main Street beats 0–5 and the boss square) buildings are drawn flats instead of painted boxes, staged per building (parallel / raked / facing) with their hidden occluders untouched: `pixelworld/elevation.ts` is the illustration kit, `pixelworld/z1flats.ts` the pictures, `stages/z1/pwFlats.ts` the staging (`&pwflats=parallel|<degrees>` for look-dev). `docs/PIXELWORLD3.md` describes it as built.
+
 ### Round 5 (review fixes, PIXEL WORLD only unless noted)
 
 - **z1 painted smoke** (`FirePlume` puffs): a smoke particle's FIRST life is a stagger (`life`

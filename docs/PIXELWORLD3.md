@@ -54,3 +54,26 @@ In PIXEL WORLD the visible boxes are deleted (the hidden boxes stay for gameplay
 - **Staging** breaks the long converging box lines: flats may be raked toward the oncoming camera in a saw-tooth (theatre
   wings), stay parallel to the street, or face the camera at the end of a street. Chosen by how the frame looks, per place.
 - Where enemies come out of a building (doors, windows, the diner), the opening stays where the gameplay has it.
+
+## Buildings as built (round 1: z1 Main Street, beats 0–5, and the boss square)
+
+- `pixelworld/elevation.ts`: the illustration kit. An `Elev` over a `PwCanvas` draws one building as one picture: `parapet`,
+  `curvedGable`, `steppedGable`, `bite` (the drawn outline, `top[]`); `fill` / `courses` (brick in patches, thinning out,
+  never a grid) / `patch` / `bareBrick`; `cornice`, `coping`, `band`, `pilaster`, every long line through `sag()` / `lean()`;
+  `window` (kinds: dark, moon, lit, curtain, blind, figure, tv, boarded, broken, bricked, ac) with heads and sills;
+  `shutters`, `drainpipe`, `wire`, `poster` / `bills`, `tag` (spray lettering), `sheet` (HELP on a bedsheet), `clothesline`,
+  `fixture`, `shopfront` + `room` (a shop interior drawn in one-point perspective, per bay), `scorch`, `pocks`, `crack`,
+  `value` (whole-tone value structure with hand-shaped seams), `pool`, `footGrime`, `ink`. 32 texels a metre (FLAT_TPM).
+- `pixelworld/z1flats.ts`: the z1 buildings (`Z1_FLATS`): each a hand-placed picture plus cards: awnings, fire escapes,
+  the pawnbroker's balls, a rooftop billboard, and each building's roof clutter (chimneys, tanks, aerials, vents) as
+  separate cut-out cards standing a little behind the wall (parallax, and no painted sky in the atlas).
+- `stages/z1/pwFlats.ts`: staging. `Z1Flats.stage()` deletes a building's visible meshes (the hidden occluders stay),
+  lays the flat and its cards, and for `raked` flats turns the group about the flat's far end (25°, the near end swinging
+  back inside the old footprint: `FLAT_RAKE`), floors the wedge of sidewalk that opens, and darkens the wall glows that
+  have nothing to land on. Placements are chosen per building in `AT`; `&pwflats=parallel` or `&pwflats=<degrees>` overrides
+  for look-dev. The RIALTO stays `parallel` (its marquee is a real box with animated chase bulbs on the old facade), the boss
+  square's PRIME MEATS and bank stand square to the camera (`facing`).
+- One atlas (`z1-flats`, skyline-packed: `PwAtlas(..., { skyline: true })`) and one draw call a zone; lit `Z1_FLAT_GAIN`
+  (2.6; 1.7 in the square, zone E) so a wall lands on the mood's pivot and shows as painted.
+- A new building: add a painter in `z1flats.ts` (or `<stage>flats.ts`), an entry in `Z1_FLATS`, and its world position in `AT`.
+
