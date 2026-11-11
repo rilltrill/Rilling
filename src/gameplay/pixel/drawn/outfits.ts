@@ -240,7 +240,7 @@ function foot(d: Draw, side: number, st: FootStyle, view: ViewId) {
   }
   if (st.shaft) {
     // The shaft climbs the shin to a padded collar, over the jeans tucked into it.
-    const ct = 0.58;
+    const ct = 0.54;
     const col = 0.235;
     pen.begin();
     d.pt(shin, ct, col + 0.02, true);

@@ -395,6 +395,12 @@ if (which.has('canon')) {
   };
   widths('worker', WORKER);
   widths('flannel', FLANNEL);
+  // Leg widths down the front view (texels at 180), arms clear.
+  for (const [name, def] of [['worker', WORKER], ['flannel', FLANNEL]]) {
+    const f = renderer.draw(def, { aL: [0, 62, 0], aR: [0, 62, 0], lL: [0, 3, 0], lR: [0, 3, 0] }, 0, 0, 180);
+    const legW = (frac) => { const y = Math.round(f.h * frac); const runs = []; let on = 0, st = 0; for (let x = 0; x <= f.w; x++) { const v = x < f.w && f.pixels[y * f.w + x] ? 1 : 0; if (v && !on) st = x; if (!v && on) runs.push(x - st); on = v; } return runs.join('+'); };
+    console.log(`  ${name} legs (run widths): thigh ${legW(0.6)} | above knee ${legW(0.72)} | knee ${legW(0.75)} | calf ${legW(0.82)} | ankle ${legW(0.93)}`);
+  }
   // Tones used by each ramp in the front idle at 180 (% of that ramp's filled area; tone 0 = ink).
   const NAMES = (await import(`${ROOT}/src/gameplay/pixel/drawn/palette.ts`)).RAMPS.map((r) => r.name);
   for (const [name, def, pose] of [['worker', WORKER, 'zidle'], ['flannel', FLANNEL, 'civstand']]) {

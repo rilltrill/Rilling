@@ -145,7 +145,7 @@ const NIGHT: CastStageLight = { step: -1, floor: 0.24, accent: 0x9cc4ff, accentA
 /** Per stage id (`StageDef.id`); stages not listed fall back to DAY / NIGHT by how dark their fog is. */
 export const CAST_STAGE_LIGHT: Record<string, CastStageLight> = {
   // z1: night street, wet asphalt — sodium lamps and neon overhead: a step down, warm accents from above.
-  z1: { ...NIGHT, accent: 0xffc070, accentAmount: 0.5, accentDir: [0.25, 0.97], tint: 0xc08850, tintAmt: 0.1, skirt: true },
+  z1: { ...NIGHT, accent: 0xffc070, accentAmount: 0.5, accentDir: [0.25, 0.97], tint: 0xc08850, tintAmt: 0.07, skirt: true },
   // z2: hospital — failing fluorescent tubes: no step down, no coloured source.
   z2: { step: 0, floor: 0.17, accent: 0xd8ffe8, accentAmount: 0, accentDir: [0, 1], tint: 0x4f9a8c, tintAmt: 0.1, ground: 0x12202a, groundAlpha: 0.5, skirt: false, fog: 0.5 },
   // z3: dusk bridge — fires behind the horde: a step down, orange accents from the upper right.
