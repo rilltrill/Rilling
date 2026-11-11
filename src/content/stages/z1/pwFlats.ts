@@ -4,6 +4,21 @@ import { PwBatch } from '../../pixelworld/batch';
 import { Z1_FLATS, type FlatDef } from '../../pixelworld/z1flats';
 import { FLAT_TPM } from '../../pixelworld/elevation';
 import { sidewalkTile } from '../../pixelworld/surfaces';
+import type { PwTile } from '../../pixelworld/atlas';
+import {
+  DINER_FRONT_H,
+  DINER_FRONT_W,
+  MARQUEE_END_H,
+  MARQUEE_END_W,
+  MARQUEE_H,
+  MARQUEE_SOFFIT_H,
+  MARQUEE_SOFFIT_W,
+  MARQUEE_W,
+  paintDinerFront,
+  paintMarqueeEnd,
+  paintMarqueeFace,
+  paintMarqueeSoffit,
+} from '../../pixelworld/z1dinerflat';
 import type { ZoneId } from './town';
 
 /**
@@ -18,21 +33,30 @@ import type { ZoneId } from './town';
  *    wings; the near end swings back INSIDE the old footprint, so the flat never
  *    crosses the sidewalk. Saw-tooth across the street's side, and the box's long
  *    converging lines are gone (each tooth is a picture seen more nearly square on);
- *  - `facing`: square to the camera at the end of a street (boss square).
+ *  - `teeth`: as `raked` but the one flat is cut along drawn piers into several
+ *    narrower wings at a steep angle;
+ *  - `facing`: square to the camera at the end of a street (boss square);
+ *  - `end`: a second flat on the box's end wall, square to a cross street (the two
+ *    corner buildings at the crossing).
  */
 
-export type FlatStaging = 'parallel' | 'raked' | 'facing';
+export type FlatStaging = 'parallel' | 'raked' | 'teeth' | 'facing';
 
 interface Placement {
   /** Which FlatDef (and the building's identity, its z or x). */
   def: string;
   staging: FlatStaging;
+  /** A flat on this box's end wall (world x centre, world z; faces +z, down the street at the player). */
+  end?: { def: string; x: number; z: number };
 }
 
 /** How far a raked flat is turned (radians). */
 export const FLAT_RAKE = (25 * Math.PI) / 180;
+/** Teeth: wings at this angle (radians), `FLAT_TEETH` of them per building. */
+export const FLAT_TEETH_RAKE = (50 * Math.PI) / 180;
+export const FLAT_TEETH = 3;
 
-/** Dev: `&pwflats=parallel` stages every flat on the old street face, `&pwflats=<degrees>` rakes them that much (look-dev). */
+/** Dev: `&pwflats=parallel` stages every flat on the old street face, `&pwflats=<degrees>` rakes them that much, `&pwflats=teeth` cuts them into wings (look-dev). */
 const FLAT_MODE = typeof location === 'undefined' ? '' : new URLSearchParams(location.search).get('pwflats') ?? '';
 
 /** Buildings drawn so far, by the facade centre's world position (rounded x, z). */
@@ -50,10 +74,14 @@ const AT: Record<string, Placement> = {
   '-9,-32': { def: 'w4', staging: 'raked' },
   '-9,-66': { def: 'w6', staging: 'raked' },
   '-9,-81': { def: 'bar', staging: 'raked' },
+  // The two corners past the crossing: the street side raked as the rest, the end wall square to the crossing.
+  '10,-110': { def: 'cornerE-side', staging: 'raked', end: { def: 'cornerE', x: 16.5, z: -102 } },
+  '-9,-110': { def: 'cornerW-side', staging: 'raked', end: { def: 'cornerW', x: -16.5, z: -102 } },
   // The boss square.
   '-58,-304': { def: 'meats', staging: 'facing' },
   '-40,-304': { def: 'bank', staging: 'facing' },
   '-66,-294': { def: 'shutterblock', staging: 'raked' },
+  '-78,-304': { def: 'grand', staging: 'facing' },
 };
 
 const defs = new Map(Z1_FLATS.map((d) => [d.id, d]));
@@ -61,6 +89,8 @@ const defs = new Map(Z1_FLATS.map((d) => [d.id, d]));
 const _o = new THREE.Vector3();
 const X = new THREE.Vector3(1, 0, 0);
 const Y = new THREE.Vector3(0, 1, 0);
+const Z = new THREE.Vector3(0, 0, 1);
+const NZ = new THREE.Vector3(0, 0, -1);
 
 /** The flat of a building group, if it has one (keyed by which side of the street it stands on and where). */
 function placementOf(g: THREE.Object3D): Placement | null {
@@ -70,13 +100,13 @@ function placementOf(g: THREE.Object3D): Placement | null {
 export class Z1Flats {
   readonly atlas = new PwAtlas('z1-flats', { upscale: false, skyline: true });
   private batches = new Map<ZoneId, PwBatch>();
-  private tiles = new Map<string, import('../../pixelworld/atlas').PwTile>();
-  /** Old facade lines of the flats that were swung back: wall light decals there have nothing to land on. */
-  private swung: { x: number; z: number; r: number }[] = [];
+  private tiles = new Map<string, PwTile>();
+  /** Old facade stretches of the flats that were swung back: wall light decals there have nothing to land on. */
+  private swung: { x: number; z0: number; z1: number }[] = [];
 
   /** Did a flat swing back from this point of its old facade (x, z)? */
   swungAt(x: number, z: number): boolean {
-    return this.swung.some((s) => Math.hypot(s.x - x, s.z - z) < s.r);
+    return this.swung.some((s) => Math.abs(s.x - x) < 0.7 && z >= s.z0 && z <= s.z1);
   }
 
   /** Is this building group drawn as a flat? */
@@ -102,23 +132,33 @@ export class Z1Flats {
     // (The square's west-side block faces east: its far end is local +x like the street's west side.)
     const east = g.position.x > 0;
     const farLocalX = east ? -rec.w / 2 : rec.w / 2;
-    const staging: FlatStaging = FLAT_MODE === 'parallel' ? 'parallel' : FLAT_MODE && !Number.isNaN(Number(FLAT_MODE)) && p.staging === 'raked' ? 'raked' : p.staging;
-    const rake = FLAT_MODE && !Number.isNaN(Number(FLAT_MODE)) ? (Number(FLAT_MODE) * Math.PI) / 180 : FLAT_RAKE;
+    const numeric = FLAT_MODE && !Number.isNaN(Number(FLAT_MODE));
+    const raked = p.staging === 'raked' || p.staging === 'teeth';
+    const staging: FlatStaging = FLAT_MODE === 'parallel' ? 'parallel' : FLAT_MODE === 'teeth' && raked ? 'teeth' : numeric && raked ? 'raked' : p.staging;
+    const rake = numeric ? (Number(FLAT_MODE) * Math.PI) / 180 : FLAT_RAKE;
     if (staging === 'raked') {
       g.updateMatrix();
       const pivot = new THREE.Vector3(farLocalX, 0, 0).applyMatrix4(g.matrix);
+      const oldNear = new THREE.Vector3(-farLocalX, 0, 0).applyMatrix4(g.matrix);
       const yaw = (east ? 1 : -1) * rake;
       const rel = g.position.clone().sub(pivot).applyAxisAngle(Y, yaw);
       g.position.copy(pivot).add(rel);
       g.rotation.y += yaw;
-      // The sidewalk that opens up in front of the swung-back flat.
-      const nearS = new THREE.Vector3(-farLocalX, 0, 0);
       g.updateMatrix();
-      this.wedge(ground, sidewalkAtlas, g.matrix, pivot, nearS);
-      this.swung.push({ x: pivot.x, z: pivot.z, r: rec.w * 1.05 });
+      const near = new THREE.Vector3(-farLocalX, 0, 0).applyMatrix4(g.matrix);
+      // The sidewalk that opens up in front of the swung-back flat.
+      this.wedge(ground, sidewalkAtlas, pivot, near, oldNear);
+      this.swung.push({ x: pivot.x, z0: Math.min(pivot.z, oldNear.z), z1: Math.max(pivot.z, oldNear.z) });
     }
     g.updateMatrixWorld(true);
-    this.lay(b, g, def);
+    if (staging === 'teeth') {
+      g.updateMatrix();
+      const pivot = new THREE.Vector3(farLocalX, 0, 0).applyMatrix4(g.matrix);
+      const oldNear = new THREE.Vector3(-farLocalX, 0, 0).applyMatrix4(g.matrix);
+      this.teeth(b, g, def, rec.w, east, ground, sidewalkAtlas);
+      this.swung.push({ x: pivot.x, z0: Math.min(pivot.z, oldNear.z), z1: Math.max(pivot.z, oldNear.z) });
+    } else this.lay(b, g, def);
+    if (p.end) this.end(b, p.end);
   }
 
   private tile(key: string, tw: number, th: number, paint: import('../../pixelworld/atlas').PwPainter) {
@@ -128,11 +168,11 @@ export class Z1Flats {
   }
 
   private lay(b: PwBatch, g: THREE.Object3D, def: FlatDef) {
-    const tMain = this.tile(def.id, def.tw, def.th, def.paint);
+    const tMain = this.tile(def.reuse ?? def.id, def.tw, def.th, def.paint);
     const wm = def.tw / FLAT_TPM;
     const hm = def.th / FLAT_TPM;
     b.setMatrix(g.matrixWorld);
-    b.rect(_o.set(-wm / 2, 0, 0), X, Y, wm, hm, tMain);
+    b.rect(_o.set(-wm / 2 + (def.xOffset ?? 0), 0, 0), X, Y, wm, hm, tMain, { tint: def.tint });
     for (const c of def.cards ?? []) {
       const t = this.tile(`${def.id}-${c.id}`, c.tw, c.th, c.paint);
       const cw = c.tw / FLAT_TPM;
@@ -142,17 +182,105 @@ export class Z1Flats {
     b.setMatrix(null);
   }
 
-  /** Floor the wedge of old footprint in front of a swung-back flat: sidewalk at kerb height. */
-  private wedge(ground: PwBatch, atlas: PwAtlas, m: THREE.Matrix4, far: THREE.Vector3, nearLocal: THREE.Vector3) {
-    const near = nearLocal.clone().applyMatrix4(m);
-    const onLine = new THREE.Vector3(far.x, 0.145, near.z);
-    near.y = far.y = 0.145;
+  /** A flat on a box's end wall, square to the crossing (world position; faces +z). */
+  private end(b: PwBatch, e: { def: string; x: number; z: number }) {
+    const def = defs.get(e.def)!;
+    const t = this.tile(def.id, def.tw, def.th, def.paint);
+    const wm = def.tw / FLAT_TPM;
+    const hm = def.th / FLAT_TPM;
+    b.rect(_o.set(e.x - wm / 2, 0, e.z), X, Y, wm, hm, t);
+    for (const c of def.cards ?? []) {
+      const ct = this.tile(`${def.id}-${c.id}`, c.tw, c.th, c.paint);
+      const cw = c.tw / FLAT_TPM;
+      const ch = c.th / FLAT_TPM;
+      b.rect(_o.set(e.x + c.x - cw / 2, c.y, e.z + c.z), X, Y, cw, ch, ct);
+    }
+  }
+
+  /** The flat cut along its piers into a row of narrow steep wings (each picks up its own stretch of the painting). */
+  private teeth(b: PwBatch, g: THREE.Object3D, def: FlatDef, w: number, east: boolean, ground: PwBatch, atlas: PwAtlas) {
+    const t = this.tile(def.reuse ?? def.id, def.tw, def.th, def.paint);
+    const wm = def.tw / FLAT_TPM;
+    const hm = def.th / FLAT_TPM;
+    const n = FLAT_TEETH;
+    const toothL = w / n;
+    const c = Math.cos(FLAT_TEETH_RAKE);
+    const s = Math.sin(FLAT_TEETH_RAKE);
+    const along = toothL / c;
+    const depth = toothL * (s / c);
+    b.setMatrix(g.matrixWorld);
+    for (let i = 0; i < n; i++) {
+      // Far end of this tooth on the old facade line, near end set back into the footprint.
+      const xFar = (east ? -w / 2 + i * toothL : w / 2 - i * toothL);
+      const dir = east ? 1 : -1;
+      const a0 = (i * (def.tw - 32)) / n + 16;
+      const a1 = ((i + 1) * (def.tw - 32)) / n + 16;
+      const uvFar = east ? a0 : def.tw - a0;
+      const uvNear = east ? a1 : def.tw - a1;
+      const p0 = new THREE.Vector3(xFar, 0, 0);
+      const p1 = new THREE.Vector3(xFar + dir * toothL * c * 1, 0, -depth);
+      const p2 = p1.clone().setY(hm);
+      const p3 = p0.clone().setY(hm);
+      // Winding: the picture faces the street (+local z); the near end is local +x on the east side.
+      if (east) b.quad(p0, p1, p2, p3, t, [uvFar, 0, uvNear, 0, uvNear, def.th, uvFar, def.th]);
+      else b.quad(p1, p0, p3, p2, t, [uvNear, 0, uvFar, 0, uvFar, def.th, uvNear, def.th]);
+      void wm;
+      void along;
+    }
+    b.setMatrix(null);
+    // The gaps behind the teeth are the old footprint: floored at sidewalk level.
+    const m = g.matrixWorld;
+    const a = new THREE.Vector3(-w / 2, 0, 0).applyMatrix4(m);
+    const bb = new THREE.Vector3(w / 2, 0, 0).applyMatrix4(m);
+    const cc = new THREE.Vector3(w / 2, 0, -depth).applyMatrix4(m);
+    const d = new THREE.Vector3(-w / 2, 0, -depth).applyMatrix4(m);
+    this.wedge(ground, atlas, a, bb, cc);
+    this.wedge(ground, atlas, a, cc, d);
+  }
+
+  /** Floor a triangle of old footprint at kerb height (the sidewalk's own tile). */
+  private wedge(ground: PwBatch, atlas: PwAtlas, a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) {
+    const pa = a.clone().setY(0.145);
+    const pb = b.clone().setY(0.145);
+    const pc = c.clone().setY(0.145);
     const t = sidewalkTile(atlas, { hex: 0x56575d });
     const d = t.density;
-    const uvs = [near, far, onLine].flatMap((v) => [v.x * d, -v.z * d]);
-    const east = far.x > 0;
-    if (east) ground.tri(near, onLine, far, t, [uvs[0], uvs[1], uvs[4], uvs[5], uvs[2], uvs[3]]);
-    else ground.tri(near, far, onLine, t, uvs);
+    const uvs = [pa, pb, pc].flatMap((v) => [v.x * d, -v.z * d]);
+    // (Winding so the triangle's face points up, whichever way round the three points come.)
+    const up = pb.clone().sub(pa).cross(pc.clone().sub(pa)).y > 0;
+    if (up) ground.tri(pa, pb, pc, t, uvs);
+    else ground.tri(pa, pc, pb, t, [uvs[0], uvs[1], uvs[4], uvs[5], uvs[2], uvs[3]]);
+  }
+
+  /** The diner as a cut-out front: the classic front's bands go, holes are left where the glass and the door are. */
+  stageDiner(id: ZoneId, g: THREE.Object3D) {
+    const b = this.batch(id);
+    g.updateMatrixWorld(true);
+    const t = this.tile('diner-front', DINER_FRONT_W, DINER_FRONT_H, paintDinerFront);
+    b.setMatrix(g.matrixWorld);
+    b.rect(_o.set(-9.25, 0, 0.18), X, Y, DINER_FRONT_W / FLAT_TPM, DINER_FRONT_H / FLAT_TPM, t);
+    b.setMatrix(null);
+  }
+
+  /** The marquee as three drawn cards: a shaped face, a painted soffit under it, a flared end. `s` is the marquee group (the box front is at z 3.2). */
+  stageMarquee(id: ZoneId, s: THREE.Object3D) {
+    const b = this.batch(id);
+    s.updateMatrixWorld(true);
+    b.setMatrix(s.matrixWorld);
+    const fw = MARQUEE_W / FLAT_TPM;
+    const fh = MARQUEE_H / FLAT_TPM;
+    b.rect(_o.set(-fw / 2, -fh / 2 - 0.1, 3.24), X, Y, fw, fh, this.tile('marquee-face', MARQUEE_W, MARQUEE_H, paintMarqueeFace));
+    // Soffit: the underside, facing the street below; the wall end warm, the front end lit by the street.
+    const sw = MARQUEE_SOFFIT_W / FLAT_TPM;
+    const sd = MARQUEE_SOFFIT_H / FLAT_TPM;
+    b.rect(_o.set(-sw / 2, -0.85, 0.02), X, Z, sw, sd, this.tile('marquee-soffit', MARQUEE_SOFFIT_W, MARQUEE_SOFFIT_H, paintMarqueeSoffit));
+    // Ends: flared wings against the wall (near end is seen coming up the road).
+    const ew = MARQUEE_END_W / FLAT_TPM;
+    const eh = MARQUEE_END_H / FLAT_TPM;
+    const end = this.tile('marquee-end', MARQUEE_END_W, MARQUEE_END_H, paintMarqueeEnd);
+    b.rect(_o.set(7.05, -eh / 2 - 0.1, 3.2), NZ, Y, ew, eh, end);
+    b.rect(_o.set(-7.05, -eh / 2 - 0.1, 0), Z, Y, ew, eh, end, { flipU: true });
+    b.setMatrix(null);
   }
 
   /** Build the flats' meshes (one draw call a zone) after the atlas is painted. */

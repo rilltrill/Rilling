@@ -99,8 +99,8 @@ export function elevRamps(k: PwKit, o: ElevWallColours): ElevRamps {
     ink: k.ramp(0x201c30, { light: 0.3, dark: 0.5 }),
     soot: k.ramp(0x2c2838, { light: 0.25, dark: 0.5, sat: 0.6 }),
     rust: k.ramp(0x8a4a24, { light: 0.4 }),
-    glassDark: k.ramp(0x1f2a48, { light: 0.4, sat: 1.0, dark: 0.45 }),
-    glassSky: k.ramp(0x4e6696, { light: 0.46, sat: 0.9 }),
+    glassDark: k.ramp(0x161b30, { light: 0.32, sat: 0.8, dark: 0.45 }),
+    glassSky: k.ramp(0x41527a, { light: 0.4, sat: 0.75 }),
     lamp: k.ramp(0xeab664, { light: 0.32, sat: 1.0, dark: 0.55 }),
     lampDeep: k.ramp(0xb0632e, { light: 0.34, sat: 1.05, dark: 0.45 }),
     curtain: k.ramp(o.curtain ?? 0x9a4a3a, { light: 0.38, sat: 0.9, dark: 0.5 }),
@@ -113,6 +113,23 @@ export function elevRamps(k: PwKit, o: ElevWallColours): ElevRamps {
 export function mix(a: number, b: number, t: number): number {
   const ch = (s: number) => Math.round(((a >> s) & 255) * (1 - t) + ((b >> s) & 255) * t) << s;
   return ch(16) | ch(8) | ch(0);
+}
+
+/** What finishes an end of the card: a brick pier or a stone return, each with its side in shadow, toothing above. */
+export type SideKind = 'pier' | 'stone';
+
+export interface BrickOpts {
+  /** Share of the wall drawn as brick (the rest stays flat). */
+  amount?: number;
+  ramp?: number;
+  course?: number;
+  len?: number;
+}
+
+/** A long line's hand: per column, how far this stretch has dropped, and what interrupts it (1 pier, 2 gone). */
+interface LineBreaks {
+  dy: Int8Array;
+  st: Uint8Array;
 }
 
 export type WinKind = 'dark' | 'moon' | 'lit' | 'curtain' | 'blind' | 'figure' | 'tv' | 'boarded' | 'broken' | 'bricked' | 'ac';
@@ -130,6 +147,20 @@ export class Elev {
   private readonly endL: Int16Array;
   private readonly endR: Int16Array;
   readonly r: ElevRamps;
+  /** What stands at each end of the card (`sides`). */
+  private sideL: SideKind = 'pier';
+  private sideR: SideKind = 'pier';
+  private carved = false;
+  private finished = false;
+  private brickOpts: BrickOpts = {};
+  /** Where things have happened on the wall: brick shows round them, grime runs from them. */
+  private readonly spots: { x: number; y: number; rx: number; ry: number }[] = [];
+  private readonly splash: { x: number; s: number }[] = [];
+  private readonly bites: { x0: number; x1: number }[] = [];
+  private readonly joists: { x0: number; x1: number }[] = [];
+  private readonly runs = new Map<number, LineBreaks>();
+  /** The hand-shaped seam of `value`, once per picture. */
+  private wob?: Float32Array;
 
   constructor(
     readonly c: PwCanvas,
@@ -148,10 +179,10 @@ export class Elev {
     this.endL = new Int16Array(c.h);
     this.endR = new Int16Array(c.h);
     this.r = elevRamps(k, colours);
-    // The ends of a wall are drawn too: a pixel out here and there, a slow lean.
+    // The ends of a wall are drawn too (`carveEnds`: once the outline is known).
     for (let y = 0; y < c.h; y++) {
-      this.endL[y] = this.x0 + Math.round((vnoise(y, 90, seed + 71) - 0.5) * 2.4 + this.lean(y, 3));
-      this.endR[y] = this.x1 + Math.round((vnoise(y, 80, seed + 73) - 0.5) * 2.4 + this.lean(y, 5));
+      this.endL[y] = this.x0;
+      this.endR[y] = this.x1;
     }
   }
 
@@ -217,6 +248,18 @@ export class Elev {
     return this;
   }
 
+  /** A straight-sided pediment centred on `cM`, apex at `hM`. */
+  pediment(cM: number, halfM: number, hM: number): this {
+    const yApex = this.Y(hM);
+    const cx = this.X(cM);
+    const half = Math.round(halfM * this.tpm);
+    for (let x = cx - half; x <= cx + half; x++) {
+      const y = Math.round(yApex + (Math.abs(x - cx) / half) * (this.top[x] - yApex));
+      if (y < this.top[x]) this.top[x] = y;
+    }
+    return this;
+  }
+
   /** A bite out of the outline at metres `aM`, `wM` wide, `dM` deep: broken edge with rubble steps. */
   bite(aM: number, wM: number, dM: number): this {
     const x0 = this.X(aM);
@@ -228,6 +271,67 @@ export class Elev {
       const j = Math.round((vnoise(x, 5, this.seed + 201) - 0.5) * 6);
       this.top[x] += Math.max(0, Math.round(v * d) + j);
     }
+    this.bites.push({ x0, x1 });
+    return this;
+  }
+
+  /** What stands at each end of the card: `pier` (brick pier with its return in shadow), `stone` (a stone return). */
+  sides(l: SideKind, r: SideKind): this {
+    this.sideL = l;
+    this.sideR = r;
+    return this;
+  }
+
+  /**
+   * A length of the roofline raised (`dy` < 0) or dropped by whole courses, its ends built, not
+   * cut: the height change happens over a few columns in brick steps. A flat is never a rectangle
+   * with one bump: every building takes at least two of these away from its gable.
+   */
+  lift(aM: number, bM: number, dy: number): this {
+    const x0 = this.X(aM);
+    const x1 = this.X(bM);
+    const ramp = 8;
+    for (let x = x0 - ramp; x < x1 + ramp; x++) {
+      if (x < this.x0 || x >= this.x1 || this.top[x] >= this.H) continue;
+      const t = Math.min(1, Math.min(x - x0 + ramp, x1 + ramp - x) / ramp);
+      this.top[x] += Math.round((dy * Math.floor(t * 4)) / 4);
+    }
+    return this;
+  }
+
+  /** A corner of the wall gone, `w` texels in (20–60), `d` deep: courses stepping back from the end. */
+  cornerBite(left: boolean, w: number, d: number): this {
+    for (let i = 0; i < w; i++) {
+      const x = left ? this.x0 + i : this.x1 - 1 - i;
+      const t = 1 - i / w;
+      const course = Math.floor(i / 7);
+      const j = Math.round((hash2(course, 3, this.seed + 211) - 0.5) * 8);
+      this.top[x] += Math.max(0, Math.round((d * t * t) / 4) * 4 + (t > 0.2 ? j : 0));
+    }
+    this.bites.push(left ? { x0: this.x0, x1: this.x0 + w } : { x0: this.x1 - w, x1: this.x1 });
+    return this;
+  }
+
+  /**
+   * A storey fallen in: from `aM` to `bM` the wall stops at a torn line about `hM` above the street
+   * (brick stepped and ragged, joist stumps left sticking out of it into the night).
+   */
+  collapse(aM: number, bM: number, hM: number): this {
+    const x0 = this.X(aM);
+    const x1 = this.X(bM);
+    const y0 = this.Y(hM);
+    const W = x1 - x0;
+    const { seed } = this;
+    for (let x = x0; x < x1; x++) {
+      const t = (x - x0) / W;
+      // Slumps toward the far end, in runs of courses, with a bite or two.
+      const slope = (1 - Math.cos(t * Math.PI)) * 0.5 * Math.round(0.9 * this.tpm);
+      const n = (vnoise(x, 9, seed + 231) - 0.5) * 16 + (vnoise(x, 34, seed + 233) - 0.5) * 22;
+      const y = Math.floor((y0 + slope + n) / 4) * 4;
+      this.top[x] = Math.max(this.top[x], y);
+    }
+    this.bites.push({ x0, x1 });
+    this.joists.push({ x0, x1 });
     return this;
   }
 
@@ -263,23 +367,31 @@ export class Elev {
     return this;
   }
 
-  /** A wooden water tank on an iron trestle, standing behind the wall. */
+  /**
+   * A wooden water tank on an iron trestle, standing behind the wall. The legs are wide enough,
+   * and rim-lit, to read against the night sky from the road, and they land on a drawn strip of
+   * tarred roof (`roofStrip`): a tank with thin dark legs floats.
+   */
   tank(cM: number, baseM: number, o: { w?: number; h?: number } = {}): this {
     const { c, r, seed } = this;
     const cx = this.X(cM);
     const yB = this.Y(baseM);
     const w = Math.round((o.w ?? 2.5) * this.tpm);
     const h = Math.round((o.h ?? 2.2) * this.tpm);
-    const legs = 26;
-    // Trestle.
+    const legs = 28;
     const yLeg = yB - legs;
-    for (const lx of [-w / 2 + 3, -w / 6, w / 6, w / 2 - 3]) {
-      c.line(cx + lx - 2, yLeg, cx + lx - 3, yB + 6, r.iron, 2);
-      c.line(cx + lx, yLeg, cx + lx - 1, yB + 6, r.iron, 3);
+    const iron = r.stone;
+    // Trestle: three heavy posts, two diagonals (a lit edge, a dark one).
+    for (const lx of [-w / 2 + 3, 0, w / 2 - 6]) {
+      const x0 = cx + Math.round(lx);
+      for (let i = 0; i < 6; i++) c.line(x0 + i, yLeg, x0 + i - 1, yB + 2, iron, i === 0 ? 3.6 : i === 5 ? 0.8 : 2);
     }
-    c.line(cx - w / 2 + 2, yLeg + 4, cx + w / 2 - 3, yB - 2, r.iron, 2);
-    c.line(cx + w / 2 - 2, yLeg + 4, cx - w / 2 + 3, yB - 2, r.iron, 1);
-    c.hline(cx - w / 2 + 1, yLeg + 1, w - 2, r.iron, 3);
+    for (let i = -1; i <= 1; i++) {
+      c.line(cx - w / 2 + 6, yLeg + 3 + i, cx + w / 2 - 8, yB - 6 + i, iron, i === 0 ? 2.4 : 1.2);
+      c.line(cx + w / 2 - 6, yLeg + 3 + i, cx - w / 2 + 8, yB - 6 + i, iron, i === 0 ? 2.8 : 1);
+    }
+    c.rect(cx - w / 2 + 3, yLeg, w - 6, 3, iron, 3);
+    this.roofStrip(cx - w / 2 - 6, cx + w / 2 + 6, yB + 2);
     // The barrel: staves, hoops, a conical cap.
     const yT = yLeg - h;
     c.rect(cx - w / 2, yT, w, h, r.wood, 3);
@@ -296,6 +408,18 @@ export class Elev {
     const pts = [cx - w / 2 - 3, yT, cx + w / 2 + 3, yT, cx + 3, yT - capH, cx - 3, yT - capH];
     c.poly(pts, r.iron, (x, y) => (x + (y - yT) * 0.9 < cx - 3 ? 4 : x > cx + w * 0.22 ? 1 : 2));
     c.hline(cx - w / 2 - 3, yT, w + 6, r.iron, 1);
+    return this;
+  }
+
+  /** The strip of tarred roof and stubby parapet a tank or a billboard stands on (so it is seen to land). */
+  roofStrip(x0: number, x1: number, y: number): this {
+    const { c, r } = this;
+    for (let x = x0; x < x1; x++) {
+      const h = 4 + Math.round(hash2(x >> 3, 5, this.seed + 3) * 3);
+      c.rect(x, y, 1, h, r.stone, 2);
+      c.set(x, y, r.stone, 3.6);
+      c.set(x, y + h - 1, r.stone, 0.8);
+    }
     return this;
   }
 
@@ -330,8 +454,45 @@ export class Elev {
 
   // ─── The wall ─────────────────────────────────────────────────────────────
 
+  /** An end's edge: a pixel or two out, moving every 6 to 10 rows (the hand; a card must not end on a ruler). */
+  private edgeJog(y: number, salt: number): number {
+    const span = 6 + Math.floor(hash2(salt, 5, this.seed) * 5);
+    const seg = Math.floor((y + hash2(salt, 3, this.seed) * span) / span);
+    const h = hash2(seg, salt, this.seed + 77);
+    return h < 0.3 ? 0 : h < 0.65 ? 1 : h < 0.88 ? 2 : 3;
+  }
+
+  /** Cut the card's two ends once the outline is known: the wobble, and the brick toothing up the top third. */
+  private carveEnds() {
+    if (this.carved) return;
+    this.carved = true;
+    const { H, x0, x1, top, seed } = this;
+    for (let y = 0; y < H; y++) {
+      this.endL[y] = Math.max(x0, x0 + this.edgeJog(y, 101) + this.lean(y, 3));
+      this.endR[y] = Math.min(x1, x1 - this.edgeJog(y, 103) + this.lean(y, 5));
+    }
+    // Toothing: pairs of courses cut back 4 to 10 texels, shallowing toward the pier below.
+    const tooth = (yt: number, left: boolean) => {
+      const salt = left ? 701 : 703;
+      const third = Math.round((H - yt) * 0.36);
+      for (let y = yt; y < yt + third && y < H; y++) {
+        const cn = Math.floor((y - yt) / 4);
+        const group = Math.floor(cn / 2);
+        const h = hash2(group, salt, seed + 41);
+        const step = h < 0.34 ? 4 : h < 0.7 ? 7 : 10;
+        const fade = 1 - (y - yt) / third;
+        const inset = group & 1 ? Math.round(step * (0.45 + fade * 0.55)) : Math.round(hash2(cn, salt, seed + 43) * 2);
+        if (left) this.endL[y] += inset;
+        else this.endR[y] -= inset;
+      }
+    };
+    tooth(Math.min(top[x0 + 3], top[x0 + 14]), true);
+    tooth(Math.min(top[x1 - 4], top[x1 - 15]), false);
+  }
+
   /** Fill the outline with the wall's base tone. */
   fill(ramp: number = this.r.wall, tone = 3): this {
+    this.carveEnds();
     const { c, x0, x1, H } = this;
     for (let x = x0 - 3; x < x1 + 3; x++) {
       for (let y = this.top[x]; y < H; y++) {
@@ -389,6 +550,92 @@ export class Elev {
     return this;
   }
 
+  /** Set the wall's brick (drawn last, when the picture knows where its damage and sills are). */
+  brick(o: BrickOpts = {}): this {
+    this.brickOpts = o;
+    return this;
+  }
+
+  /**
+   * Brick as it is drawn, not as it is built: most of the wall stays one flat tone, the eye's rest
+   * for windows and ironwork. Coursed groups of 3 to 8 bricks (highlight on top, shadow under and
+   * at the joint) cluster where a painter would put them: the corners, under the sills, round the
+   * damage, along the top. `amount` is the share of the wall (0.3 to 0.4).
+   */
+  brickwork(o: BrickOpts = {}): this {
+    const { c, seed, W, H, x0, x1, top, spots } = this;
+    if (o.amount === 0) return this;
+    const ramp = o.ramp ?? this.r.wall;
+    const amount = o.amount ?? 0.35;
+    const COURSE = o.course ?? 4;
+    const LEN = o.len ?? 10;
+    // Where the eye goes, on a coarse grid (cheap: this runs over every picture of the stage).
+    const G = 8;
+    const gw = Math.ceil(W / G);
+    const gh = Math.ceil(H / G);
+    const A = new Float32Array(gw * gh);
+    for (let gy = 0; gy < gh; gy++) {
+      const y = gy * G + 4;
+      for (let gx = 0; gx < gw; gx++) {
+        const x = gx * G + 4;
+        const yTop = x < W ? top[x] : H;
+        if (y < yTop || x < x0 || x >= x1) {
+          A[gy * gw + gx] = -9;
+          continue;
+        }
+        let a = Math.max(0, 1 - Math.min(x - x0, x1 - x) / 52) * 0.95;
+        a = Math.max(a, Math.max(0, 1 - (y - yTop) / 54) * 0.85);
+        a = Math.max(a, Math.max(0, 1 - (H - y) / 40) * 0.4);
+        for (const s of spots) {
+          const u = (x - s.x) / s.rx;
+          const v = (y - s.y) / s.ry;
+          a = Math.max(a, 1 - Math.sqrt(u * u + v * v));
+        }
+        A[gy * gw + gx] = a + (vnoise2(x, y, 76, 52, seed + 13) - 0.42) * 0.62;
+      }
+    }
+    const walls = [...A].filter((v) => v > -9).sort((p, q) => q - p);
+    const thresh = walls[Math.min(walls.length - 1, Math.floor(walls.length * amount * 1.08))] ?? 1;
+    const tones = c.tone;
+    const rampArr = c.ramp;
+    for (let y = 0; y < H; y += COURSE) {
+      const cn = y / COURSE;
+      const off = cn & 1 ? LEN >> 1 : 0;
+      let x = x0 + off + Math.floor(hash2(cn, 3, seed + 53) * LEN);
+      const band = Math.floor(cn / 6);
+      while (x < x1) {
+        const gx = Math.min(gw - 1, x >> 3);
+        const gy = Math.min(gh - 1, y >> 3);
+        if (A[gy * gw + gx] < thresh) {
+          x += LEN;
+          continue;
+        }
+        const n = 3 + Math.floor(hash2(x, cn, seed + 51) * 6);
+        for (let b = 0; b < n; b++) {
+          const bx0 = x + b * LEN;
+          const cx = bx0 + (LEN >> 1);
+          if (cx >= x1) break;
+          const yy = y + this.sag(cx, band + 11);
+          const h = hash2(bx0, cn, seed + 37);
+          const dv = h < 0.2 ? -0.7 : h > 0.86 ? 0.5 : 0;
+          for (let i = 0; i < LEN; i++) {
+            for (let j = 0; j < COURSE; j++) {
+              const xx = bx0 + i;
+              const yr = yy + j;
+              if (xx < 0 || xx >= W || yr < 0 || yr >= H) continue;
+              const q = yr * W + xx;
+              if (rampArr[q] !== ramp || !this.inWall(xx, yr)) continue;
+              const d = j === COURSE - 1 || i === LEN - 1 ? -1.3 : j === 0 ? 0.8 : 0;
+              tones[q] = Math.max(0, Math.min(5, tones[q] + d + dv));
+            }
+          }
+        }
+        x += n * LEN + LEN * (1 + Math.floor(hash2(x, cn, seed + 57) * 3));
+      }
+    }
+    return this;
+  }
+
   /** Shift the tone of a wall-ramp texel. */
   shadeW(x: number, y: number, dt: number, ramp: number = this.r.wall) {
     if (this.c.at(x, y) === ramp) this.c.shift(x, y, dt);
@@ -432,6 +679,79 @@ export class Elev {
         } else if ((inside(x - 1, y) || inside(x, y - 1)) && this.inWall(x, y)) c.shift(x, y, 1);
       }
     }
+    this.spots.push({ x: cx, y: cy, rx: rx * 2.4, ry: ry * 2.4 });
+    return this;
+  }
+
+  /**
+   * A hole knocked through the wall, drawn over the architecture so it CUTS it: cornice, sill and
+   * window head stop at its edge. Dark inside with a charred joist, a ragged 2–3 texel inner edge
+   * of raw brick, a lit lip on the lower right, rubble staining the wall below it.
+   */
+  breach(cx: number, cy: number, rx: number, ry: number, o: { salt?: number; lintel?: boolean; rubble?: number } = {}): this {
+    const { c, seed, r } = this;
+    const salt = o.salt ?? 1;
+    const rad = (x: number, y: number) => {
+      const a = Math.atan2((y - cy) / ry, (x - cx) / rx);
+      const rr = 1 + 0.2 * Math.sin(a * 3 + seed + salt) + 0.12 * Math.sin(a * 5 + salt * 2 + 1);
+      const u = (x - cx) / rx;
+      const v = (y - cy) / ry;
+      return Math.sqrt(u * u + v * v) / rr;
+    };
+    const R = 1.6;
+    const y0 = Math.floor(cy - ry * R);
+    const y1 = Math.ceil(cy + ry * R);
+    const x0 = Math.floor(cx - rx * R);
+    const x1 = Math.ceil(cx + rx * R);
+    // Decided brick by brick (a hole in a wall has the outline of the bricks that have gone),
+    // the room behind a shade above black at the bottom so it reads as a room, not a hole in the paper.
+    for (let y = y0; y <= y1; y++) {
+      const cn = y >> 2;
+      for (let x = x0; x <= x1; x++) {
+        if (!c.at(x, y)) continue;
+        const bx = Math.floor((x + (cn & 1) * 5) / 10);
+        const px = bx * 10 + 5 - (cn & 1) * 5;
+        const py = cn * 4 + 2;
+        const d = rad(px, py) + (hash2(bx, cn, seed + salt * 3) - 0.5) * 0.12;
+        if (d > 1.14) continue;
+        if (d > 0.93) {
+          // A surviving half-brick of the broken edge: its own light, a dark mortar joint.
+          const m = (y & 3) === 3 || (x + (cn & 1) * 5) % 10 === 0;
+          c.set(x, y, r.brick, m ? 0.9 : 2.1 + (hash2(bx, cn, seed + salt) > 0.55 ? 0.8 : 0));
+        } else {
+          const low = (y - cy) / ry;
+          c.set(x, y, r.ink, 0.45 + (low > 0.3 ? 0.55 : 0) + (hash2(x >> 3, y >> 3, seed + 3) > 0.74 ? 0.4 : 0));
+        }
+      }
+    }
+    // Charred joists running back into the dark, not quite parallel.
+    for (let i = -1; i <= 1; i++) {
+      const ly = cy + ry * (0.15 + i * 0.28);
+      c.line(cx - rx * 0.75, ly, cx + rx * 0.65, ly + i * 3, r.wood, 1.1);
+    }
+    if (o.lintel) {
+      // A stone lintel come down into the hole, one end still on its bearing: thick, two-toned, its edge broken.
+      const lw = rx * 1.15;
+      const a = [cx - lw, cy - ry * 0.55, cx - lw + 7, cy - ry * 0.55 - 7, cx + lw, cy + ry * 0.4 - 7, cx + lw - 6, cy + ry * 0.4];
+      c.poly(a, r.stone, 2.4);
+      c.line(a[0], a[1], a[6], a[7], r.stone, 0.9);
+      c.line(a[2], a[3], a[4], a[5], r.stone, 3.6);
+    }
+    // Rubble staining down the wall: a few dark runs and flakes of the brick dust.
+    const n = o.rubble ?? 7;
+    for (let i = 0; i < n; i++) {
+      const sx = Math.round(cx - rx * 0.9 + (i / Math.max(1, n - 1)) * rx * 1.8);
+      const sy = Math.round(cy + ry * (0.55 + hash2(i, 3, seed) * 0.5));
+      const len = 18 + Math.round(hash2(i, 7, seed + salt) * 56);
+      for (let j = 0; j < len; j++) {
+        const xx = sx + Math.round(Math.sin(j * 0.22 + i) * 1.2);
+        if (!this.inWall(xx, sy + j)) continue;
+        c.shift(xx, sy + j, j < len * 0.6 ? -1.5 : -0.8);
+        if (hash2(xx, sy + j, seed + 9) > 0.86) c.tint(xx, sy + j, r.brick, 0);
+      }
+    }
+    this.spots.push({ x: cx, y: cy, rx: rx * 2.2, ry: ry * 2.2 });
+    this.splash.push({ x: cx, s: 0.9 });
     return this;
   }
 
@@ -462,6 +782,8 @@ export class Elev {
   /** Scorch going up a wall from a window: a stepped, flame-shaped soot shadow. */
   scorch(cx: number, y: number, w: number, h: number): this {
     const { c, seed } = this;
+    this.spots.push({ x: cx, y: y - h * 0.4, rx: w, ry: h * 0.7 });
+    this.splash.push({ x: cx, s: 0.5 });
     for (let j = 0; j < h; j++) {
       const t = j / h;
       const hw = Math.round((w / 2) * (1 - t * 0.75 + Math.sin(j * 0.2 + seed) * 0.08));
@@ -491,16 +813,88 @@ export class Elev {
 
   // ─── Architecture ─────────────────────────────────────────────────────────
 
-  /** A horizontal band of `h` rows: the top lit, the bottom shadowed, a cast shadow on the wall under it. */
+  /**
+   * How a long horizontal is broken: a run of 80 to 110 texels (2.5 to 3.5 m) never goes on
+   * unbroken. At each break either a pier interrupts it, the next stretch has dropped 6 to 14
+   * texels, or 20 to 40 texels of it are gone and the raw brick shows. Foreshortened, those
+   * breaks are what stops a wall's long lines reading as a modelled box.
+   */
+  private breaks(salt: number): LineBreaks {
+    let b = this.runs.get(salt);
+    if (b) return b;
+    const { W, seed, x0, x1 } = this;
+    const dy = new Int8Array(W);
+    const st = new Uint8Array(W);
+    let x = x0 + 10 + Math.floor(hash2(1, salt, seed + 601) * 40);
+    let cur = 0;
+    for (let i = 0; x < x1; i++) {
+      const len = 80 + Math.floor(hash2(i, salt, seed + 603) * 31);
+      const k = hash2(i, salt, seed + 607);
+      if (k < 0.34) {
+        const pw = 10 + Math.floor(hash2(i, salt, seed + 609) * 5);
+        st.fill(1, Math.max(0, x), Math.min(W, x + pw));
+        if (cur) cur = 0;
+      } else if (k < 0.7) {
+        cur = cur ? 0 : 6 + Math.floor(hash2(i, salt, seed + 611) * 9);
+      } else {
+        const gw = 20 + Math.floor(hash2(i, salt, seed + 613) * 21);
+        st.fill(2, Math.max(0, x), Math.min(W, x + gw));
+      }
+      dy.fill(cur, Math.max(0, x), Math.min(W, x + len));
+      x += len;
+    }
+    b = { dy, st };
+    this.runs.set(salt, b);
+    return b;
+  }
+
+  /** Raw brick where a moulding has fallen away (one column of it, in courses, rough). */
+  private rawBand(x: number, y: number, h: number) {
+    const { c, r, seed } = this;
+    for (let j = 0; j < h; j++) {
+      const yy = y + j;
+      if (!this.inWall(x, yy)) continue;
+      const cn = yy >> 2;
+      const mortar = (yy & 3) === 3 || (x + (cn & 1) * 5) % 10 === 0;
+      c.set(x, yy, r.brick, mortar ? 1.1 : 2 + (hash2(x >> 3, cn, seed + 33) > 0.7 ? 0.7 : 0));
+    }
+  }
+
+  /** A pier breaking through a moulding: its block stands forward, lit left, shadow right and under. */
+  private linePier(a: number, b: number, y: number, h: number, ramp: number) {
+    const { c } = this;
+    for (let x = a; x < b; x++) {
+      for (let j = -4; j < h + 5; j++) {
+        if (!this.inWall(x, y + j)) continue;
+        c.set(x, y + j, ramp, x === a ? 3.5 : x === b - 1 ? 1 : j === -4 ? 3.4 : j >= h + 3 ? 1.2 : 2.5);
+      }
+      c.shift(x, y + h + 5, -1.6);
+    }
+    for (let j = -4; j < h + 5; j++) c.shift(b, y + j, -1.4);
+  }
+
+  /** A horizontal band of `h` rows: the top lit, the bottom shadowed, a cast shadow on the wall under it. Broken like every long line. */
   band(y: number, h: number, ramp: number = this.r.stone, o: { x0?: number; x1?: number; gaps?: [number, number][]; salt?: number; shadow?: number } = {}): this {
     const { c } = this;
     const x0 = o.x0 ?? this.x0;
     const x1 = o.x1 ?? this.x1;
     const salt = o.salt ?? 2;
+    const brk = this.breaks(salt + 64);
     const inGap = (x: number) => o.gaps?.some(([a, b]) => x >= a && x < b) ?? false;
+    let pier = -1;
     for (let x = x0; x < x1; x++) {
-      if (inGap(x)) continue;
-      const yy = y + this.sag(x, salt);
+      const st = brk.st[x];
+      if (st === 1 && pier < 0) pier = x;
+      if (st !== 1 && pier >= 0) {
+        this.linePier(pier, x, y + brk.dy[pier], h, ramp);
+        pier = -1;
+      }
+      if (st === 1) continue;
+      if (inGap(x) || st === 2) {
+        this.rawBand(x, y + brk.dy[x], h + 1);
+        continue;
+      }
+      const yy = y + this.sag(x, salt) + brk.dy[x];
       for (let j = 0; j < h; j++) {
         if (!this.inWall(x, yy + j) && j < h - 1) continue;
         const t = j === 0 ? 3.6 : j === h - 1 ? 1 : 2.8;
@@ -513,7 +907,8 @@ export class Elev {
 
   /**
    * A cornice: lit crown, cove in shadow, frieze with dentils at wandering spacing, a cast
-   * shadow on the wall. `gaps` (columns) are where it has been shot or has fallen off: the
+   * shadow on the wall. Broken every 2.5 to 3.5 m like every long line. `gaps` (columns), a
+   * bite in the outline and any stretch the wall has lost are where it has fallen off: the
    * band stops with a rough end and the brick shows.
    */
   cornice(y: number, o: { ramp?: number; gaps?: [number, number][]; x0?: number; x1?: number; h?: number; salt?: number } = {}): this {
@@ -523,14 +918,24 @@ export class Elev {
     const x1 = o.x1 ?? this.x1 + 3;
     const h = o.h ?? 13;
     const salt = o.salt ?? 2;
-    const inGap = (x: number) => o.gaps?.some(([a, b]) => x >= a - 2 && x < b + 2) ?? false;
+    const brk = this.breaks(salt);
+    const gone = (x: number) => (o.gaps?.some(([a, b]) => x >= a - 2 && x < b + 2) ?? false) || brk.st[x] === 2 || this.top[x] > y + brk.dy[x] + 3;
     let dx = x0 + 3;
+    let pier = -1;
     for (let x = x0; x < x1; x++) {
-      if (inGap(x)) {
-        for (let j = 2; j < h + 3; j++) if (this.inWall(x, y + j)) this.c.shift(x, y + j, -1);
+      const st = brk.st[x];
+      if (st === 1 && pier < 0) pier = x;
+      if (st !== 1 && pier >= 0) {
+        this.linePier(pier, x, y + brk.dy[pier], h, ramp);
+        pier = -1;
+      }
+      if (st === 1) continue;
+      if (gone(x)) {
+        this.rawBand(x, y + brk.dy[x], h + 3);
+        for (let j = 2; j < h + 3; j++) if (this.inWall(x, y + brk.dy[x] + j) && hash2(x, j, seed + 37) > 0.7) this.c.shift(x, y + brk.dy[x] + j, -1);
         continue;
       }
-      const yy = y + this.sag(x, salt);
+      const yy = y + this.sag(x, salt) + brk.dy[x];
       for (let j = 0; j < h; j++) {
         // crown | cove | fillet | frieze | bed mould
         let t: number;
@@ -573,6 +978,142 @@ export class Elev {
     return this;
   }
 
+  /**
+   * A bay recessed in the wall: its inside a tone or two down, a hard shadow cast down the side
+   * and along the head by what stands in front of it. Draw the window rows over it afterwards.
+   */
+  recess(x0: number, x1: number, y0: number, y1: number): this {
+    const { c, seed } = this;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        if (!this.inWall(x, y)) continue;
+        const head = y - y0 < 10 + Math.floor(vnoise(x, 12, seed + 91) * 5);
+        const side = x - x0 < 8;
+        c.shift(x, y, head || side ? -2 : -1);
+      }
+    }
+    // The recess's reveals: a lit return on the right, a dark edge on the left.
+    for (let y = y0; y < y1; y++) {
+      c.shift(x1 - 1 + this.lean(y, 9), y, 1.6);
+      c.shift(x0 + this.lean(y, 9), y, -1);
+    }
+    return this;
+  }
+
+  /** A round arch through the wall from the street up, dark inside, stone voussoirs round it, a dim lamp far down the passage. */
+  archway(cx: number, yTop: number, halfW: number, h: number): this {
+    const { c, r } = this;
+    const yFoot = yTop + h;
+    const hw = halfW;
+    for (let y = yTop; y < yFoot; y++) {
+      const v = (y - yTop) / Math.max(1, hw * 0.9);
+      const span = v >= 1 ? hw : Math.round(hw * Math.sqrt(Math.max(0, 1 - (1 - v) * (1 - v))));
+      for (let x = cx - span - 3; x <= cx + span + 3; x++) {
+        const inside = Math.abs(x - cx) <= span;
+        if (inside) c.set(x, y, r.ink, 0.5 + (y > yFoot - 16 ? 0.6 : 0));
+      }
+    }
+    // Voussoirs.
+    for (let a = 0; a <= 16; a++) {
+      const t = (a / 16) * Math.PI;
+      const ox = cx + Math.cos(Math.PI - t) * (hw + 5);
+      const oy = yTop + hw * 0.9 - Math.sin(t) * (hw * 0.9 + 5);
+      const n = 9 - Math.abs(a - 8) * 0.2;
+      c.line(ox, oy, ox + Math.cos(Math.PI - t) * n, oy - Math.sin(t) * n, r.stone, a % 2 ? 3.4 : 2.6);
+    }
+    c.rect(cx - 5, yTop - 8, 10, 14, r.stone, 3.6);
+    c.vline(cx - 5, yTop - 8, 14, r.stone, 4.2);
+    c.vline(cx + 4, yTop - 8, 14, r.stone, 1.4);
+    // Jambs.
+    for (const s of [-1, 1]) {
+      for (let y = yTop + Math.round(hw * 0.9); y < yFoot; y++) {
+        const xe = cx + s * (hw + 1) + this.lean(y, 7);
+        for (let i = 0; i < 7; i++) c.set(xe + s * i, y, r.stone, (y >> 3) & 1 ? 2.8 : 3.4);
+      }
+    }
+    // The far end of the passage: a lit yard seen through it, its floor line, a dim lamp high up.
+    const yf = yFoot - 16;
+    c.rect(cx - 12, yf - 56, 24, 56, r.alt, 1.3);
+    c.hline(cx - 12, yf - 1, 24, r.stone, 2);
+    c.ellipse(cx + 3, yf - 44, 3, 3, r.lamp, 3, PWF.GLOW);
+    for (let i = 0; i <= 12; i++) c.set(cx - 12 - i, yf + Math.round(i * 0.8), r.stone, 1.3);
+    for (let i = 0; i <= 12; i++) c.set(cx + 12 + i, yf + Math.round(i * 0.8), r.stone, 1.3);
+    return this;
+  }
+
+  /**
+   * A three-sided oriel on brackets, carried up the wall between `yBase` (the street end, y larger)
+   * and `yTop`, `wTex` wide: lit centre light, one curtain, a dark side, a little roof over it.
+   */
+  oriel(cx: number, yBase: number, yTop: number, wTex: number, kinds: WinKind[]): this {
+    const { c, r } = this;
+    const hw = wTex >> 1;
+    for (let y = yTop; y < yBase; y++) {
+      for (let x = cx - hw; x < cx + hw; x++) {
+        const u = (x - cx) / hw;
+        // Three planes: left shaded, centre lit, right darker.
+        const t = u < -0.55 ? 1.9 : u > 0.55 ? 1.4 : 3;
+        c.set(x, y, r.stone, t);
+      }
+    }
+    for (let x = cx - hw - 3; x < cx + hw + 3; x++) {
+      c.set(x, yTop, r.stone, 4);
+      c.set(x, yTop + 1, r.stone, 3.2);
+      c.shift(x, yBase, -1.4);
+      c.shift(x, yBase + 1, -0.9);
+    }
+    // Brackets under it.
+    for (const s of [-1, 0, 1]) {
+      const bx = cx + s * (hw - 6);
+      c.poly([bx - 5, yBase, bx + 5, yBase, bx + 2, yBase + 14, bx - 2, yBase + 14], r.stone, 2.6);
+    }
+    // Lead cap.
+    c.poly([cx - hw - 3, yTop, cx - hw + 12, yTop - 10, cx + hw - 12, yTop - 10, cx + hw + 3, yTop], r.iron, (x) => (x < cx ? 3 : 1.8));
+    c.hline(cx - hw + 12, yTop - 10, wTex - 24, r.iron, 3.6);
+    const paneH = yBase - yTop - 16;
+    this.window(cx - hw + 8, yTop + 8, 20, paneH, kinds[0], { head: 'none', sill: false });
+    this.window(cx - 18, yTop + 8, 36, paneH, kinds[1], { head: 'none', sill: false });
+    this.window(cx + hw - 28, yTop + 8, 20, paneH, kinds[2], { head: 'none', sill: false });
+    return this;
+  }
+
+  /** A round corner turret drawn up the end of the wall from the street to a cap above the roofline, windows on the round. */
+  turret(cx: number, rw: number, yFoot: number, yTop: number): this {
+    const { c, r, k } = this;
+    const hw = rw >> 1;
+    const slate = k.ramp(0x3a4250, { light: 0.32, sat: 0.7, dark: 0.45 });
+    const copper = k.ramp(0x6aa080, { light: 0.34, sat: 0.8, dark: 0.45 });
+    const yCap = yTop + Math.round((yFoot - yTop) * 0.12);
+    for (let y = yCap; y < yFoot; y++) {
+      for (let x = cx - hw; x <= cx + hw; x++) {
+        const u = (x - cx) / hw;
+        const t = u < -0.8 ? 1.6 : u < -0.4 ? 3.3 : u < 0.2 ? 2.8 : u < 0.65 ? 2 : 1.2;
+        c.set(x, y, r.stone, t + ((y >> 2) & 1 ? 0.15 : -0.1));
+      }
+    }
+    for (let x = cx - hw - 4; x <= cx + hw + 4; x++) {
+      c.set(x, yCap, r.stone, 4);
+      c.set(x, yCap + 1, r.stone, 3);
+      c.shift(x, yCap + 2, -1.6);
+    }
+    // Windows around it: each floor one tall one on the turret's face.
+    for (let y = yFoot - 150; y > yCap + 50; y -= 102) this.window(cx - 13, y - 58, 26, 58, y < yFoot - 300 ? 'lit' : 'dark', { head: 'arch', sill: true });
+    // Conical slated cap and the finial.
+    const cone = yCap - yTop;
+    for (let y = yTop; y < yCap; y++) {
+      const w2 = Math.round(hw * ((y - yTop) / cone) * 1.1);
+      for (let x = cx - w2; x <= cx + w2; x++) {
+        const u = (x - cx) / Math.max(1, w2);
+        const band = ((y - yTop + ((x >> 2) & 1) * 2) >> 2) & 1 ? 0.3 : -0.2;
+        c.set(x, y, slate, (u < -0.5 ? 3.4 : u < 0.2 ? 2.4 : 1.4) + band);
+      }
+    }
+    c.vline(cx, yTop - 12, 12, copper, 3.4);
+    c.ellipse(cx, yTop - 12, 3, 3, copper, 3.6);
+    c.hline(cx - 4, yTop - 3, 9, copper, 2.4);
+    return this;
+  }
+
   /** Vertical stone pilaster or quoin strip, `w` texels wide, leaning with the wall. */
   pilaster(x: number, y0: number, y1: number, w: number, ramp: number = this.r.stone): this {
     const { c } = this;
@@ -597,6 +1138,7 @@ export class Elev {
     const { c, r, seed } = this;
     const v = o.v ?? Math.floor(hash2(x, y, seed + 41) * 1000);
     const head = o.head ?? 'lintel';
+    this.spots.push({ x: x + w / 2, y: y + h + 9, rx: w * 0.95, ry: 15 });
     // Surround: a shadow halo on the wall round the opening, then the head and the sill.
     this.halo(x - 2, y - 2, w + 4, h + 4);
     this.windowHead(x, y, w, head, v);
@@ -842,26 +1384,24 @@ export class Elev {
       }
       return;
     }
-    // Unlit panes: the night in them — dark glass, a broken reflection, sometimes a torn blind or cardboard.
+    // Unlit panes: the night in them — near black, one low moon streak across a single pane, the odd
+    // torn blind or cardboard square. (Bright reflections read as repeated stickers.)
     const dark = kind !== 'moon';
     for (let j = 0; j < h; j++) {
       for (let i = 0; i < w; i++) {
-        const t = dark ? 1.2 + (j < 5 ? -0.4 : 0.3 * ((i + (j >> 2)) & 1)) : 3 - (j / h) * 1.8;
+        const t = dark ? 0.9 + (j < 5 ? -0.3 : 0.15 * ((i + (j >> 2)) & 1)) : 2.2 - (j / h) * 1.3;
         c.set(x + i, y + j, r.glassDark, t);
       }
     }
-    // The reflection: a stepped diagonal band, each pane catching it at a different place.
-    const panes = 2;
-    for (let p = 0; p < panes; p++) {
-      const py0 = y + (p * h) / panes;
-      const py1 = y + ((p + 1) * h) / panes;
-      const bx = Math.round(hash2(v, p, 3) * (w - 6));
+    {
+      const p = hash2(v, 41, 3) > 0.5 ? 0 : 1;
+      const py0 = y + (p * h) / 2 + 2;
+      const py1 = y + ((p + 1) * h) / 2 - 2;
+      const bx = Math.round(hash2(v, 43, 3) * Math.max(1, w - 6));
       for (let j = Math.floor(py0); j < py1; j++) {
         const c0 = bx + Math.round((j - py0) * 0.6);
-        for (let i = 0; i < 3 + (j % 9 < 3 ? 2 : 0); i++) {
-          const px = x + ((c0 + i) % w);
-          c.set(px, j, r.glassSky, dark ? 1.7 + (i === 0 ? 0.9 : 0) : 3.6);
-        }
+        const sw = 2 + (j % 11 < 3 ? 1 : 0);
+        for (let i = 0; i < sw; i++) c.set(x + ((c0 + i) % w), j, r.glassSky, dark ? 1.3 : 2.6);
       }
     }
     if (kind === 'broken') {
@@ -893,12 +1433,24 @@ export class Elev {
       c.frame(x + 3, py, w - 6, 13, r.wood, 3.6);
       c.hline(x + 6, py + 5, w - 12, r.wood, 1.4);
     }
-    if (hash2(v, 7, 3) > 0.74) {
+    if (hash2(v, 7, 3) > 0.75) {
       const cx = x + 4 + Math.floor(hash2(v, 8, 3) * (w - 8));
       const cy = y + 4 + Math.floor(hash2(v, 9, 3) * (h - 8));
-      for (let a = 0; a < 5; a++) {
-        const ang = (a / 5) * 6.28 + hash2(v, a, 21);
-        c.line(cx, cy, cx + Math.round(Math.cos(ang) * (3 + (a % 3) * 3)), cy + Math.round(Math.sin(ang) * (3 + (a % 3) * 3)), r.glassSky, 3.4);
+      const shape = v % 3;
+      if (shape === 0) {
+        for (let a = 0; a < 5; a++) {
+          const ang = (a / 5) * 6.28 + hash2(v, a, 21);
+          c.line(cx, cy, cx + Math.round(Math.cos(ang) * (3 + (a % 3) * 3)), cy + Math.round(Math.sin(ang) * (3 + (a % 3) * 3)), r.glassSky, 2.4);
+        }
+      } else if (shape === 1) {
+        // One long crack from a corner, with a fork.
+        c.line(x, y + 3, cx, cy, r.glassSky, 2.4);
+        c.line(cx, cy, x + w - 2, cy + 6, r.glassSky, 2);
+        c.line(cx, cy, cx - 3, y + h - 2, r.glassSky, 2);
+      } else {
+        // A corner gone, a dark triangle with a lit edge.
+        c.poly([x + w - 1, y, x + w - 1, y + 14, x + w - 15, y], r.ink, 0.3);
+        c.line(x + w - 1, y + 14, x + w - 15, y, r.glassSky, 2.6);
       }
     }
   }
@@ -913,33 +1465,117 @@ export class Elev {
   value(field: (x: number, y: number) => number, strength: number, seam = 0.14): this {
     const { c, W, H } = this;
     const sign = Math.sign(strength);
+    const abs = Math.abs(strength);
+    const w2 = (W + 1) >> 1;
+    if (!this.wob) {
+      // (Per picture, and at half resolution: the same hand-shaped edge at a fraction of the cost.)
+      const h2 = (H + 1) >> 1;
+      const t = new Float32Array(w2 * h2);
+      for (let y = 0; y < h2; y++) for (let x = 0; x < w2; x++) t[y * w2 + x] = (vnoise2(x * 2, y * 2, 9, 7, this.seed + 401) - 0.5) * 0.22;
+      this.wob = t;
+    }
+    const wob = this.wob;
+    const { ramp, flag, tone } = c;
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
-        if (!c.at(x, y)) continue;
         const i = y * W + x;
-        if (c.flag[i] & PWF.GLOW) continue;
-        const f = field(x, y) * Math.abs(strength);
+        if (!ramp[i] || flag[i] & PWF.GLOW) continue;
+        const f = field(x, y) * abs;
         if (f <= 0) continue;
         const whole = Math.floor(f);
-        const frac = f - whole;
         // Whole tones with a hand-shaped edge: a slow wobble moves the threshold, and only a
         // hair's width at the edge is dithered, however gentle the gradient is.
-        const wob = (vnoise2(x, y, 9, 7, this.seed + 401) - 0.5) * 0.22;
-        const v = frac + wob;
+        const v = f - whole + wob[(y >> 1) * w2 + (x >> 1)];
         const up = v > 0.5 + seam * 0.16 ? 1 : v < 0.5 - seam * 0.16 ? 0 : bayer(x, y) < 0.5 ? 1 : 0;
         const step = whole + up;
-        if (step) c.shift(x, y, sign * step);
+        if (step) tone[i] = Math.max(0, Math.min(5, tone[i] + sign * step));
       }
     }
     return this;
   }
 
-  /** Rising damp and street grime along the foot of the wall: a ragged band, darker, with moss flecks at the very bottom. */
+  /**
+   * Everything that goes on last because it depends on what the picture holds: the brick (it
+   * clusters round the damage and under the sills), the torn edges of what has been bitten away,
+   * the card's two drawn ends.
+   */
+  finish(): this {
+    if (this.finished) return this;
+    this.finished = true;
+    this.brickwork(this.brickOpts);
+    this.dressBites();
+    this.dressEnd(true);
+    this.dressEnd(false);
+    return this;
+  }
+
+  /** The torn edge of a bite or a fallen storey: a dark inner lip of raw brick, stains under it, joist stumps. */
+  private dressBites() {
+    const { c, r, seed } = this;
+    for (const { x0, x1 } of this.bites) {
+      for (let x = x0; x < x1; x++) {
+        const y0 = this.top[x];
+        const d = 2 + Math.round(hash2(x >> 2, 3, seed + 81) * 2);
+        for (let j = 0; j < d; j++) if (this.inWall(x, y0 + j)) c.set(x, y0 + j, r.brick, j === 0 ? 1.1 : 1.9 + (hash2(x, j, seed + 83) > 0.7 ? 0.8 : 0));
+        c.shift(x, y0 + d, -1);
+      }
+      for (let x = x0 + 4; x < x1 - 3; x += 7 + Math.floor(hash2(x, 5, seed + 87) * 11)) {
+        const len = 14 + Math.floor(hash2(x, 9, seed + 87) * 44);
+        const y0 = this.top[x] + 3;
+        for (let j = 0; j < len; j++) if (this.inWall(x, y0 + j)) c.shift(x, y0 + j, j < len * 0.6 ? -1.4 : -0.7);
+      }
+    }
+    for (const { x0, x1 } of this.joists) {
+      for (let x = x0 + 12; x < x1 - 8; x += 26 + Math.floor(hash2(x, 3, seed + 93) * 30)) {
+        const y0 = this.top[x] + 4;
+        const len = 12 + Math.floor(hash2(x, 7, seed + 93) * 16);
+        const slant = Math.round((hash2(x, 11, seed + 93) - 0.5) * 8);
+        c.line(x, y0, x + slant, y0 - len, r.wood, 1.8);
+        c.line(x + 1, y0, x + slant + 1, y0 - len, r.wood, 0.9);
+      }
+    }
+  }
+
+  /** One end of the card: a pier or stone return with its side in shadow, plinth at the foot (the toothing above it is cut out of the outline). */
+  private dressEnd(left: boolean) {
+    const { c, r, H, seed, x0, x1, top } = this;
+    const kind = left ? this.sideL : this.sideR;
+    const salt = left ? 811 : 813;
+    const stone = kind === 'stone';
+    const ramp = stone ? r.stone : r.wall;
+    const sideRamp = r.soot;
+    const pw = 12 + Math.floor(hash2(salt, 3, seed) * 8);
+    const yt = Math.min(top[left ? x0 + 3 : x1 - 4], top[left ? x0 + 14 : x1 - 15]);
+    const y0 = yt + Math.round((H - yt) * 0.36);
+    const dir = left ? 1 : -1;
+    const span = 14 + Math.floor(hash2(salt, 5, seed) * 10);
+    for (let y = y0; y < H; y++) {
+      const xe = left ? this.endL[y] : this.endR[y] - 1;
+      const n = y >= H - 18 ? pw + 3 : pw;
+      const joint = (y - y0) % span === 0 && hash2(y, salt, seed + 7) > 0.3;
+      for (let i = 0; i < n; i++) {
+        const x = xe + dir * i;
+        if (!this.inWall(x, y) || c.flag[y * c.w + x] & PWF.GLOW) continue;
+        if (i < 4) c.set(x, y, sideRamp, i === 0 ? 0.7 : 1.5 + (i === 3 ? 0.6 : 0) + (joint ? -0.6 : 0));
+        else if (i === 4) c.set(x, y, ramp, 3.9);
+        else if (i === n - 1) c.shift(x, y, -1.2);
+        else c.set(x, y, ramp, (y === H - 18 ? 3.6 : joint ? 1.8 : 2.9) + (i > n * 0.7 ? -0.4 : 0));
+      }
+    }
+  }
+
+  /** Rising damp and street grime at the foot: its height is this building's own, and it climbs under what feeds it: a downpipe's splash, a doorway's wear, a soot plume. */
   footGrime(heightM = 0.9): this {
-    const { c, x0, x1, H, seed } = this;
+    const { c, x0, x1, H, seed, splash } = this;
     const moss = this.k.ramp(0x4a5a30, { light: 0.3, sat: 0.8, dark: 0.45 });
+    const base = 0.18 + hash2(1, 9, seed) * 0.4;
     for (let x = x0; x < x1; x++) {
-      const top = H - Math.round((heightM * this.tpm) * (0.55 + vnoise(x, 23, seed + 501) * 0.7));
+      let hm = heightM * base * (0.4 + vnoise(x, 37, seed + 501) * 1.2);
+      for (const s of splash) {
+        const d = Math.abs(x - s.x);
+        if (d < 34) hm = Math.max(hm, s.s * heightM * (1.5 - d / 26) * (0.7 + vnoise(x, 7, seed + 503) * 0.6));
+      }
+      const top = H - Math.round(hm * this.tpm);
       for (let y = top; y < H; y++) {
         if (!c.at(x, y) || c.flag[y * c.w + x] & PWF.GLOW) continue;
         c.shift(x, y, y > H - 6 ? -2 : -1);
@@ -1131,6 +1767,7 @@ export class Elev {
     c.rect(x - 2, y0 - 4, 8, 4, r.iron, 2);
     c.hline(x - 2, y0 - 4, 8, r.iron, 4);
     c.streak(this.rng, x + 4, y0 + 2, 60, -1);
+    this.splash.push({ x: x + 2, s: 1.1 });
     return this;
   }
 
@@ -1212,7 +1849,7 @@ export class Elev {
    * Spray paint: a word in fat letters (the font doubled, leaning a touch), an outline in the second
    * colour, runs of paint below the strokes.
    */
-  tag(x: number, y: number, word: string, hex: number, outlineHex: number, scale = 2): this {
+  tag(x: number, y: number, word: string, hex: number, outlineHex: number, scale = 2, o: { metal?: boolean } = {}): this {
     const { c, k } = this;
     const fill = k.ramp(hex, { light: 0.46, sat: 1.0, dark: 0.5 });
     const line = k.ramp(outlineHex, { light: 0.42, sat: 0.95, dark: 0.5 });
@@ -1226,17 +1863,119 @@ export class Elev {
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
           const q = (my + dy) * m.w + mx + dx;
           if (my + dy < 0 || my + dy >= m.h || mx + dx < 0 || mx + dx >= m.w || !m.data[q]) {
-            if (this.inWall(px + dx, py + dy)) c.set(px + dx, py + dy, line, 1.4);
+            if (this.inWall(px + dx, py + dy)) c.set(px + dx, py + dy, line, o.metal ? 1 + c.toneAt(px + dx, py + dy) * 0.3 : 1.4);
           }
         }
-        if (this.inWall(px, py)) c.set(px, py, fill, 3 + ((mx + my) % 7 === 0 ? 1 : 0));
+        if (!this.inWall(px, py)) continue;
+        // On shutters the paint takes the slat's own light: it is sprayed on metal, not printed over it.
+        const base = o.metal ? 2.2 + (c.toneAt(px, py) - 2.4) * 0.75 : 3;
+        c.set(px, py, fill, base + ((mx + my) % 7 === 0 ? 0.6 : 0));
       }
     }
-    // Runs.
-    for (let i = 0; i < 5; i++) {
+    // Runs: on slats they catch on each edge and step sideways as they go down.
+    const nRuns = o.metal ? 9 : 5;
+    for (let i = 0; i < nRuns; i++) {
       const rx = x + 4 + Math.floor(this.rng.next() * (m.w - 8));
       const ry = y + m.h;
-      for (let j = 0; j < 4 + Math.floor(this.rng.next() * 10); j++) if (this.inWall(rx, ry + j)) c.set(rx, ry + j, fill, 2 + (j & 1));
+      const len = (o.metal ? 10 : 4) + Math.floor(this.rng.next() * (o.metal ? 22 : 10));
+      for (let j = 0; j < len; j++) {
+        const jx = o.metal ? (((ry + j) / 7) | 0) % 2 : 0;
+        if (!this.inWall(rx + jx, ry + j)) continue;
+        c.set(rx + jx, ry + j, fill, o.metal ? 1.4 + (c.toneAt(rx + jx, ry + j) - 1.4) * 0.5 + (j & 1) * 0.4 : 2 + (j & 1));
+      }
+    }
+    return this;
+  }
+
+  /**
+   * Rolling steel shutters: 7-texel slats in three tones lit from above, each bay its own weight,
+   * dents and creases, guide rails, a heavy bottom rail with padlocks; one bay can be stuck half up
+   * on a black interior. Mid values, on purpose: a shutter is a thing, never a black slab.
+   */
+  rollerShutter(x0: number, x1: number, yTop: number, yBot: number, o: { hex?: number; bays?: number; raised?: { bay: number; lift: number } } = {}): this {
+    const { c, k, r, seed } = this;
+    const metal = k.ramp(o.hex ?? 0x7a7f88, { light: 0.36, sat: 0.7, dark: 0.42 });
+    const bays = o.bays ?? Math.max(2, Math.round((x1 - x0) / 130));
+    const SLAT = 7;
+    const hood = 9;
+    for (let x = x0 - 4; x < x1 + 4; x++) {
+      const yy = yTop + this.sag(x, 19) + (hash2(x >> 5, 3, seed + 131) > 0.72 ? 1 : 0);
+      for (let j = 0; j < hood; j++) c.set(x, yy + j, metal, j === 0 ? 3.9 : j === 1 ? 3 : j === hood - 1 ? 0.8 : 2.2);
+      c.shift(x, yy + hood, -1.2);
+    }
+    const yFirst = yTop + hood + 1;
+    for (let b = 0; b < bays; b++) {
+      const bx0 = x0 + Math.round(((x1 - x0) * b) / bays) + 3;
+      const bx1 = x0 + Math.round(((x1 - x0) * (b + 1)) / bays) - 3;
+      const lift = o.raised?.bay === b ? o.raised.lift : 0;
+      const yEnd = yBot - lift;
+      const base = 2.2 + hash2(b, 3, seed + 137) * 0.7;
+      if (lift) {
+        // What is behind a shutter stuck half up: black, a counter's edge, something on the floor.
+        c.rect(bx0, yEnd, bx1 - bx0, yBot - yEnd, r.ink, 0.5);
+        c.rect(bx0 + 6, yEnd + Math.round(lift * 0.45), bx1 - bx0 - 12, 3, r.wood, 1.6);
+        for (let i = 0; i < 4; i++) c.rect(bx0 + 10 + i * 34, yEnd + Math.round(lift * 0.45) - 8, 12, 8, r.iron, 1.2 + (i & 1));
+      }
+      for (let x = bx0; x < bx1; x++) {
+        for (let y = yFirst; y < yEnd - 5; y++) {
+          const n = Math.floor((y - yFirst) / SLAT);
+          const dent = Math.round((vnoise2(x, n * 3, 26, 2, seed + b * 7 + 3) - 0.5) * 3.2);
+          const row = (((y - yFirst + dent) % SLAT) + SLAT) % SLAT;
+          const tone = row === 0 ? base + 1.3 : row <= 2 ? base + 0.1 : row <= 4 ? base - 0.4 : row === 5 ? base - 1 : base - 1.6;
+          c.set(x, y, metal, tone);
+        }
+        // Bottom rail: heavy, lit along its top, grime on it.
+        for (let j = 0; j < 5; j++) c.set(x, yEnd - 5 + j, metal, j === 0 ? 3.8 : j === 4 ? 0.8 : 2.6);
+      }
+      // Big dents and rust running from the rail.
+      for (let i = 0; i < 3; i++) {
+        const dx = bx0 + 14 + Math.floor(hash2(b, i, seed + 141) * Math.max(1, bx1 - bx0 - 28));
+        const dy = yFirst + 10 + Math.floor(hash2(b, i, seed + 143) * Math.max(1, yEnd - yFirst - 28));
+        c.ellipseShade(dx, dy, 13 + i * 3, 7, (d) => (d < 0.55 ? -1 : d < 1 ? -0.6 : 0));
+      }
+      for (let x = bx0 + 8; x < bx1 - 4; x += 16 + Math.floor(hash2(x, b, seed + 147) * 22)) c.streak(this.rng, x, yEnd - 5, 8 + (x % 16), -1);
+      // Padlocks on the rail.
+      for (const px of [bx0 + 12, bx1 - 16]) {
+        c.rect(px, yEnd - 8, 7, 8, r.stone, 2.8);
+        c.frame(px, yEnd - 8, 7, 8, r.iron, 1);
+        c.rect(px + 2, yEnd - 12, 3, 4, r.iron, 3);
+      }
+      // Guide rails.
+      for (const gx of [bx0 - 3, bx1]) {
+        for (let y = yFirst; y < yBot; y++) {
+          c.set(gx + this.lean(y, 11), y, r.iron, 3.6);
+          c.set(gx + 1 + this.lean(y, 11), y, r.iron, 2);
+          c.set(gx + 2 + this.lean(y, 11), y, r.iron, 1);
+        }
+      }
+    }
+    return this;
+  }
+
+  /** Security bars: fewer and heavier than a comb, two tones each, cross-rails, one bent, one gone. */
+  bars(x0: number, x1: number, y0: number, y1: number, spacing = 18): this {
+    const { c, r, seed } = this;
+    let i = 0;
+    for (let x = x0 + (spacing >> 1); x < x1; x += spacing, i++) {
+      const h = hash2(i, 3, seed + 151);
+      if (h > 0.9) continue;
+      const bent = h < 0.14;
+      for (let y = y0; y < y1; y++) {
+        const t = (y - y0) / (y1 - y0);
+        const off = bent ? Math.round(Math.sin(t * Math.PI) * 6) : 0;
+        c.set(x + off, y, r.iron, 3.8);
+        c.set(x + off + 1, y, r.iron, 2.6);
+        c.set(x + off + 2, y, r.iron, 1);
+      }
+    }
+    for (const f of [0.12, 0.86]) {
+      const y = Math.round(y0 + (y1 - y0) * f);
+      for (let x = x0; x < x1; x++) {
+        const yy = y + this.sag(x, 23);
+        c.set(x, yy, r.iron, 3.6);
+        c.set(x, yy + 1, r.iron, 2.2);
+        c.set(x, yy + 2, r.iron, 0.8);
+      }
     }
     return this;
   }
@@ -1258,9 +1997,16 @@ export class Elev {
     const dx = o.door === undefined ? null : Math.max(x0 + 2, Math.min(x1 - doorW - 2, o.door));
     // Fascia: a painted board under a moulding (the sign goes on it as a separate card).
     // Fascia: follows the sag of the wall (a board's edge, not a ruler's), with a hand-drawn underline.
+    const fbrk = this.breaks(131);
     for (let x = x0 - 3; x < x1 + 3; x++) {
-      const yy = yTop + this.sag(x, 13);
+      const yy = yTop + this.sag(x, 13) + Math.round(fbrk.dy[x] / 4);
+      if (fbrk.st[x] === 2) {
+        // The board has gone here: the frame behind it, in the dark.
+        c.rect(x, yy + 2, 1, fasH - 2, r.ink, 0.8);
+        continue;
+      }
       for (let j = 0; j < fasH; j++) c.set(x, yy + j, fas, j === 0 ? 4 : j === 1 ? 3 : j === fasH - 1 ? 1 : 2);
+      if (fbrk.st[x] === 1) for (let j = 2; j < fasH - 1; j++) c.shift(x, yy + j, 0.8);
       c.shift(x, yy + fasH, -1.2);
     }
     // Transom panes, dull glass over the door height.
@@ -1293,6 +2039,7 @@ export class Elev {
     }
     // Recessed door: dark niche, door with a pane, step at the foot.
     if (dx !== null) {
+      this.splash.push({ x: dx + doorW / 2, s: 0.6 });
       const y0 = yTop + fasH + 8;
       c.rect(dx, y0, doorW, H - y0, r.ink, 0);
       c.rect(dx + 3, y0 + 3, doorW - 6, H - y0 - 3, r.wood, 2);

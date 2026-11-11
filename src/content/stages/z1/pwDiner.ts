@@ -3,9 +3,9 @@ import type { PwAtlas, PwTile } from '../../pixelworld/atlas';
 import { PwBatch, type PwRectOpts } from '../../pixelworld/batch';
 import { PW_TPM, PWF } from '../../pixelworld/canvas';
 import { FONT_5x7, neonText, textWidth } from '../../pixelworld/font';
-import { fontScaleFor } from '../../pixelworld/signs';
 import { roofTile } from '../../pixelworld/surfaces';
 import { z1DinerTiles, type Z1DinerTiles } from '../../pixelworld/z1diner';
+import { dinerSignLayout, paintDinerBacking } from '../../pixelworld/z1dinerflat';
 
 /**
  * The chrome diner in ART: PIXEL WORLD: every part `buildDiner` tagged
@@ -14,6 +14,8 @@ import { z1DinerTiles, type Z1DinerTiles } from '../../pixelworld/z1diner';
  * still shines into the wet street), with the menu board, clock, kitchen pass
  * and back bar laid over its back wall. The destructible panes and the
  * transparent glass stay classic (gameplay / glass), as do the pendant globes.
+ * The front bands, posts and roof edge are the drawn card (`Z1Flats.stageDiner`):
+ * this only re-emits what stands behind it.
  */
 
 const X = new THREE.Vector3(1, 0, 0);
@@ -67,6 +69,9 @@ export function cylinder(b: PwBatch, r: number, h: number, seg: number, side: Pw
   }
 }
 
+/** Parts the drawn front card replaces (bands, posts, the box's roof edge): the card has holes where the glass and door are. */
+const DRAWN_FRONT = new Set(['kick', 'stripe', 'checker', 'header', 'mullion', 'doorHead', 'roof']);
+
 export class Z1Diner {
   readonly t: Z1DinerTiles;
   private roof: PwTile;
@@ -95,6 +100,10 @@ export class Z1Diner {
         const p = (m.geometry as THREE.CylinderGeometry).parameters;
         if (part === 'stoolSeat') cylinder(b, p.radiusTop, p.height, 10, t.stoolSide, t.stoolTop, 12, 16);
         else cylinder(b, p.radiusTop, p.height, 6, t.chrome, null);
+        drop.push(c);
+        continue;
+      }
+      if (DRAWN_FRONT.has(part)) {
         drop.push(c);
         continue;
       }
@@ -184,23 +193,16 @@ export class Z1Diner {
     if (!info || info.text !== 'Diner') return null;
     // neonSign's layout for { font: 'script', cap: size × 0.9, minW / minH = the classic board }.
     const f = FONT_5x7;
-    const scale = fontScaleFor('script', info.size * 0.9);
+    const { w: W, h: H, x0, y0, scale } = dinerSignLayout(info.size, info.bw ?? 0, info.bh ?? 0);
     const to = { scale, script: true, spacing: 1 };
-    const pad = 4 + scale * 2;
-    const tw = textWidth(info.text, f, to);
-    const th = f.h * scale;
-    const W = Math.ceil(Math.max(tw + pad * 2, Math.round((info.bw ?? 0) * PW_TPM)) / 2) * 2;
-    const H = Math.ceil(Math.max(th + pad * 2, Math.round((info.bh ?? 0) * PW_TPM)) / 2) * 2;
-    const x0 = Math.round((W - tw) / 2);
-    const y0 = Math.round((H - th) / 2);
     const r0 = x0 + textWidth('Dine', f, { scale, spacing: 1 }) + scale;
-    const r1 = Math.min(W - 6, x0 + tw + 2);
+    const r1 = Math.min(W - 6, x0 + textWidth(info.text, f, to) + 2);
     const ow = Math.max(16, Math.ceil((r1 - r0) / 2) * 2);
     const oh = H - 12;
     const tile = atlas.tile(`z1diner|roff|${W}x${H}|${r0}`, ow, oh, (c, k) => {
-      const board = k.ramp(0x1c1c22, { light: 0.5, sat: 0.8 });
       const dead = k.ramp(0x5a1a30, { light: 0.4 });
-      c.rect(0, 0, ow, oh, board, 2);
+      // (The drawn backing sheet itself, so when the r is dark it sits on what is painted round it.)
+      paintDinerBacking(c, k, W, H, -r0, -6, ow, oh);
       // The whole word in dead tube colour, shifted so only the 'r' falls inside this tile.
       neonText(c, info.text, x0 - r0, y0 - 6, f, dead, { ...to, core: 2, halo: 1 });
       for (let i = 0; i < c.flag.length; i++) c.flag[i] &= ~PWF.GLOW;

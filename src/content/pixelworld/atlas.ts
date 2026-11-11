@@ -116,7 +116,8 @@ export interface PwKit {
   ramp(hex: number, o?: Parameters<PwPalette['add']>[1]): number;
 }
 
-export type PwPainter = (c: PwCanvas, k: PwKit) => void;
+/** Paints a tile. A long painter may be a generator: each `yield` hands control back between its passes, so no paint slice runs long. */
+export type PwPainter = (c: PwCanvas, k: PwKit) => void | Generator<void, void, void>;
 
 export interface PwAtlasData {
   /** Atlas name and tile-list signature (the cache / store key). */
@@ -571,7 +572,9 @@ export function pwLevelRgba(d: PwAtlasData, l: number): Uint8Array {
 export function paintTile(key: string, w: number, h: number, paint: PwPainter, pal: PwPalette): PwCanvas {
   const c = new PwCanvas(w, h);
   const rng = new PwRng(hashStr(key));
-  paint(c, { pal, rng, ramp: (hex, o) => pal.add(hex, o) });
+  const steps = paint(c, { pal, rng, ramp: (hex, o) => pal.add(hex, o) });
+  // (A sync caller paints straight through a generator painter's steps.)
+  if (steps) for (const _ of steps) void _;
   return c;
 }
 
@@ -612,6 +615,7 @@ function layoutAtlas(name: string, sig: string, list: { tile: PwTile; paint: PwP
           bestI = i;
         }
       }
+      if (bestI < 0) throw new Error(`pixelworld atlas '${name}' overflow: no room for a ${it.aw}×${it.ah} rect within ${maxSize} (opt far tiles out of the 2× fallback, or split the atlas)`);
       it.x = line[bestI].x;
       it.y = bestY;
       // Replace the segments the rect covers with one segment on top of it.
@@ -701,9 +705,21 @@ function* paintSteps(items: { t: { tile: PwTile; paint: PwPainter; frames: numbe
   const doubled = new Uint16Array(items.some((it) => it.t.tile.scale === 2) ? most * 4 : 0);
   for (const it of items) {
     const { tile, paint, frames } = it.t;
-    const tp = now();
-    const c = paintTile(tile.key, tile.w, tile.h, paint, pal);
-    tms.push([tile.key, now() - tp]);
+    let tp = now();
+    const c = new PwCanvas(tile.w, tile.h);
+    const rng = new PwRng(hashStr(tile.key));
+    const steps = paint(c, { pal, rng, ramp: (hex, o) => pal.add(hex, o) });
+    let spent = now() - tp;
+    if (steps) {
+      for (;;) {
+        tp = now();
+        const r = steps.next();
+        spent += now() - tp;
+        if (r.done) break;
+        yield;
+      }
+    }
+    tms.push([tile.key, spent]);
     c.index(texels);
     if (tile.scale === 2) {
       // Level 0: the upscaler's copy; level 1: the texels exactly as painted.

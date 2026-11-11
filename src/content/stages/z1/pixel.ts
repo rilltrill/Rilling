@@ -9,7 +9,7 @@ import {
 } from '../../pixelworld/facade';
 import { kitTileRule, neutral, NEUTRAL_BRICK, retexture, type TileRule } from '../../pixelworld/retexture';
 import { bladeSign as pwBlade, moviePoster, neonEdge, neonSign } from '../../pixelworld/signs';
-import { z1Marquee, z1MarqueeEnd } from '../../pixelworld/z1signs';
+import { z1Marquee } from '../../pixelworld/z1signs';
 import { z1WallPiece } from '../../pixelworld/z1graffiti';
 import { paintZ1Panel, paintZ1Plaster, z1BrickHoles, z1PanelTile, z1PlasterTile, z1Streaks, z1WallBands, Z1_WEAR } from '../../pixelworld/z1walls';
 import type { PwPainter } from '../../pixelworld/atlas';
@@ -30,6 +30,7 @@ import { Z1Square } from './pwSquare';
 import { Z1Street } from './pwStreet';
 import { Z1Props } from './pwProps';
 import { Z1Flats } from './pwFlats';
+import { DINER_SIGN_STRUTS, dinerSignLayout, paintDinerSign } from '../../pixelworld/z1dinerflat';
 import { PW_PARTS, type PwPart } from './setpieces';
 import { repaintable } from '../../pixelworld/retexture';
 import type { Town } from './town';
@@ -221,14 +222,17 @@ export class Z1PixelWorld {
       if (this.flats.has(g)) this.flats.stage(id, g, b, this.atlas);
       else this.facade(b, g, g.userData.pwBuilding as FacadeRecord, i);
     });
-    for (const s of signs) this.sign(b, s);
+    for (const s of signs) this.sign(b, s, id);
     // Ground: the tagged classic decals (puddles, manholes, blood, litter, skids) → painted ones, plus the street dressing.
     for (const m of this.ground.replaceTagged(b, zone)) m.parent?.remove(m);
     this.ground.dress(b, id);
     // Cars: painted body / glass / nose / tail / wheel modules.
     for (const m of this.cars.convert(b, zone)) m.parent?.remove(m);
-    // The chrome diner and its lit interior.
+    // The chrome diner: its lit interior; the front is a drawn card.
     for (const m of this.diner.convert(b, zone)) m.parent?.remove(m);
+    zone.traverse((o) => {
+      if (o.userData.pwDinerRoot) this.flats.stageDiner(id, o);
+    });
     // The town square: PRIME MEATS, kiosks, courthouse, shop windows, the memorial.
     for (const m of this.square.convert(b, zone)) m.parent?.remove(m);
     // Street hardware and the alley walls: lamps, news boxes, dumpsters, bags, graffiti, fire escapes…
@@ -654,7 +658,7 @@ export class Z1PixelWorld {
 
   // ─── Signs ────────────────────────────────────────────────────────────────
 
-  private sign(b: PwBatch, s: THREE.Object3D) {
+  private sign(b: PwBatch, s: THREE.Object3D, zone: ZoneId) {
     const a = this.atlas;
     const info = s.userData.pwSign as {
       kind: 'board' | 'blade' | 'marquee';
@@ -672,30 +676,28 @@ export class Z1PixelWorld {
       bh?: number;
     };
     if (info.kind === 'marquee') {
-      // The marquee's lit board (the metal box around it is re-painted with the rest).
+      // The marquee is drawn: a shaped face, a painted soffit and a flared end (three cards, the box gone).
+      this.flats.stageMarquee(zone, s);
       s.updateMatrixWorld(true);
       b.setMatrix(s.matrixWorld);
       const t = z1Marquee(a, info.text.split('/'), { widthM: info.w ?? 12, heightM: info.size });
       b.rect(_o.set(-t.wM / 2, -t.hM / 2, info.z ?? 0.01), X, Y, t.wM, t.hM, t.tile);
-      // The lit end panels (blank glowing boards in the classic look) carry the cinema's name.
-      const ends = s.children.filter((c) => isGlow((c as THREE.Mesh).material) && ((c as THREE.Mesh).geometry as THREE.BoxGeometry).parameters?.width < 0.1);
-      for (const c of ends) {
-        const m = c as THREE.Mesh;
-        const p = (m.geometry as THREE.BoxGeometry).parameters;
-        // (Painted at the panel's own width: the name is never squeezed.)
-        const end = z1MarqueeEnd(a, 'RIALTO', { widthM: p.depth, heightM: info.size });
-        const sx = Math.sign(m.position.x);
-        const z0 = m.position.z - p.depth / 2;
-        const z1 = m.position.z + p.depth / 2;
-        if (sx > 0) b.rect(_o.set(m.position.x + 0.035, -end.hM / 2, z1), NZ, Y, p.depth, end.hM, end.tile);
-        else b.rect(_o.set(m.position.x - 0.035, -end.hM / 2, z0), Z, Y, p.depth, end.hM, end.tile);
-      }
       b.setMatrix(null);
-      for (const c of s.children.filter((c) => c.userData.pwFacade === 'signBack' || c.type === 'Group' || ends.includes(c))) s.remove(c);
+      for (const c of [...s.children]) s.remove(c);
       return;
     }
     s.updateMatrixWorld(true);
     b.setMatrix(s.matrixWorld);
+    if (info.text === 'Diner') {
+      // A shaped sheet on struts with bent tubes, not a black slab (same layout, the buzzing r stays aligned).
+      const l = dinerSignLayout(info.size, info.bw ?? 0, info.bh ?? 0);
+      const t = a.tile(`z1dinersign|${l.w}x${l.h}`, l.w, l.h + DINER_SIGN_STRUTS, paintDinerSign(l, info.border ?? 0x39e8ff, info.color));
+      b.setMatrix(s.matrixWorld);
+      b.rect(_o.set(-l.w / 2 / PW_TPM, -l.h / 2 / PW_TPM - DINER_SIGN_STRUTS / PW_TPM, 0.01), X, Y, l.w / PW_TPM, (l.h + DINER_SIGN_STRUTS) / PW_TPM, t);
+      b.setMatrix(null);
+      for (const c of [...s.children]) s.remove(c);
+      return;
+    }
     const backTile = metalTile(a, { hex: info.back ?? 0x1c1c22, rust: 0.2 });
     if (info.kind === 'board') {
       // Classic letters are `size` tall caps; script lower case runs a little smaller.
