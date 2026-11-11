@@ -533,6 +533,48 @@ export const CEL_HAND: number[][][] = HANDS_L.map((p, i) => {
   return [m, l, p.right[1] ? hand8(p.right[1], p.diag[1]) : l];
 });
 
+// ─── PIXEL CAST 2: the predator face ────────────────────────────────────────
+// Eyes and nostrils are authored for the VIEWER'S LEFT (the nose to the right); teeth for
+// the viewer's left of a jaw row, shaded on the side toward the nose. Mirrored by the painter.
+
+/** Predator eye [XS, S, M, L]: slanted almond, dark socket (slot 1), lit iris (slot 0), a slit, a glint (slot 2) at L. */
+const DINO_EYE: StampDef[] = [
+  { rows: ['g..', 'AgA'], ax: 1, ay: 1 },
+  { rows: ['gg...', 'gAgAg', '.ggg1'], ax: 2, ay: 1 },
+  { rows: ['ggg....', 'gAgAgg.', 'gAgAAgg', '1ggdgg1', '.11111.'], ax: 3, ay: 2 },
+  { rows: ['ggg......', 'gAAgggg..', 'gACgAAggg', 'gAAgAAddg', '1gdgddgg1', '.1ggggg1.', '..11111..'], ax: 4, ay: 3 },
+];
+/** Nostril [S, M, L]: a raked slit darkened into whatever hide lies under it. */
+const DINO_NOSTRIL: StampDef[] = [
+  { rows: ['3'], ax: 0, ay: 0 },
+  { rows: ['.3', '3.'], ax: 1, ay: 0 },
+  { rows: ['..+', '.33', '33.'], ax: 1, ay: 1 },
+];
+/** Upper tooth [S, M, L]: slot 0, anchored at the middle of its root (top row). */
+const TOOTH_U: StampDef[] = [
+  { rows: ['ee', 'ec', '.c'], ax: 1, ay: 0 },
+  { rows: ['eee', 'eec', '.ec', '.c.'], ax: 1, ay: 0 },
+  { rows: ['.eee.', 'eeeec', '.eec.', '.eec.', '..ec.', '..c..'], ax: 2, ay: 0 },
+];
+/** Lower tooth: the upper one turned point-up, anchored at its root (bottom row). */
+const TOOTH_L: StampDef[] = TOOTH_U.map((d) => ({ rows: d.rows.slice().reverse(), ax: d.ax, ay: d.rows.length - 1 - d.ay }));
+
+/** Side tooth (a rim running up the screen): the upper tooth turned to point RIGHT, toward the mouth's middle. */
+const TOOTH_S: StampDef[] = TOOTH_U.map((d) => ({
+  rows: Array.from({ length: d.rows[0].length }, (_, x) => d.rows.map((r) => r[x] ?? '.').join('')),
+  ax: d.ay,
+  ay: d.ax,
+}));
+
+/** Predator face stamps (ids): eye [XS, S, M, L]; nostril and teeth [S, M, L]. */
+export const DINO_STAMP = {
+  eye: DINO_EYE.map(add),
+  nostril: DINO_NOSTRIL.map(add),
+  toothU: TOOTH_U.map(add),
+  toothL: TOOTH_L.map(add),
+  toothS: TOOTH_S.map(add),
+};
+
 /** PIXEL CAST 2 face size class (0 XS … 3 L) for a head `headPx` texels tall. */
 export function celSize(headPx: number): number {
   return headPx < 10.5 ? 0 : headPx < 14.5 ? 1 : headPx < 21 ? 2 : 3;
