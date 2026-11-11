@@ -9,6 +9,7 @@ import { RETRO_DETAIL } from '../content/kit/ModelKit';
 import { buildPalette, linearToOklab, PALETTE_MAX, paletteRamps, type PaletteId } from './spritePalette';
 import { PixelFigure } from './pixel/figure';
 import { PixelCast, type CastEnv } from './pixel/PixelCast';
+import { castStageLight, castStyle, castStyleVersion } from './pixel/look';
 
 /**
  * ART: SPRITES — every character (enemies, bosses, civilians), plus the things
@@ -566,9 +567,11 @@ const SHOW_FRAG = /* glsl */ `
 const SHADOW_VERT = /* glsl */ `
   varying vec2 vUv;
   varying float vAlpha;
+  varying float vSkirt;
   void main() {
     vUv = uv;
     vAlpha = instanceColor.r;
+    vSkirt = instanceColor.g;
     vec4 mv = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
     vAlpha *= 1.0 - smoothstep(22.0, 40.0, -mv.z);
     gl_Position = projectionMatrix * mv;
@@ -577,14 +580,31 @@ const SHADOW_VERT = /* glsl */ `
 const SHADOW_FRAG = /* glsl */ `
   precision highp float;
   uniform float uPxScale; // target pixels per retro pixel (1 with the retro pass on)
+  uniform vec4 uGround;   // PIXEL CAST 2 contact shadow: rgb (scene-linear), a = core opacity
+  uniform float uStyle;   // 0 = two-tone blob (first look), 1 = flat pixel ellipse, 2 = flat ellipse + dashed skirt (wet ground)
   varying vec2 vUv;
   varying float vAlpha;
+  varying float vSkirt;
   void main() {
     // Evaluate at the centre of the retro pixel (a no-op when drawing at retro resolution).
     vec2 f = gl_FragCoord.xy;
     vec2 s = (floor(f / uPxScale) + 0.5) * uPxScale - f;
     vec2 uv = vUv + dFdx(vUv) * s.x + dFdy(vUv) * s.y;
     float r = length(uv * 2.0 - 1.0);
+    if (uStyle > 0.5) {
+      // A drawn contact shadow in the stage's deepest shadow colour: one flat tone with a
+      // hard edge — never a soft blob. It fades the pixel-art way: the ellipse SHRINKS as
+      // the figure leaves the ground or dies (no pop, no translucent disc). On wet ground
+      // (2) a standing figure's shadow ends in a skirt of broken horizontal dashes.
+      vec2 px = floor(f / uPxScale);
+      float rr = r / clamp(vAlpha * 1.3, 0.001, 1.0);
+      float a = rr < 0.78 ? 1.0 : 0.0;
+      if (uStyle > 1.5 && vSkirt > 0.5 && rr >= 0.78 && rr < 1.0) a = mod(px.y, 2.0) < 1.0 && mod(px.x + px.y * 1.5, 6.0) < 4.0 ? 1.0 : 0.0;
+      a *= uGround.a;
+      if (a < 0.01) discard;
+      gl_FragColor = vec4(uGround.rgb, a);
+      return;
+    }
     float a = r < 0.6 ? 0.42 : r < 1.0 ? 0.22 : 0.0;
     a *= vAlpha;
     if (a < 0.01) discard;
@@ -623,6 +643,8 @@ interface Sprite {
   seen: number;
   /** Ground shadow radius (m, smoothed). */
   shadowR: number;
+  /** Primitives its last painted frame used (look-dev / bench). */
+  prims: number;
   /** Last bake found it off screen / empty: probed every frame (cheap) until it is back. */
   away: boolean;
   /** Draw calls its last bake cost (visible meshes + the pixel pass). */
@@ -960,7 +982,7 @@ export class SpriteArt {
     this.shadowMat = new THREE.ShaderMaterial({
       vertexShader: SHADOW_VERT,
       fragmentShader: SHADOW_FRAG,
-      uniforms: { uPxScale: { value: 1 } },
+      uniforms: { uPxScale: { value: 1 }, uGround: { value: new THREE.Vector4(0, 0, 0, 0.5) }, uStyle: { value: 0 } },
       transparent: true,
       depthWrite: false,
       polygonOffset: true,
@@ -1029,6 +1051,22 @@ export class SpriteArt {
     this.targetU.value.set(v.target.width, v.target.height);
     this.expU.value = this.renderer.toneMappingExposure;
     this.shadowMat.uniforms.uPxScale.value = Math.max(1, this.pxScale);
+    // PIXEL CAST 2: a look switch repaints every sprite; the contact shadow follows the look and the stage.
+    if (castStyleVersion() !== this.styleV) {
+      this.styleV = castStyleVersion();
+      this.invalidate();
+    }
+    {
+      const st = castStyle();
+      this.shadowMat.uniforms.uStyle.value = 0;
+      if (st.ground > 0) {
+        const sl = castStageLight(this.world.stage?.id, this.night);
+        this.shadowMat.uniforms.uStyle.value = sl.skirt ? 2 : 1;
+        const g = this.shadowMat.uniforms.uGround.value as THREE.Vector4;
+        _sc.setHex(sl.ground);
+        g.set(_sc.r, _sc.g, _sc.b, sl.groundAlpha);
+      }
+    }
     this.syncEntities();
     w.scene.updateMatrixWorld();
     // Nothing moves until the main render: it can skip its own matrix pass (restored in endFrame).
@@ -1308,6 +1346,7 @@ export class SpriteArt {
         keepAny: false,
         seen: f,
         shadowR: 0,
+        prims: 0,
         away: false,
         cost: 8,
         k: 1,
@@ -1677,6 +1716,7 @@ export class SpriteArt {
     // Something reaching through the lens: the 3D bake handles near-plane clipping.
     if (f.minDepth < cam.near * 1.5) return null;
     this.stats.prims = f.count;
+    s.prims = f.count;
     this.stats.primOverflow += f.overflow;
     if (!f.layout(s.k, 24, 256)) {
       s.ready = false;
@@ -1738,7 +1778,10 @@ export class SpriteArt {
     m.scale.set((2 * hx * D) / P[0], (2 * hy * D) / P[5], 1);
     const fb = f.foot;
     const foot = Math.max(fb.max.x - fb.min.x, fb.max.z - fb.min.z);
-    const want = THREE.MathUtils.clamp(foot * 0.42, 0.22, 7);
+    let want = THREE.MathUtils.clamp(foot * 0.42, 0.22, 7);
+    // PIXEL CAST 2: a body going down keeps the contact shadow it stood on — it does not
+    // spread into a disc under the fallen figure (the blood pool is the read there).
+    if (f.cel > 0 && s.shadowR > 0 && e instanceof Enemy && e.state === 'dying') want = Math.min(want, s.shadowR);
     s.shadowR = s.shadowR > 0 ? s.shadowR + (want - s.shadowR) * 0.35 : want;
     _v.setFromMatrixPosition(s.obj.matrixWorld);
     s.offset.subVectors(m.position, _v);
@@ -1766,11 +1809,29 @@ export class SpriteArt {
     const env = this.env;
     const sc = this.world.scene;
     const fog = sc.fog as THREE.Fog | THREE.FogExp2 | null;
-    // Day ≈ 1, night ≈ 0.68: characters stay readable without glowing.
-    const lit = THREE.MathUtils.clamp(0.52 + 0.2 * this.irr, 0.62, 1);
-    env.tint.setRGB(lit * this.skyTint.r, lit * this.skyTint.g, lit * this.skyTint.b);
-    env.rimAmount = 0.42 * this.night;
-    env.rim.copy(this.rimDisplay);
+    const style = castStyle();
+    let fogShare = 0.5;
+    if (style.cel > 0) {
+      // PIXEL CAST 2: no multiplied tint and no rim. The stage moves the figure by whole tone
+      // steps along its own ramps.
+      const sl = castStageLight(this.world.stage?.id, this.night);
+      env.tint.setRGB(1, 1, 1);
+      env.step = sl.step;
+      env.floor = sl.floor;
+      // (The accent: short light strokes on the top hull edges facing a strong coloured source.)
+      env.rimDir = sl.accentDir;
+      env.rim.setRGB(((sl.accent >> 16) & 255) / 255, ((sl.accent >> 8) & 255) / 255, (sl.accent & 255) / 255);
+      env.rimAmount = sl.accentAmount;
+      fogShare = sl.fog;
+    } else {
+      // Day ≈ 1, night ≈ 0.68: characters stay readable without glowing.
+      const lit = THREE.MathUtils.clamp(0.52 + 0.2 * this.irr, 0.62, 1);
+      env.tint.setRGB(lit * this.skyTint.r, lit * this.skyTint.g, lit * this.skyTint.b);
+      env.rimAmount = 0.42 * this.night;
+      env.rim.copy(this.rimDisplay);
+      env.step = 0;
+      env.rimDir = undefined;
+    }
     env.fogAmount = 0;
     if (fog) {
       _v.copy(f.foot.min).add(f.foot.max).multiplyScalar(0.5);
@@ -1784,12 +1845,13 @@ export class SpriteArt {
         a = THREE.MathUtils.clamp((dist - fl.near) / Math.max(1e-3, fl.far - fl.near), 0, 1);
       }
       // Painted sprites get half the fog scenery gets: the cast stays legible as icons down the street.
-      env.fogAmount = a * 0.5;
+      env.fogAmount = a * fogShare;
       toDisplay(fog.color, this.expU.value, env.fog);
     }
   }
   /** Stage light level (irradiance-ish, see syncRimLight) and the sky's tint for painted sprites. */
   private irr = 2;
+  private styleV = castStyleVersion();
   private skyTint = new THREE.Color(1, 1, 1);
   private rimDisplay = new THREE.Color(0.55, 0.7, 1);
 
@@ -1820,7 +1882,10 @@ export class SpriteArt {
     _ss.set(r * 2, r * 2 * 0.8, 1);
     _m4.compose(_v, _sq, _ss);
     this.shadows.setMatrixAt(i, _m4);
-    this.shadows.setColorAt(i, _sc.setRGB(fade, 0, 0));
+    // (g: the wet-ground skirt, for standing figures big enough to carry it.)
+    const dying = e instanceof Enemy && e.state === 'dying';
+    if (dying && castStyle().ground > 0) fade *= 0.7;
+    this.shadows.setColorAt(i, _sc.setRGB(fade, !dying && dPx > 14 ? 1 : 0, 0));
     return true;
   }
 

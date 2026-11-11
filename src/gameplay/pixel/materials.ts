@@ -87,7 +87,20 @@ export interface PixelMaterial {
   spec: number;
   /** Third material id (body stripes in their own colour) — 0 = none. */
   tertiary?: number;
+  /**
+   * PIXEL CAST 2: how the flat cel look builds this material's ramp from its base colour
+   * (`celRamp`). Unset = the cel look keeps the ramp above (a step more saturated).
+   */
+  cel?: CelKind;
 }
+
+/**
+ * Ramp families of the cel look. `cloth` / `hair` / `leather` lift near-black bases to a
+ * blue-grey that still reads on a night street; `dead` pulls skin toward a sickly
+ * grey-green so no dead face shares a living hue; `live` keeps skin warm with red-violet
+ * shadows; the rest are plain (their own hue, violet-leaning shadows).
+ */
+export type CelKind = 'cloth' | 'hair' | 'leather' | 'live' | 'dead' | 'hide' | 'metal' | 'gore' | 'flat';
 
 // ─── Colour maths ──────────────────────────────────────────────────────────
 
@@ -172,6 +185,64 @@ export function makeRamp(hex: number, o: RampOptions = {}): number[] {
   return out;
 }
 
+// ─── PIXEL CAST 2: cel ramps ───────────────────────────────────────────────
+
+/** Hue `t` of the way from `h` toward blue-violet, the way a sprite palette shifts: reds / oranges through crimson, yellows / greens through teal. */
+function towardViolet(h: number, t: number): number {
+  const target = 285;
+  if (h >= 100 && h <= target) return h + (target - h) * t;
+  const d = h < 100 ? h + (360 - target) : h - target;
+  return (h - d * t + 360) % 360;
+}
+
+/**
+ * The cel look's ramp round `hex` (step 3): THREE fill tones a painter uses — 2 the
+ * shadow, 3 the base, 4 the light — plus 1 for deep recesses, 5 for highlights on what
+ * shines and 0, the colour of a drawn line. Each step is a clear jump (flat fields must
+ * read as shapes), shadows lean violet on EVERY ramp (skin included), lights lean warm.
+ */
+export function celRamp(hex: number, kind: CelKind): number[] {
+  let [L, C, h] = hexToOklch(hex);
+  const soft = kind === 'cloth' || kind === 'hair' || kind === 'leather';
+  let dark = 0;
+  if (kind === 'dead') {
+    // Sickly: tan and brown skins are pulled to a grey olive-green, and kept dull.
+    if (h < 100 || h > 200) h = hueToward(h, 118, 0.62);
+    C = Math.min(Math.max(C, 0.03), 0.07);
+  } else if (kind === 'live') C *= 1.04;
+  else if (kind === 'gore') C *= 1.08;
+  else C *= 1.15;
+  if (soft && L < 0.38) {
+    // Black suits, black hair, dark leather: a blue-grey that never sinks below the road.
+    dark = Math.min(1, (0.38 - L) / 0.14);
+    L = Math.max(L, L + (0.33 - L) * dark);
+    if (C < 0.045) {
+      h = C < 0.012 ? 268 : hueToward(h, 268, 0.6 * dark);
+      C = Math.max(C, 0.02 + 0.026 * dark);
+    }
+  }
+  const dS = dark > 0 ? 0.075 : Math.max(0.085, 0.15 * L);
+  const dL = dark > 0 ? 0.11 : Math.max(0.065, (1 - L) * 0.3);
+  const sC = kind === 'dead' ? 0.85 : 1.1;
+  const hi = (t: number) => (C < 0.02 ? h : hueToward(h, 85, t));
+  return [
+    oklchToHex(Math.max(0.12, Math.min(0.24, L * 0.36)), Math.max(C * 0.8, 0.025), towardViolet(h, 0.42)),
+    oklchToHex(L - dS * 1.9, Math.max(C * sC * 1.05, 0.02), towardViolet(h, 0.3)),
+    oklchToHex(L - dS, Math.max(C * sC, 0.015), towardViolet(h, 0.17)),
+    oklchToHex(L, C, h),
+    oklchToHex(Math.min(0.96, L + dL), C * 0.9, hi(0.1)),
+    oklchToHex(Math.min(0.985, L + dL + Math.max(0.08, (1 - L - dL) * 0.5)), C * 0.6, hi(0.18)),
+  ];
+}
+
+/** A legacy ramp a step more saturated (materials with no cel family: props, goo, custom ramps). */
+function celKeep(ramp: number[]): number[] {
+  return ramp.map((c) => {
+    const [L, C, h] = hexToOklch(c);
+    return oklchToHex(L, C * 1.14, h);
+  });
+}
+
 // ─── The table ─────────────────────────────────────────────────────────────
 
 const byKey = new Map<string, number>();
@@ -179,16 +250,26 @@ const mats: PixelMaterial[] = [];
 let version = 0;
 /** RGBA8 table: row per material id (row 0 = empty), MAT_COLS texels per row. */
 const table = new Uint8Array(256 * MAT_COLS * 4);
+/**
+ * The same table for the cel look (PIXEL CAST 2): the same ids, patterns and extras, the
+ * ramps rebuilt by `celRamp`; the dither byte (unused there) flags a DARK material, whose
+ * interior lines are drawn lighter than its fill.
+ */
+const tableCel = new Uint8Array(256 * MAT_COLS * 4);
+
+function writeRamp(t: Uint8Array, o: number, ramp: number[]) {
+  for (let i = 0; i < STEPS; i++) {
+    const c = ramp[Math.min(i, ramp.length - 1)];
+    t[o + i * 4] = (c >> 16) & 255;
+    t[o + i * 4 + 1] = (c >> 8) & 255;
+    t[o + i * 4 + 2] = c & 255;
+    t[o + i * 4 + 3] = 255;
+  }
+}
 
 function writeRow(id: number, m: PixelMaterial) {
   const o = id * MAT_COLS * 4;
-  for (let i = 0; i < STEPS; i++) {
-    const c = m.ramp[Math.min(i, m.ramp.length - 1)];
-    table[o + i * 4] = (c >> 16) & 255;
-    table[o + i * 4 + 1] = (c >> 8) & 255;
-    table[o + i * 4 + 2] = c & 255;
-    table[o + i * 4 + 3] = 255;
-  }
+  writeRamp(table, o, m.ramp);
   const p = o + STEPS * 4;
   table[p] = m.pattern;
   table[p + 1] = Math.round(Math.min(1, Math.max(0, m.scale / 0.5)) * 255);
@@ -199,6 +280,13 @@ function writeRow(id: number, m: PixelMaterial) {
   table[q + 1] = Math.round(Math.min(1, Math.max(0, m.dither * 2)) * 255);
   table[q + 2] = Math.round(Math.min(1, Math.max(0, m.spec)) * 255);
   table[q + 3] = m.tertiary ?? 0;
+  // The cel look's row.
+  const baseHex = m.ramp[Math.min(BASE_STEP, m.ramp.length - 1)];
+  const cel = m.glow ? m.ramp : m.cel ? celRamp(baseHex, m.cel) : celKeep(m.ramp);
+  writeRamp(tableCel, o, cel);
+  for (let i = STEPS * 4; i < MAT_COLS * 4; i++) tableCel[o + i] = table[o + i];
+  const soft = m.cel === 'cloth' || m.cel === 'hair' || m.cel === 'leather';
+  tableCel[q + 1] = soft && hexToOklch(baseHex)[0] < 0.38 ? 255 : 0;
 }
 
 /**
@@ -260,6 +348,17 @@ export function materialTable(): { data: Uint8Array; version: number; rows: numb
   return { data: table, version, rows: 256, cols: MAT_COLS };
 }
 
+/** The cel look's table (PIXEL CAST 2): the same ids and layout, `celRamp` colours; same version. */
+export function materialTableCel(): { data: Uint8Array; version: number; rows: number; cols: number } {
+  return { data: tableCel, version, rows: 256, cols: MAT_COLS };
+}
+
+/** sRGB colour of ramp step `step` of material `id` in the cel look (tests, tools). */
+export function celColor(id: number, step: number): number {
+  const o = (id * MAT_COLS + step) * 4;
+  return (tableCel[o] << 16) | (tableCel[o + 1] << 8) | tableCel[o + 2];
+}
+
 // ─── The library ───────────────────────────────────────────────────────────
 
 const h6 = (n: number) => n.toString(16).padStart(6, '0');
@@ -277,18 +376,18 @@ export const Mat = {
   cloth(hex: number, o: { pattern?: PatternId; strength?: number; scale?: number; stain?: number; dither?: number } = {}): number {
     const pat = o.pattern ?? PAT.WEAVE;
     return material(`cloth|${h6(hex)}|${pat}|${o.strength ?? ''}|${o.scale ?? ''}|${o.stain ?? 0}`, () =>
-      base(makeRamp(hex), pat, { strength: o.strength ?? 0.5, scale: o.scale ?? 0.1, secondary: o.stain ?? 0, dither: o.dither ?? 0.16 }),
+      base(makeRamp(hex), pat, { strength: o.strength ?? 0.5, scale: o.scale ?? 0.1, secondary: o.stain ?? 0, dither: o.dither ?? 0.16, cel: 'cloth' }),
     );
   },
   denim(hex: number, stain = 0): number {
-    return material(`denim|${h6(hex)}|${stain}`, () => base(makeRamp(hex, { light: 0.5 }), PAT.DENIM, { strength: 0.6, secondary: stain, dither: 0.18 }));
+    return material(`denim|${h6(hex)}|${stain}`, () => base(makeRamp(hex, { light: 0.5 }), PAT.DENIM, { strength: 0.6, secondary: stain, dither: 0.18, cel: 'cloth' }));
   },
   /** Buffalo check: crossing bands in a near-black of the same hue (secondary), single bands a shade darker. */
   plaid(hex: number, check = 0.07): number {
     return material(`plaid|${h6(hex)}|${check}`, () => {
       const [L, C, h] = hexToOklch(hex);
-      const dark = material(`plaidk|${h6(hex)}`, () => base(makeRamp(oklchToHex(L * 0.4, C * 0.55, hueToward(h, 285, 0.15)), { light: 0.4 }), PAT.NONE, { dither: 0.05 }));
-      return base(makeRamp(hex, { light: 0.45 }), PAT.PLAID, { scale: check, strength: 0.9, dither: 0.08, secondary: dark });
+      const dark = material(`plaidk|${h6(hex)}`, () => base(makeRamp(oklchToHex(L * 0.4, C * 0.55, hueToward(h, 285, 0.15)), { light: 0.4 }), PAT.NONE, { dither: 0.05, cel: 'cloth' }));
+      return base(makeRamp(hex, { light: 0.45 }), PAT.PLAID, { scale: check, strength: 0.9, dither: 0.08, secondary: dark, cel: 'cloth' });
     });
   },
   /** Zombie skin: pale, with rot patches (a sicklier green-grey) and bruises. `rot` < 0.85 = cleaner (faces). */
@@ -298,52 +397,52 @@ export const Mat = {
       // Rot patches: a sicker, darker green; bruises a purple shade (tertiary).
       const rotM = Mat.flat(oklchToHex(L * 0.74, Math.max(C, 0.06) * 1.5, hueToward(h, 130, 0.7)), 'rot');
       const bruise = Mat.flat(oklchToHex(L * 0.62, Math.max(C, 0.05) * 1.2, hueToward(h, 330, 0.75)), 'bruise');
-      return base(makeRamp(hex, { light: 0.62, sat: 1.15 }), PAT.ROT, { strength: rot, scale: 0.07, secondary: rotM, tertiary: bruise, dither: 0.12 });
+      return base(makeRamp(hex, { light: 0.62, sat: 1.15 }), PAT.ROT, { strength: rot, scale: 0.07, secondary: rotM, tertiary: bruise, dither: 0.12, cel: 'dead' });
     });
   },
   /** Living skin (civilians): warm, smooth. */
   liveSkin(hex: number): number {
-    return material(`live|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.6, sat: 1.12 }), PAT.FLESH, { strength: 0.3, dither: 0.1 }));
+    return material(`live|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.6, sat: 1.12 }), PAT.FLESH, { strength: 0.3, dither: 0.1, cel: 'live' }));
   },
   hair(hex: number): number {
-    return material(`hair|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.5, dark: 0.45 }), PAT.HAIR, { strength: 0.8, dither: 0.06, spec: 0.35 }));
+    return material(`hair|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.5, dark: 0.45 }), PAT.HAIR, { strength: 0.8, dither: 0.06, spec: 0.35, cel: 'hair' }));
   },
   leather(hex: number): number {
-    return material(`leather|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.45 }), PAT.LEATHER, { strength: 0.5, spec: 0.6, dither: 0.1 }));
+    return material(`leather|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.45 }), PAT.LEATHER, { strength: 0.5, spec: 0.6, dither: 0.1, cel: 'leather' }));
   },
   /** Hi-vis fabric: neon, shadows sinking to olive (not grey), a faint weave. */
   hivis(hex: number): number {
-    return material(`hivis|${h6(hex)}`, () => base(makeRamp(hex, { dark: 0.3, light: 0.4, shadowHue: 135, sat: 1.0 }), PAT.WEAVE, { strength: 0.6, dither: 0.1 }));
+    return material(`hivis|${h6(hex)}`, () => base(makeRamp(hex, { dark: 0.3, light: 0.4, shadowHue: 135, sat: 1.0 }), PAT.WEAVE, { strength: 0.6, dither: 0.1, cel: 'cloth' }));
   },
   /** Hard hats, helmets, badges: glossy. */
   gloss(hex: number): number {
-    return material(`gloss|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.7 }), PAT.GLOSS, { strength: 0.6, spec: 1, dither: 0.08 }));
+    return material(`gloss|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.7 }), PAT.GLOSS, { strength: 0.6, spec: 1, dither: 0.08, cel: 'metal' }));
   },
   /** Plain ramp, no pattern (badges, trims, ID cards). */
   flat(hex: number, tag = ''): number {
-    return material(`flat|${h6(hex)}|${tag}`, () => base(makeRamp(hex), PAT.NONE, { dither: 0.1 }));
+    return material(`flat|${h6(hex)}|${tag}`, () => base(makeRamp(hex), PAT.NONE, { dither: 0.1, cel: 'flat' }));
   },
   /** Unlit glow (eyes, glints): one colour, no shading or outline. */
   glow(hex: number): number {
     return material(`glow|${h6(hex)}`, () => base([hex, hex, hex, hex, hex, hex], PAT.NONE, { glow: true, dither: 0 }));
   },
   blood(hex = 0x7a0c0c): number {
-    return material(`blood|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.45, dark: 0.3, sat: 1.15 }), PAT.WET, { strength: 0.7, spec: 0.9, dither: 0.06 }));
+    return material(`blood|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.45, dark: 0.3, sat: 1.15 }), PAT.WET, { strength: 0.7, spec: 0.9, dither: 0.06, cel: 'gore' }));
   },
   gore(hex = 0x7a1612): number {
-    return material(`gore|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.5, sat: 1.1 }), PAT.WET, { strength: 1, spec: 0.7, dither: 0.1 }));
+    return material(`gore|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.5, sat: 1.1 }), PAT.WET, { strength: 1, spec: 0.7, dither: 0.1, cel: 'gore' }));
   },
   bone(hex = 0xd8cfb0): number {
-    return material(`bone|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.6 }), PAT.NONE, { dither: 0.08 }));
+    return material(`bone|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.6 }), PAT.NONE, { dither: 0.08, cel: 'flat' }));
   },
   ribs(): number {
     return material('ribs', () => base(makeRamp(0x5a0e0c, { light: 0.4 }), PAT.RIBS, { scale: 0.05, secondary: Mat.bone(), strength: 1, spec: 0.5 }));
   },
   gown(hex: number): number {
-    return material(`gown|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.5 }), PAT.GOWN, { strength: 0.5, scale: 0.05, dither: 0.14 }));
+    return material(`gown|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.5 }), PAT.GOWN, { strength: 0.5, scale: 0.05, dither: 0.14, cel: 'cloth' }));
   },
   camo(hex: number): number {
-    return material(`camo|${h6(hex)}`, () => base(makeRamp(hex), PAT.CAMO, { strength: 0.8, scale: 0.12, dither: 0.1 }));
+    return material(`camo|${h6(hex)}`, () => base(makeRamp(hex), PAT.CAMO, { strength: 0.8, scale: 0.12, dither: 0.1, cel: 'cloth' }));
   },
   /**
    * Reptile hide: scales + body stripes; `belly` = the underside material id,
@@ -355,15 +454,16 @@ export const Mat = {
         strength: o.spots ?? o.stripes ?? 0.6,
         scale: o.scale ?? 0.16,
         secondary: o.belly ?? 0,
-        tertiary: o.stripe !== undefined ? material(`stripe|${h6(o.stripe)}`, () => base(makeRamp(o.stripe!, { light: 0.5, sat: 1.15 }), PAT.SCALES, { strength: 0.4, scale: 0.16, dither: 0.1 })) : 0,
+        tertiary: o.stripe !== undefined ? material(`stripe|${h6(o.stripe)}`, () => base(makeRamp(o.stripe!, { light: 0.5, sat: 1.15 }), PAT.SCALES, { strength: 0.4, scale: 0.16, dither: 0.1, cel: 'hide' })) : 0,
         dither: 0.12,
         spec: 0.15,
+        cel: 'hide',
       }),
     );
   },
   /** Riot armour / steel plates: scratched, riveted, a hard glint. */
   plate(hex: number): number {
-    return material(`plate|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.62, dark: 0.32, sat: 1.2 }), PAT.PLATE, { strength: 0.8, scale: 0.09, spec: 0.9, dither: 0.06 }));
+    return material(`plate|${h6(hex)}`, () => base(makeRamp(hex, { light: 0.62, dark: 0.32, sat: 1.2 }), PAT.PLATE, { strength: 0.8, scale: 0.09, spec: 0.9, dither: 0.06, cel: 'metal' }));
   },
   /** Dark mouth interior / throat. */
   mouth(hex = 0x3a0808): number {

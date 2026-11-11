@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { atlasCode, stampInfo, stampReach } from './stamps';
+import { castStyle } from './look';
 
 /**
  * PixelCast figures: a character's sprite frame described as a short list of
@@ -57,6 +58,21 @@ export const PF = {
    * (bellies, flesh mounds) get blotches, not bullseye rings round the centre.
    */
   PLANAR: 1024,
+  /**
+   * Flat (butt) cap at the A / B end of a cone: the shape is cut square across its
+   * axis there instead of ending in a round cap — the corners of drawn cloth:
+   * cuffs, straight hems, square shoulders, soles, collars (PIXEL CAST 2). Seen
+   * end-on the cut end is a disc: `layout` stores how foreshortened the axis is
+   * (`CUT_FORE`), and the cap keeps that share of its round end — a sleeve pointing
+   * at the camera still shows its whole opening.
+   */
+  CUT_A: 2048,
+  CUT_B: 4096,
+  /**
+   * PIXEL CAST 2: this primitive carries no automatic form shadow band (the painter
+   * draws its shadow as shapes: `sideOf`, `.flag(PF.SHADE_ONLY).tone(-1)`).
+   */
+  NO_BAND: 8192,
 } as const;
 
 /** Hit-part code of a primitive (alignment tests / gore). */
@@ -123,6 +139,9 @@ const AX = 0,
   BB1 = 21,
   BB2 = 22,
   BB3 = 23;
+
+/** Flags above this bit hold a cut cone's foreshortening (0..63 = |cos| of the axis to the view), set by `layout`. */
+const CUT_FORE = 16384;
 
 const _v = new THREE.Vector3();
 const _w = new THREE.Vector3();
@@ -270,6 +289,24 @@ export class PixelFigure {
    * instead of popping to chunkier texels mid-fight. Reset by `begin`.
    */
   maxWide = 0;
+  /**
+   * The cast look this frame is painted for (`look.ts`): 0 = the first PIXEL CAST
+   * look (contour shading), 1–3 = PIXEL CAST 2 (flat cel: strict / accents / drawn).
+   * Painters branch on it for shape design and detail. Set by `begin`.
+   */
+  cel = 0;
+  /**
+   * PIXEL CAST 2: while false, every primitive added gets `PF.NO_BAND` — a painter that
+   * designs its own shadow shapes switches the automatic band off for the parts it draws
+   * (and back on round callbacks that still rely on it). Reset to true by `begin`.
+   */
+  autoBand = true;
+  /**
+   * World-space unit vector, in the screen plane, pointing AWAY from the sprite artist's
+   * light (the light is up and to the left: this points right and down). Painters place
+   * drawn shadow shapes toward it and light shapes against it (`sideOf`). Set by `begin`.
+   */
+  readonly shadeDir = new THREE.Vector3(1, 0, 0);
 
   private pool: THREE.Vector3[] = [];
   private poolN = 0;
@@ -302,6 +339,11 @@ export class PixelFigure {
     this.maxTexels = 140;
     this.kHint = 1;
     this.maxWide = 0;
+    this.cel = castStyle().cel;
+    this.autoBand = true;
+    // Camera right / up are rows 0 / 1 of the view rotation.
+    const V = this.V;
+    this.shadeDir.set(0.62 * V[0] - 0.78 * V[1], 0.62 * V[4] - 0.78 * V[5], 0.62 * V[8] - 0.78 * V[9]).normalize();
   }
 
   // ─── Painter API ──────────────────────────────────────────────────────────
@@ -335,6 +377,25 @@ export class PixelFigure {
   /** Linear mix of two points (scratch vector). */
   mix(a: THREE.Vector3, b: THREE.Vector3, t: number): THREE.Vector3 {
     return this.vec().copy(a).lerp(b, t);
+  }
+
+  /**
+   * PIXEL CAST 2: the offset (scratch vector, length `r` metres) from the axis a → b of
+   * a part to its silhouette edge on the side AWAY from the sprite light, as seen on
+   * screen — right of an upright limb, the underside of one that juts out. A painter
+   * builds drawn shadow shapes from `axis point + sideOf × t` (t ≈ 0.3 … 1.3) and light
+   * shapes from negative t; being built from the joints, the shapes are stable from
+   * redraw to redraw. Seen end-on, the offset is `shadeDir` itself.
+   */
+  sideOf(a: THREE.Vector3, b: THREE.Vector3, r = 1): THREE.Vector3 {
+    const out = this.vec();
+    _v.subVectors(b, a);
+    _w.subVectors(this.eye, a);
+    out.crossVectors(_v, _w);
+    const l = out.length();
+    if (l < 1e-6 * Math.max(1e-6, _v.length() * _w.length()) || l < 1e-9) return out.copy(this.shadeDir).multiplyScalar(r);
+    out.multiplyScalar((out.dot(this.shadeDir) < 0 ? -r : r) / l);
+    return out;
   }
 
   /**
@@ -483,6 +544,21 @@ export class PixelFigure {
     this.data[o] = Math.floor(this.data[o]) + Math.min(0.999, 1 - c);
   }
 
+  /**
+   * Cap how far the shape bulges toward the viewer (metres): a broad slab — a trunk
+   * drawn as one trapezoid — seen three-quarters on is no deeper than its real
+   * half-depth, so a limb swinging in front of it still composites in front.
+   */
+  bulge(m: number): this {
+    if (this.last >= 0) {
+      const o = this.last * PRIM_FLOATS;
+      const r = Math.max(this.data[o + RA], this.data[o + RB], 1e-6);
+      const q = 1 - (this.data[o + PARTI] - Math.floor(this.data[o + PARTI]));
+      this.depthRatio(Math.min(q, (m * this.lastS) / r));
+    }
+    return this;
+  }
+
   /** Smallest radius in texels (default 0.55 — one-texel lines survive). */
   min(px: number): this {
     if (this.last >= 0) this.minPx[this.last] = px;
@@ -606,7 +682,7 @@ export class PixelFigure {
     d[off + SPLIT] = 2;
     d[off + K] = this.layerK[this.curLayer] * 0.5 * (sa + sb);
     d[off + LAYER] = this.curLayer;
-    d[off + FLAGS] = PF.TRI | PF.FLAT;
+    d[off + FLAGS] = PF.TRI | PF.FLAT | (this.autoBand ? 0 : PF.NO_BAND);
     d[off + RAG] = 0;
     d[off + SEED] = (i * 7.31) % 97;
     d[off + U0] = round * 0.5 * (sa + sb);
@@ -620,6 +696,20 @@ export class PixelFigure {
     this.foot.expandByPoint(a);
     this.foot.expandByPoint(b);
     this.foot.expandByPoint(c);
+    return this;
+  }
+
+  /**
+   * A triangle PAINTED ON the current layer where it is covered (a decal with
+   * corners): lapels, collar points, patches, torn holes, drawn shadow shapes
+   * (`.flag(PF.SHADE_ONLY).tone(-1)`). Never changes the silhouette.
+   */
+  triDecal(a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, mat: number): this {
+    this.tri(a, b, c, mat, 0);
+    if (this.last >= 0) {
+      const o = this.last * PRIM_FLOATS + FLAGS;
+      this.data[o] = (this.data[o] | PF.DECAL) >>> 0;
+    }
     return this;
   }
 
@@ -668,6 +758,17 @@ export class PixelFigure {
     const sr = (ra + rb) * 0.5;
     this.emit(a, b, ra, rb, mat, 0, o);
     if (sr > 1e-6) this.depthRatio(dz / sr);
+    if (this.cel > 0 && this.last >= 0 && sr > 1e-6) {
+      // For flat caps (`PF.CUT_*`): how far the end section reaches ALONG the axis as seen,
+      // as a share of the drawn radius — a broad trunk's end is a shallow ellipse, not a disc.
+      let share: number;
+      if (l > 0.5) {
+        const tx = uxx * ny - uxy * nx;
+        const ty = uyx * ny - uyy * nx;
+        share = (Math.hypot(rxA * tx, ryA * ty) + Math.hypot(rxB * tx, ryB * ty)) / (ra + rb);
+      } else share = Math.min(rxA * Math.hypot(uxx, uxy), ryA * Math.hypot(uyx, uyy)) / Math.max(ra, 1e-6);
+      this.data[this.last * PRIM_FLOATS + FLAGS] += Math.max(1, Math.min(63, Math.round(share * 63))) * CUT_FORE;
+    }
     return this;
   }
 
@@ -801,7 +902,7 @@ export class PixelFigure {
     d[off + SPLIT] = o?.split ?? 2;
     d[off + K] = (o?.k ?? this.layerK[this.curLayer]) * 0.5 * (sa + sb);
     d[off + LAYER] = this.curLayer;
-    d[off + FLAGS] = flags | (o?.flags ?? 0);
+    d[off + FLAGS] = flags | (o?.flags ?? 0) | (this.autoBand ? 0 : PF.NO_BAND);
     d[off + RAG] = (o?.rag ?? 0) * 0.5 * (sa + sb);
     d[off + SEED] = o?.seed ?? (i * 7.31) % 97;
     d[off + U0] = o?.u0 ?? 0;
@@ -968,6 +1069,11 @@ export class PixelFigure {
           const rb = Math.max(d[o + RB] / k, mp);
           const kk = d[o + K] / k;
           const rag = d[o + RAG] / k;
+          if (d[o + FLAGS] & (PF.CUT_A | PF.CUT_B) && d[o + FLAGS] < CUT_FORE) {
+            // How much the axis points along the view: the cut ends keep that share of their round cap.
+            const c = Math.min(1, Math.abs(d[o + ZB] - d[o + ZA]) / Math.max(d[o + ULEN], 1e-6));
+            tmp[t + FLAGS] = d[o + FLAGS] + Math.round(c * 63) * CUT_FORE;
+          }
           tmp[t + AX] = ax;
           tmp[t + AY] = ay;
           tmp[t + BX] = bx;
@@ -1107,13 +1213,21 @@ export class PixelFigure {
       const ay = d[o + AY];
       const bx = d[o + BX];
       const by = d[o + BY];
-      const di = sdRoundCone(x, y, ax, ay, bx, by, d[o + RA], d[o + RB]);
+      let di = sdRoundCone(x, y, ax, ay, bx, by, d[o + RA], d[o + RB]);
       const k = d[o + K];
-      const wb = shareB(lD, di, k);
-      const hh = k > 0 ? Math.max(k - Math.abs(lD - di), 0) / k : 0;
       const dx = bx - ax;
       const dy = by - ay;
       const h = dx * dx + dy * dy;
+      if (d[o + FLAGS] & (PF.CUT_A | PF.CUT_B)) {
+        // Flat caps: cut square across the axis at A and / or B (same rule as the GPU).
+        const len = Math.sqrt(h);
+        const al = ((x - ax) * dx + (y - ay) * dy) / Math.max(len, 1e-3);
+        const fore = Math.floor(d[o + FLAGS] / CUT_FORE) / 63;
+        if (d[o + FLAGS] & PF.CUT_A) di = Math.max(di, -al - d[o + RA] * fore);
+        if (d[o + FLAGS] & PF.CUT_B) di = Math.max(di, al - len - d[o + RB] * fore);
+      }
+      const wb = shareB(lD, di, k);
+      const hh = k > 0 ? Math.max(k - Math.abs(lD - di), 0) / k : 0;
       const t = h > 1e-6 ? Math.min(1, Math.max(0, ((x - ax) * dx + (y - ay) * dy) / h)) : 0;
       const z = d[o + ZA] + (d[o + ZB] - d[o + ZA]) * t;
       lZ = lD > 1e8 ? z : lZ + (z - lZ) * wb;

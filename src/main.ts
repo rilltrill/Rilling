@@ -9,6 +9,7 @@ import { isArtStyle } from './core/art';
 import { CAMPAIGNS } from './content';
 import { initPlatform } from './platform';
 import { pwStoreEnable } from './content/pixelworld/store';
+import { isCastLook, setCastLook } from './gameplay/pixel/look';
 import { pwUpscale } from './content/pixelworld/atlas';
 import { pwAxisLevels } from './content/pixelworld/material';
 import { pwLight, pwMoodBoot, pwMoodTweak } from './content/pixelworld/light';
@@ -60,6 +61,10 @@ function main() {
   // Dev / bench: `&pwstore=<tag>` persists painted PixelWorld atlases under that version (off on the dev server by default).
   const store = query.get('pwstore');
   if (store) pwStoreEnable(store === '0' ? '' : `dev-${store}`);
+  // PIXEL CAST 2 look-dev: `&castlook=a|b|c` picks a candidate cast look, `0` the look before it.
+  const castlook = query.get('castlook')?.toLowerCase();
+  if (isCastLook(castlook)) setCastLook(castlook);
+  (window as unknown as { __castLook: typeof setCastLook }).__castLook = setCastLook;
   // A/B and the parity check: `&pwup=0` stores every PixelWorld tile as painted (no 2× fallback).
   if (query.get('pwup') === '0') pwUpscale(false);
   // … and `&pwaniso=0` picks one level for both texel axes, as the first pass drew.

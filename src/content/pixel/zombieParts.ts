@@ -155,8 +155,10 @@ export function paintBruteArmour(f: PixelFigure, B: BruteParts, severed: readonl
   const chestOn = f.facing(f.at(sp, 0, 0.36, bz + 0.05), f.dir(sp, 0, 0, 1));
   if (chestOn > -0.1) {
     f.layer(0.012 * s, PART.ARMOR, 0, -0.03);
-    f.cone(f.at(sp, -w * 0.33, 0.33, bz + 0.03), f.at(sp, w * 0.33, 0.33, bz + 0.03), 0.105 * s, 0.105 * s, M.plate);
-    f.cone(f.at(sp, -w * 0.4, 0.455, bz + 0.04), f.at(sp, w * 0.4, 0.455, bz + 0.04), 0.022 * s, 0.022 * s, M.edge).z(-0.03);
+    // (PIXEL CAST 2: plates are cut square — a slab with corners, not a pill.)
+    const cut = f.cel > 0 ? PF.CUT_A | PF.CUT_B : 0;
+    f.cone(f.at(sp, -w * (cut ? 0.44 : 0.33), 0.33, bz + 0.03), f.at(sp, w * (cut ? 0.44 : 0.33), 0.33, bz + 0.03), 0.105 * s, 0.105 * s, M.plate).flag(cut);
+    f.cone(f.at(sp, -w * (cut ? 0.46 : 0.4), 0.455, bz + 0.04), f.at(sp, w * (cut ? 0.46 : 0.4), 0.455, bz + 0.04), 0.022 * s, 0.022 * s, M.edge).flag(cut).z(-0.03);
   }
   if (chestOn > 0) {
     f.decal(f.at(sp, -0.08, 0.38, bz + 0.05), f.at(sp, 0.08, 0.38, bz + 0.05), 0.016 * s, 0.016 * s, M.strip).flag(PF.FLAT);
@@ -179,7 +181,7 @@ export function paintBruteArmour(f: PixelFigure, B: BruteParts, severed: readonl
   if ((severed[norm] ?? 0) === 0) {
     const el = norm === 0 ? r.armL.elbow : r.armR.elbow;
     f.layer(0.012 * s, PART.ARMOR, 0, -0.03);
-    f.cone(f.at(el, 0, -0.03 * B.armLen, 0), f.at(el, 0, -0.21 * B.armLen, 0), 0.088 * s, 0.084 * s, M.plate);
+    f.cone(f.at(el, 0, -0.03 * B.armLen, 0), f.at(el, 0, -0.21 * B.armLen, 0), 0.088 * s, 0.084 * s, M.plate).flag(f.cel > 0 ? PF.CUT_A | PF.CUT_B : 0);
     f.cone(f.at(el, 0, -0.03 * B.armLen, 0), f.at(el, 0, -0.03 * B.armLen, 0), 0.09 * s, 0.09 * s, M.edge).z(-0.005);
   }
   // Knee pads.

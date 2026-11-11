@@ -7,7 +7,7 @@
  *
  *   node scripts/pixel-look.mjs --base http://localhost:5701 --out /tmp/pixel/look/a \
  *     --place "walker@office:-1:3.5,walker@worker:1:4:30:windup=0.9,civ@worker:0:6,raptor@red:2:7::pounce=0.3" \
- *     [--stage "zoo&zooEnv=night"] [--settle 600] [--pre 0] [--nohud] [--retro pixel] [--zoom 3] [--dpr 1] [--modes 3d,sprites]
+ *     [--stage "zoo&zooEnv=night"] [--settle 600] [--pre 0] [--nohud] [--retro pixel] [--zoom 3] [--dpr 1] [--modes 3d,sprites] [--extra "&castlook=b"]
  *
  * A placement is  id[@variant]:right:forward[:yawDeg][:action=arg;action=arg]  (metres from the camera,
  * yaw relative to facing the camera). Actions: windup=progress, stagger=t, sever=L|R|l|r (L/R whole arm,
@@ -58,7 +58,8 @@ await page.addInitScript(() => {
   }, 20);
 });
 const zooArg = stage.startsWith('zoo') ? '&zoo=none' : '';
-await page.goto(`${base}/?stage=${stage}${zooArg}&god=1&retro=${retro}&seed=7&mute=1&art=3d`, { waitUntil: 'load' });
+// --extra "&castlook=b": more URL flags (the PIXEL CAST 2 cel look).
+await page.goto(`${base}/?stage=${stage}${zooArg}&god=1&retro=${retro}&seed=7&mute=1&art=3d${args.extra ?? ''}`, { waitUntil: 'load' });
 const t0 = Date.now();
 while (Date.now() - t0 < 25000) {
   await page.waitForTimeout(250);

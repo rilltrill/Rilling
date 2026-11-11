@@ -3,6 +3,7 @@ import type { HumanoidRig } from '../kit/humanoid';
 import { PART, PF, type PixelFigure } from '../../gameplay/pixel/figure';
 import { Mat } from '../../gameplay/pixel/materials';
 import { CIV_STAMP, HAND, STAMP, dir8, stampSize } from '../../gameplay/pixel/stamps';
+import { paintHumanCel, paintLooseArmCel } from './humanCel';
 
 /**
  * ─── PixelCast humanoid painter ────────────────────────────────────────────
@@ -181,17 +182,17 @@ export interface HumanPose {
 }
 
 /** World scale of a joint (its matrix's X column length). */
-function scaleOf(o: THREE.Object3D): number {
+export function scaleOf(o: THREE.Object3D): number {
   const e = o.matrixWorld.elements;
   return Math.hypot(e[0], e[1], e[2]);
 }
 
-function hash(n: number): number {
+export function hash(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 }
 
-interface Mats {
+export interface Mats {
   skin: number;
   /** Head skin: the same skin with less rot, so the face stays readable. */
   face: number;
@@ -236,7 +237,7 @@ interface Mats {
 /** Materials per look, resolved once (no key strings or lookups per redraw). */
 const matCache = new WeakMap<HumanLook, Mats>();
 
-function mats(L: HumanLook): Mats {
+export function mats(L: HumanLook): Mats {
   let m = matCache.get(L);
   if (m) return m;
   const skin = L.dead ? Mat.deadSkin(L.skin) : Mat.liveSkin(L.skin);
@@ -336,14 +337,14 @@ const _eul = new THREE.Euler();
 const P0 = { x: 0, y: 0, z: 0 };
 const P1 = { x: 0, y: 0, z: 0 };
 
-function tilted(h: THREE.Object3D, pitch: number, roll: number): THREE.Object3D {
+export function tilted(h: THREE.Object3D, pitch: number, roll: number): THREE.Object3D {
   _rot.makeRotationFromEuler(_eul.set(pitch, 0, roll));
   headProxy.matrixWorld.multiplyMatrices(h.matrixWorld, _rot);
   return headProxy;
 }
 
 /** Texels a length of `m` metres at `p` covers (using the sprite's last texel size). */
-function tx(f: PixelFigure, p: THREE.Vector3, m: number): number {
+export function tx(f: PixelFigure, p: THREE.Vector3, m: number): number {
   return f.px(p, m) / f.kHint;
 }
 
@@ -362,6 +363,8 @@ export function humanMem(): HumanMem {
 
 /** Paint a humanoid rig. Returns false when it can't (nothing to draw). */
 export function paintHuman(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: HumanPose): boolean {
+  // PIXEL CAST 2 (flat cel looks): the figure is drawn by its own painter.
+  if (f.cel > 0) return paintHumanCel(f, r, L, st);
   if (!r.root.visible) return false;
   // 1 texel per retro pixel up to ~240 px tall (≈ 1.9 m away); closer, texels grow (arcade sprite scaling).
   f.maxTexels = 240;
@@ -514,7 +517,7 @@ export function paintHuman(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: Hum
  * `y` (joint units), half-width `hw`, half-height `rv` (both × bulk already), depth
  * half `rd` toward z; `z` pushes it forward (hunch).
  */
-function trunkSlice(f: PixelFigure, j: THREE.Object3D, up: THREE.Vector3, fwd: THREE.Vector3, y: number, z: number, hw: number, rv: number, rd: number, s: number, mat: number): PixelFigure {
+export function trunkSlice(f: PixelFigure, j: THREE.Object3D, up: THREE.Vector3, fwd: THREE.Vector3, y: number, z: number, hw: number, rv: number, rd: number, s: number, mat: number): PixelFigure {
   const x = Math.max(0.001, hw - rv);
   return f.coneE(f.at(j, -x, y, z), f.at(j, x, y, z), up, fwd, rv * s, rd * s, rv * s, rd * s, mat).k(0.06 * s);
 }
@@ -524,7 +527,7 @@ function trunkSlice(f: PixelFigure, j: THREE.Object3D, up: THREE.Vector3, fwd: T
  * redraw (a lunge, a swipe), a flat streak trails behind it for that frame —
  * the classic hand-drawn motion smear. Drawn behind the body, hits nothing.
  */
-function paintSmears(f: PixelFigure, r: HumanoidRig, M: Mats, st: HumanPose, s: number) {
+export function paintSmears(f: PixelFigure, r: HumanoidRig, M: Mats, st: HumanPose, s: number) {
   const mem = st.mem!;
   const head = f.at(r.head, 0, 0.13, 0.02);
   const hl = f.at(r.armL.elbow, 0, -0.3, 0);
@@ -580,7 +583,7 @@ function torsoFolds(f: PixelFigure, r: HumanoidRig, L: HumanLook, M: Mats, front
 }
 
 /** Trunk decals: outfit details, stains, wounds. */
-function torsoDetails(f: PixelFigure, r: HumanoidRig, L: HumanLook, M: Mats, front: number, fz: number, b: number, s: number) {
+export function torsoDetails(f: PixelFigure, r: HumanoidRig, L: HumanLook, M: Mats, front: number, fz: number, b: number, s: number) {
   const sp = r.spine;
   const seenFront = front > -0.15;
   const o = L.outfit;
@@ -836,7 +839,7 @@ function paintHead(f: PixelFigure, r: HumanoidRig, h: THREE.Object3D, L: HumanLo
 }
 
 /** Living eye stamps [size] for an expression. */
-function liveEyes(face: HumanPose['face']): readonly number[] {
+export function liveEyes(face: HumanPose['face']): readonly number[] {
   switch (face) {
     case 'scream':
       return STAMP.seye;
@@ -852,7 +855,7 @@ function liveEyes(face: HumanPose['face']): readonly number[] {
 }
 
 /** Living mouth stamps [size] for an expression (terror gasps, and screams once the jaw drops). */
-function liveMouth(face: HumanPose['face'], jaw: number): readonly number[] {
+export function liveMouth(face: HumanPose['face'], jaw: number): readonly number[] {
   switch (face) {
     case 'scream':
       return STAMP.lmouth[1];
@@ -872,7 +875,7 @@ function liveMouth(face: HumanPose['face'], jaw: number): readonly number[] {
  * that hangs from it and swings — a slow sway, bouncing and streaming back with
  * ground speed, plus whatever jolt the pose adds (`hairSwing`: trembling, a yank).
  */
-function paintPonytail(f: PixelFigure, h: THREE.Object3D, L: HumanLook, M: Mats, st: HumanPose, s: number, hs: number) {
+export function paintPonytail(f: PixelFigure, h: THREE.Object3D, L: HumanLook, M: Mats, st: HumanPose, s: number, hs: number) {
   f.layer(0.025 * s, PART.NONE);
   const run = Math.min(1, st.speed / 4);
   const t = st.time;
@@ -900,7 +903,7 @@ let bubbleMats: [number, number] | null = null;
  * layer of its own, pulled toward the camera so the body never covers it, two
  * retro pixels a cell (readable next to the HUD's text) and never a target.
  */
-function paintBubble(f: PixelFigure, r: HumanoidRig, id: number, s: number) {
+export function paintBubble(f: PixelFigure, r: HumanoidRig, id: number, s: number) {
   if (!bubbleMats) bubbleMats = [Mat.flat(0xf8f4e6), Mat.flat(0x16121c)];
   // Over the head (world up — however the head is bowed), above a hand waving up there.
   const tip = f.at(r.head, 0, 0.13, 0);
@@ -920,7 +923,7 @@ function brim(f: PixelFigure, h: THREE.Object3D, y: number, z0: number, z1: numb
   f.cone(f.at(h, 0, y, z0), f.at(h, 0, y - r * 0.3, z1), r * 1.2, r, mat).k(k).tone(tone);
 }
 
-function paintHat(f: PixelFigure, h: THREE.Object3D, L: HumanLook, M: Mats, s: number, hs: number) {
+export function paintHat(f: PixelFigure, h: THREE.Object3D, L: HumanLook, M: Mats, s: number, hs: number) {
   const m = M.hat;
   switch (L.outfit) {
     case 'worker':
@@ -1049,7 +1052,7 @@ function hp(f: PixelFigure, y: number, x: number, z: number): THREE.Vector3 {
  * claw, open hand or fist, in 8 directions along the forearm on screen; bigger
  * ones are built from a palm and jointed fingers fanned out on screen.
  */
-function paintHand(f: PixelFigure, el: THREE.Object3D, side: number, L: HumanLook, M: Mats, s: number, a: number, time: number, pose: number, chest: THREE.Object3D | null) {
+export function paintHand(f: PixelFigure, el: THREE.Object3D, side: number, L: HumanLook, M: Mats, s: number, a: number, time: number, pose: number, chest: THREE.Object3D | null) {
   hWrist.copy(f.at(el, 0, -0.252 * a, 0.004));
   const len = tx(f, hWrist, 0.17 * s);
   if (len >= 3 && len < 11) {
@@ -1163,6 +1166,7 @@ function paintLeg(f: PixelFigure, hip: THREE.Object3D, knee: THREE.Object3D, sid
  * the shoulder for a whole arm, the elbow for a forearm). Gore at the joint.
  */
 export function paintLooseArm(f: PixelFigure, obj: THREE.Object3D, whole: boolean, L: HumanLook): boolean {
+  if (f.cel > 0) return paintLooseArmCel(f, obj, whole, L);
   const M = mats(L);
   const s = scaleOf(obj);
   f.layer(0.035 * s, PART.NONE);
