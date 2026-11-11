@@ -1123,7 +1123,7 @@ backdrops, the store, deferred paint) works as described, on new formats.
   below 32 on purpose (d1's river at 16), FLORA plants close to the camera (their own atlas,
   not upscaled) — and everything `flat` and `tiny` measure, which is paint and light.
 - **Budgets** (per stage, all atlases, all levels; the bytes are the same on the GPU and in
-  the CPU copy): ≤ 48 MiB, every atlas ≤ 4096 on a side, cold paint ≤ 1.2 s on the test box (z1 with drawn flats: about 2 s, the figure the PIXELWORLD3 brief allows; it still needs the owner's sign-off).
+  the CPU copy): ≤ 48 MiB, every atlas ≤ 4096 on a side, cold paint ≤ 1.2 s on the test box (z1 with drawn flats: about 2 to 2.4 s, first run only, recorded in docs/PIXELWORLD3.md "Round 3"; it still needs the owner's sign-off).
 
   | stage | atlases as stored (MB) | total | paint, JIT-warm (node, min of 4) | cold load: build / paint in frames / total | warm total |
   |---|---|---|---|---|---|

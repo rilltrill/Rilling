@@ -798,6 +798,11 @@ describe('PixelWorld stages (budgets, gameplay unchanged)', () => {
           continue;
         }
         if (Math.abs(x) > 24) continue; // anything off Main Street
+        // The burning car's drawn flat: a prop on the road, standing where the car stood (x 3.1, z −66.5), not a building.
+        if (Math.abs(x - 3.1) < 3 && Math.abs(z + 67) < 3 && y < 2.6) {
+          expect(Math.abs(z + 67)).toBeLessThan(2.4);
+          continue;
+        }
         verts++;
         // Facades at ±9.5; cards (awnings, fire escapes) stand at most 1 m in front of a flat, footprints reach 14.5 m back.
         // The Rialto's marquee (the classic overhang) is the one thing that reaches out over the pavement, at head height and up.

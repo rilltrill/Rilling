@@ -103,7 +103,7 @@ wherever the player looks. (`&pwdebug=mag` shows where: anything orange or red.)
 
 Budget (per stage, all atlases, all levels): ≤ 48 MiB of texture memory; paint ≤ 1.2 s on the
 test box for a cold load (it runs in slices behind the intro card and is stored after the
-first run; z1 with drawn flats is about 2 s, see docs/PIXELWORLD3.md). Spend texels where the rail camera is: unique paint near, tinted wrap tiles far.
+first run; z1 with drawn flats is about 2 to 2.4 s cold, first run only, see docs/PIXELWORLD3.md "Round 3"). Spend texels where the rail camera is: unique paint near, tinted wrap tiles far.
 
 ## 4. Painting rules
 
