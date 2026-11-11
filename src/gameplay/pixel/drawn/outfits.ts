@@ -4,7 +4,7 @@ import { R } from './palette';
 import { J, type PoseKey, type ViewId } from './skeleton';
 import { CIVSTAND, ZIDLE } from './poses';
 import {
-  ARM_CORE, ARM_F, ARM_L, ARM_Q, ARM_R, ARM_S, ARM_SHADE_F, BOOT_F, BOOT_Q, BOOT_S, DELTOID_LIT, FOREARM_LIT, HAND_CLAW, HAND_FIST, HAND_MITT, HAND_OPEN, HAND_SPLAY, KNEE_LIT, LEG_CORE, LEG_F, LEG_L, LEG_Q, LEG_R, LEG_S, LEG_SHADE_F, NECK_F, PELVIS_F, PELVIS_Q, PELVIS_S, SHIN_LIT, SHOE_F, SHOE_Q, SHOE_S, THIGH_ACCENT, THIGH_LIT, TRUNK_F, TRUNK_MAP, TRUNK_Q, TRUNK_S,
+  ARM_CORE, ARM_F, ARM_L, ARM_Q, ARM_R, ARM_S, ARM_SHADE_F, BOOT_F, BOOT_Q, BOOT_S, DELTOID_LIT, FOREARM_LIT, HAND_CLAW, HAND_FIST, HAND_MITT, HAND_OPEN, HAND_SPLAY, LEG_CORE, LEG_F, LEG_L, LEG_Q, LEG_R, LEG_S, LEG_SHADE_F, NECK_F, PELVIS_F, PELVIS_Q, PELVIS_S, SHOE_F, SHOE_Q, SHOE_S, TRUNK_F, TRUNK_MAP, TRUNK_Q, TRUNK_S,
 } from './body';
 
 /**
@@ -282,58 +282,64 @@ function foot(d: Draw, side: number, st: FootStyle, view: ViewId) {
 }
 
 /** One leg of a pair of jeans: outline, then the forms and folds on it. */
-function jeansLeg(d: Draw, side: number, ramp: number, view: ViewId, group: number) {
+function jeansLeg(d: Draw, side: number, ramp: number, view: ViewId, group: number, breakT: number) {
   const tbl = view === 2 ? LEG_S : view === 1 || view === 3 ? LEG_Q : LEG_F;
   const map = side === 0 ? LEG_L : LEG_R;
   const shinBack = d.shinBack[side] === 1;
   const g2 = group === G.legNear ? G.legNearB : G.legFarB;
   if (!shinBack) {
     limbFill(d, tbl, map, ramp, group, PARTL, 3, -1);
-    legForm(d, map, group);
+    legForm(d, map, group, breakT);
   } else if (view === 0) {
     // Going away from the viewer: the shin first, the thigh over it.
     partLimb(d, tbl, map, 1, ramp, group, PARTL, -1);
-    legForm(d, map, group);
+    legForm(d, map, group, breakT);
     partLimb(d, tbl, map, 0, ramp, g2, PARTL, -1);
-    legForm(d, map, g2);
+    legForm(d, map, g2, breakT);
   } else {
     // From behind, a shin bent back comes toward the viewer: the thigh first.
     partLimb(d, tbl, map, 0, ramp, group, PARTL, -1);
-    legForm(d, map, group);
+    legForm(d, map, group, breakT);
     partLimb(d, tbl, map, 1, ramp, g2, PARTL, -1);
-    legForm(d, map, g2);
+    legForm(d, map, g2, breakT);
   }
 }
 
-/** Forms on a leg: shadow toward the crotch side, a core strip inside it with reflected light beyond, lit planes, folds. */
-function legForm(d: Draw, map: readonly number[], g: number) {
+/** A hard-edged polygon on the skeleton, as (bone, along, n) triples: a plane, not a soft band. */
+function plane(d: Draw, g: number, delta: number, ...p: number[]) {
+  const pen = d.pen;
+  pen.begin();
+  for (let i = 0; i < p.length; i += 3) d.pt(p[i], p[i + 1], p[i + 2], true);
+  pen.shade(g, delta);
+}
+
+/**
+ * Forms on a leg, hard planes like a period sprite: shadow toward the crotch side, a core inside
+ * it, then the lit front of the thigh (a hard diagonal at the hip crease), a diamond knee cap and a
+ * straight shin. The cloth breaks in one or two shapes where it stacks above the boot (`breakT`).
+ */
+function legForm(d: Draw, map: readonly number[], g: number, breakT: number) {
   d.wedge(LEG_SHADE_F, map, g);
   band(d, LEG_CORE, map, g, -2, 1);
-  if (d.lod >= 1) {
-    band(d, THIGH_LIT, map, g, 1, -1);
-    band(d, KNEE_LIT, map, g, 1, -1);
-    band(d, SHIN_LIT, map, g, 1, -1);
-  }
-  if (d.lod >= 2) {
-    band(d, THIGH_ACCENT, map, g, 2, -1);
-    const th = map[0];
-    const sh = map[1];
-    const a = d.away(th);
-    // Fold shapes: from the hip, behind the knee, stacked at the ankle.
-    foldShape(d, th, g, 0.04, -a * 0.1, 0.34, a * 0.14, 0.09);
-    foldShape(d, th, g, 0.1, a * 0.32, 0.4, a * 0.06, 0.08);
-    foldShape(d, th, g, 0.8, a * 0.18, 0.96, -a * 0.1, 0.09);
-    foldShape(d, th, g, 0.72, -a * 0.2, 0.88, a * 0.08, 0.07);
-    foldShape(d, sh, g, 0.03, -a * 0.18, 0.2, a * 0.12, 0.08);
-    foldShape(d, sh, g, 0.62, a * 0.18, 0.74, -a * 0.1, 0.09);
-    foldShape(d, sh, g, 0.76, -a * 0.18, 0.88, a * 0.08, 0.09);
-    foldShape(d, sh, g, 0.88, a * 0.16, 0.97, -a * 0.1, 0.09);
-    if (d.lod >= 3) {
-      // A lit echo above each big fold.
-      foldShape(d, th, g, 0.0, -a * 0.1, 0.28, a * 0.16, 0.05, 1);
-      foldShape(d, sh, g, 0.56, a * 0.18, 0.68, -a * 0.1, 0.05, 1);
-    }
-  }
+  if (d.lod < 1) return;
+  const th = map[0];
+  const sh = map[1];
+  const a = d.away(th);
+  // Lit planes sit toward the light; n > 0 is the outer side of the limb.
+  const c = -a * 0.06;
+  plane(d, g, 1, th, 0.06, c + 0.13, th, 0.2, c - 0.08, th, 0.62, c - 0.05, th, 0.72, c + 0.02, th, 0.5, c + 0.1);
+  plane(d, g, 1, th, 0.9, c, th, 0.98, c + 0.09, sh, 0.08, c, th, 0.98, c - 0.09);
+  plane(d, g, 1, sh, 0.2, c + 0.04, sh, 0.2, c - 0.07, sh, 0.5, c - 0.05, sh, 0.5, c + 0.03);
+  if (d.lod < 2) return;
+  plane(d, g, 2, th, 0.93, c, th, 0.98, c + 0.05, sh, 0.05, c, th, 0.98, c - 0.05);
+  // The outer seam, a shade down the leg.
+  strokeB(d, th, g, -1, [0.06, 0.25, 0.5, 0.25, 0.94, 0.22]);
+  strokeB(d, sh, g, -1, [0.04, 0.22, 0.5, 0.19, Math.min(0.92, breakT + 0.04), 0.15]);
+  // Pull of the cloth: from the hip, behind the knee, and the break above the boot.
+  foldShape(d, th, g, 0.04, -a * 0.1, 0.34, a * 0.14, 0.09);
+  foldShape(d, th, g, 0.8, a * 0.18, 0.96, -a * 0.1, 0.09);
+  foldShape(d, sh, g, breakT - 0.04, a * 0.2, breakT + 0.05, -a * 0.12, 0.11);
+  foldShape(d, sh, g, breakT - 0.18, -a * 0.18, breakT - 0.1, a * 0.08, 0.09);
 }
 
 /** Boots and jeans together, in depth order, so a stride reads as one leg crossing in front of the other. */
@@ -349,7 +355,7 @@ function legs(d: Draw, jeansRamp: number, view: ViewId, foot_: FootStyle) {
     const side = order[i];
     const g = front ? (i === 0 ? farGroup : G.legNear) : side === 0 ? G.legFar : G.legNear;
     if ((!foot_.shaft && !d.shinBack[side]) || (d.shinBack[side] && view === 0)) foot(d, side, foot_, view);
-    jeansLeg(d, side, jeansRamp, view, g);
+    jeansLeg(d, side, jeansRamp, view, g, foot_.shaft ? 0.44 : 0.82);
     if (foot_.shaft && !d.shinBack[side]) foot(d, side, foot_, view);
     if (d.shinBack[side] && view === 4) foot(d, side, foot_, view);
   }
@@ -365,20 +371,25 @@ function seat(d: Draw, ramp: number, view: ViewId) {
   polyB(d, B.pelvis, [0.42, 0.2, 0.05, 0.3, -0.36, 0.22, -0.36, 0.9, 0.42, 0.9]);
   pen.shade(G.pelvis, -1);
   if (d.lod >= 1) {
-    polyB(d, B.pelvis, [0.32, -0.5, 0.3, -0.2, 0.0, -0.18, -0.2, -0.44, -0.02, -0.62]);
+    polyB(d, B.pelvis, [0.26, -0.5, 0.24, -0.3, 0.02, -0.28, -0.14, -0.44, -0.02, -0.58]);
     pen.shade(G.pelvis, 1);
     // The fork of the crotch, cloth pulling toward it.
-    foldShape(d, B.pelvis, G.pelvis, -0.36, 0.0, 0.16, view === 2 ? -0.1 : 0.04, 0.08, -2);
+    foldShape(d, B.pelvis, G.pelvis, -0.3, 0.0, 0.16, view === 2 ? -0.1 : 0.04, 0.08, -2);
+  }
+  if (d.lod >= 2) {
+    // The iliac ridge catches the light.
+    polyB(d, B.pelvis, [0.02, -0.5, 0.0, -0.36, -0.08, -0.44, -0.1, -0.54], true);
+    pen.shade(G.pelvis, 2);
   }
   if (d.lod >= 2 && !isSideish(view)) {
     if (view === 0) {
-      // Fly, pockets.
-      strokeB(d, B.pelvis, G.pelvis, -1, [0.3, 0.03, -0.3, 0.02]);
-      strokeB(d, B.pelvis, G.pelvis, -1, [0.24, 0.5, 0.02, 0.56]);
-      strokeB(d, B.pelvis, G.pelvis, -1, [0.24, -0.5, 0.02, -0.56]);
+      // The fly curving over, front pockets curving from the hip toward it.
+      strokeB(d, B.pelvis, G.pelvis, 0, [0.3, 0.05, 0.08, 0.1, -0.14, 0.08, -0.28, 0.0], ramp, 1);
+      strokeB(d, B.pelvis, G.pelvis, 0, [0.14, 0.54, 0.02, 0.42, -0.06, 0.24, -0.12, 0.12], ramp, 1);
+      strokeB(d, B.pelvis, G.pelvis, 0, [0.14, -0.54, 0.02, -0.42, -0.06, -0.24, -0.12, -0.12], ramp, 1);
     } else {
       // Back: seat seam and back pockets.
-      strokeB(d, B.pelvis, G.pelvis, -2, [0.34, 0.02, -0.36, 0.0]);
+      strokeB(d, B.pelvis, G.pelvis, -2, [0.34, 0.02, -0.3, 0.0]);
       strokeB(d, B.pelvis, G.pelvis, -1, [0.1, 0.18, -0.12, 0.22, -0.12, 0.5, 0.1, 0.54, 0.1, 0.18]);
       strokeB(d, B.pelvis, G.pelvis, -1, [0.1, -0.18, -0.12, -0.22, -0.12, -0.5, 0.1, -0.54, 0.1, -0.18]);
     }
@@ -521,8 +532,9 @@ function sleeve(d: Draw, tbl: readonly Pt[], map: readonly number[], ramp: numbe
     d.pt(map[p[0]], p[1], p[2], p[3] === 1);
   }
   if (tRoll < 1) {
-    d.pt(map[1], tRoll, 0.3, true);
-    d.pt(map[1], tRoll, -0.3, true);
+    // Cut square across the forearm: the roll is a band, not a bell.
+    d.pt(map[1], tRoll, 0.24, true);
+    d.pt(map[1], tRoll, -0.24, true);
   }
   pen.fill(ramp, tone, PARTL, group, -2);
   if (form) armForm(d, map, group);
@@ -531,10 +543,28 @@ function sleeve(d: Draw, tbl: readonly Pt[], map: readonly number[], ramp: numbe
     foldShape(d, map[0], group, 0.8, -0.14, 0.96, 0.08, 0.07);
     foldShape(d, map[1], group, 0.04, -0.14, 0.16, 0.08, 0.07);
   }
-  if (d.lod >= 1 && tRoll < 1) {
-    // The rolled cuff: a band of the sleeve's own lighter inside.
-    polyB(d, map[1], [tRoll - 0.1, -0.32, tRoll - 0.1, 0.32, tRoll, 0.32, tRoll, -0.32], true);
-    pen.shade(group, 0, ramp, 4);
+}
+
+/**
+ * A rolled cuff: one band a tone lighter than the shirt, straight edges, a texel wider than the
+ * forearm; drawn after the print so the check does not run across it.
+ */
+function rolledCuff(d: Draw, map: readonly number[], g: number, ramp: number, tRoll: number) {
+  const fore = map[1];
+  const w = 0.25;
+  const t0 = tRoll - 6.5 / (d.S * Math.max(0.2, d.A[fore]));
+  const pen = d.pen;
+  pen.begin();
+  d.pt(fore, t0, -w, true);
+  d.pt(fore, t0, w, true);
+  d.pt(fore, tRoll, w + 0.035, true);
+  d.pt(fore, tRoll, -w - 0.035, true);
+  pen.fill(ramp, 4, PARTL, g, -2);
+  if (d.lod >= 2) {
+    const a = d.away(fore);
+    polyB(d, fore, [t0 + 0.01, a * w, tRoll - 0.01, a * (w + 0.03), tRoll - 0.01, a * 0.05, t0 + 0.01, a * 0.04], true);
+    pen.shade(g, -1);
+    strokeB(d, fore, g, -1, [t0 + (tRoll - t0) * 0.5, -w, t0 + (tRoll - t0) * 0.5, w]);
   }
 }
 
@@ -579,6 +609,19 @@ function hand(d: Draw, tbl: readonly Pt[], bone: number, ramp: number, group: nu
     d.pt(bone, p[1], p[2] * narrow, p[3] === 1);
   }
   pen.fill(ramp, 3, PARTL, group, -1);
+  if (tbl === HAND_OPEN && d.S >= 16) {
+    // The fingers are parted by interior lines from the tip notches to the knuckles.
+    const line = (t0: number, n0: number, t1: number, n1: number) => {
+      pen.begin();
+      d.pt(bone, t0, n0 * narrow);
+      d.pt(bone, (t0 + t1) / 2, (n0 + n1) * 0.5 * narrow);
+      d.pt(bone, t1, n1 * narrow);
+      pen.stroke(group, 0, ramp, 1);
+    };
+    line(0.88, 0.125, 0.5, 0.13);
+    line(0.9, 0.035, 0.5, 0.04);
+    line(0.89, -0.09, 0.5, -0.07);
+  }
   if (d.lod >= 2) {
     // The palm's shadow, the lit back of the hand, knuckles.
     polyB(d, bone, [0.1, 0.05 * narrow, 0.46, 0.06 * narrow, 0.46, 0.2 * narrow, 0.1, 0.2 * narrow]);
@@ -680,7 +723,7 @@ function reachArm(d: Draw, side: number, shirt: number, skin: number, level: num
 /** The hand a figure shows at this size and in this pose. */
 function handFor(d: Draw, open: readonly Pt[]): readonly Pt[] {
   if (d.key.fists) return HAND_FIST;
-  return d.lod >= 2 ? open : HAND_MITT;
+  return d.S >= 16 ? open : HAND_MITT;
 }
 
 // ─── The worker ────────────────────────────────────────────────────────────
@@ -693,9 +736,9 @@ function hiVisVest(d: Draw, view: ViewId) {
     d.pt(B.chest, 0.42, 0.17, true);
     d.pt(B.chest, 0.33, 0.46);
     d.pt(B.chest, 0.04, 0.5);
-    d.pt(B.chest, -0.28, 0.5);
-    d.pt(B.waist, 0.0, 0.42);
-    d.pt(B.pelvis, 0.3, 0.48);
+    d.pt(B.chest, -0.28, 0.54);
+    d.pt(B.waist, 0.0, 0.52);
+    d.pt(B.pelvis, 0.3, 0.53);
     d.pt(B.pelvis, 0.12, 0.54, true);
     d.pt(B.pelvis, 0.05, 0.46, true);
     d.pt(B.pelvis, 0.12, 0.34, true);
@@ -705,9 +748,9 @@ function hiVisVest(d: Draw, view: ViewId) {
     d.pt(B.pelvis, 0.11, -0.28, true);
     d.pt(B.pelvis, 0.04, -0.4, true);
     d.pt(B.pelvis, 0.12, -0.54, true);
-    d.pt(B.pelvis, 0.3, -0.48);
-    d.pt(B.waist, 0.0, -0.42);
-    d.pt(B.chest, -0.28, -0.5);
+    d.pt(B.pelvis, 0.3, -0.53);
+    d.pt(B.waist, 0.0, -0.52);
+    d.pt(B.chest, -0.28, -0.54);
     d.pt(B.chest, 0.04, -0.5);
     d.pt(B.chest, 0.33, -0.46);
     d.pt(B.chest, 0.42, -0.17, true);
@@ -717,18 +760,18 @@ function hiVisVest(d: Draw, view: ViewId) {
     d.pt(B.chest, 0.42, 0.17, true);
     d.pt(B.chest, 0.36, 0.46);
     d.pt(B.chest, 0.06, 0.5);
-    d.pt(B.chest, -0.28, 0.5);
-    d.pt(B.waist, 0.0, 0.39);
-    d.pt(B.pelvis, 0.3, 0.46);
+    d.pt(B.chest, -0.28, 0.54);
+    d.pt(B.waist, 0.0, 0.5);
+    d.pt(B.pelvis, 0.3, 0.52);
     d.pt(B.pelvis, 0.1, 0.53, true);
     d.pt(B.pelvis, 0.04, 0.32, true);
     d.pt(B.pelvis, 0.12, 0.1, true);
     d.pt(B.pelvis, 0.03, -0.14, true);
     d.pt(B.pelvis, 0.1, -0.34, true);
     d.pt(B.pelvis, 0.1, -0.53, true);
-    d.pt(B.pelvis, 0.3, -0.46);
-    d.pt(B.waist, 0.0, -0.39);
-    d.pt(B.chest, -0.28, -0.5);
+    d.pt(B.pelvis, 0.3, -0.52);
+    d.pt(B.waist, 0.0, -0.5);
+    d.pt(B.chest, -0.28, -0.54);
     d.pt(B.chest, 0.06, -0.5);
     d.pt(B.chest, 0.36, -0.46);
     d.pt(B.chest, 0.42, -0.17, true);
@@ -752,17 +795,17 @@ function hiVisVest(d: Draw, view: ViewId) {
   } else {
     d.pt(B.chest, 0.42, 0.22, true);
     d.pt(B.chest, 0.32, 0.48);
-    d.pt(B.chest, -0.3, 0.46);
-    d.pt(B.waist, 0.0, 0.34);
-    d.pt(B.pelvis, 0.28, 0.4);
+    d.pt(B.chest, -0.3, 0.48);
+    d.pt(B.waist, 0.0, 0.4);
+    d.pt(B.pelvis, 0.28, 0.43);
     d.pt(B.pelvis, 0.1, 0.46, true);
     d.pt(B.pelvis, 0.03, 0.2, true);
     d.pt(B.pelvis, 0.11, -0.08, true);
     d.pt(B.pelvis, 0.03, -0.34, true);
     d.pt(B.pelvis, 0.12, -0.54, true);
     d.pt(B.pelvis, 0.3, -0.5);
-    d.pt(B.waist, 0.0, -0.46);
-    d.pt(B.chest, -0.3, -0.52);
+    d.pt(B.waist, 0.0, -0.48);
+    d.pt(B.chest, -0.3, -0.54);
     d.pt(B.chest, 0.3, -0.54);
     d.pt(B.chest, 0.42, -0.14, true);
     if (view === 1) d.pt(B.chest, 0.1, 0.14, true);
@@ -1002,12 +1045,12 @@ function check(d: Draw, group: number, bone: number, a0: number, a1: number, n0:
 const SHIRT_F: readonly Pt[] = [
   [2, 0.44, 0.18],
   [2, 0.38, 0.36],
-  [2, 0.26, 0.58],
-  [2, 0.02, 0.66],
-  [2, -0.28, 0.6],
-  [2, -0.54, 0.5],
-  [1, -0.02, 0.42],
-  [0, 0.36, 0.54],
+  [2, 0.26, 0.63],
+  [2, 0.02, 0.7],
+  [2, -0.28, 0.66],
+  [2, -0.54, 0.57],
+  [1, -0.02, 0.52],
+  [0, 0.36, 0.55],
   [0, 0.16, 0.58],
   [0, 0.08, 0.5],
   [0, 0.02, 0.28],
@@ -1015,12 +1058,12 @@ const SHIRT_F: readonly Pt[] = [
   [0, 0.02, -0.28],
   [0, 0.08, -0.5],
   [0, 0.16, -0.58],
-  [0, 0.36, -0.54],
-  [1, -0.02, -0.42],
-  [2, -0.54, -0.5],
-  [2, -0.28, -0.6],
-  [2, 0.02, -0.66],
-  [2, 0.26, -0.58],
+  [0, 0.36, -0.55],
+  [1, -0.02, -0.52],
+  [2, -0.54, -0.57],
+  [2, -0.28, -0.66],
+  [2, 0.02, -0.7],
+  [2, 0.26, -0.63],
   [2, 0.38, -0.36],
   [2, 0.44, -0.18],
 ];
@@ -1029,22 +1072,22 @@ const SHIRT_Q: readonly Pt[] = [
   [2, 0.5, 0.18],
   [2, 0.4, 0.4],
   [2, 0.22, 0.6],
-  [2, -0.04, 0.6],
-  [2, -0.32, 0.52],
-  [2, -0.55, 0.4],
-  [1, -0.02, 0.33],
+  [2, -0.04, 0.62],
+  [2, -0.32, 0.55],
+  [2, -0.55, 0.45],
+  [1, -0.02, 0.4],
   [0, 0.34, 0.44],
   [0, 0.16, 0.48],
   [0, 0.06, 0.34],
   [0, -0.02, 0.0],
   [0, 0.04, -0.3],
-  [0, 0.1, -0.52],
-  [0, 0.18, -0.56],
+  [0, 0.1, -0.5],
+  [0, 0.18, -0.54],
   [0, 0.34, -0.5],
-  [1, -0.02, -0.44],
-  [2, -0.55, -0.52],
-  [2, -0.28, -0.62],
-  [2, 0.04, -0.68],
+  [1, -0.02, -0.47],
+  [2, -0.55, -0.54],
+  [2, -0.28, -0.65],
+  [2, 0.04, -0.69],
   [2, 0.26, -0.62],
   [2, 0.4, -0.36],
   [2, 0.5, -0.12],
@@ -1095,6 +1138,7 @@ export const FLANNEL: FigureDef = {
       d.wedge(ARM_SHADE_F, map, g, -1, true);
       band(d, ARM_CORE, map, g, -1, 1, true);
       if (d.lod >= 1) band(d, DELTOID_LIT, map, g, 1, -1, true);
+      if (d.lod >= 1) rolledCuff(d, map, g, shirt, 0.32);
       hand(d, open, hb, R.skinLive, hg, narrow);
     };
     if (view === 4) {

@@ -515,4 +515,70 @@ if (which.has('r2')) {
   strip('s-civ-states', FLANNEL, 'civcower', [0, 1, 2], null, 130, 2);
   strip('s-civ-plead', FLANNEL, 'civplead', [0, 1, 2], null, 130, 2);
 }
+
+if (which.has('check')) {
+  // The judges' numbers, on the silhouette, not the skeleton: widest rows with the arms out, the
+  // inseam, the front walk's boots, the corpse's box, far-size connectivity.
+  const SZ = 180;
+  const S = SZ / 6.25;
+  const c = renderer.canvas;
+  const TEST = { aL: [0, 110, 0], aR: [0, 110, 0], lL: [0, 2, 0], lR: [0, 2, 0] };
+  for (const [name, def] of FIGS) {
+    for (const view of [0, 1, 3, 4]) {
+      const f = renderer.draw(def, TEST, 0, view, SZ);
+      const cx = Math.round(f.gx);
+      const rowW = (y) => { let a = 1e9, b = -1; const lim = Math.round(0.97 * S); for (let x = Math.max(0, cx - lim); x < Math.min(f.w, cx + lim); x++) if (f.pixels[y * f.w + x]) { a = Math.min(a, x); b = Math.max(b, x); } return b < 0 ? 0 : b - a + 1; };
+      const rows = (a, b) => { const r = []; for (let y = Math.floor(a * f.h); y < b * f.h; y++) r.push(rowW(y)); return r; };
+      // Inseam apex: walking up the centre column from below until the figure is solid.
+      let apex = f.h;
+      for (let y = f.h - 1; y > f.h * 0.3; y--) { if (!f.pixels[y * f.w + cx]) apex = y; else if (apex !== f.h) break; }
+      const chest = Math.max(...rows(0.24, 0.34));
+      const waist = Math.min(...rows(0.36, 0.46));
+      const hips = Math.max(...rows(0.46, 0.66));
+      console.log(`${name} v${view} (arms out, ${f.h} tall): chest ${chest}  waist ${waist}  hip-thigh (widest row) ${hips}  inseam apex row ${apex} = ${(((f.h - apex) / f.h) * 100).toFixed(1)} % above ground`);
+    }
+  }
+  // Front walk: soles and boots, from the drawing groups (G.bootL = 3, G.bootR = 4).
+  for (const [name, def, pose] of [['worker', WORKER, 'zshamble'], ['flannel', FLANNEL, 'civwalk']]) {
+    const F = POSES[pose];
+    let sep = 0, solesMax = 0;
+    const log = [];
+    for (let i = 0; i < F.length; i++) {
+      renderer.draw(def, F, i, 0, SZ);
+      const b = { 3: [1e9, -1, -1], 4: [1e9, -1, -1] };
+      for (let y = c.y0; y <= c.y1; y++) for (let x = c.x0; x <= c.x1; x++) { const g = c.group[y * c.w + x]; if (b[g]) { b[g][0] = Math.min(b[g][0], x); b[g][1] = Math.max(b[g][1], x); b[g][2] = Math.max(b[g][2], y); } }
+      const L = b[3], R = b[4];
+      const gap = Math.max(L[0], R[0]) - Math.min(L[1], R[1]) - 1;
+      const dy = Math.abs(L[2] - R[2]);
+      solesMax = Math.max(solesMax, dy);
+      if (gap >= 0) sep++;
+      log.push(`${i}:${gap}/${dy}`);
+    }
+    console.log(`${name} ${pose} front: boots clear on ${sep}/${F.length} frames, sole offset max ${solesMax} tx  [frame:gap/soledy] ${log.join(' ')}`);
+  }
+  // The corpse's bounding box, every view.
+  for (const v of [0, 1, 2, 3, 4]) {
+    const f = renderer.draw(WORKER, POSES.zdeath, POSES.zdeath.length - 1, v, SZ);
+    console.log(`corpse v${v}: ${f.w} x ${f.h} tx at ${SZ}`);
+  }
+  // Far sizes are one connected part.
+  for (const [name, def, poses] of [['worker', WORKER, ['zidle', 'zshamble']], ['flannel', FLANNEL, ['civstand', 'civrun']]]) {
+    let bad = 0, n = 0;
+    for (const p of poses) for (let fr = 0; fr < POSES[p].length; fr += p.includes('stand') || p.includes('idle') ? 1 : 2) for (const v of [0, 1, 2, 3, 4]) for (const sz of [24, 30, 40, 50, 60, 70, 80]) {
+      const f = renderer.draw(def, POSES[p], fr, v, sz);
+      const seen = new Uint8Array(f.w * f.h);
+      let parts = 0;
+      for (let i = 0; i < f.w * f.h; i++) {
+        if (!f.pixels[i] || seen[i]) continue;
+        parts++;
+        const st = [i];
+        seen[i] = 1;
+        while (st.length) { const k = st.pop(); const x = k % f.w; for (const m of [x > 0 ? k - 1 : -1, x < f.w - 1 ? k + 1 : -1, k - f.w, k + f.w, x > 0 ? k - f.w - 1 : -1, x < f.w - 1 ? k - f.w + 1 : -1, x > 0 ? k + f.w - 1 : -1, x < f.w - 1 ? k + f.w + 1 : -1]) if (m >= 0 && m < f.w * f.h && f.pixels[m] && !seen[m]) { seen[m] = 1; st.push(m); } }
+      }
+      n++;
+      if (parts !== 1) { bad++; if (bad < 8) console.log(`  detached: ${name} ${p} f${fr} v${v} @${sz} parts ${parts}`); }
+    }
+    console.log(`${name}: ${n} far sprites checked, ${bad} with detached pixels`);
+  }
+}
 console.log(`done in ${(performance.now() - t0).toFixed(0)} ms`);
