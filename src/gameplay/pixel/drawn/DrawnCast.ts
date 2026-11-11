@@ -300,12 +300,15 @@ export class DrawnCast {
       this.atlasReady = true;
     }
     const tex = r.properties.get(this.atlas) as { __webglTexture: WebGLTexture };
-    r.state.bindTexture(gl.TEXTURE_2D, tex.__webglTexture);
+    const st = r.state;
+    // Through three's state tracker, so its texture-binding cache stays honest.
+    st.bindTexture(gl.TEXTURE_2D, tex.__webglTexture);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, w, h, gl.RED, gl.UNSIGNED_BYTE, this.upload, 0);
-    r.state.reset(); // (three re-binds what it needs; its texture cache must not believe this one is still bound)
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    st.unbindTexture();
   }
 
   /**
@@ -365,7 +368,10 @@ export class DrawnCast {
     // Size: the rig's height at the ground point's depth, in frame pixels; texels double past the cap.
     const full = q.scale * 1.83 * ((P[5] * gh) / (2 * D));
     const k = full > MAX_FIGURE_PX ? Math.ceil(full / MAX_FIGURE_PX) : 1;
-    const size = sizeStep(full / k);
+    // A size change is only taken once it has really moved (a figure walking toward the camera
+    // would otherwise miss the cache on every redraw for a texel of height).
+    let size = sizeStep(full / k);
+    if (st.size !== 0 && Math.abs(full / k - st.size) < (st.size < 100 ? 2 : 4)) size = st.size;
     // View: the figure's forward against the camera, nearest drawn view (with hysteresis).
     _c.setFromMatrixPosition(cam.matrixWorld).sub(_rp);
     const cl = Math.hypot(_c.x, _c.z);
@@ -408,6 +414,9 @@ export class DrawnCast {
     let hyq = Math.round((rigHy - (sk.sy[J.head] + bias[1]) * S) / (S * 0.1));
     hxq = Math.max(-7, Math.min(7, hxq));
     hyq = Math.max(-7, Math.min(7, hyq));
+    // (The same hysteresis for the head offset: a bucket's edge must not flicker between frames.)
+    if (Math.abs(hxq - st.hx) <= 1) hxq = st.hx;
+    if (Math.abs(hyq - st.hy) <= 1) hyq = st.hy;
     const entry = this.frameFor(q, pose, q.def!.id, poseIdOf(frames), q.frame, v, size, hxq, hyq, arms);
     if (!entry) return 'wait';
     st.k = k;

@@ -793,6 +793,40 @@ stay live 3D meshes over the sprite (blood pools too). Tuning: `&spriteLook=pal:
 captures: `scripts/snap-art.mjs`, `scripts/look-art.mjs`; numbers: `scripts/bench-art.mjs`
 (draw calls, redraws, paint ms, primitives, sprite vs model silhouette area, style pops).
 
+### PIXEL WORLD 3 people — drawn figures (`castlook=d`, `gameplay/pixel/drawn/`)
+
+Round one of docs/PIXELWORLD3.md: the humanoids that have a figure are not painted over the rig any
+more. They are DRAWN in 2D: authored outlines on a designed skeleton (`skeleton.ts`, the canon's
+6.25-head proportions), rasterised on the CPU at the on-screen size into an indexed buffer
+(`raster.ts`: fill, shade shapes, ink round the silhouette of the union, interior lines), shown as a
+flat, screen-aligned sprite (`SpriteArt.paintDrawn`) with the palette in a lookup texture. The 3D rig
+stays hidden and stays the hitbox. Behind `&castlook=d` (no flag: CEL, the old path): today only the
+construction-worker zombie (`variant: 'worker'`) and the flannel civilian have a figure; everything
+else is CEL. `&drawnfig=all` (look-dev) shows every walker / civilian as those two figures.
+
+- `body.ts` limb tables (outlines in bone space: bone 0/1, t along, n off the axis), `head.ts` heads
+  and faces per view with three levels of detail, `outfits.ts` the costumes (back-to-front order,
+  shadow shapes, interior strokes, plaid), `poses.ts` animator's keyframes (angles on designed
+  bones; 12-frame walk and run cycles from six drawn keys + in-betweens).
+- Views: front, 3/4, side, 3/4 back, back; the rest are mirrors (`DrawnSprite.mirror`, a UV flip: no
+  raster). Faces, hair and hats are drawn per view; outlines are shared between a view and its back.
+- `states.ts` maps an entity state + phase to a frame (`Zombie.drawnFigure`, `Civilian.drawnFigure`
+  fill a `DrawnQuery`; no allocation).
+- Placement (`DrawnCast.place`): feet on the rig's ground point, the sprite shifted so its drawn
+  torso centre sits over the rig's torso, the neck redrawn (`hx`, `hy` in 0.1 head-units) so its head
+  centre sits over the rig's head; the arms take the rig's angles in 3/4 and side views (where they
+  cross the torso) and in windups. Aim checks: `tests/unit/drawnAim.ts` (head strict in every view;
+  torso strict front and back, in 3/4 and side views an arm hit is allowed where the arm crosses the
+  torso on the rig too; civilians' cower / hide excluded: the arms ARE over the head).
+- Frames: 2048² R8 atlas of palette indices (`DrawnCast`), shelf LRU keyed by (figure, pose, frame,
+  view, size, head offset, damage, arm buckets), ≤ `MAX_RASTERS` (3) rasters per frame, the nearest
+  cached size until the exact one is ready. Stage light is a palette rebuild (`setStageLight`,
+  `CastStageLight.step` / `floor`), not a repaint; fog in whole bands per sprite.
+- Look-dev without a browser: `node --experimental-strip-types --no-warnings scripts/figure-sheet.mjs
+  --out DIR --sheet turn,anim,states,sizes,solid,measure,look,perf` (labelled PNGs in a few ms).
+  Round one's rollout plan is in the round-one report (per figure group: outfit sketches, then
+  `poses.ts` / `states.ts` for its movement set, then `drawnFigure` on the entity).
+
 ## Art style: PIXEL WORLD — PixelWorld environments (`content/pixelworld/`)
 
 The ART setting has three values (`Settings.art`, `core/art.ts` is the ONE place that
@@ -1739,7 +1773,7 @@ render / settle / total ms (`scripts/load-bench.mjs`).
 
 `?stage=z1` jump into a stage · `&art=3d|sprites|pixel` ART: CLASSIC / PIXEL CAST / PIXEL WORLD (default) ·
 `&pwstore=<tag>` persist painted atlases on the dev server (version `dev-<tag>`; `0` = off) ·
-`&spriteLook=pal:0,dirs:8` sprite look tuning · `&castlook=0|b` cast look (`0` = the first PIXEL CAST look, `b` = the PIXEL CAST 2 cel look) · `&beat=5` start at beat 5 · `&autoplay=1`
+`&spriteLook=pal:0,dirs:8` sprite look tuning · `&castlook=0|b|d` cast look (`0` = the first PIXEL CAST look, `b` = the PIXEL CAST 2 cel look, `d` = drawn figures for the humanoids that have one) · `&beat=5` start at beat 5 · `&autoplay=1`
 `&pwdebug=mag|lvl|tone|ramp|steps|light|fog` PixelWorld debug views (`1` = compiled in, off
 until `__pwDebug(view)`) · `&pwup=0` no 2× fallback · `&pwaniso=0` one level for both texel
 axes · `&pwlight=0` the first pass's light (all three off = the first pass's frames) ·

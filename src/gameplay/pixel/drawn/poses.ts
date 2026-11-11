@@ -10,7 +10,7 @@ const zPose = (o: PoseKey): PoseKey => ({ cLean: 8, sLean: 6, lean: 4, hPitch: 1
 
 /** A zombie standing: weight on one leg, one shoulder dropped, an arm dragging, the head lolling. */
 export const ZIDLE: PoseKey[] = [
-  zPose({ px: 0.06, tilt: 4, sTilt: -3, cTilt: -5, hRoll: -8, aL: [6, 6, 18], aR: [10, 10, 26], lL: [4, 3, 8], lR: [-3, 5, 4], py: -0.04 }),
+  zPose({ px: 0.08, tilt: 5, sTilt: -4, cTilt: -9, cLean: 10, sLean: 8, hRoll: -13, aL: [2, 5, 10], aR: [14, 12, 30], lL: [4, 3, 8], lR: [-3, 6, 4], py: -0.05 }),
 ];
 
 /** A linear in-between of two keys (an animator's in-between; the keys hold the design). */
@@ -52,17 +52,17 @@ function doubled(keys: PoseKey[]): PoseKey[] {
 /** Zombie shamble, six frames: a stiff planted leg, the other dragged through. */
 const ZSHAMBLE6: PoseKey[] = [
   // 0: left foot planted forward, right trailing.
-  zPose({ px: 0.05, py: -0.06, tilt: 5, sTilt: -3, cTilt: -5, turn: 6, sTurn: -10, hRoll: -8, aL: [-8, 10, 20], aR: [30, 16, 30], lL: [20, 4, 8], lR: [-14, 8, 16] }),
+  zPose({ px: 0.05, py: -0.06, tilt: 5, sTilt: -4, cTilt: -8, cLean: 10, turn: 6, sTurn: -10, hRoll: -12, aL: [-4, 5, 12], aR: [32, 16, 34], lL: [20, 4, 8], lR: [-14, 8, 16] }),
   // 1: weight rolling onto the left leg.
-  zPose({ px: 0.09, py: -0.02, tilt: 7, sTilt: -4, cTilt: -6, turn: 3, sTurn: -7, hRoll: -10, aL: [0, 10, 18], aR: [24, 16, 34], lL: [8, 4, 10], lR: [-12, 8, 34] }),
+  zPose({ px: 0.09, py: -0.02, tilt: 7, sTilt: -5, cTilt: -9, cLean: 10, turn: 3, sTurn: -7, hRoll: -14, aL: [2, 5, 14], aR: [26, 16, 36], lL: [8, 4, 10], lR: [-12, 8, 34] }),
   // 2: passing: the right foot dragged past.
-  zPose({ px: 0.08, py: 0.05, tilt: 6, sTilt: -3, cTilt: -5, turn: -3, sTurn: 2, hRoll: -7, aL: [14, 10, 24], aR: [10, 14, 30], lL: [-2, 4, 6], lR: [2, 10, 48] }),
+  zPose({ px: 0.08, py: 0.05, tilt: 6, sTilt: -4, cTilt: -8, cLean: 9, turn: -3, sTurn: 2, hRoll: -11, aL: [12, 6, 20], aR: [14, 14, 30], lL: [-2, 4, 6], lR: [2, 10, 48] }),
   // 3: right foot forward.
-  zPose({ px: -0.05, py: -0.06, tilt: -5, sTilt: 6, cTilt: -2, turn: -6, sTurn: 10, hRoll: -8, aL: [30, 12, 34], aR: [-6, 14, 18], lL: [-16, 8, 20], lR: [18, 6, 8] }),
+  zPose({ px: -0.05, py: -0.06, tilt: -5, sTilt: 5, cTilt: -3, cLean: 8, turn: -6, sTurn: 10, hRoll: -10, aL: [30, 12, 34], aR: [-4, 12, 16], lL: [-16, 8, 20], lR: [18, 6, 8] }),
   // 4: weight rolling onto the right leg.
-  zPose({ px: -0.09, py: -0.02, tilt: -7, sTilt: 7, cTilt: 0, turn: -3, sTurn: 7, hRoll: -6, aL: [24, 12, 30], aR: [0, 14, 20], lL: [-12, 8, 36], lR: [8, 6, 10] }),
+  zPose({ px: -0.09, py: -0.02, tilt: -7, sTilt: 6, cTilt: -1, cLean: 8, turn: -3, sTurn: 7, hRoll: -8, aL: [24, 12, 30], aR: [2, 12, 20], lL: [-12, 8, 36], lR: [8, 6, 10] }),
   // 5: passing: the left foot dragged past.
-  zPose({ px: -0.08, py: 0.04, tilt: -6, sTilt: 6, cTilt: -3, turn: 3, sTurn: -2, hRoll: -9, aL: [12, 10, 28], aR: [14, 14, 26], lL: [4, 10, 44], lR: [-2, 6, 6] }),
+  zPose({ px: -0.08, py: 0.04, tilt: -6, sTilt: 5, cTilt: -4, cLean: 8, turn: 3, sTurn: -2, hRoll: -11, aL: [12, 10, 28], aR: [12, 12, 24], lL: [4, 10, 44], lR: [-2, 6, 6] }),
 ];
 
 /** The cycle shown: twelve frames. */
