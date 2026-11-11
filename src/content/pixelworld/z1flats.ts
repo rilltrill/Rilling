@@ -142,7 +142,10 @@ function* light(e: Elev, o: { moon?: number; foot?: number; right?: number } = {
     const h = hash2(i, 3, seed + 12);
     return (h > 0.7 ? 2.4 : h > 0.34 ? 1.2 : 0.2) + (hash2(i + 1, 3, seed + 12) > 0.5 && (x % stepW) / stepW > 0.8 ? 0.6 : 0);
   };
-  e.value((x, y) => (y > e.Y(GROUND_H + 1.0 + roofOpp(x)) + (x / W) * 40 ? 1 : 0), -1, 0.14, { y0: e.Y(GROUND_H + 3.6) });
+  // (One edge row per column, worked out once: this field is read at every texel below it.)
+  const edge = new Int16Array(W);
+  for (let x = 0; x < W; x++) edge[x] = Math.floor(e.Y(GROUND_H + 1.0 + roofOpp(x)) + (x / W) * 40);
+  e.value((x, y) => (y > edge[x] ? 1 : 0), -1, 0.14, { y0: e.Y(GROUND_H + 3.6) });
   yield;
   e.footGrime();
   e.ink();

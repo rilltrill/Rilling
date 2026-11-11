@@ -1627,20 +1627,15 @@ export class Elev {
   /** Ink down the shadow side and along the outline: what makes a flat read as a drawing. */
   ink(): this {
     const { c, W, H } = this;
-    const out = new Uint8Array(W * H);
+    const { ramp, tone, flag } = c;
+    // (Direct array access: this visits every texel of every picture.)
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         const i = y * W + x;
-        if (!c.ramp[i] || c.flag[i] & PWF.GLOW) continue;
-        const up = !c.at(x, y - 1);
-        const dn = !c.at(x, y + 1);
-        const lf = !c.at(x - 1, y);
-        const rt = !c.at(x + 1, y);
-        if (up || dn || lf || rt) out[i] = 1;
+        if (!ramp[i] || flag[i] & PWF.GLOW) continue;
+        const edge = y === 0 || y === H - 1 || x === 0 || x === W - 1 || !ramp[i - W] || !ramp[i + W] || !ramp[i - 1] || !ramp[i + 1];
+        if (edge && tone[i] > 0.6) tone[i] = 0.6;
       }
-    }
-    for (let i = 0; i < W * H; i++) {
-      if (out[i]) c.tone[i] = Math.min(c.tone[i], 0.6);
     }
     return this;
   }
