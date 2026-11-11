@@ -189,7 +189,7 @@ export const ZDEATH: PoseKey[] = [
     lL: [18, 12, 24],
     lR: [6, 18, 16],
     // The same body with its feet toward the viewer: the street's foreshortening, arms flung out, head fallen aside.
-    front: { noGround: true, py: -2.32, lean: -72, sLean: -2, cLean: -2, hPitch: 6, hRoll: 62, aL: [2, 78, 14], aR: [0, 70, 26], lL: [8, 22, 20], lR: [4, 30, 14] },
+    front: { noGround: true, py: -2.32, lean: -72, sLean: -2, cLean: -2, hPitch: 6, hRoll: 40, aL: [2, 78, 14], aR: [0, 70, 26], lL: [8, 22, 20], lR: [4, 30, 14] },
   },
 ];
 

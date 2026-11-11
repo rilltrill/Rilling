@@ -325,15 +325,18 @@ function liveFace(d: Draw, s: HeadSpec, g: HeadGroups, view: ViewId) {
       return;
     }
     // A white, a pupil looking at the player, a brow lifted with fear.
-    poly(d, 0.065, n - wide, 0.065, n + wide, -0.015, n + wide, -0.02, n - wide);
+    poly(d, 0.075, n - wide, 0.075, n + wide, -0.035, n + wide, -0.04, n - wide);
     pen.shade(g.head, 0, R.white, 4);
     const ex = d.px(B.head, 0.02, n + wide * 0.1);
     const ey = d.py(B.head, 0.02, n + wide * 0.1);
     pen.plot(Math.floor(ex), Math.floor(ey), g.head, 0, R.hairDark, 1);
     if (lod >= 2) {
+      // A wide pupil, the whites showing round it: frightened, not sleepy.
       pen.plot(Math.floor(ex) + 1, Math.floor(ey), g.head, 0, R.hairDark, 1);
+      pen.plot(Math.floor(ex), Math.floor(ey) + 1, g.head, 0, R.hairDark, 1);
+      pen.plot(Math.floor(ex) + 1, Math.floor(ey) + 1, g.head, 0, R.hairDark, 1);
       // Upper lid.
-      poly(d, 0.08, n - wide * 1.1, 0.08, n + wide * 1.1, 0.06, n + wide * 1.05, 0.06, n - wide);
+      poly(d, 0.09, n - wide * 1.1, 0.09, n + wide * 1.1, 0.075, n + wide * 1.05, 0.075, n - wide);
       pen.shade(g.head, 0, s.skin, 2);
     }
     if (lod >= 1) {
@@ -354,7 +357,7 @@ function liveFace(d: Draw, s: HeadSpec, g: HeadGroups, view: ViewId) {
     }
   }
   // The mouth: open, gasping.
-  const w = view === 1 ? 0.12 : 0.15;
+  const w = view === 1 ? 0.1 : 0.15;
   if (lod === 0) {
     const x = Math.floor(d.px(B.head, -0.3, mid));
     const y = Math.floor(d.py(B.head, -0.3, mid));
@@ -365,8 +368,11 @@ function liveFace(d: Draw, s: HeadSpec, g: HeadGroups, view: ViewId) {
   poly(d, -0.28, mid + w * 0.75, -0.35, mid + w * 0.55, -0.35, mid - w * 0.55, -0.28, mid - w * 0.75);
   pen.shade(g.head, 0, R.blood, 1);
   if (lod >= 2) {
-    poly(d, -0.275, mid + w * 0.62, -0.275, mid - w * 0.62, -0.3, mid - w * 0.5, -0.3, mid + w * 0.5);
-    pen.shade(g.head, 0, R.teeth, 4);
+    // A row of teeth under the lip.
+    const y0 = Math.floor(d.py(B.head, -0.29, mid));
+    const x0 = Math.ceil(d.px(B.head, -0.29, mid - w * 0.5));
+    const x1 = Math.floor(d.px(B.head, -0.29, mid + w * 0.5));
+    for (let x = x0; x <= x1; x++) pen.plot(x, y0, g.head, 0, R.teeth, 4);
   }
 }
 

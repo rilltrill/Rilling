@@ -575,7 +575,7 @@ export class DrawnCast {
     const sk = f.d.sk;
     if (hc > 0) {
       b[0] = (hx / hc + 0.5 - f.d.cx) / S - sk.sx[J.head];
-      b[1] = (f.d.cy - hy / hc - 0.5) / S - sk.sy[J.head];
+      b[1] = (f.d.cy - hy / hc - 0.5) / S - (sk.sy[J.head] - (def.neck ?? 0));
     }
     if (tc > 0) {
       b[2] = (tx / tc + 0.5 - f.d.cx) / S - sk.sx[J.chest];

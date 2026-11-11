@@ -1141,7 +1141,7 @@ export class SpriteArt {
     if (this.drawnStage !== (this.world.stage?.id ?? '')) {
       this.drawnStage = this.world.stage?.id ?? '';
       const sl = castStageLight(this.world.stage?.id, this.night);
-      this.drawn.setStageLight(sl.step, sl.floor);
+      this.drawn.setStageLight(sl.step, sl.floor, sl.tint, sl.tintAmt);
     }
     w.scene.updateMatrixWorld();
     // Nothing moves until the main render: it can skip its own matrix pass (restored in endFrame).

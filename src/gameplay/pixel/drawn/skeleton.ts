@@ -22,8 +22,7 @@ export const BODY = {
   pelvisToWaist: 0.55,
   waistToChest: 0.85,
   chestToNeck: 0.52,
-  /** A little longer than the rest of the canon asks: a jaw on the collar reads as no neck at all. */
-  neckToHead: 0.6,
+  neckToHead: 0.56,
   /** Shoulder joints from the chest origin. */
   shoulderX: 0.56,
   shoulderUp: 0.25,

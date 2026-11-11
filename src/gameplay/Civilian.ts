@@ -1346,11 +1346,15 @@ export class Civilian extends Entity {
    * put until they're rescued; then they jog off the edge (PerchedCivilian drops
    * them to the ground).
    */
+  /** Metres moved over the ground so far (the drawn run cycle follows this, not the clock). */
+  private travel = 0;
+
   private step(dir: THREE.Vector3, dist: number) {
     if (dist <= 0 || (this.perched && this.phase !== 'leave')) return;
     const p = this.root.position;
     p.x += dir.x * dist;
     p.z += dir.z * dist;
+    this.travel += dist;
     if (!this.perched) p.y = this.world.groundAt(p.x, p.z);
   }
 
@@ -1395,7 +1399,7 @@ export class Civilian extends Entity {
   /** PIXEL WORLD 3 (`castlook=d`): round one draws the civilian in the flannel shirt. */
   override drawnFigure(q: DrawnQuery): boolean {
     if (this.look.outfit !== 'flannel' && !isDrawnEveryone()) return false;
-    const pick = civilianFrame(this.phase, this.phaseT, this.shot, this.age, this.age * 13.5);
+    const pick = civilianFrame(this.phase, this.phaseT, this.shot, this.age, this.travel);
     q.def = FLANNEL;
     q.frames = pick.frames;
     q.frame = pick.frame;

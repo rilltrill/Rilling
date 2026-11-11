@@ -100,6 +100,12 @@ export class Draw {
     this.sg[B.head] = -1;
     let hx = sk.sx[J.head] - sk.sx[J.neck];
     let hy = sk.sy[J.head] - sk.sy[J.neck];
+    // Folded right over toward or away from the viewer, the neck points down the screen; a head
+    // never hangs upside down in those views (it foreshortens instead).
+    if ((view === 0 || view === 4) && hy < 0.25) {
+      this.A[B.head] = 0.7;
+      hy = 0.25;
+    }
     const hl = Math.max(1e-4, Math.hypot(hx, hy));
     hx /= hl;
     hy /= hl;
@@ -310,7 +316,7 @@ export function makeFigureRenderer() {
     d.S = pxTall / HEADS;
     // (The aim-fair head offset comes in whole texels: the head steps on the sprite's own grid.)
     sk.sx[J.head] += hx / d.S;
-    sk.sy[J.head] += hy / d.S;
+    sk.sy[J.head] += hy / d.S + (def.neck ?? 0);
     d.cx = canvas.w / 2;
     d.cy = canvas.h - 8;
     d.lod = lod >= 0 ? lod : lodFor(d.S, -1);

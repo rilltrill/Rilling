@@ -116,7 +116,7 @@ const res = await page.evaluate(async () => {
     const want = { head: 1, torso: 2 };
     // A drawn figure (castlook=d): read its frame's part map instead of the GPU figure.
     const st = s.drawn && s.drawn.pose ? s.drawn : null;
-    const part = st ? sp.drawn.debugParts(st.def, st.pose, st.view, st.size, st.hx, st.hy, st.flags) : null;
+    const part = st ? sp.drawn.debugParts(st.def, st.pose, st.view, st.size, st.hx, st.hy, st.flags, st.lod) : null;
     const drawnAt = (cx, cy) => {
       // cx, cy = sprite texels from the left / top (the image as displayed).
       const col = st.mirror ? part.w - 1 - Math.floor(cx) : Math.floor(cx);

@@ -221,7 +221,7 @@ export abstract class Zombie extends Enemy {
     q.flags = this.severed[0] | (this.severed[1] << 2) | (this.headless ? 16 : 0);
     q.lockView = this.state === 'dying';
     rigArms(q, this.r.armL, this.r.armR);
-    q.armsAlways = this.state === 'windup' || this.state === 'recover';
+    q.armsAlways = false;
     // (Rig pivots stay live; the baked meshes' matrices do not. The torso hitbox centre is 22 cm up the spine.)
     const sm = this.r.spine.matrixWorld.elements;
     q.chest.set(sm[12] + sm[4] * 0.22, sm[13] + sm[5] * 0.22, sm[14] + sm[6] * 0.22);

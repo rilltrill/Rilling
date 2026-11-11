@@ -21,6 +21,8 @@ export interface FigureDef {
   rest: PoseKey;
   name: string;
   ground?: boolean;
+  /** Extra neck (hu): a hanging jaw would otherwise sit on the collar. */
+  neck?: number;
   paint(d: Draw, view: ViewId): void;
 }
 
@@ -127,18 +129,27 @@ function foldShape(d: Draw, bone: number, g: number, t0: number, n0: number, t1:
 function partLimb(d: Draw, tbl: readonly Pt[], map: readonly number[], which: 0 | 1, ramp: number, group: number, part: number, line: number) {
   const pen = d.pen;
   pen.begin();
+  // The tables run down the outer side, round the end and back up the inner side: the closing
+  // cap goes where the skipped bone would have been.
+  let capped = false;
   for (let i = 0; i < tbl.length; i++) {
     const p = tbl[i];
-    if (p[0] !== which) continue;
+    if (p[0] !== which) {
+      if (!capped) {
+        capped = true;
+        if (which === 0) {
+          d.pt(map[0], 1.08, 0.2);
+          d.pt(map[0], 1.14, 0.0);
+          d.pt(map[0], 1.08, -0.18);
+        }
+      }
+      continue;
+    }
     d.pt(map[which], p[1], p[2], p[3] === 1);
   }
-  if (which === 0) {
-    d.pt(map[0], 1.1, -0.22);
-    d.pt(map[0], 1.18, 0.0);
-    d.pt(map[0], 1.1, 0.26);
-  } else {
+  if (which === 1) {
+    d.pt(map[1], -0.1, -0.2);
     d.pt(map[1], -0.1, 0.22);
-    d.pt(map[1], -0.1, -0.22);
   }
   pen.fill(ramp, 3, part, group, line);
 }
@@ -203,7 +214,7 @@ function foot(d: Draw, side: number, st: FootStyle, view: ViewId) {
     shadeRect(0.2, -0.22, front ? -0.08 : -0.5, front ? 0.5 : -0.12);
     pen.shade(group, -1);
     const cap = front ? 0.08 : 0.16;
-    shadeRect(-0.03, -0.17, toeN - cap - (st.shaft ? 0.04 : 0.02), toeN + cap);
+    shadeRect(-0.02, -0.19, toeN - cap - (st.shaft ? 0.06 : 0.02), toeN + cap);
     pen.shade(group, 1);
     if (d.lod >= 2) {
       shadeRect(-0.08, -0.14, toeN - cap * 0.4, toeN + cap * 0.8);
@@ -240,13 +251,19 @@ function foot(d: Draw, side: number, st: FootStyle, view: ViewId) {
     d.pt(shin, ct, -col - 0.02, true);
     pen.fill(st.ramp, 3, PARTL, group, -1);
     if (d.lod >= 1) {
+      const a = d.away(shin);
       pen.begin();
-      d.pt(shin, ct + 0.1, 0.3);
-      d.pt(shin, ct + 0.1, -0.3);
-      d.pt(shin, 1.1, -0.3);
-      d.pt(shin, 1.1, -0.0);
-      d.pt(shin, ct + 0.1, 0.0);
+      d.pt(shin, ct + 0.1, a * 0.3);
+      d.pt(shin, 1.1, a * 0.3);
+      d.pt(shin, 1.1, a * 0.02);
+      d.pt(shin, ct + 0.1, a * 0.04);
       pen.shade(group, -1);
+      pen.begin();
+      d.pt(shin, ct + 0.14, -a * 0.2);
+      d.pt(shin, 0.94, -a * 0.17);
+      d.pt(shin, 0.94, -a * 0.06);
+      d.pt(shin, ct + 0.14, -a * 0.07);
+      pen.shade(group, 1);
     }
     if (d.lod >= 2) {
       strokeB(d, shin, group, 0, [ct + 0.04, -col, ct + 0.05, col], st.ramp, 5);
@@ -881,6 +898,7 @@ export const WORKER: FigureDef = {
   id: 0,
   rest: ZIDLE[0],
   name: 'worker',
+  neck: 0.07,
   paint(d, view) {
     const shirt = R.shirtGrey;
     const armTbl = view === 2 ? ARM_S : view === 1 || view === 3 ? ARM_Q : ARM_F;
@@ -1059,6 +1077,7 @@ export const FLANNEL: FigureDef = {
       armCheck(map, g);
       d.wedge(ARM_SHADE_F, map, g);
       band(d, ARM_CORE, map, g, -2, 1);
+      if (d.lod >= 1) band(d, DELTOID_LIT, map, g, 1, -1);
       hand(d, open, hb, R.skinLive, hg, narrow);
     };
     if (view === 4) {

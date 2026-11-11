@@ -568,9 +568,9 @@ export const DELTOID_LIT: readonly BandRow[] = [
   [0, 0.34, 0.08, 0.18],
 ];
 export const FOREARM_LIT: readonly BandRow[] = [
-  [1, 0.16, 0.04, 0.15],
-  [1, 0.34, 0.05, 0.16],
-  [1, 0.6, 0.04, 0.1],
+  [1, 0.1, 0.03, 0.17],
+  [1, 0.32, 0.04, 0.18],
+  [1, 0.66, 0.02, 0.12],
 ];
 export const ARM_CORE: readonly BandRow[] = [
   [0, 0.3, 0.09, 0.16],

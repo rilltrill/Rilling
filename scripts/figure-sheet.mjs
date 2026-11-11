@@ -373,6 +373,66 @@ if (which.has('solid')) {
   }
   s.save(`${out}/solid.png`);
 }
+if (which.has('canon')) {
+  // Widths against the head as drawn; tones per ramp (the finish numbers).
+  const hu = 180 / 6.25;
+  const widths = (name, def) => {
+    const TEST = { aL: [0, 62, 0], aR: [0, 62, 0], lL: [0, 3, 0], lR: [0, 3, 0] };
+    const f = renderer.draw(def, TEST, 0, 0, 180);
+    const rowsOf = (part) => { const r = []; for (let y = 0; y < f.h; y++) { let a = 1e9, b = -1; for (let x = 0; x < f.w; x++) if (f.part[y * f.w + x] === part) { a = Math.min(a, x); b = Math.max(b, x); } if (b >= 0) r.push([y, b - a + 1]); } return r; };
+    const head = rowsOf(1);
+    const start = head[0][0] + Math.floor((head[head.length - 1][0] - head[0][0]) * 0.3);
+    const headW = Math.max(...head.filter(([y]) => y >= start).map(([, w]) => w));
+    const tr = rowsOf(2);
+    const y0 = tr[0][0], y1 = tr[tr.length - 1][0], n = y1 - y0;
+    const up = tr.filter(([y]) => y < y0 + n * 0.35).map(([, w]) => w);
+    const mid = tr.filter(([y]) => y > y0 + n * 0.4 && y < y0 + n * 0.72).map(([, w]) => w);
+    const lo = tr.filter(([y]) => y >= y0 + n * 0.72).map(([, w]) => w);
+    // Standing width over the shoulders, arms included (the idle pose).
+    const st = renderer.draw(def, POSES[name === 'worker' ? 'zidle' : 'civstand'], 0, 0, 180);
+    const band = []; for (let y = Math.floor(st.h * 0.16); y < st.h * 0.32; y++) { let a = 1e9, b = -1; for (let x = 0; x < st.w; x++) if (st.pixels[y * st.w + x]) { a = Math.min(a, x); b = Math.max(b, x); } band.push(b - a + 1); }
+    console.log(`${name}: head ${headW} tx | shoulders standing ${(Math.max(...band) / headW).toFixed(2)} head-widths (${Math.max(...band)} tx) | chest ${Math.max(...up)} tx, waist ${Math.min(...mid)} tx, hips ${Math.max(...lo)} tx = ${(Math.max(...lo) / headW).toFixed(2)} head-widths`);
+  };
+  widths('worker', WORKER);
+  widths('flannel', FLANNEL);
+  // Tones used by each ramp in the front idle at 180 (% of that ramp's filled area; tone 0 = ink).
+  const NAMES = (await import(`${ROOT}/src/gameplay/pixel/drawn/palette.ts`)).RAMPS.map((r) => r.name);
+  for (const [name, def, pose] of [['worker', WORKER, 'zidle'], ['flannel', FLANNEL, 'civstand']]) {
+    const f = renderer.draw(def, POSES[pose], 0, 0, 180);
+    const hist = {};
+    for (let i = 0; i < f.w * f.h; i++) { const v = f.pixels[i]; if (!v) continue; const r = Math.floor((v - 1) / RAMP_TONES); const t = v - 1 - r * RAMP_TONES; (hist[r] ??= [0, 0, 0, 0, 0, 0])[t]++; }
+    for (const [r, a] of Object.entries(hist)) {
+      const tot = a.reduce((x, y) => x + y, 0);
+      if (tot < 180) continue;
+      const fill = a.slice(1).reduce((x, y) => x + y, 0);
+      console.log(`  ${name} ${NAMES[r].padEnd(10)} ${a.map((v) => String(Math.round((v / tot) * 100)).padStart(3)).join(' ')}   lit (4+5 of fill) ${Math.round(((a[4] + a[5]) / fill) * 100)} %  fill tones ${a.slice(1).filter((v) => v / fill > 0.02).length}`);
+    }
+  }
+}
+if (which.has('heads')) {
+  // Heads in every view, x6, and hands and feet x4.
+  const s = new Sheet(1880, 1040, 0x6f7f8c);
+  const crop = (f, y0, h) => ({ ...f, h, pixels: f.pixels.subarray(y0 * f.w, (y0 + h) * f.w), part: f.part.subarray(y0 * f.w, (y0 + h) * f.w) });
+  let i = 0;
+  for (const [name, def, pose] of [['worker', WORKER, 'zidle'], ['flannel', FLANNEL, 'civstand']]) {
+    for (const [v, l] of VIEWS) {
+      const f = renderer.draw(def, POSES[pose], 0, v, 180);
+      const c = crop(f, 0, Math.min(f.h, 48));
+      s.figure(c, 10 + (i % 5) * 370, 20 + Math.floor(i / 5) * 320, 6);
+      s.text(10 + (i % 5) * 370, 310 + Math.floor(i / 5) * 320, `${name} ${l}`);
+      i++;
+    }
+  }
+  let x = 10;
+  for (const [name, def, pose, fr] of [['worker', WORKER, 'zidle', 0], ['flannel', FLANNEL, 'civstand', 0]]) {
+    for (const v of [0, 1, 2]) {
+      const f = renderer.draw(def, POSES[pose], fr, v, 180);
+      s.figure(crop(f, Math.floor(f.h * 0.82), f.h - Math.floor(f.h * 0.82)), x, 660, 3);
+      x += 300;
+    }
+  }
+  s.save(`${out}/heads.png`);
+}
 if (which.has('r2')) {
   // Round two: every thing the judges pointed at, on labelled strips.
   const K = 2;

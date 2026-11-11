@@ -37,7 +37,7 @@ export function drawnAim(world: World, camera: THREE.PerspectiveCamera, e: Entit
   dc.beginFrame();
   const r = dc.place(camera, e.root, q, GW, GH, st);
   expect(typeof r, 'placed').toBe('object');
-  const map = dc.debugParts(st.def!, st.pose!, st.view, st.size, st.hx, st.hy, st.flags);
+  const map = dc.debugParts(st.def!, st.pose!, st.view, st.size, st.hx, st.hy, st.flags, st.lod);
   const boxes = world.shootables.objects.filter((o) => (o.userData.shot as { owner: Entity } | undefined)?.owner === e);
   // Retro px of a sprite texel centre.
   const spX = (col: number) => st.left + (col + 0.5) * st.k;
