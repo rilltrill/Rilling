@@ -243,6 +243,9 @@ describe('PixelWorld light: moods and materials', () => {
     expect(u.uPwMood3.value.y).toBe(0);
     // (A mood that says nothing of the torch counts the spot lights like any lamp.)
     expect(PW_MOOD_DEFAULT.torch).toBe(1);
+    // … and the painted world does not flash with every shot unless it asks to.
+    expect(PW_MOOD_DEFAULT.flash).toBe(0);
+    expect(u.uPwMood3.value.z).toBe(0);
     expect(u.uPwWhite.value.toArray().map((v) => +v.toFixed(4))).toEqual([1, 1, 1]);
     expect(u.uPwShade.value.z).toBeGreaterThan(u.uPwShade.value.x);
     const atlas = new PwAtlas('light-test', { levels: 1 });

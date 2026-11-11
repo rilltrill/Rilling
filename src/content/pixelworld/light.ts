@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PW_PAL_DEEP, PW_PAL_W } from './canvas';
 import { MONITOR, MONITOR_EXPOSURE, MONITOR_LEVELS, MONITOR_TOP } from '../../core/RetroPass';
+import { MUZZLE_VIEW_X, MUZZLE_VIEW_Y } from '../../fx/Fx';
 
 /**
  * PIXEL-ART LIGHT (docs/PIXELWORLD2.md §5): how light, fog and the arcade monitor reach a painted
@@ -77,6 +78,14 @@ export interface PwMood {
    */
   torch: number;
   /**
+   * How much of the gun's muzzle flash counts for the painted world (0 not at all … 1 as any lamp).
+   * It is a light that rides with the camera and fires many times a second: on paint that moves in
+   * whole tones it is a strobe over everything near (a corridor's walls jump a tone and turn
+   * yellow with every shot). The cast keeps it. Explosions, which light the world from where
+   * they are, always count.
+   */
+  flash: number;
+  /**
    * How much of the monitor's tone curve lit paint still goes through (0 none: what is painted is
    * what is shown … 1 all of it, as the first pass and as backdrops, plants and the cast do). The
    * curve lifts and saturates mid tones and sinks dark ones; paint that was tuned through it in
@@ -89,7 +98,7 @@ export interface PwMood {
   fogEdge: number;
 }
 
-export const PW_MOOD_DEFAULT: PwMood = { pivot: 0.5, steps: 0.75, lo: -2, hi: 2, edge: 5, tint: 0.6, white: 0xffffff, shade: 0xffffff, torch: 1, film: 0, fogBands: 6, fogEdge: 4 };
+export const PW_MOOD_DEFAULT: PwMood = { pivot: 0.5, steps: 0.75, lo: -2, hi: 2, edge: 5, tint: 0.6, white: 0xffffff, shade: 0xffffff, torch: 1, flash: 0, film: 0, fogBands: 6, fogEdge: 4 };
 
 /** The uniforms of one mood (shared by every material made under it: a tweak shows at once). */
 export interface PwMoodUniforms {
@@ -107,7 +116,7 @@ function writeMood(u: PwMoodUniforms) {
   const m = u.mood;
   u.uPwMood.value.set(m.pivot, m.steps, m.lo, m.hi);
   u.uPwMood2.value.set(m.edge, m.tint, m.fogBands, m.fogEdge);
-  u.uPwMood3.value.set(m.torch, m.film, 0, 0);
+  u.uPwMood3.value.set(m.torch, m.film, m.flash, 0);
   // Only the chroma of the white point and of the shade counts: how bright is the pivot's business.
   // (The light is divided by the white point: a saturated one must not divide by nothing.)
   u.uPwWhite.value.fromArray(pwChroma(m.white).map((v) => Math.max(v, 0.05)));
@@ -344,7 +353,7 @@ export const PW_LIGHT_DECL = /* glsl */ `
   ${PW_MONITOR_GLSL}
   uniform vec4 uPwMood;  // pivot, steps a stop, fewest, most
   uniform vec4 uPwMood2; // band edge (frame px), tint, fog bands, fog edge (frame px)
-  uniform vec4 uPwMood3; // how much of the spot lights counts, how much of the tone curve stays on lit paint
+  uniform vec4 uPwMood3; // how much of the spot lights counts, how much of the tone curve stays on lit paint, how much of the muzzle flash counts
   uniform vec3 uPwWhite;
   uniform vec3 uPwShade;
   const vec3 PW_LUM = vec3(0.2126, 0.7152, 0.0722);
@@ -366,17 +375,29 @@ export const PW_LIGHT_OUT = /* glsl */ `
       for (int i = 0; i < NUM_DIR_LIGHTS; i++) pwSun += saturate(dot(normal, directionalLights[i].direction)) * directionalLights[i].color;
       pwSun *= RECIPROCAL_PI;
     #endif
-    // The spot lights (the shoulder torch, headlights) count only as much as the mood says: the rest
-    // of them is left out of the local light.
+    // The lights that ride with the camera count only as much as the mood says — the spot lights (the
+    // shoulder torch, headlights) and the gun's muzzle flash (the point light fx/Fx.ts fixes in the
+    // view, just off the eye's line): the rest of them is left out of the local light.
     vec3 pwOff = vec3(0.0);
-    #if NUM_SPOT_LIGHTS > 0
+    #if NUM_SPOT_LIGHTS > 0 || NUM_POINT_LIGHTS > 0
       IncidentLight pwIl;
+    #endif
+    #if NUM_SPOT_LIGHTS > 0
       for (int i = 0; i < NUM_SPOT_LIGHTS; i++) {
         getSpotLightInfo(spotLights[i], -vViewPosition, pwIl);
-        pwOff += saturate(dot(normal, pwIl.direction)) * pwIl.color;
+        pwOff += saturate(dot(normal, pwIl.direction)) * pwIl.color * (1.0 - uPwMood3.x);
       }
-      pwOff *= RECIPROCAL_PI * (1.0 - uPwMood3.x);
     #endif
+    #if NUM_POINT_LIGHTS > 0
+      for (int i = 0; i < NUM_POINT_LIGHTS; i++) {
+        vec3 pwLp = pointLights[i].position;
+        if (abs(pwLp.x - ${MUZZLE_VIEW_X.toFixed(3)}) < 0.02 && abs(pwLp.y - ${MUZZLE_VIEW_Y.toFixed(3)}) < 0.02 && pwLp.z < 0.0) {
+          getPointLightInfo(pointLights[i], -vViewPosition, pwIl);
+          pwOff += saturate(dot(normal, pwIl.direction)) * pwIl.color * (1.0 - uPwMood3.z);
+        }
+      }
+    #endif
+    pwOff *= RECIPROCAL_PI;
     vec3 pwEi = (reflectedLight.indirectDiffuse + pwSun) * uPwGain / uPwWhite;
     vec3 pwEd = max(reflectedLight.directDiffuse - pwSun - pwOff, vec3(0.0)) * uPwGain / uPwWhite;
     float pwYi = dot(pwEi, PW_LUM);
