@@ -9,6 +9,9 @@ import { Civilian, type CivPhase } from '../../src/gameplay/Civilian';
 import type { Enemy } from '../../src/gameplay/Enemy';
 import { DrawnCast, newDrawnSprite } from '../../src/gameplay/pixel/drawn/DrawnCast';
 import { setCastLook } from '../../src/gameplay/pixel/look';
+import { lodFor, makeFigureRenderer } from '../../src/gameplay/pixel/drawn/figure';
+import { ZSHAMBLE } from '../../src/gameplay/pixel/drawn/poses';
+import { J } from '../../src/gameplay/pixel/drawn/skeleton';
 import { nullHud } from './sim';
 import { drawnAim as check, drawnReport as report, type DrawnAimResult as Res } from './drawnAim';
 
@@ -99,5 +102,50 @@ describe('drawn figures (aim)', () => {
     }
     const rep = report(rows);
     expect(rep.bad, JSON.stringify(rep.bad.slice(0, 20), null, 1)).toEqual([]);
+  });
+});
+
+describe('drawn figures (the drawing)', () => {
+  const r = makeFigureRenderer();
+  const front = ZSHAMBLE.map((k) => {
+    const sk = r.pose(k, 0);
+    return { ankL: sk.sx[J.ankleL], ankR: sk.sx[J.ankleR], pelvis: sk.sx[J.pelvis], pelvisY: sk.sy[J.pelvis] };
+  });
+  const side = ZSHAMBLE.map((k) => {
+    const sk = r.pose(k, 2);
+    return { ankL: sk.sx[J.ankleL], ankR: sk.sx[J.ankleR], toeL: sk.sy[J.toeL], toeR: sk.sy[J.toeR] };
+  });
+
+  it('the front walk keeps the feet near the centre line and the weight over them', () => {
+    for (const f of front) {
+      expect(Math.abs(f.ankL)).toBeLessThan(0.42);
+      expect(Math.abs(f.ankR)).toBeLessThan(0.42);
+    }
+    const px = front.map((f) => f.pelvis);
+    expect(Math.max(...px) - Math.min(...px)).toBeGreaterThan(0.4);
+  });
+
+  it('the hips drop on contact and rise over the passing leg', () => {
+    const py = front.map((f) => f.pelvisY);
+    expect(Math.max(...py) - Math.min(...py)).toBeGreaterThan(0.18);
+  });
+
+  it('the toes stay on the street through the whole side-view cycle', () => {
+    for (const f of side) {
+      expect(f.toeL).toBeLessThan(0.16);
+      expect(f.toeR).toBeLessThan(0.16);
+    }
+  });
+
+  it('a stride crosses over several frames, not two', () => {
+    const steps = side.map((f, i) => Math.abs(side[(i + 1) % side.length].ankR - f.ankR));
+    expect(Math.max(...steps)).toBeLessThan(0.45);
+  });
+
+  it('the level of detail holds near a threshold', () => {
+    expect(lodFor(11.2, 0)).toBe(0);
+    expect(lodFor(10.8, 1)).toBe(1);
+    expect(lodFor(12, 0)).toBe(1);
+    expect(lodFor(10, 1)).toBe(0);
   });
 });

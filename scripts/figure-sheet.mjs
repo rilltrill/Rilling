@@ -439,6 +439,28 @@ if (which.has('sil')) {
   }
   s.save(`${out}/sil60.png`);
 }
+if (which.has('lodstrip')) {
+  // Sizes through the level-of-detail thresholds (68, 112, 188 px): one drawing shrinking, no pops.
+  const s = new Sheet(1880, 1000, 0x6f7f8c);
+  let x = 10;
+  let y = 20;
+  for (const sz of [44, 52, 60, 64, 68, 70, 74, 84, 96, 108, 112, 118, 150, 186, 190]) {
+    const f = renderer.draw(WORKER, POSES.zshamble, 2, 0, sz);
+    if (x + f.w * 2 > 1860) { x = 10; y += 440; }
+    s.figure(f, x, y + 430 - f.h * 2, 2);
+    s.text(x, y + 435, String(sz));
+    x += Math.max(f.w * 2 + 14, 60);
+  }
+  s.save(`${out}/lodstrip.png`);
+}
+if (which.has('bn')) {
+  // The same two characters at the size the rejected sheet shows them (texels x4).
+  const s = new Sheet(1560, 780, 0x6f7f8c);
+  put(s, renderer.draw(WORKER, POSES.zidle, 0, 0, 168), 280, 716, 4, 'worker, front');
+  put(s, renderer.draw(FLANNEL, POSES.civstand, 0, 0, 168), 840, 716, 4, 'civilian, front');
+  put(s, renderer.draw(WORKER, POSES.zidle, 0, 1, 168), 1320, 716, 4, 'worker, 3/4');
+  s.save(`${out}/bn.png`);
+}
 if (which.has('heads')) {
   // Heads in every view, x6, and hands and feet x4.
   const s = new Sheet(1880, 1040, 0x6f7f8c);
@@ -483,6 +505,7 @@ if (which.has('r2')) {
     s.save(`${out}/${name}.png`);
   };
   strip('s-shamble', WORKER, 'zshamble', [0, 2], null, 110, 2);
+  strip('s-shamble34', WORKER, 'zshamble', [1, 3, 4], null, 110, 2);
   strip('s-idle-wind', WORKER, 'zwindup', [0, 1, 2], null, 180, 2);
   strip('s-lunge', WORKER, 'zlunge', [0, 1, 2, 3, 4], null, 180, 2);
   strip('s-civrun', FLANNEL, 'civrun', [0, 2], null, 110, 2);
