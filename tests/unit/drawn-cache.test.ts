@@ -45,7 +45,7 @@ describe('drawn figure at the lens', () => {
         // A windup, raised arms at the biggest size: the canvas holds it without clipping.
         z.setState('windup');
         for (let t = 0; t < 0.5; t += 1 / 60) z.update(1 / 60);
-        z.root.position.set(0, 0, camera.position.z - 0.6);
+        z.root.position.set(0, 0, camera.position.z - (camY > 2 ? 1.1 : 0.6));
         world.scene.updateMatrixWorld(true);
         dc.beginFrame();
         q.flags = 0;
