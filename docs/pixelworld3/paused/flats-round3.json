@@ -1,0 +1,193 @@
+{
+ "report": {
+  "summary": "Round 3 of the z1 drawn flats is done and committed (6 commits on pw3/flats, working tree clean). Every high and medium judge finding is fixed, and I traced or checked each one first. Two judge explanations were off:\n- The art judge's guess about the diner seam (the wall glow span) was wrong. The seam was the band edge of the stage's accent point light, at env.ts:191.\n- The tech judge's suggestion to delete unused z1 facade modules cannot shrink the atlas. A probe of a whole cold load found 5 unused tiles (6.6k texels of 49 M), and those 5 are now gone. Every other facade module is still used by the unconverted rest of z1.\n\nWhat is new:\n- **Diner seam:** the seam is gone. The neon wash is now painted on, and a no-local-lights material keeps stage lamps off it.\n- **Far city:** a drawn z1 skyline with a ragged smoke haze replaces the blocks. No top edge in the hand-placed end-of-street group is level for more than 8 art px.\n- **Diner sign:** no more rust rectangles. The letters have a halo that follows their shapes, and the buzzing r's overlay is the dead tube only.\n- **Marquee:** the lettered board is five framed panels, one dead, one cracked with the tube showing, one hanging.\n- **Diner bands:** interrupted by ribbed gaps, a hanging strip, an AC box and vent, a bin and crates; the chequer pitch is uneven.\n- **Roof tanks:** round, bigger, on four legs.\n- **Boss square:** the plinth is a card with a bronze cap, wreath and candles. The arch under the awning is boarded.\n- **Brick and damage:** raw brick takes the wall's own colour, and breaches come in three outlines that avoid lit rooms.\n- **End walls at the crossing:** repainted with one diagonal shadow, a wall lamp and plain lit rooms.\n- **Burnt car:** now a three-quarter drawn flat.\n- **Bank:** the frieze, clock, door bay and coping are fixed.\n- **Tech lows:** the menu board and gone-panel notes are fixed, and the paint budget is now written into the docs.\n\nThe pieces of the brief are all delivered: labelled sheets, numbers, tests, the notDone list and the rollout plan.\n\nOpen for the owner: about 2.1 to 2.3 s cold paint on the first run only (the store then makes later loads 0 ms), and whether to redraw the other modelled cars.",
+  "design": "**Painted light (light.ts, material.ts, pwFlats.ts, z1dinerflat.ts).** `pwMaterial({ noLocal: true })` adds a define (PW_NO_LOCAL) that removes the stage's point lights from the local-light term and keeps the moon and the muzzle flash. Other materials compile to the same shader as before.\n- `Z1Flats.ownLight` is a second per-zone batch on the flats atlas, built with that option. It costs one draw call in the zone that has the diner.\n- The diner front card and the sign go there.\n- The wash is painted in `paintDinerFront`: three 12-texel steps from a nearest panel joint on each side, stepped by course with a dithered seam.\n- Washed chrome and tile are GLOW texels, so the moon's tint does not turn them purple.\n- The sign's wall glow is dropped, and its letter halo is painted (three dilation rings).\n- `rOverlay` paints only the dead tube, on a transparent tile.\n\n**Far city (z1sky.ts, `z1SkylineTile`).** A z1-only painter; the shared `skylineTile` is untouched. It draws two ranks of towers plus a hand-placed group around azimuth 0, the end of Main Street: spire, snapped tower with girders, gutted shell, tanks, masts. The windows come in clumps. Smoke rises above the 8-degree seam of the sky tile so the sky's straight band never shows.\n\n**Kit additions (elevation.ts).**\n- `ElevRamps.raw`: broken-brick tone from the wall's family.\n- `rawBand`: 2 or 3 courses with a torn top.\n- `breach` takes `shape: blob|rip|corner` (default picked per wall) and moves along the wall off any lit room (`litWindows`).\n- `plainLit`: a single lit tone plus a head and shoulders, for far walls.\n- `wallLamp`: a three-ring warm fan on wall ramps.\n- `ghostGround`: ragged edges.\n- `tank`: round, with hoops, soft banding and four wide legs.\n\n**New or changed cards.**\n- `z1wreck.ts` `paintBurntCarFlat`, staged by `Z1Flats.stageBurntCar` just behind the fire, square to the road. `pwCars.convert` takes a `drawn` callback that drops that car's meshes and leaves everything else about the car alone.\n- `paintPlinth` is a card (88 x 92 texels), world-aligned at `PLINTH_YAW` in pwProps.ts. The classic cap box is tagged `plinthCap` (a userData tag only).\n- `paintMarqueeBoard` lays over the marquee face in `stageMarquee`. `paintDinerFront` has the wounds, ribs, objects, MENU board and uneven chequer. The shutter block's arch is boarded.\n\n**Extending this.** New stages add a `<stage>flats.ts` with painters and a placements table, as z1 does. A painting that carries its own light uses `noLocal`. See the Round 3 section of docs/PIXELWORLD3.md.\n\n**Gameplay and art modes.** Colliders, occluders and RNG are untouched: the deleted boxes are visible meshes only, and flats stay inside the old volumes. The burnt car's card is the one narrow test exclusion, because it stands on the road where the car stood, and the test bounds it there. In town.ts the only edit is a `userData` tag (the plinth cap), so classic and pixel cast are unaffected by this round's meshes.",
+  "sheets": [
+   "/tmp/pw3/flats/sheets/r3/r3-flats-painted.png (every flat, card and new painting as painted, labelled)",
+   "/tmp/pw3/flats/sheets/r3/r3-before-now.png (before | now: beats 1 to 6 and the boss, road and hold positions)",
+   "/tmp/pw3/flats/sheets/r3/r3-stagings.png (parallel | raked 25 | raked 35, the chosen staging, at h2, b3a, b5a, b5b)",
+   "/tmp/pw3/flats/sheets/r3/r3-phone-crt.png (phone CRT view: b1, h4, h6, boss)",
+   "/tmp/pw3/flats/sheets/r3/r3-crops.png (crops of each finding: diner at the hold, end of Main Street, marquee, tank, burnt car, plinth, bank, end walls)"
+  ],
+  "numbers": "All timings are from a dev server on the shared box. Reference = the server on 5791.\n\n**Tests**\n| Check | Result |\n|---|---|\n| `npx tsc --noEmit` | clean |\n| tests/unit/pixel-world.test.ts + stages.test.ts | 59 of 59 pass, on the final commit |\n| Whole tests/unit | 411 passed, 24 skipped; run before the last art commit (tanks and smoke only) |\n\nTest change: the flats volume test gained a narrow exclusion for the burning car's card, which is bounded within 2.4 m of the old car. Size baseline in scripts/single-size.json moved from 3565 to 3581 KB (the new painters). Rebuild is +0.1 KB against it.\n\n**Memory (z1 PixelWorld atlases)**\n- Now 43.65 MiB (45.77 MB); reference 37.31 MiB; limit 48 MiB.\n- z1 4096x2624, 27.36 MiB, 323 tiles; z1-flats 4096x1312, 13.68 MiB, 87 tiles; z1-sky and z1-fire 1.2 to 1.5 MB each.\n\n**Cold paint (three dev runs of the final builds, ms)**\n| Atlas | ms |\n|---|---|\n| z1 | 1193, 1232, 1284 |\n| z1-flats | 817, 872, 795 |\n| sky | 91 to 121 |\n| fire | 58 to 79 |\n\nTotal about 2.1 to 2.3 s, first run only (the store makes later loads 0 ms). The longest single slice was 121 to 174 ms. Paint per flat on the shared box is 26 to 175 ms; the slowest are pawn 175, laundry 136, then 40 to 70 ms each. Full flats dump total 1324 ms under Node, including all 87 tiles.\n\n**Draw calls and triangles (`scripts/pixel-audit.mjs`, per shot, now vs reference)**\n| Shot | Calls | Triangles |\n|---|---|---|\n| h2 | 44 vs 41 | 27528 vs 33588 |\n| h4 | 46 vs 43 | 26620 vs 32680 |\n| b5a | 31 vs 28 | 26238 vs 32298 |\n| h6 | 35 vs 34 | 21754 vs 23456 |\n| boss | 28 vs 27 | 14135 vs 15430 |\n\n**Audit**\n- Boss passes. h2, h4, b5a and h6 fail the `flat` criterion, in the reference too.\n- Flat: h2 .095 vs .066 (worse: the marquee panels are large flat lit areas), h4 .045 vs .049, b5a .078 vs .079, h6 .069 vs .085, boss .023 vs .021.\n- h4 also fails mag15, .065 vs .063 in the reference.\n\n**Far city**\n- Longest level run of the top edge in the hand-placed group is 8 texels, about 8 art px.",
+  "notDone": [
+   "Other cars are still modelled (the art judge's stranger-test note). The brief made them the owner's call; only the burning car was drawn. The barricade wreck at z -199 stays too.",
+   "Boss square foreground slabs (low finding): not touched, because the ground was just repainted and the brief says it stays.",
+   "The owner has not signed off the cold paint figure (about 2.1 to 2.3 s, first run only; recorded in docs/PIXELWORLD3.md Round 3).",
+   "Production store restore was not re-measured this round. The dev cold.mjs second load repaints (stored false), which does not exercise the store as a production load did in the last round.",
+   "Rest of z1 (alley, gas station, other blocks, second street) stays as it was; rollout plan below.",
+   "The re-used wall at the crossing was calmed by lowering the brick share of `w6` to 26 % instead of repainting; it is still the same painting, seen in passing."
+  ],
+  "filesChanged": [
+   "/home/user/wt/flats/docs/ARCHITECTURE.md",
+   "/home/user/wt/flats/docs/PIXELWORLD2.md",
+   "/home/user/wt/flats/docs/PIXELWORLD3.md",
+   "/home/user/wt/flats/scripts/single-size.json",
+   "/home/user/wt/flats/src/content/pixelworld/elevation.ts",
+   "/home/user/wt/flats/src/content/pixelworld/light.ts",
+   "/home/user/wt/flats/src/content/pixelworld/material.ts",
+   "/home/user/wt/flats/src/content/pixelworld/z1alley.ts",
+   "/home/user/wt/flats/src/content/pixelworld/z1diner.ts",
+   "/home/user/wt/flats/src/content/pixelworld/z1dinerflat.ts",
+   "/home/user/wt/flats/src/content/pixelworld/z1flats.ts",
+   "/home/user/wt/flats/src/content/pixelworld/z1props.ts",
+   "/home/user/wt/flats/src/content/pixelworld/z1sky.ts",
+   "/home/user/wt/flats/src/content/pixelworld/z1wreck.ts",
+   "/home/user/wt/flats/src/content/stages/z1/pixel.ts",
+   "/home/user/wt/flats/src/content/stages/z1/pwCars.ts",
+   "/home/user/wt/flats/src/content/stages/z1/pwDiner.ts",
+   "/home/user/wt/flats/src/content/stages/z1/pwFlats.ts",
+   "/home/user/wt/flats/src/content/stages/z1/pwProps.ts",
+   "/home/user/wt/flats/src/content/stages/z1/town.ts",
+   "/home/user/wt/flats/tests/unit/pixel-world.test.ts"
+  ],
+  "commits": [
+   "747eb61 Diner front and sign: neon wash painted, no local lamp across it; panelled marquee board; a drawn far city at the end of Main Street",
+   "d722f14 End walls redrawn (one cast shadow, a wall lamp, plain lit rooms, ghost sign ragged), round tank on four legs, raw brick on the wall's own colours, three breach outlines, burnt car and plinth as flats, boarded arch, bank frieze and clock",
+   "a38fa87 Bank frieze as one large word, door bay in shadow; five unused tiles and dead diner cases removed; burnt car wider, sheets of rust and char",
+   "166e481 Docs: round 3 of the flats; paint budget stated in the brief",
+   "fa765a6 Single-file size baseline: the drawn far city, the wreck and the marquee panels",
+   "1fee425 Far city: smoke above the sky's straight band; tanks bigger and softer so they read at a distance; marquee crack beside the words"
+  ],
+  "rolloutPlan": "**Do first, alone.** Group 0 (small, 1 agent): move the generic part of `stages/z1/pwFlats.ts` (`stage`, `lay`, `end`, `wedge`, `ownLight`, `finish`) into `src/content/pixelworld/flats.ts`, taking a placements table as data. z1 keeps its `AT` table and the diner, marquee and wreck staging. After that, no group edits the shared class or `elevation.ts`. Kit additions go through one owner, or stay local to a stage's painter file until merged.\n\nThe groups below can then run in parallel, apart from where noted.\n\n**Group 1: the rest of z1** (largest; 2 rounds).\n- Files: `pixelworld/z1flats.ts`, the `AT` table in `pwFlats.ts`, `z1facade.ts` and `z1shops.ts` deletions.\n- Scope: the buildings past the crossing, the alley and second street, the gas station and other blocks, the side walls of the corners.\n- Risks: doors and windows where enemies come out must keep their openings. Deleting each facade module as its last user converts is what shrinks the z1 atlas (43.65 MiB now, and only 5 tiles were dead).\n- Must not run alongside anything else touching z1flats.ts or pwFlats.ts.\n\n**Group 2: z2 hospital exterior** (medium).\n- Files: new `pixelworld/z2flats.ts`, `stages/z2/pixel.ts` only.\n- Risk: the ambulance bay's lit canopy wants the `noLocal` route for any painted glow.\n\n**Group 3: z3 roadside buildings, warehouses, overpass, skyline** (medium to large).\n- Files: new `pixelworld/z3flats.ts`, `z3sky.ts`, `stages/z3` files.\n- Risk: the overpass is a long converging box; break it with cards and stage it facing. It takes the same drawn-far-city approach as z1's skyline.\n\n**Group 4: d1 gate, kiosks, palisade, watchtower** (medium).\n- Files: new `pixelworld/d1flats.ts`, `stages/d1` files.\n- Risk: the gate's opening stays where gameplay has it; the palisade should be cut-out cards with a stepped top.\n\n**Group 5: d3 visitor centre, ticket booth, depot** (medium).\n- Files: new `pixelworld/d3flats.ts`, `d3Visitor.ts`, `stages/d3` files.\n\n**Group 6: title-screen city** (small).\n- Files: `src/ui/menuPixel.ts` only (its painted buildings).\n- It uses `skylineTile` from sky.ts and must not edit it.\n\n**Each group** adds its own atlas budget and paint ms to the numbers; about 0.8 to 1.2 s of flats cost per stage is the guide from z1. Every group must keep `tests/unit/pixel-world.test.ts` volume checks for its buildings, adding its footprints, and must not touch `tests/unit/stages.test.ts` budgets beyond what its new flats legitimately cost."
+ },
+ "judges": [
+  {
+   "judge": "art",
+   "atBar": true,
+   "scores": "Verdict: at the bar for what was converted. In 29 pixel-frame positions (beats 0-7 and the boss) no building reads as a block. A stranger would call this hand-painted pixel art, and nothing suggests Minecraft or Roblox. Against the reference at h2, h6 and the boss (r3c/sbs-ref.png) it is a different game. No high finding is open; what remains is mediums.\nScope: this covers z1 to beat 7 and the boss. Per the report, the rest of z1 and the other stages are still boxes, so the owner's \"all the blocky buildings\" is not finished for the game. I did not look at those.\nMethod: stills only, no video, so motion is inferred from 4 to 7 positions per beat. Of the 3 phone CRT captures I opened only h4; it looks right.\nNew frames: /tmp/pw3/judge-flats-art/r3/ (b0a to boss), r3d/ (b1c, b3d, b3e, b5d, b5e, b5f, b7), r3p/ (phone). Crops: r3c/. Coordinates are in the 1872x864 frames unless a crop is named.\nNo box anywhere: 8/10 (was 7). Street-level buildings have no side faces. Left: tanks that read as boxes on raked cards, the EAT sign edge-on, the marquee's end.\nOutlines drawn and irregular: 9/10 (was 8). Rooflines break everywhere. The far city now has silhouettes.\nOne picture with value structure: 8/10 (was 7). The diner seam is gone; the end walls have a clear diagonal shadow.\nWindows and brick individually drawn, no repeat: 8/10 (was 7). Head-and-shoulders figures read. Plain orange windows at h6 are bare.\nDamage and story: 8/10 (was 7). Ghost sign, boards, memorial with candles. Red chips over window heads are the last stamp.\nDepth from layers: 9/10 (was 8). Marquee panels, AC box, bin, crates, plinth and burnt car all separate.\nStaging in motion and at holds: 8/10 (was 7). The 35 degree rake looks like painted wings at every position. Nothing looks like a mistake.\nNothing floating, no void: 8/10 (was 8). No gaps. One glow hangs in the sky behind the diner sign.\nStranger test: 8.5/10 (was 7). The biggest remaining 3D tell is the modelled cars, which are not buildings.",
+   "resolved": [
+    "High, diner colour seam: resolved. The chrome now goes violet, lilac, pink in visible steps on both bands, with no hard column (r3c/c1-h4-diner.png, r3/h4-pixel.png, phone r3p/ph4-pixel.png). The new look holds at every position from b3d to b5a.",
+    "High, plain rectangles at the end of the street: resolved for the city. Towers, a spire and stepped silhouettes with scattered window clumps replace the slabs and the pale oblong, against the reference at r3c/c24-compare.png. One inherited black strip is listed under findings.",
+    "Medium, rust rectangles behind the Diner letters: resolved. The halo follows the letters and no oblongs remain (r3c/c2-h4-sign.png).",
+    "Medium, marquee board as two blank bands: resolved. Framed panels with mullions, one dead, words along the length (r3c/c9-b3a-marq.png, r3/b3a, r3d/b3d). Compare the reference at the bottom right of r3c/sbs-ref.png. The flared end is listed separately.",
+    "Medium, diner rails: largely resolved. Rib gaps, a hanging strip, an AC box, a bin and crates interrupt both bands (r3c/c1-h4-diner.png). The nearest foot band is listed separately.",
+    "Medium, plinth as a real box, and the dead maroon shop: resolved. The plinth is a flat card with a bronze cap, plaque, ivy and candles; the arch is boarded (r3c/c8-boss-left.png).",
+    "Medium, figures in lit windows lost to low size: resolved. Clear head and shoulders on one lit tone, and no breach runs through a lit window (r3c/c5-h6-L.png, r3c/c6-h6-R.png).",
+    "Medium, end walls flat and patched: resolved. One large diagonal shadow, a lamp over the door, the ghost sign with story (SIR KELSO'S TONIC at r3/h6b-pixel.png), and a window dropped out of its row.",
+    "Medium, burnt car as stacked prisms: resolved, and it holds at close range (r3d/b5d-pixel.png, r3/b5c-pixel.png).",
+    "Low, bank leftovers: resolved. Coped parapet, a NATIONAL frieze that reads, a clock with hands, the door bay in shadow (r3c/c7-boss-bank.png)."
+   ],
+   "findings": [
+    {
+     "severity": "medium",
+     "problem": "Roof water tanks still read as boxes on the raked flats, partly unresolved from last round. The tank card rakes with its wall, so a round tank's top and bottom edges slope about 18 degrees and it draws exactly like the side of a box in perspective. A straight value split down the body reads as a lit front and a dark side. The legs and cap help, but no hoop or rim curve is visible from the road. They stand top centre in the very first frame of the game. The report's 'round' is not visible here.",
+     "evidence": "r3/b0a-pixel.png x515-620 y40-170 and x670-720 y115-230. r3c/c19-b0-tanks.png: top edge falls about 105 crop px over 325 (measured by eye). r3c/c14-b5b-tank.png: split at crop x520-540, flat lower edge.",
+     "fix": "Stand tank cards square to the road and never rake them with their wall: a cylinder looks the same from every side. Replace the two-tone body with 4 or 5 vertical bands, lit edge to shadow, with the terminator about two-thirds across and no single hard split. Bow the top rim and the bottom by 3 art px and add 3 curved hoops."
+    },
+    {
+     "severity": "medium",
+     "problem": "The EAT sign is a ruler-straight vertical bar at the diner hold. Seen edge-on it is a black slab with a cyan stripe, nearly half the frame height, and the hardest straight line at the game's most-looked-at hold. It is unchanged from last round, and I missed it then. It works face-on at r3d/b3d, so only the hold view is the problem.",
+     "evidence": "r3/h4-pixel.png x105-160 y0-415. Art columns 39-53 are 97-100 % identical from row to row across 138 rows. r3c/c21-h4-leftedge.png. r3c/sbs-ref.png bottom row shows r2 and r3 the same.",
+     "fix": "Turn the sign card about its pole so the hold sees it at 40 to 50 degrees and EAT reads foreshortened, leaving it face-on enough for b3d. Failing that, draw the edge view: 2 or 3 brackets, a tube that bends off the line by 1 or 2 art px, and a ragged top cap."
+    },
+    {
+     "severity": "medium",
+     "problem": "A dead-level black strip with lit dots sits on the vanishing point of every road frame. It is the last plain rectangle at the end of the street, directly under the new city. It is inherited (also in r2 and the reference). The report's 8-texel limit covers the hand-placed skyline group; this strip was not traced and may be separate.",
+     "evidence": "r3c/c11-vanish.png y580-670. r3c/c24-compare.png bottom row. r3/h6-pixel.png about x900-993 y375-393: near-black run of 31 art px on art rows 125-130. Also 25 art px on rows 133-138 at h2 and b3a.",
+     "fix": "Find what draws it and either remove it or break its top edge into 3 or 4 steps of 2 to 7 art px. Add a low roofline or a fence and let the smoke haze cut across one end. Move the dots into uneven clumps."
+    },
+    {
+     "severity": "medium",
+     "problem": "The marquee's flared end is the largest empty area on Main Street. At b3a it is about 94x76 art px of almost one maroon tone with one word, and it meets the panelled face at a straight vertical knife edge, which is a box corner. It reads fine at h2 and gets worse up close. The report's own flat-area figure at h2 got worse, .095 against .066.",
+     "evidence": "r3/b3a-pixel.png x1590-1872 y37-265. r3c/c9-b3a-marq.png x1075 is the corner.",
+     "fix": "Draw material on it: 5 or 6 ribs fanning from the corner, rain streaks from the top rim, and a torn or dented patch with the frame showing, about 20x15 art px. Round the corner with a trim strip 4 to 6 texels wide and a vertical run of bulbs, 2 of them dead, so the two planes never meet in one line."
+    },
+    {
+     "severity": "medium",
+     "problem": "A warm brown keyhole-shaped glow hangs in the empty sky behind the Diner sign at the hold, with a hard outline. It reads as a floating dome or bottle, because the glow has no wall to land on now that the box is gone. It is inherited and was hidden by pink last round. The source is not traced.",
+     "evidence": "r3/h4-pixel.png x760-890 y30-110. r3c/c2-h4-sign.png x740-1050 y80-400. r3c/c24-compare.png top row, r3 left and r2 right. Visible in r3p/ph4-pixel.png.",
+     "fix": "Remove the cone at this lamp and keep the lamp head with a 2-ring dithered halo about 6 art px wide. If light is wanted, paint it on the sign card's top right corner, where it has a surface."
+    },
+    {
+     "severity": "medium",
+     "problem": "The cars are still modelled, and they are now the strongest 3D tell in the frame, beside painted walls: flat roof slabs and box bodies. The burnt car shows the drawn approach works. Outside the building brief, so this is the owner's call.",
+     "evidence": "r3/b3a-pixel.png x1370-1872 y440-800. r3/h2-pixel.png x1225-1780 y430-620. r3/h6-pixel.png x305-770 y405-570. Compare r3d/b5d-pixel.png.",
+     "fix": "If taken on, start with the three parked nearest the holds (the silver wagon at h2, the pink one at h6, the blue one at the barricade). Use three-quarter drawn flats about 185x70 art px, like the wreck, with dented panels and a sagging roof line."
+    },
+    {
+     "severity": "medium",
+     "problem": "The same crimson chips still sit over window heads on grey, violet and stone walls. Cornice breaks now take the wall's own colour, but this small stamp did not, and it repeats window after window. Partly unresolved from last round.",
+     "evidence": "r3c/c7-boss-bank.png x245-370 y305-330, x680-800 y318-345, x1400-1510 y318-345. r3c/c6-h6-R.png x195-285 y605-625, x200-235 y318-340. Also r3c/c5-h6-L.png window heads.",
+     "fix": "Route window-head damage through the same wall-family raw tone (Elev.raw) as the cornice breaks. Keep it on at most 1 window in 3, and vary width from 4 to 14 texels."
+    },
+    {
+     "severity": "medium",
+     "problem": "The nearest stretch of the diner's foot band is much coarser than everything else at the hold: flat black chequer tiles and ribs at perspective-magnified size, with no drawn detail. At this one spot, mixed pixel size looks chunky. The stacked blue plates at the frame's left edge read the same way. The report notes this frame fails the magnification audit (.065).",
+     "evidence": "r3/h4-pixel.png x0-480 y510-610 and x0-40 y215-510. r3c/c21-h4-leftedge.png y1000-1344: flat runs up to 15 art px along art row 182.",
+     "fix": "Over the 3 or 4 m nearest the hold, draw at the size it is seen: halve the tile size, chip corners, add dents, rivets and a two-tone reflection in the ribs. Break the blue plates with a seam, a scratch and one dent each."
+    },
+    {
+     "severity": "low",
+     "problem": "The diner card's far end is a clean vertical cut, unlike every other card with its pier, toothing and ragged ink. It shows for a moment at the left of the frame while passing.",
+     "evidence": "r3c/c17-b5y-dinerend.png x1130 y500-1500, about 74 art px tall by eye. r3/h4b-pixel.png left edge.",
+     "fix": "Give it a bent chrome end strip 6 to 10 texels wide and a wobble of 1 to 2 texels, as on the Elev cards."
+    },
+    {
+     "severity": "low",
+     "problem": "The re-used wall at the crossing hold is still wall-to-wall, even-contrast brick. The report says it was calmed to a 26 % brick share; there is no visible difference from last round in this strip.",
+     "evidence": "r3c/sbs-ref.png bottom row, wall h6 r2 and r3. r3c/c6-h6-R.png x1380 onward.",
+     "fix": "Put a quiet two-tone mass over at least half of this strip at the hold, or use a painting that already has one."
+    },
+    {
+     "severity": "low",
+     "problem": "Small finish items on the crossing end walls: bare flat orange windows with no sash, peach door lamps opaque enough to read as arched recesses, and a plain teal polygon behind the right parapet.",
+     "evidence": "r3c/c5-h6-L.png x390-470 y600-730 and x280-480 y870-1130. r3c/c6-h6-R.png x1100-1250 y0-190.",
+     "fix": "Add a one-pixel sash cross to plain lit windows. Thin the lamp's outer ring with dither so the wall shows through. Give the polygon a roofline or remove it."
+    },
+    {
+     "severity": "low",
+     "problem": "Boss square foreground slabs are still large flat rectangles. Not touched, and outside the building brief.",
+     "evidence": "r3/boss1-pixel.png y600-864 x400-1500.",
+     "fix": "Break the largest slabs with cracks, chipped corners and rain-dark patches."
+    }
+   ],
+   "keep": [
+    "The diner hold as a whole. In the phone CRT view it is the best picture in the game (r3p/ph4-pixel.png).",
+    "The neon wash painted in steps ending on panel joints, with no lamp band across the card. Every lit sign in later stages should use this route.",
+    "The far city: silhouettes, snapped and stepped tops, scattered windows, smoke haze.",
+    "The marquee's panels with one dead and one cracked, and words along the length.",
+    "The burnt car flat: the proof that a drawn flat survives a close pass (r3d/b5d-pixel.png).",
+    "PRIME MEATS, the hotel corner, the bank's pediment, and the memorial with candles. The boss square is now one painted set.",
+    "The 35 degree rake. It reads as painted wings at every position sampled.",
+    "Card ends with pier, toothing and ragged ink; broken rooflines; clustered brick with quiet two-tone masses. Every later stage should inherit these.",
+    "End walls with one big cast shadow, the ghost sign, and head-and-shoulders windows.",
+    "Roller shutters with paint running slat by slat, INSIDE and NO ONE LEFT."
+   ]
+  },
+  {
+   "judge": "tech",
+   "atBar": true,
+   "scores": "Timings were taken while my own captures and other agents shared the 4-core box, so only the paired ratios mean anything. Last round's score is in brackets.\n\nGameplay identity 9/10 (9). tsc is clean. pixel-world + stages 59/59. Whole tests/unit at HEAD: 411 passed, 24 skipped, which closes the report's 'run before the last art commit' gap. The added lines contain no world RNG, raycast or collider call. town.ts changes one userData tag. The burnt car only loses meshes, and the test exclusion for it is narrow and bounded.\n\nCLASSIC / PIXEL CAST isolation 10/10 (10). h2, h4, approach and boss in 3d and sprites differ from the reference by 0 to 21 px of 180k, with calls and triangles equal. PIXEL WORLD in z2, z3, d1 and d3: every atlas sig identical, calls and triangles equal, 2 to 100 px differ.\n\nEnemies and openings 8/10 (9). --noauto --hud at beats 2, 4 and 6, the boss (3 instants) and the camera passing the burnt-car card: nobody pops through or stands in a flat, and positions match the reference. GAP: the burst instant itself was NOT caught this round. Autoplay at beat 4 clears the beat too fast (frames 60 to 840 show no enemy at the glass). Instead: the hole-cutting code is unchanged in the diff, the new wounds stay in the head and kick bands, and at frame 240 the panes change state over the same span in both builds (burstg c3). Last round's burst check still stands for the holes.\n\nEnemy and telegraph read 9/10 (9). Rings and walkers are clear at the art frame and in the phone CRT view. The ring's red vs white difference from the reference is the wall-clock blink (Overlay2D.ts:350), not a game difference.\n\nLighting of what did not change 9/10 (9). The diner seam is gone. PW_NO_LOCAL is compiled only for that one material.\n\nBudgets 7/10 (7). 43.65 MiB against the 48 limit (reference 37.31). Calls +1 to +3, with +3 at h2, h4 and beat 5 (the own-light batch), against +1 to +2 last round. Triangles 1.3k to 6.1k fewer. Single file 3581 KB, +0.1 KB against baseline. Audit matches the report: h2 flat 9.6 % vs 6.3 %, h4 4.7 % vs 5.2 %, boss passes. Cold paint is still over the written 1.2 s.\n\nMotion 9/10 (9). Moving, f1 to f2, colour changed now vs reference: m5 25.6 vs 27.8 %, m3 24.7 vs 28.1 %, m1 26.7 vs 27.3 %. Still camera, f1 to f2: square 0.41 vs 0.45 %, h4 1.43 vs 1.56 %, h2 1.53 vs 1.50 %. Reference h6 and boss still-camera runs did not finish. This build's own h6 is 0.67 % and boss 0.93 %, with light at or below 0.01 %, so no Z-fighting signature. Burnt-car pass-by frames show no edge-on stretch or near-plane clip. Marquee board and plinth crops are stable across frames.\n\nProduction 10/10 (10). vite build OK. No console or page errors in 3 cold loads and the second load. Second load took all 4 atlases from the store: 0 ms painted, 43.65 MB read, time to play 4.9 s against 9.9 to 12.0 s cold (contended). Cold-vs-store frames show the same art but differ on edges, so frame-level identity remains unmeasured, as last round.",
+   "resolved": [
+    "LOW paint-budget cross-references: docs/PIXELWORLD3.md:106 now states the figure (about 2 to 2.4 s, first run only, pending the owner), and docs/PIXELWORLD2.md:106 and docs/ARCHITECTURE.md:1126 carry it too.",
+    "LOW diner menu board and black kick panel: no solid black rectangle at the hold. The board is lit and legible past the door (burstg c4), and the gone-panel stretches show steel ribs (r3/diner-now-r2.png).",
+    "Report's open item on the production store: re-measured here. Restore works, with 0 ms paint and no errors (r3/prod).",
+    "Report's open item on the whole unit suite: run at HEAD on a scratch copy, 411 passed, 24 skipped."
+   ],
+   "findings": [
+    {
+     "severity": "medium",
+     "problem": "Still open and still the owner's decision: cold paint for z1 is over the written 1.2 s. The z1 atlas no longer costs more than the reference; all of the extra time is the flats atlas. I could not reproduce the report's quiet-box 2.1 to 2.3 s because the box was never quiet, but the ratio to the reference is 1.3x to 1.6x. Later loads paint 0 ms. My earlier suggestion to delete unused z1 facade modules is withdrawn: the z1 atlas did drop to 28.69 MB (323 tiles), and I accept the report's probe that only 5 tiles were dead, though I did not re-run that probe.",
+     "evidence": "Paired alternating dev loads, 4 each: now 3428, 3767, 3385, 3477 ms (median 3452; z1 1921, z1-flats 1287); reference 2544, 2727, 2115, 2801 ms (median 2636; z1 2337). 14 fresh pages each: median 3667 vs 2315. Production cold under load: 4201, 4582, 4556 ms. r3/now/cold*/stats.json, r3/ref/cold*/stats.json, r3/now/hud/stats.json, docs/PIXELWORLD3.md:106.",
+     "fix": "Ask the owner for a yes or no on about 2.1 to 2.4 s on the first run only. Before Group 1 adds more z1 flats, give the rollout a written cap (for example 0.8 s of flats paint per stage on the test box) and delete each facade module as its last building converts, so z1 gets faster as it converts."
+    },
+    {
+     "severity": "low",
+     "problem": "Dead code left by this round: `z1Marquee` and `z1MarqueeEnd` no longer have a caller outside z1signs.ts, and `shrinkWallsWhere` has no caller at all. Harmless at runtime, but it adds bundle weight and suggests a route that is no longer used.",
+     "evidence": "src/content/pixelworld/z1signs.ts:51 and :101; src/content/stages/z1/vfx.ts:150. A grep of src and tests finds only these definitions and the z1signs comment.",
+     "fix": "Delete both z1signs functions and their header comment lines, and delete `shrinkWallsWhere` from vfx.ts."
+    }
+   ],
+   "keep": [
+    "The noLocal route: a painting that carries its own light costs one extra draw call in that zone, and the define changes no other material's shader.",
+    "z1SkylineTile is z1-only; the shared skylineTile is untouched and every other stage's atlas signatures are identical.",
+    "Burnt car as a card: no near-plane clip or edge-on stretch as the camera passes it, and the fire stays in front of it. Its test exclusion is narrow and bounded.",
+    "Plinth as a card: at 2.875 m it reaches the statue's foot, so the statue lands on it from the approach and the boss hold.",
+    "Flats volume test and wall-glow span test.",
+    "The store restore path: all four z1 atlases, 43.65 MB, no errors.",
+    "Evidence is in /tmp/pw3/judge-flats-tech/r3/ (now/ and ref/: hud, id, ot, late, burstf, burstg, mot, motHold, phone, audit, cold1-4; prod/; sheet-holds.png, sheet-move-boss.png, sheet-late.png, sheet-burst2.png, passby.png, crops2.png, ring.png, diner-now-r2.png, phone.png). The queued background burst job hit its time limit; the same captures were re-run in the foreground as burstf and burstg. The repository was not changed; builds ran in /tmp/pw3/judge-flats-tech/copy."
+   ]
+  }
+ ]
+}

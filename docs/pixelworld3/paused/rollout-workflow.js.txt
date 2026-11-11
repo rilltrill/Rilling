@@ -1,0 +1,161 @@
+export const meta = {
+  name: 'pw3-rollout',
+  description: 'PIXEL WORLD 3 rollout: draw a batch of humanoids or buildings, one worktree per group, each judged independently and refined',
+  phases: [
+    { title: 'Groups', detail: 'each group draws its batch; independent judges look; the lead fixes what they found' },
+  ],
+}
+
+const TRAILER = 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01RkBH5LrGsE3Aa6iqvrQWHD'
+const REPORT = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    design: { type: 'string', description: 'what was built and how the next person extends it' },
+    sheets: { type: 'array', items: { type: 'string' }, description: 'absolute paths, each labelled with what it shows' },
+    numbers: { type: 'string', description: 'tests, aim checks, timings, memory, draw calls: before and now, measured' },
+    notDone: { type: 'array', items: { type: 'string' } },
+    filesChanged: { type: 'array', items: { type: 'string' } },
+    commits: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['summary', 'design', 'sheets', 'numbers', 'notDone', 'filesChanged', 'commits'],
+}
+const VERDICT = {
+  type: 'object',
+  properties: {
+    atBar: { type: 'boolean', description: 'true only if, as captured NOW, this passes the question your brief asks, with no high finding open' },
+    scores: { type: 'string', description: 'your criteria 1-10, one line each, with last round beside them when there was one' },
+    resolved: { type: 'array', items: { type: 'string' } },
+    findings: { type: 'array', items: { type: 'object', properties: { severity: { type: 'string', enum: ['high', 'medium', 'low'] }, problem: { type: 'string' }, evidence: { type: 'string', description: 'capture path + crop box, or file:line, or numbers' }, fix: { type: 'string', description: 'concrete: what to draw or change, where, how big' } }, required: ['severity', 'problem', 'evidence', 'fix'] } },
+    keep: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['atBar', 'scores', 'resolved', 'findings', 'keep'],
+}
+
+const common = (g) => [
+  'You work on OVERRUN, a mobile (iPhone-first, WebGL2) arcade on-rails light-gun shooter in TypeScript + Three.js + Vite: zombies and dinosaurs, tap to shoot. Environments are geometry coloured from procedurally PAINTED pixel-art atlases (painters are code: src/content/pixelworld/, wired per stage in src/content/stages/<id>/). Characters are drawn in 2D over a hidden 3D rig that stays the hitbox.',
+  '',
+  'THE OWNER: "The people still dont look like people at all - shape is all wrong. Trash all the blocky buildings and redraw as 2-d. I know it\'s a lot but do it." They have rejected the look four times. Earlier: "more like mid 2000s pixel art, and a good deal more detailed. I really don\'t want it to feel like a Roblox or Minecraft vibe."',
+  'READ docs/PIXELWORLD3.md FIRST (the direction, and how the foundations were built). docs/PIXELWORLD2.md is the painting rulebook where it does not conflict. docs/ARCHITECTURE.md is long: read only the sections you need. /tmp/pw3/rollout/inventory.md lists every humanoid and building still to convert, with file references (verify them; the code has moved a little).',
+  '',
+  'WORKSPACE: ' + g.wt + ' (git worktree on its own branch, node_modules present). Work ONLY inside it. Commit early and often (small commits survive a restart), each message ending with exactly:\n' + TRAILER + '\nNever push; never create branches or PRs. No model names in code or comments. Do not edit docs/ARCHITECTURE.md, README.md or scripts/single-size.json (others are working in parallel and these are merged later). Your written notes go in docs/pixelworld3/' + g.key + '.md.',
+  'DEV SERVER for browser captures: port ' + g.port + ' of this worktree; if nothing answers at http://localhost:' + g.port + '/ start it: (cd ' + g.wt + ' && nohup npx vite --port ' + g.port + ' --strictPort > /tmp/pw3/vite-' + g.port + '.log 2>&1 &). Never kill processes you did not start; stop your own server when you finish. The look before this work: reference server http://localhost:5791 (read-only, never restart it).',
+  'BROWSER: Playwright with the preinstalled Chromium (software GL). Never "playwright install"; if the executable is reported missing run: sh /tmp/claude-0/-home-user-Rilling/43e8f353-90b2-5a75-a93f-280908b402a9/scratchpad/pw-shim.sh . python3 has PIL and numpy.',
+  'MACHINE: 4 cores shared with up to 8 other agents. Wrap captures, test suites and builds in: sh /tmp/pw2/heavy.sh <command...> . Scratch output under ' + g.scratch + ' only (mkdir it).',
+  'CAPTURES: node scripts/pixel-world.mjs --base http://localhost:' + g.port + ' --out <dir> --modes pixel --retro pixel --vw 624 --vh 288 --dsf 3 --shots "z1:2:150:label,..." (stage:beat:frames:label; the 288-line frame the phone renders, each frame pixel 3x3, no CRT: judge pixel art here. --noauto = nobody shoots; --hud shows the HUD and telegraph rings; --extra "&flag=value" adds URL flags. Phone view: --vw 844 --vh 390 --dsf 2 --retro crt). Humanoids only show as drawn figures with --extra "&castlook=d" until the default is flipped at the very end. You judge by LOOKING: Read the PNGs, crop and enlarge with PIL.',
+  'HARD RULES: gameplay never changes (colliders, occluders, raycast targets, world RNG draws, timings, where enemies and civilians stand, weak-point positions). CLASSIC (art=3d) and PIXEL CAST (art=sprites) build exactly as before. No per-frame allocation in update paths. iPhone-safe WebGL2. Code in the repository\'s style: comments say WHY. Every intermediate commit must typecheck.',
+].join('\n')
+
+// ── Judges ────────────────────────────────────────────────────────────────────
+const FIGURE_J = { key: 'figure', brief: 'You are a figure-drawing teacher who also shipped sprites at SNK and Capcom. THE question: DOES THIS LOOK LIKE A PERSON, AND THE RIGHT PERSON? Use the look-dev tool (scripts/figure-sheet.mjs; read its header) for your own renders. Compare with the construction-worker zombie and the flannel civilian, which set the bar. Measure proportions on solid-black silhouettes. Judge: anatomy and mass; gesture and weight; the walk or action reading with weight; views consistent (the same person turning); clothes as drawn shapes with hard fold wedges (period sprites get their detail from these), not smooth tubes; faces; hands; the costume reading as itself in solid black at 60 px and not as a recoloured worker. atBar only if a stranger shown the sprite would say at once what it is, and it could sit in Metal Slug 3 or House of the Dead 2.' }
+const GAME_J = { key: 'game', brief: 'You verify the figures in the real game with &castlook=d: frames at several distances, night and day, in scenes of the stages where these characters appear. Do people sit in the backgrounds as one medium; correct size on the ground; feet planted, no floating or skating; readable at a glance; zombies against civilians instantly told apart? Telegraph rings (--hud) still dominate? Consecutive frames: no popping or jitter when the size steps. Weak points, wound markers and severed parts land on the drawn figure. Measured, not trusted: tsc; tests/unit drawn-figure, drawn-cache, pixelcast, civilian-align, civilian-silhouette, sprite-art; scripts/pixel-aim.mjs at 3, 6 and 12 m (head and torso strict); raster and upload cost in a horde; cache hit rate; no per-frame allocation; CLASSIC and PIXEL CAST unchanged against the reference server. atBar only if nothing is broken and it holds up in play.' }
+const ONE_J = { key: 'figure', brief: FIGURE_J.brief + '\n\nThen in the real game, briefly: ' + GAME_J.brief }
+const ART_J = { key: 'art', brief: 'You are the background art director of a 2000-2007 arcade studio (Metal Slug 3, SF III, Garou), and you also check that it is safe. THE question: ARE THESE DRAWN, OR STILL BLOCKS? Capture every beat where the converted structures show, from the road and the hold positions, at several frame counts; read them enlarged; compare with the reference server and with z1 Main Street, which sets the bar. Judge: no box anywhere (side faces, knife-edge corners, long converging ruler-straight edges); outlines drawn and irregular; a structure as one picture with a value structure; windows, boards, brick or timber individually drawn, no visible repeat; damage and story; depth from layers; how the staging reads in motion and at holds; nothing floating, no gaps showing void. Safety, measured: tsc, tests/unit/pixel-world.test.ts, tests/unit/stages.test.ts; hidden boxes kept, CLASSIC and PIXEL CAST identical to the reference; enemies never pop through a flat and their doors and windows still line up (--noauto --hud at hold beats); atlas MB (limit 48 per stage), cold paint ms, draw calls and triangles against the reference; three consecutive frames for shimmer, Z-fighting or gaps. atBar only if a stranger would call this a hand-painted 2D background and nothing is broken.' }
+
+const PEOPLE_BAR = 'THE BAR is the construction-worker zombie and the flannel civilian in src/gameplay/pixel/drawn/. Read docs/pixelworld3/p0.md (how to add a costume) and follow it. FIRST run in your worktree: git merge --no-edit pw3/people (it carries the foundation). Other groups are adding costumes in parallel: keep your additions in your own module, and add to shared tables (states, poses index, the figure registry) only by appending your own named block. Nothing changes without castlook=d until the default is flipped at the very end.\n\nMETHOD: most of your effort goes into DRAWING. Render with scripts/figure-sheet.mjs, look at the sheet enlarged, ask "is that this person?", change the shapes, repeat at least eight times per costume or pose family. Deliver labelled sheets: turnaround, strips of each animation, sizes 60/110/180, solid black at 60 px; in-game frames; numbers; tests (tsc, tests/unit/drawn-figure.test.ts extended to your figures, drawn-cache, pixelcast, civilian-align). Aim fairness: scripts/pixel-aim.mjs on your characters at 3, 6 and 12 m, head and torso strict.'
+const FLATS_BAR = 'THE BAR is z1 Main Street as it stands (src/content/stages/z1/pwFlats.ts, src/content/pixelworld/z1flats.ts). Read docs/pixelworld3/b0.md (how to add a stage) and follow it. FIRST run in your worktree: git merge --no-edit pw3/flats (it carries the shared class). Do not edit the shared flats class or elevation.ts: new brushes stay in your own painter file and you name them in your report.\n\nMETHOD: a structure is one or a few flat cut-out cards with one painting on them; its visible box meshes are removed in PIXEL WORLD and hidden boxes stay for occluders and raycasts; every flat stays inside the old volume or on its face, so enemies never pop through; doors and windows enemies use keep their openings. Most of your effort goes into PAINTING: dump the flat as a PNG, look, repaint, then look at it in the scene at the road and the holds; at least six look-and-fix rounds on your first structure. Would a pixel artist have drawn this, or is it a box with a texture? Deliver labelled sheets: each flat as painted; before | now from the road and at holds; phone view with CRT. Numbers: atlas MB (limit 48 per stage), cold paint ms against the reference (about 0.8 to 1.2 s of extra flats paint per stage is the guide), draw calls (at most 250) and triangles per shot (scripts/pixel-audit.mjs). Tests: tsc, tests/unit/pixel-world.test.ts, tests/unit/stages.test.ts; add volume checks for your flats; never weaken identity checks. Delete painter modules as their last user converts.'
+
+// ── The groups ────────────────────────────────────────────────────────────────
+const P = (key, port, extra) => ({ key, port, track: 'people', wt: '/home/user/wt/g-' + key, scratch: '/tmp/pw3/g/' + key, leads: 3, judges: [ONE_J], tools: 130, bar: PEOPLE_BAR, ...extra })
+const B = (key, port, extra) => ({ key, port, track: 'flats', wt: '/home/user/wt/g-' + key, scratch: '/tmp/pw3/g/' + key, leads: 3, judges: [ART_J], tools: 130, bar: FLATS_BAR, ...extra })
+
+const GROUPS = {
+  p0: { key: 'p0', port: 5821, track: 'people', wt: '/home/user/wt/people', scratch: '/tmp/pw3/g/p0', leads: 2, judges: [FIGURE_J, GAME_J], tools: 170, bar: '', title: 'FIGURE ARTIST AND ENGINEER: the shared drawing and the structure every costume will copy', scope: [
+    'Two drawn figures exist (worker zombie, flannel civilian; src/gameplay/pixel/drawn/, behind castlook=d). /tmp/pw3/rollout/people-round3.json holds the last report, the rollout plan, and the two judges\' final verdicts with evidence paths and concrete fixes. Those judges said the shape problem is solved but left the items below. Every other character inherits this code, so it has to be right before anything is copied.',
+    '',
+    'A. DRAWING (shared code first). Fix every high and medium finding in that file; verify each first and say why if one is wrong. The main ones:',
+    ' 1. CLOTH FOLDS: the largest areas are smooth tubes. Hard fold wedges, never ovals, in the shared jeans and sleeve code, per the figure judge\'s fix: drag wedges from the crotch, stacked chevrons behind the knee, the overlapping stack above the boot, wedges fanning from the inner elbow, armpit drag lines, a cuff with a fold line; vest drape. Fewer at small sizes. Replace the full-width knee band with a diagonal wedge; remove the diamond knee glints. This is what makes it "a good deal more detailed".',
+    ' 2. FRONT COWER is a frog pose. Knees over or inside the feet, pigeon-toed; forearms up across the face and crown, hands on the head, head tipped down below the shoulder line, as the side view already does. Compact bell at 60 px. Stop the sideways shake (it needs hysteresis on the rig sway).',
+    ' 3. DEATH: every kill ends on this. First key is a stiff A-pose with a long neck; second key puts the face on the chest; the final corpse reads as a man sitting up with bread-roll soles, and its eyes are open. Redraw: a body knocked backward and folding, ending flat on the street at the right low height (about 1.8 head-units, not 2.8), soles small or hidden, head lolled, eyes shut or rolled.',
+    ' 4. The rest: flannel collar through every view; the zombie mouth at the 110 px level (teeth and jaw); civilian thumbs; arm swing in the civilian front walk; the lollipop head in the far three-quarter-back view; small-size hand ink.',
+    '',
+    'B. STRUCTURE, so the rollout can run in parallel:',
+    ' - Split drawn/outfits.ts into drawn/outfits/ modules: shared parts (jeans, shirt, vest, boots, hands) and one file per costume group.',
+    ' - A figure registry: one table from zombie outfit (ZOMBIE_VARIANTS) and civilian look to a figure definition, so a group adds a costume in one line. Anything not registered keeps the current path, so the game plays at every intermediate state.',
+    ' - Raise the figure id limit in the cache key (the rollout needs about 20 figures).',
+    ' - Per-pose head bias (a runner\'s upright head must not need a neck offset). A proportion parameter on Skeleton (a heavy body: about 5.5 heads, wider shoulders) so the tables stretch.',
+    ' - VARIETY: a crowd must not be clones. Find what per-instance variety the current figures have (skin tone, hair colour, wounds, seeds) and keep it, by palette where that avoids a re-raster, plus a small set of shape flags.',
+    ' - FLUNG LIMBS and heads: today they go through the old painter (see inventory). Draw them through the new pipeline so a severed arm matches the body it came from.',
+    ' - CACHE: measure hit rate and memory with four costumes in one wave, state what happens with about 20, tune what the numbers call for.',
+    ' - scripts/figure-sheet.mjs takes a --fig id and every sheet works per figure.',
+    ' - docs/pixelworld3/p0.md: HOW TO ADD A COSTUME and HOW TO ADD A POSE FAMILY, step by step, with the files and the checks. Seven other agents will follow it literally.',
+    '',
+    'Deliver the same sheets as the last round (turnaround, animation strips, 60 px silhouettes, before | now, in-game frames), numbers and tests.',
+  ].join('\n') },
+
+  b0: { key: 'b0', port: 5822, track: 'flats', wt: '/home/user/wt/flats', scratch: '/tmp/pw3/g/b0', leads: 1, judges: [], tools: 45, bar: '', title: 'ENGINEER: move the flats system into shared code, with no visible change', scope: [
+    'The drawn-flats system lives in src/content/stages/z1/pwFlats.ts. Move its generic part (stage, lay, end, wedge, ownLight, finish) into src/content/pixelworld/flats.ts, taking a placements table as data. z1 keeps its AT table and its diner, marquee and wreck staging. After this, five agents build their stages on that class without touching it.',
+    'Prove there is no visible change: capture z1 at beats 1, 2, 4, 6 and the boss before and after in the pixel art frame and report the differing pixel counts (rain and sparks move, so compare two runs of the same build as well). tsc, tests/unit/pixel-world.test.ts and tests/unit/stages.test.ts pass.',
+    'Write docs/pixelworld3/b0.md: HOW TO ADD A STAGE, step by step: painter file, placements table, staging choices and when to use each (street-parallel, raked saw-tooth, facing the camera), how to remove visible boxes while hidden boxes stay, openings for enemies, what the volume tests need, how to dump a flat to PNG. Say what kit exists in elevation.ts, with one line per brush. Five other agents will follow it literally. Small job; do not repaint anything.',
+  ].join('\n') },
+
+  civ: P('civ', 5831, { title: 'FIGURE ARTIST: the walker costumes', scope: 'Costumes casual ("civilian" variant), office, patient, nurse, doctor on the walker body (walker, straggler, finale_walker, roadside_walker: see the inventory). Each needs its own silhouette in solid black at 60 px, not a recoloured worker: a hospital gown tied at the back with bare legs; a nurse in a uniform dress or scrubs; a doctor whose coat hangs and swings; an office shirt, tie, slacks and shoes. Patient and nurse need a lower-body shape that is not two jeans legs. Shamble, windup, lunge, stagger, death, severed arms, headless, every view, with instance variety.' }),
+  uni: P('uni', 5832, { title: 'FIGURE ARTIST: the uniformed zombies', scope: 'Costumes cop, soldier, biker, and the riot walker riot_z2 (default cop with a steel vest and belt). Cop: shirt, badge, duty belt, cap. Soldier: fatigues, webbing, boots, helmet. Biker: leather, chains, bare arms or patches. Riot: armour shapes the silhouette and must keep reading at 60 px in solid black; armour hits behave exactly as today. Shamble, windup, lunge, stagger, death, severed arms, headless, every view, with instance variety.' }),
+  run: P('run', 5833, { title: 'FIGURE ANIMATOR: the fast movers', scope: 'Pose families, not costumes: a zombie sprint (forward lean, arms driving, knees up, head low and forward), the lunge and leap, and the straggler\'s limp; mapped for runner, straggler, pack_runner, truck_runner, tail_runner. Draw them on the worker and on the flannel so they work for ANY figure (costumes from other groups arrive when merged). Sprites are 2D, so the sprint must read in the view the player actually sees: mostly front and three-quarter, coming at them. The head offset is what breaks first: run the head-on-neck test (runner p90 was +0.68 head-units before the foundation work).' }),
+  bloat: P('bloat', 5834, { title: 'FIGURE ARTIST: spitters and bloaters', scope: 'spitter, finale_spitter, deck_spitter (a glowing throat sac that is the weak point, veins, a recoil-and-spit pose) and bloater, finale_bloater (huge belly, pustules that are weak points, the burst). A bloated trunk table and sacs in their own module; outfits per the inventory. Must read as bloated in solid black at 60 px. Weak-point markers must land on the drawn sac and pustules at every size and view (they are read off the rig: check it live). Shamble, attack, stagger, death, burst.' }),
+  act: P('act', 5835, { title: 'FIGURE ARTIST: civilians in every act', scope: 'Civilian looks: casual, cop, nurse, scientist, ranger, tech (orange polo); the flannel exists. Each its own silhouette and a person the player would want to save. States missing today: grabbed (paired with a zombie, the arms come from the rig; this is the risky one), thanks, stumble, fall, startle, hide, perched (d3), plus the cower, flee, backaway and plead that exist, for every look. Civilians must read as not-zombies instantly, in every stage\'s light. Files: drawn/outfits/civ-*.ts and the civilian branch of drawn/states.ts.' }),
+  crawl: P('crawl', 5836, { title: 'FIGURE ARTIST: crawlers', scope: 'crawler, roadside_crawler, finale_crawler: a legless torso dragging itself on its arms, and the pounce; outfits civilian, patient, office, worker (other costumes arrive when merged; shape the torso so it takes any shirt). A new low-profile pose family with its own placement rule. Aim fairness is the main risk: the head is about 40 cm off the ground, so re-run pixel-aim at 3, 6 and 12 m and adjust the bias. A crawler seen from the front is mostly head, shoulders and reaching arms: draw that view first.' }),
+  heavy: P('heavy', 5837, { title: 'FIGURE ARTIST: heavies and bosses', tools: 170, scope: 'brute, brute_z2, riot_brute (shirtless, riot trousers, armour plates; riot_brute adds a glowing split skull), then the Butcher (3.2 m: cleaver arm, apron armour, the apron rip that adds three pustules, exposed heart, roaring head, meat hook) and the Behemoth (7.6 m worker: hard hat, rebar, arm guard, chest wound and head weak points, lamp-post club). Use the Skeleton proportion parameter. They use paintPixels and no drawnFigure today, so the route is yours to wire. High risk: boss hit logic, weak points, armour, phases and telegraphs are read off the rig and must stay exact; draw the weak points where the rig has them. Figures past MAX_FIGURE_PX double their texels (already handled): check the Behemoth still looks drawn at that size. patient_zero (a fused mass, barely humanoid) stays on its current path. Every boss attack pose the player sees, the stagger, and the death.' }),
+
+  bz1: B('bz1', 5841, { title: 'BACKGROUND ARTIST: the rest of z1', tools: 170, scope: 'Everything in z1 that is still a box, per the inventory: BARBER, the cross-street row, Main past the corners (PHARMACY, fire-escape, shutter, plain, GUNS, tank, boarded, plain), the alley warehouses, Second Street east and west (MOTEL, bus storefront, POLICE), the gas station (canopy, pillars, GAS & GO), the square (BOOKS/TOYS row, kiosks, plain 3-storey, the courthouse with its clock tower, the bandstand).\nAlso the open polish on what exists, from /tmp/pw3/rollout/flats-round3.json (the art judge\'s mediums, with fixes): roof tanks square to the road with banded round bodies and curved hoops; the EAT sign edge-on at the diner hold; the dead-level black strip at the vanishing point; the keyhole glow in the sky behind the Diner sign; the marquee\'s flared end; the crimson chips over window heads; the diner\'s nearest foot band. Remove the dead code the tech judge named. Delete each facade module as its last user converts: that is what makes room in the z1 atlas (43.65 MiB of 48 now).' }),
+  bz2t: B('bz2t', 5842, { title: 'BACKGROUND ARTIST: the z2 hospital exterior and the title-screen city', scope: 'TWO small jobs. (1) z2: the hospital facade, wing and ambulance-bay canopy (src/content/stages/z2/pwBay.ts, shell.ts): one drawn building, the lit canopy on the painted-glow route (pwMaterial noLocal). Interiors stay as they are. (2) The title-screen city: the street blocks both sides (src/ui/MenuBackdrop.ts, src/ui/menuPixel.ts building and roofBox): drawn cut-out buildings, on the same flats approach, in the title screen\'s own light. Do not edit skylineTile in sky.ts. The title horde itself is someone else\'s job.' }),
+  bz3: B('bz3', 5843, { title: 'BACKGROUND ARTIST: z3', tools: 170, scope: 'Everything in z3 that is a box, per the inventory: outskirts blocks, houses, gas station, warehouses, motel, billboards (src/content/stages/z3/pwBuildings.ts); gantry, overpass, sound wall, tunnel and portals, bridge deck, towers, sandbags and floods (pwStructures.ts); the skyline as a drawn far city, as z1 has (z3sky.ts). The boss arena is the suspension bridge, seen for a long time: towers and cables as drawn cards. The player moves fast on a highway here, so judge in motion as well as at holds. The overpass is a long converging box: break it with cards and stage it facing the camera.' }),
+  bd1: B('bd1', 5844, { title: 'BACKGROUND ARTIST: d1', scope: 'd1 per the inventory: the gate pillars and palisade, kiosk, river jetty and ticket hut, watchtower, and the hut and landing on the boss road (src/content/stages/d1/). Daylight, jungle, so the medium is timber, rope, thatch, corrugated sheet and painted signs: uneven planks, sagging ropes, moss, a cut-out palisade with a stepped, splintered top. The gate\'s opening stays where gameplay has it.' }),
+  bd3: B('bd3', 5845, { title: 'BACKGROUND ARTIST: d3', scope: 'd3 per the inventory: the visitor centre, paddock pylons, ticket kiosk, the trestle bridge before the boss, and the abutments (src/content/stages/d3/props.ts, env.ts; d3Visitor.ts painters). Rain and dark, so silhouettes and a few lit surfaces carry the picture. The ground and the puddle work are finished; do not touch them.' }),
+}
+
+// ── Prompts ───────────────────────────────────────────────────────────────────
+const lead = (g, round, last) => [
+  common(g),
+  '',
+  '=== YOUR JOB: ' + g.title + (g.leads > 1 ? ', round ' + round : '') + ' ===',
+  '',
+  'SCOPE:',
+  g.scope,
+  '',
+  g.bar,
+  '',
+  round === 1 ? '' : 'THIS ROUND: an independent judge looked, the verdict is below. Fix every high and medium finding (verify first; say why if one is wrong) and keep what it said to keep. Your earlier work is committed in your worktree.',
+  'Stay disciplined: about ' + (round === 1 ? g.tools : Math.round(g.tools * 0.6)) + ' tool calls at most. Stop your own dev server when you finish. Be honest in notDone: what you did not check is as useful as what you did.',
+  last ? '\nJUDGE ON THE PREVIOUS ROUND:\n' + JSON.stringify(last, null, 1) : '',
+].join('\n')
+
+const judge = (g, j, rep, prev) => [
+  common(g),
+  '',
+  '=== YOUR JOB: INDEPENDENT JUDGE of "' + g.title + '". Do not edit repository files; write only under /tmp/pw3/judge-' + g.key + '-' + j.key + '/. Do not trust the report. About 35 tool calls at most. ===',
+  '',
+  j.brief,
+  '',
+  'Scope of the work you are judging:\n' + g.scope,
+  '',
+  'Return atBar, scores, findings with evidence and a concrete fix (what to draw or change, where, how big), and what to keep.',
+  prev ? '\nYOUR VERDICT ON THE PREVIOUS ROUND (re-check every finding):\n' + JSON.stringify(prev, null, 1) : '',
+  '\nREPORT:\n' + JSON.stringify(rep, null, 1),
+].join('\n')
+
+// ── A group: draw, judge, fix. The last lead round is not re-judged: the whole-game sweep sees it.
+const runGroup = async (g) => {
+  let rep = null, verdicts = null
+  const history = []
+  for (let round = 1; round <= g.leads; round++) {
+    const next = await agent(lead(g, round, verdicts), { label: g.key + ' lead r' + round, phase: 'Groups', schema: REPORT })
+    if (!next) { log(g.key + ': lead round ' + round + ' produced nothing'); break }
+    rep = next
+    if (round === g.leads || g.judges.length === 0) break
+    const prev = verdicts
+    verdicts = (await parallel(g.judges.map((j) => () => agent(judge(g, j, rep, prev ? prev.find((p) => p.judge === j.key) : null), { label: g.key + ' judge ' + j.key + ' r' + round, phase: 'Groups', schema: VERDICT }).then((v) => (v ? { judge: j.key, ...v } : null))))).filter(Boolean)
+    const count = (s) => verdicts.reduce((n, v) => n + v.findings.filter((f) => f.severity === s).length, 0)
+    log(g.key + ' round ' + round + ': ' + verdicts.map((v) => v.judge + (v.atBar ? ' AT BAR' : ' not yet')).join(', ') + ', ' + count('high') + ' high, ' + count('medium') + ' medium')
+    history.push({ round, verdicts: verdicts.map((v) => ({ judge: v.judge, atBar: v.atBar, scores: v.scores })) })
+    if (verdicts.length === g.judges.length && verdicts.every((v) => v.atBar) && count('high') === 0) break
+  }
+  return { key: g.key, final: rep, verdicts, history }
+}
+
+const names = (args && args.groups) || []
+if (!names.length) throw new Error('args.groups is required')
+names.forEach((n) => { if (!GROUPS[n]) throw new Error('unknown group ' + n) })
+phase('Groups')
+const results = await parallel(names.map((n) => () => runGroup(GROUPS[n])))
+return { groups: names, results }
