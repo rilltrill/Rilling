@@ -228,7 +228,7 @@ export function paintHumanCel(f: PixelFigure, r: HumanoidRig, L: HumanLook, st: 
     f.coneE(f.at(r.hips, 0, 0.06, 0), f.at(r.hips, 0, low, 0.004), hipX, hipZ, 0.166 * b * s, 0.106 * sb * s, 0.205 * b * s, 0.122 * sb * s, M.shirt)
       .flag(CUT)
       .bulge(0.1 * sb * s)
-      .z(-0.05)
+      .z(-0.09)
       .u(0.5);
   }
   // Shoulder line: sloping from the neck down to each shoulder point (one shoulder drops on the dead).
