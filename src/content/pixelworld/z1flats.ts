@@ -1,6 +1,7 @@
 import type { PwPainter } from './atlas';
 import { bayer, PWF } from './canvas';
 import { Elev, FLAT_PAD, FLAT_TPM, vnoise, type ElevWallColours, type RoomKind, type WinKind } from './elevation';
+import { hash2 } from './surfaces';
 import { drawText, FONT_BOLD, FONT_5x7, textWidth } from './font';
 
 /**
@@ -119,11 +120,15 @@ function light(e: Elev, o: { moon?: number; foot?: number; right?: number } = {}
   e.value((x, y) => Math.max(0, 1 - y / (H * 0.5)) * Math.max(0, 1.1 - x / (W * 0.65)) * moon, 1);
   e.value((x) => Math.max(0, (x - W * 0.62) / (W * 0.38)) * right, -1);
   // The block across the street throws a long shadow over the lower wall: one big diagonal shape, drawn by hand.
+  // (Its edge is the block's own roofline: runs and steps, not a smooth wave.)
   const seed = e.seed;
-  e.value((x, y) => {
-    const edge = e.Y(GROUND_H + 1.2 + 2.4 * vnoise(x, 120, seed + 12)) + (x / W) * 42;
-    return y > edge ? 1 : 0;
-  }, -1);
+  const stepW = 54;
+  const roofOpp = (x: number) => {
+    const i = Math.floor(x / stepW);
+    const h = hash2(i, 3, seed + 12);
+    return (h > 0.7 ? 2.4 : h > 0.34 ? 1.2 : 0.2) + (hash2(i + 1, 3, seed + 12) > 0.5 && (x % stepW) / stepW > 0.8 ? 0.6 : 0);
+  };
+  e.value((x, y) => (y > e.Y(GROUND_H + 1.0 + roofOpp(x)) + (x / W) * 40 ? 1 : 0), -1);
   e.footGrime();
   e.ink();
 }
@@ -223,6 +228,8 @@ const paintLaundry: PwPainter = (c, k) => {
   e.fixture(e.X(16.5), e.Y(1.8), 'box');
   e.bills(e.X(16.4), e.Y(3.4), 46, 40);
   e.scorch(e.X(7.4), sillOf(e, 1) - 54, 30, 66);
+  e.sheet(e.X(13.3) - 22, sillOf(e, 1) - 52, 44, 52, 'SOS');
+  e.clothesline(e.X(1.9), e.X(4.2), sillOf(e, 0) - 60, 2);
   e.crack(e.X(6.6), e.Y(13.4), 42);
   e.crack(e.X(12.8), e.Y(8.2), 30);
   e.pocks(e.X(3), e.Y(9), 300, 180, 26);
@@ -266,7 +273,7 @@ const paintRialto: PwPainter = (c, k) => {
   e.crack(e.X(15.5), e.Y(8.7), 34);
   e.pocks(e.X(3), e.Y(10), 400, 120, 22);
   // The marquee's warm spill on the brick above it.
-  neonWash(e, 3, 17, GROUND_H - 0.3, GROUND_H + 1.5, 0x9a5238);
+  neonWash(e, 3, 17, GROUND_H - 0.3, GROUND_H + 1.2, 0x7a5040);
   light(e, { moon: 1.0, right: 0.6 });
 };
 
@@ -339,7 +346,7 @@ const paintLiquor: PwPainter = (c, k) => {
   e.pocks(e.X(1), e.Y(7), 300, 60, 14);
   // A security grille, half up.
   for (let x = e.X(0.9); x < e.X(13.2); x += 2) c.vline(x, sy + 30, 56, e.r.iron, 1 + ((x >> 1) & 1));
-  neonWash(e, 3.6, 12.4, GROUND_H - 0.2, GROUND_H + 1.0, 0x8a3a30);
+  neonWash(e, 3.6, 12.4, GROUND_H - 0.2, GROUND_H + 0.8, 0x74403a);
   light(e, { moon: 0.8 });
 };
 
@@ -415,6 +422,7 @@ const paintHotel: PwPainter = (c, k) => {
   e.bills(e.X(20.5), e.Y(3.2), 40, 60);
   e.fixture(e.X(0.8), e.Y(2.0), 'meter');
   e.scorch(e.X(16.7), sillOf(e, 1) - 54, 32, 66);
+  e.sheet(e.X(11.0) - 26, sillOf(e, 2) - 54, 52, 64, 'HELP');
   e.crack(e.X(9), e.Y(12.3), 46);
   e.pocks(e.X(2), e.Y(9), 420, 200, 28);
   light(e, { moon: 1.1 });
@@ -480,6 +488,7 @@ const paintW4: PwPainter = (c, k) => {
   c.rect(dx + 14, e.Y(2.7), 30, 26, e.r.glassDark, 2);
   e.drainpipe(15.5, h - 1);
   e.tag(e.X(1.0), e.Y(1.7), 'RUN', 0xe89a38, 0x3a1e08, 2);
+  e.clothesline(e.X(5.3), e.X(10.7), sillOf(e, 0) - 66);
   e.bills(e.X(10.2), e.Y(2.2), 40, 44);
   e.fixture(e.X(5.5), e.Y(2.2), 'meter');
   e.fixture(e.X(5.5), e.Y(3.5), 'vent');
@@ -541,7 +550,7 @@ const paintBar: PwPainter = (c, k) => {
   e.band(e.Y(GROUND_H - 0.1), 5, e.r.stone);
   const sy = e.Y(3.9);
   e.shopfront(e.X(0.8), e.X(11.2), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'bar', { hex: 0x9a4a72 }), door: e.X(11.6), doorKind: 'lit', frameRamp: e.k.ramp(0x241a24, { light: 0.34 }), riser: e.k.ramp(0x3a2234, { light: 0.34 }) });
-  neonWash(e, 2.5, 10.5, GROUND_H - 0.2, GROUND_H + 1.0, 0x8a3a60);
+  neonWash(e, 2.5, 10.5, GROUND_H - 0.2, GROUND_H + 0.8, 0x6e4258);
   e.bills(e.X(11.8), e.Y(3.6), 30, 44);
   e.pocks(e.X(1), e.Y(7), 300, 50, 12);
   light(e, { moon: 0.8 });
@@ -574,7 +583,7 @@ const paintMeats: PwPainter = (c, k) => {
   c.hline(e.X(5.4), e.Y(4.0), e.X(10.6) - e.X(5.4), e.r.stone, 4);
   // Wall behind the display windows: dark, it is lit red by the sign.
   const red = e.k.ramp(0x7a3028, { light: 0.34, sat: 1.05, dark: 0.45 });
-  e.pool(e.X(8), e.Y(5.2), 210, 56, 2, red);
+  // (The sign's own red light does the rest in the scene: a painted pool on top turned into a blob.)
   // Blood down the wall from the sign.
   for (const x of [e.X(3.4), e.X(11.5), e.X(12.4)]) {
     for (let j = 0; j < 34; j++) c.tint(x + (j >> 5), e.Y(4.6) + j, red, -1);

@@ -772,6 +772,26 @@ describe('PixelWorld stages (budgets, gameplay unchanged)', () => {
     expect(d.bytes).toBe(d.w * d.h * 2 + d.pal.length);
   });
 
+  it('z1: drawn flats stand inside the old building volumes (never over the sidewalk where enemies walk)', { timeout: 120_000 }, () => {
+    const px = build('z1', 'pixel');
+    const flats = pwMeshes(px).filter((m) => m.name === 'pw:z1-flats');
+    expect(flats.length).toBeGreaterThan(0);
+    let verts = 0;
+    for (const m of flats) {
+      const p = m.geometry.getAttribute('position');
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i);
+        const z = p.getZ(i);
+        if (z < -205 || Math.abs(x) > 24) continue; // the square's flats and anything off Main Street
+        verts++;
+        // Facades at ±9.5; cards (awnings, fire escapes) stand at most 1 m in front of a flat, footprints reach 14.5 m back.
+        expect(Math.abs(x)).toBeGreaterThanOrEqual(8.5);
+        expect(Math.abs(x)).toBeLessThanOrEqual(9.5 + 14.5);
+      }
+    }
+    expect(verts).toBeGreaterThan(0);
+  });
+
   it('z1 in PIXEL WORLD plays exactly like PIXEL CAST (stage simulator)', { timeout: 300_000 }, () => {
     const a = simulateStage(stage('z1'), { art: 'sprites', maxTime: 120 });
     const b = simulateStage(stage('z1'), { art: 'pixel', maxTime: 120 });

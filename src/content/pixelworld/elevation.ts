@@ -1078,6 +1078,43 @@ export class Elev {
     return this;
   }
 
+  /** A bedsheet hung from a window with a word on it: `word` in the rough font, stained, ragged foot. */
+  sheet(x: number, y: number, w: number, h: number, word: string): this {
+    const { c, r, seed } = this;
+    for (let j = 0; j < h; j++) {
+      const sag = Math.round(Math.sin((j / h) * 3.1) * 2);
+      const foot = j > h - 8 ? Math.round(hash2(j, 3, seed) * 6) : 0;
+      for (let i = sag + foot; i < w - foot; i++) c.set(x + i, y + j, r.stone, i < sag + 2 ? 4 : i > w - 3 - foot ? 2 : 3);
+    }
+    const m = rasterText(word, FONT_BOLD, { scale: 2 });
+    const tx = x + Math.round((w - m.w) / 2);
+    const ty = y + Math.round((h - m.h) / 2);
+    for (let my = 0; my < m.h; my++) for (let mx = 0; mx < m.w; mx++) if (m.data[my * m.w + mx]) c.set(tx + mx, ty + my, r.curtain, 1);
+    for (let i = 0; i < w; i++) if (i % 7 < 2) this.c.shift(x + i, y + h + 1, -1);
+    return this;
+  }
+
+  /** Washing on a line between two windows. */
+  clothesline(x0: number, x1: number, y: number, n = 4): this {
+    const { c, r, seed } = this;
+    const hexes = [0x8a7a6a, 0x5a6a7a, 0x8a4a4a, 0x7a8a6a];
+    for (let x = x0; x < x1; x++) {
+      const t = (x - x0) / (x1 - x0);
+      c.set(x, y + Math.round(Math.sin(t * Math.PI) * 5), r.ink, 1);
+    }
+    for (let i = 0; i < n; i++) {
+      const ramp = this.k.ramp(hexes[Math.floor(hash2(i, 5, seed) * hexes.length)], { light: 0.34, dark: 0.45 });
+      const t = (i + 0.5) / n;
+      const px = Math.round(x0 + (x1 - x0) * t) - 6;
+      const py = y + Math.round(Math.sin(t * Math.PI) * 5);
+      c.rect(px, py + 1, 12, 15, ramp, 2.6);
+      c.rect(px - 3, py + 2, 3, 7, ramp, 2.2);
+      c.rect(px + 12, py + 2, 3, 7, ramp, 2.2);
+      c.hline(px, py + 15, 12, ramp, 1);
+    }
+    return this;
+  }
+
   // ─── More of the drawing ──────────────────────────────────────────────────
 
   /** A cast-iron drainpipe with its brackets and a rusty shoe. */
