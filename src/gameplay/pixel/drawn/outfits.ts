@@ -608,7 +608,7 @@ function oval(d: Draw, x: number, y: number, rx: number, ry: number) {
  * ovals growing toward the viewer, a stump if it is severed, and the hand drawn last, big, the
  * fingers spread: the largest shape on the figure.
  */
-function reachArm(d: Draw, side: number, shirt: number, skin: number, level: number, handTbl: readonly Pt[], hgroupNear: number) {
+function reachArm(d: Draw, side: number, shirt: number, skin: number, level: number, handTbl: readonly Pt[], hgroupNear: number, foreRamp = shirt) {
   const pen = d.pen;
   const sk = d.sk;
   const sh = side === 0 ? J.shL : J.shR;
@@ -645,7 +645,7 @@ function reachArm(d: Draw, side: number, shirt: number, skin: number, level: num
     const rx = 0.3 + t * 0.03;
     const ry = 0.29 + t * 0.03;
     oval(d, fx, fy, rx, ry);
-    pen.fill(shirt, 3, PARTL, gs, -2);
+    pen.fill(foreRamp, 3, PARTL, gs, -2);
     form(fx, fy, rx, ry, gs);
     const hg = hgroupNear;
     const hb = side === 0 ? B.haL : B.haR;
@@ -875,6 +875,22 @@ function hiVisVest(d: Draw, view: ViewId) {
   }
 }
 
+/** A shirt collar seen from behind: it stands up against the nape and shortens the bare neck. */
+function backCollar(d: Draw, view: ViewId, ramp: number) {
+  if (view !== 3 && view !== 4) return;
+  const pen = d.pen;
+  pen.begin();
+  d.pt(B.chest, 0.74, 0.2, true);
+  d.pt(B.chest, 0.74, -0.2, true);
+  d.pt(B.chest, 0.42, -0.3, true);
+  d.pt(B.chest, 0.42, 0.3, true);
+  pen.fill(ramp, 3, PARTT, G.collar, -2);
+  if (d.lod >= 2) {
+    polyB(d, B.chest, [0.56, 0.32, 0.56, -0.32, 0.5, -0.32, 0.5, 0.32], true);
+    pen.shade(G.collar, -1);
+  }
+}
+
 const WORK_HEAD: HeadSpec = { skin: R.skinDead, dead: true, hair: R.hairDark, hat: R.hat, jaw: 0.6 };
 
 /** Draws an arm honouring the damage flags. */
@@ -922,6 +938,7 @@ export const WORKER: FigureDef = {
     shape(d, NECK_F, B.neck, R.skinDead, PARTH, G.neck, 2, 0);
     hiVisVest(d, view);
     if (!isBack(view)) collar(d, view, shirt);
+    else backCollar(d, view, shirt);
     if (headless) neckStump(d);
     else paintHead(d, WORK_HEAD, HG, view);
     if (isSideish(view)) {
@@ -1081,8 +1098,8 @@ export const FLANNEL: FigureDef = {
       hand(d, open, hb, R.skinLive, hg, narrow);
     };
     if (view === 4) {
-      if (d.reach[0] > 0) reachArm(d, 0, shirt, R.skinLive, 0, open, G.handF);
-      if (d.reach[1] > 0) reachArm(d, 1, shirt, R.skinLive, 0, open, G.handN);
+      if (d.reach[0] > 0) reachArm(d, 0, shirt, R.skinLive, 0, open, G.handF, R.skinLive);
+      if (d.reach[1] > 0) reachArm(d, 1, shirt, R.skinLive, 0, open, G.handN, R.skinLive);
     }
     if (isSideish(view)) arm(ARM_L, G.armFar, B.haL, G.handF, view === 2 ? 0.75 : 0.9);
     legs(d, R.denimCiv, view, SNEAKER);
@@ -1111,13 +1128,14 @@ export const FLANNEL: FigureDef = {
       d.pen.fill(R.white, 3, PARTT, G.collar, -1);
     }
     if (!isBack(view)) collar(d, view, shirt);
+    else backCollar(d, view, shirt);
     paintHead(d, FLANNEL_HEAD, HG, view);
     if (isSideish(view)) {
       arm(ARM_R, G.armNear, B.haR, G.handN, view === 2 ? 0.75 : 0.9);
     } else {
-      if (d.reach[0] > 0 && view === 0) reachArm(d, 0, shirt, R.skinLive, 0, open, G.handF);
+      if (d.reach[0] > 0 && view === 0) reachArm(d, 0, shirt, R.skinLive, 0, open, G.handF, R.skinLive);
       else if (d.reach[0] === 0) arm(ARM_L, G.armFar, B.haL, G.handF, 1);
-      if (d.reach[1] > 0 && view === 0) reachArm(d, 1, shirt, R.skinLive, 0, open, G.handN);
+      if (d.reach[1] > 0 && view === 0) reachArm(d, 1, shirt, R.skinLive, 0, open, G.handN, R.skinLive);
       else if (d.reach[1] === 0) arm(ARM_R, G.armNear, B.haR, G.handN, 1);
     }
   },

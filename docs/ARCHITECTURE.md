@@ -806,24 +806,33 @@ else is CEL. `&drawnfig=all` (look-dev) shows every walker / civilian as those t
 
 - `body.ts` limb tables (outlines in bone space: bone 0/1, t along, n off the axis), `head.ts` heads
   and faces per view with three levels of detail, `outfits.ts` the costumes (back-to-front order,
-  shadow shapes, interior strokes, plaid), `poses.ts` animator's keyframes (angles on designed
-  bones; 12-frame walk and run cycles from six drawn keys + in-betweens).
+  form clusters: lit plane, base, shadow, a core at the turn, a sliver of reflected light; plaid that
+  steps at fold lines), `poses.ts` animator's keyframes: angles on designed bones, and the walk
+  plotted on the ground grid (`foot` solves the leg from where the ankle goes; a foot near the street
+  pivots on its toe, `Skeleton.footPitch`). Twelve-frame zombie limp (each frame drawn), run cycle
+  from six keys + in-betweens, a walk played backwards for backing away.
 - Views: front, 3/4, side, 3/4 back, back; the rest are mirrors (`DrawnSprite.mirror`, a UV flip: no
   raster). Faces, hair and hats are drawn per view; outlines are shared between a view and its back.
 - `states.ts` maps an entity state + phase to a frame (`Zombie.drawnFigure`, `Civilian.drawnFigure`
   fill a `DrawnQuery`; no allocation).
 - Placement (`DrawnCast.place`): feet on the rig's ground point, the sprite shifted so its drawn
-  torso centre sits over the rig's torso, the neck redrawn (`hx`, `hy` in 0.1 head-units) so its head
-  centre sits over the rig's head; the arms take the rig's angles in 3/4 and side views (where they
-  cross the torso) and in windups. Aim checks: `tests/unit/drawnAim.ts` (head strict in every view;
+  torso centre sits over the rig's torso, the neck redrawn (`hx`, `hy` in whole texels, two-texel
+  steps on big figures, at most `HEAD_TRAVEL` steps a redraw; bend past `NECK_BEND` moves the whole
+  sprite instead) so its head centre sits over the rig's head. The arms take the rig's angles in 3/4
+  and side views (where they cross the torso); seen from the front and back an arm swung up past 60
+  degrees is drawn foreshortened (`placeReach`, `reachArm`: two sleeve ovals, the hand last and big),
+  because a rig arm aimed at the camera would project straight up. A rejected figure is judged by its
+  whole on-screen rectangle (at melee range its feet are below the frame). Aim checks: `tests/unit/drawnAim.ts` (head strict in every view;
   torso strict front and back, in 3/4 and side views an arm hit is allowed where the arm crosses the
   torso on the rig too; civilians' cower / hide excluded: the arms ARE over the head).
 - Frames: 2048² R8 atlas of palette indices (`DrawnCast`), shelf LRU keyed by (figure, pose, frame,
-  view, size, head offset, damage, arm buckets), ≤ `MAX_RASTERS` (3) rasters per frame, the nearest
-  cached size until the exact one is ready. Stage light is a palette rebuild (`setStageLight`,
-  `CastStageLight.step` / `floor`), not a repaint; fog in whole bands per sprite.
+  view, size, head offset, damage, level of detail, arm buckets), ≤ `MAX_RASTERS` (3) rasters per
+  frame, the nearest cached size until the exact one is ready. A warm-cache redraw builds no pose
+  (head and chest joints are cached per pose, frame and view). Detail levels hold with hysteresis
+  (`lodFor`). Stage light is a palette rebuild (`setStageLight`, `CastStageLight.step` / `floor` /
+  `tint` / `tintAmt`), not a repaint; fog in whole bands per sprite.
 - Look-dev without a browser: `node --experimental-strip-types --no-warnings scripts/figure-sheet.mjs
-  --out DIR --sheet turn,anim,states,sizes,solid,measure,look,perf` (labelled PNGs in a few ms).
+  --out DIR --sheet turn,anim,states,sizes,solid,sil,heads,r2,canon,measure,look,perf` (labelled PNGs in a few ms).
   Round one's rollout plan is in the round-one report (per figure group: outfit sketches, then
   `poses.ts` / `states.ts` for its movement set, then `drawnFigure` on the entity).
 

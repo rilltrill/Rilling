@@ -234,7 +234,7 @@ export const CIVCOWER: PoseKey[] = [
 
 /** Pleading: on the feet, one arm stretched toward the player, the other against the chest. */
 export const CIVPLEAD: PoseKey[] = [
-  { lean: 4, sLean: 4, cLean: 2, hPitch: -6, hRoll: 6, tilt: 2, aL: [70, 12, 30], aR: [18, 18, 96], lL: [8, 6, 8], lR: [-4, 14, 6] },
+  { lean: 4, sLean: 4, cLean: 2, hPitch: -6, hRoll: 6, tilt: 2, aL: [92, 12, 30], aR: [18, 18, 96], lL: [8, 6, 8], lR: [-4, 14, 6] },
 ];
 
 export const POSES = {
