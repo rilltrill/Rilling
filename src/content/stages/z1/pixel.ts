@@ -20,7 +20,7 @@ import {
   brickTile, curbTile, hash2, metalTile, paintBrick, roofTile, sidewalkTile, stoneTile,
 } from '../../pixelworld/surfaces';
 import { texStd } from './bake';
-import { z1AsphaltTile, z1PavingTile } from '../../pixelworld/z1ground';
+import { z1AsphaltTile } from '../../pixelworld/z1ground';
 import { Z1Ground } from './pwGround';
 import { Z1Cars } from './pwCars';
 import { Z1FacadeExtras } from './pwFacade';
@@ -160,8 +160,7 @@ export class Z1PixelWorld {
     for (const m of roadMaterials()) ov.set(m, () => this.asphalt());
     // The alley's cold-storage warehouse: calm corrugated cladding (its identity is painted on by pwStreet).
     ov.set(Kit.tex('corrugated', 0x50535d, 1), () => z1CorrugatedTile(a, 0x50535d));
-    // The town square's stone flags.
-    ov.set(SQUARE_FLAGS(), () => z1PavingTile(a, { brick: 0x6e4636, granite: 0x6a6862 }));
+    // (The streets, walks, the square's paving and the forecourt are laid as paintings of their own: pwGround.ts.)
     this.overrides = ov;
     const roadPaint = new Set<THREE.Material>([M.yellowPaint, M.whitePaint]);
     const kit = kitTileRule(a, { overrides: ov, paint: roadPaint });
