@@ -241,6 +241,21 @@ if (which.has('measure')) {
   canon('worker', WORKER, 'zidle');
   canon('flannel', FLANNEL, 'civstand');
 }
+if (which.has('perf')) {
+  // Raster time per figure (CPU only, single thread): what the frame budget pays for a cache miss.
+  for (const [name, def, pose] of [['worker', WORKER, 'zshamble'], ['flannel', FLANNEL, 'civrun']]) {
+    for (const size of [60, 110, 180, 300]) {
+      let t = 0;
+      const N = 200;
+      for (let i = 0; i < N; i++) {
+        const t0 = performance.now();
+        renderer.draw(def, POSES[pose], i % POSES[pose].length, i % 5, size);
+        t += performance.now() - t0;
+      }
+      console.log(`raster ${name} ${size}px: ${(t / N).toFixed(2)} ms`);
+    }
+  }
+}
 if (which.has('anim')) {
   // Animation strips.
   const strips = [

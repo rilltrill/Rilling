@@ -175,8 +175,10 @@ function jeans(d: Draw, ramp: number, view: ViewId) {
       strokeB(d, th, g, -1, [0.96, -0.13, 0.9, 0.0, 0.97, 0.15]);
       strokeB(d, sh, g, -1, [0.12, 0.12, 0.08, 0.0, 0.14, -0.11]);
       if (d.lod >= 2) {
-        // Pull lines above the knee.
+        // Pull lines above the knee, the crease behind it.
         strokeB(d, th, g, -1, [0.76, 0.08, 0.7, 0.2]);
+        strokeB(d, th, g, -1, [0.86, -0.18, 0.78, -0.06]);
+        strokeB(d, sh, g, -1, [0.22, -0.16, 0.3, -0.05]);
       }
     }
   }
@@ -291,6 +293,17 @@ function sleeve(d: Draw, tbl: readonly Pt[], map: readonly number[], ramp: numbe
   }
   pen.fill(ramp, 3, PARTL, group, -2);
   d.wedge(ARM_SHADE_F, map, group);
+  if (d.lod >= 2) {
+    // Cloth bunches at the inner elbow; a seam from the shoulder.
+    strokeB(d, map[0], group, -1, [0.86, -0.1, 0.94, 0.0, 0.88, 0.1]);
+    strokeB(d, map[1], group, -1, [0.08, -0.12, 0.14, 0.02]);
+    strokeB(d, map[0], group, -1, [0.08, 0.14, 0.42, 0.11]);
+  }
+  if (d.lod >= 1 && tRoll < 1) {
+    // The rolled cuff: a band of the sleeve's own lighter inside.
+    polyB(d, map[1], [tRoll - 0.1, -0.32, tRoll - 0.1, 0.32, tRoll, 0.32, tRoll, -0.32], true);
+    pen.shade(group, 0, ramp, 4);
+  }
 }
 
 /** A stump of a limb: the torn end of the sleeve, meat and a knob of bone (level 1: at the elbow; 2: at the shoulder). */

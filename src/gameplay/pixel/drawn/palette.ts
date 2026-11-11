@@ -40,7 +40,7 @@ export const R = {
 
 export const RAMPS: RampDef[] = [
   { name: 'shirtGrey', hex: 0x5a6a7a, kind: 'cloth' },
-  { name: 'hivis', hex: 0xc8f020, kind: 'flat' },
+  { name: 'hivis', hex: 0xc8f020, kind: 'flat', colors: [0x20280c, 0x5e7a14, 0x96bf1a, 0xcceb22, 0xe8f65e, 0xfaffc4] },
   { name: 'reflect', hex: 0xdfe6e0, kind: 'metal' },
   { name: 'denim', hex: 0x3f5270, kind: 'cloth' },
   { name: 'boot', hex: 0x6a4524, kind: 'leather' },
