@@ -101,7 +101,7 @@ function paintPolice(c: PwCanvas, k: PwKit, board: boolean) {
   c.vline(2, gy0, gy1 - gy0 + 1, frame, 2);
 }
 
-function paintLaundry(c: PwCanvas, k: PwKit) {
+export function paintLaundry(c: PwCanvas, k: PwKit) {
   const W = c.w;
   const H = c.h;
   const F = PWF.GLOW;
@@ -210,7 +210,7 @@ const LOOKS: Record<Z1LitKind, RoomLook> = {
   pawn: { wall: 0x7a7a64, floorA: 0x6a6a64, floorB: 0x4a4a48, ceil: 0x5a5a50, tube: 0xf0ffe8 },
 };
 
-function paintLitBay(c: PwCanvas, k: PwKit, kind: Z1LitKind, frameHex: number, riserHex: number) {
+export function paintLitBay(c: PwCanvas, k: PwKit, kind: Z1LitKind, frameHex: number, riserHex: number) {
   const W = c.w;
   const H = c.h;
   const F = PWF.GLOW;
@@ -425,7 +425,7 @@ export function z1DarkBay(atlas: PwAtlas, kind: Z1DarkKind, frame: number, riser
   return atlas.tile(`z1dark|${kind}|${h6(frame)}|${h6(riser)}${piece ? `|${n}` : ''}`, 128, 112, (c, k) => paintDarkBay(c, k, kind, frame, riser, n), { wrap: true });
 }
 
-function paintDarkBay(c: PwCanvas, k: PwKit, kind: Z1DarkKind, frameHex: number, riserHex: number, n: number) {
+export function paintDarkBay(c: PwCanvas, k: PwKit, kind: Z1DarkKind, frameHex: number, riserHex: number, n: number) {
   const W = c.w;
   const H = c.h;
   const F = PWF.GLOW;

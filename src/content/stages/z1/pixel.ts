@@ -29,6 +29,7 @@ import { Z1Bus } from './pwBus';
 import { Z1Square } from './pwSquare';
 import { Z1Street } from './pwStreet';
 import { Z1Props } from './pwProps';
+import { Z1Flats } from './pwFlats';
 import { PW_PARTS, type PwPart } from './setpieces';
 import { repaintable } from '../../pixelworld/retexture';
 import type { Town } from './town';
@@ -86,6 +87,8 @@ const PAINTED: Record<number, number> = { 0x445670: 0x445670 };
  * CAST (the brick and plaster sank into the night on a phone); this lifts it back to match.
  */
 export const Z1_GAIN = 1.3;
+/** Flats are painted as seen: their gain puts the wall at the mood's pivot (the moon lights them all alike). */
+export const Z1_FLAT_GAIN = 2.6;
 
 const STONE_LIGHT = 0x86827a;
 const STONE_DARK = 0x4a4a52;
@@ -137,6 +140,8 @@ export class Z1PixelWorld {
   private square: Z1Square;
   private street: Z1Street;
   private props: Z1Props;
+  /** Buildings drawn as flats (docs/PIXELWORLD3.md). */
+  readonly flats = new Z1Flats();
   backdrop: PwBackdrop | null = null;
   /** Running count of the walls given a graffiti piece (no two neighbours share a word). */
   private grafN = 0;
@@ -210,7 +215,10 @@ export class Z1PixelWorld {
       if (o.userData.pwBuilding) buildings.push(o);
       if (o.userData.pwSign) signs.push(o);
     });
-    buildings.forEach((g, i) => this.facade(b, g, g.userData.pwBuilding as FacadeRecord, i));
+    buildings.forEach((g, i) => {
+      if (this.flats.has(g)) this.flats.stage(id, g, b, this.atlas);
+      else this.facade(b, g, g.userData.pwBuilding as FacadeRecord, i);
+    });
     for (const s of signs) this.sign(b, s);
     // Ground: the tagged classic decals (puddles, manholes, blood, litter, skids) → painted ones, plus the street dressing.
     for (const m of this.ground.replaceTagged(b, zone)) m.parent?.remove(m);
@@ -381,6 +389,7 @@ export class Z1PixelWorld {
       const mesh = b.build(undefined, { gain: Z1_GAIN });
       if (mesh) zones[id].add(mesh);
     }
+    this.flats.finish(zones, Z1_FLAT_GAIN);
     // Dynamic pieces: world-space geometry under a moving / toggled parent (undo the parent's transform).
     for (const { b, parent, local, swap, anim } of this.dynBatches) {
       if (anim && !this.fireMat) {
