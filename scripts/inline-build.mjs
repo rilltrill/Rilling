@@ -16,8 +16,9 @@ const DIST = path.join(ROOT, 'dist-single');
 const OUT = path.join(DIST, 'overrun.html');
 // Size budget for the one file (it is ≈ 1 MB gzipped). Raised from 3 MB when the six
 // PIXEL WORLD stages landed: their environments are painted by code at load (no image
-// assets), so the art lives in the script. A claude.ai artifact page takes up to 16 MB.
-const LIMIT = 3.5 * 1024 * 1024;
+// assets), so the art lives in the script. Raised again for PIXEL WORLD 3, where every
+// building and person is drawn by code too. A claude.ai artifact page takes up to 16 MB.
+const LIMIT = 4.5 * 1024 * 1024;
 // Size regression check: the committed baseline (the size at HEAD). Growth beyond SLACK fails
 // the build so every increase is a conscious one: accept it with
 //   SINGLE_SIZE_UPDATE=1 npm run build:single     (rewrites scripts/single-size.json — commit it)
