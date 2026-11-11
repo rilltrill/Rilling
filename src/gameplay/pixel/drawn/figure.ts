@@ -244,7 +244,9 @@ function placeReach(d: Draw, key: PoseKey, view: ViewId) {
     const out = Math.sign(sk.sx[sh] - sk.sx[J.chest]) || (s === 0 ? 1 : -1);
     const x0 = sk.sx[sh];
     const y0 = sk.sy[sh];
-    const wx = x0 + out * (0.22 - 0.04 * t);
+    // Low and close in at the start of the reach (the hands are in front of the chest), out to the
+    // shoulders' width by the end of it.
+    const wx = x0 + out * (-0.14 + 0.36 * t);
     const wy = y0 - 0.75 + 0.8 * t;
     const el = s === 0 ? J.elL : J.elR;
     const wr = s === 0 ? J.wrL : J.wrR;
@@ -254,8 +256,8 @@ function placeReach(d: Draw, key: PoseKey, view: ViewId) {
     sk.sx[wr] = wx;
     sk.sy[wr] = wy;
     // Fingers aimed at the camera are short on screen: the hand is wide and squat, not tall.
-    const hl = 0.64 + 0.06 * t;
-    sk.sx[tip] = wx + out * hl * 0.3;
+    const hl = 0.58 + 0.12 * t;
+    sk.sx[tip] = wx + out * hl * (0.12 + 0.22 * t);
     sk.sy[tip] = wy + hl * 0.95;
   }
 }
