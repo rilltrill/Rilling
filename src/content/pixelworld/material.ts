@@ -46,6 +46,8 @@ export interface PwMaterialOptions {
   side?: THREE.Side;
   /** Multiplier of the light on lit texels (a brighter room, a darker one; default 1). */
   gain?: number;
+  /** The stage's local point lights (a neon accent, fire) do not touch this surface: its light is painted on. The moon and the muzzle flash still do. */
+  noLocal?: boolean;
   /** Gain of glow texels (default 1 = as painted; applied in whole tone steps: `pwGlowSteps`). */
   glow?: number;
   /** The mood the material is lit under (default: the one set last with `pwMood`). */
@@ -320,7 +322,7 @@ export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.Mes
   if (!byKey) cacheByAtlas.set(atlas, (byKey = new Map()));
   const mood = o.mood ?? pwMoodNow();
   const lit = pwLightOn();
-  const key = `${o.planar ? 'p' : 'u'}|${o.side ?? 0}|${o.gain ?? 1}|${o.glow ?? 1}|${o.bias ?? PW_MIP_BIAS}|${o.fog ?? true}|${o.density ?? PW_TPM}|${o.tag ?? ''}|${o.anim ? `${o.anim.frames}x${o.anim.fps}` : ''}|${axesOn && o.axes !== false ? 'x' : ''}|${lit ? moodId(mood) : ''}`;
+  const key = `${o.planar ? 'p' : 'u'}|${o.side ?? 0}|${o.gain ?? 1}|${o.glow ?? 1}|${o.bias ?? PW_MIP_BIAS}|${o.fog ?? true}|${o.density ?? PW_TPM}|${o.tag ?? ''}|${o.anim ? `${o.anim.frames}x${o.anim.fps}` : ''}|${axesOn && o.axes !== false ? 'x' : ''}|${lit ? moodId(mood) : ''}|${o.noLocal ? 'n' : ''}`;
   const hit = byKey.get(key);
   if (hit) return hit;
   const uniforms: Record<string, { value: unknown }> = {
@@ -338,6 +340,7 @@ export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.Mes
   const defines: Record<string, string> = {};
   if (o.planar) defines.PW_PLANAR = '';
   if (o.anim) defines.PW_ANIM = '';
+  if (o.noLocal) defines.PW_NO_LOCAL = '';
   // (Backdrops, billboards and sprites face the camera: one level is right for them.)
   if (axesOn && o.axes !== false) defines.PW_ANISO = '';
   if (lit) defines.PW_LIGHT = '';

@@ -9,13 +9,11 @@ import {
 } from '../../pixelworld/facade';
 import { kitTileRule, neutral, NEUTRAL_BRICK, retexture, type TileRule } from '../../pixelworld/retexture';
 import { bladeSign as pwBlade, moviePoster, neonEdge, neonSign } from '../../pixelworld/signs';
-import { z1Marquee } from '../../pixelworld/z1signs';
 import { z1WallPiece } from '../../pixelworld/z1graffiti';
 import { paintZ1Panel, paintZ1Plaster, z1BrickHoles, z1PanelTile, z1PlasterTile, z1Streaks, z1WallBands, Z1_WEAR } from '../../pixelworld/z1walls';
 import type { PwPainter } from '../../pixelworld/atlas';
 import { z1CorrugatedTile } from '../../pixelworld/z1alley';
-import { skylineTile } from '../../pixelworld/sky';
-import { z1NightSkyTile, z1TownlineTile } from '../../pixelworld/z1sky';
+import { z1NightSkyTile, z1TownlineTile, z1SkylineTile } from '../../pixelworld/z1sky';
 import {
   brickTile, curbTile, hash2, metalTile, paintBrick, roofTile, sidewalkTile, stoneTile,
 } from '../../pixelworld/surfaces';
@@ -31,7 +29,7 @@ import { Z1Street } from './pwStreet';
 import { Z1Props } from './pwProps';
 import { Z1Flats } from './pwFlats';
 import { MAIN_FACADE } from './layout';
-import { DINER_SIGN_STRUTS, dinerSignLayout, paintDinerSign } from '../../pixelworld/z1dinerflat';
+import { dinerSignLayout } from '../../pixelworld/z1dinerflat';
 import { PW_PARTS, type PwPart } from './setpieces';
 import { repaintable } from '../../pixelworld/retexture';
 import type { Town } from './town';
@@ -252,8 +250,8 @@ export class Z1PixelWorld {
   convertDyn(town: Town) {
     // Wall glows on the old facade line have nothing to land on once a flat swung back from it.
     town.pools.dropWallsWhere((d) => this.flats.swungAt(d.x, d.z));
-    // The diner's neon glow used to land on a 9 m black board; the drawn sign is a shaped sheet with night round it.
-    town.pools.shrinkWallsWhere((d) => d.x === -MAIN_FACADE + 0.35 && d.z === -49, 2.7);
+    // The diner's neon glow used to land on a 9 m black board; the drawn sign has its halo painted, the front its wash.
+    town.pools.dropWallsWhere((d) => d.x === -MAIN_FACADE + 0.35 && d.z === -49);
     // The diner's buzzing 'r' (the classic overlay is a dark block letter).
     let sign: THREE.Object3D | null = null;
     town.zones.A.traverse((o) => {
@@ -681,11 +679,6 @@ export class Z1PixelWorld {
     if (info.kind === 'marquee') {
       // The marquee is drawn: a shaped face, a painted soffit and a flared end (three cards, the box gone).
       this.flats.stageMarquee(zone, s);
-      s.updateMatrixWorld(true);
-      b.setMatrix(s.matrixWorld);
-      const t = z1Marquee(a, info.text.split('/'), { widthM: info.w ?? 12, heightM: info.size });
-      b.rect(_o.set(-t.wM / 2, -t.hM / 2, info.z ?? 0.01), X, Y, t.wM, t.hM, t.tile);
-      b.setMatrix(null);
       for (const c of [...s.children]) s.remove(c);
       return;
     }
@@ -694,10 +687,8 @@ export class Z1PixelWorld {
     if (info.text === 'Diner') {
       // A shaped sheet on struts with bent tubes, not a black slab (same layout, the buzzing r stays aligned).
       const l = dinerSignLayout(info.size, info.bw ?? 0, info.bh ?? 0);
-      const t = a.tile(`z1dinersign|${l.w}x${l.h}`, l.w, l.h + DINER_SIGN_STRUTS, paintDinerSign(l, info.border ?? 0x39e8ff, info.color));
-      b.setMatrix(s.matrixWorld);
-      b.rect(_o.set(-l.w / 2 / PW_TPM, -l.h / 2 / PW_TPM - DINER_SIGN_STRUTS / PW_TPM, 0.01), X, Y, l.w / PW_TPM, (l.h + DINER_SIGN_STRUTS) / PW_TPM, t);
       b.setMatrix(null);
+      this.flats.stageDinerSign(zone, s, l, info.border ?? 0x39e8ff, info.color);
       for (const c of [...s.children]) s.remove(c);
       return;
     }
@@ -745,7 +736,7 @@ export class Z1PixelWorld {
     const moonEl = Math.round((Math.asin(moonDir.y / moonDir.length()) * 180) / Math.PI);
     const el1 = 36;
     const sky = z1NightSkyTile(s, { horizon: fog, top: 0x03050b, moonAz, moonEl, el0: -4, el1, fires: [-58, 38, 150] });
-    const far = skylineTile(s, { hex: 0x222a3e, fog, el0: -2, el1: 13, lights: 0.45, tall: 0.85, moonAz, seed: 1 });
+    const far = z1SkylineTile(s, { hex: 0x222a3e, fog, el0: -2, el1: 13, moonAz });
     const near = z1TownlineTile(s, { hex: 0x151a28, fog, el0: -2, el1: 9, moonAz, name: 'MILLBROOK' });
     this.backdrop = new PwBackdrop(s, { tile: sky, el0: -4, el1, radius: 330 }, [
       { tile: far, radius: 300, el0: -2, el1: 13, follow: 1 },

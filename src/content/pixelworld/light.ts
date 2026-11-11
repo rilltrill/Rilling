@@ -395,6 +395,14 @@ export const PW_LIGHT_OUT = /* glsl */ `
           getPointLightInfo(pointLights[i], -vViewPosition, pwIl);
           pwOff += saturate(dot(normal, pwIl.direction)) * pwIl.color * (1.0 - uPwMood3.z);
         }
+        #ifdef PW_NO_LOCAL
+          else {
+            // A painting that has its own light drawn in: the neon accent, fire and lamps would cross it with a band
+            // of the wrong tint that ends on whatever column the falloff happens to reach. The moon and the flash still count.
+            getPointLightInfo(pointLights[i], -vViewPosition, pwIl);
+            pwOff += saturate(dot(normal, pwIl.direction)) * pwIl.color;
+          }
+        #endif
       }
     #endif
     pwOff *= RECIPROCAL_PI;

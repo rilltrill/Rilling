@@ -1,4 +1,4 @@
-import { PWF, PW_BACKDROP_TPD, type PwCanvas } from './canvas';
+import { bayer, PWF, PW_BACKDROP_TPD, type PwCanvas } from './canvas';
 import type { PwAtlas, PwKit, PwTile } from './atlas';
 import { drawText, FONT_3x5, textWidth } from './font';
 import { rowsFor } from './sky';
@@ -457,4 +457,212 @@ function paintTownline(c: PwCanvas, k: PwKit, o: Z1TownlineOpts) {
       if (t > 0.8 || (B[(y & 3) * 4 + (xx & 3)] + 0.5) / 16 < t) c.set(xx, y, fog, 3);
     }
   }
+}
+
+// ─── The far city ───────────────────────────────────────────────────────────
+
+export interface Z1SkylineOpts {
+  hex: number;
+  fog: number;
+  el0: number;
+  el1: number;
+  moonAz: number;
+}
+
+/**
+ * The city that used to be there, far behind the town (z1 only; the shared `skylineTile` has level blocks and dotted window rows).
+ * It sits on the vanishing point of every road frame: drawn silhouettes in two depths, setbacks, tanks on legs, masts,
+ * one tower snapped off, one gutted shell with the sky through it; no top edge level for more than 7 texels; windows lit in uneven
+ * clumps; a ragged haze of smoke between the blocks (never a pale oblong of sky).
+ */
+export function z1SkylineTile(atlas: PwAtlas, o: Z1SkylineOpts): PwTile {
+  const H = rowsFor(o.el1 - o.el0);
+  return atlas.tile(`z1city|${h6(o.hex)}|${h6(o.fog)}|${o.el0}|${o.el1}|${o.moonAz}`, TW, H, (c, k) => paintCity(c, k, o), { wrap: true });
+}
+
+type Tower = 'step' | 'tank' | 'mast' | 'flat' | 'snapped' | 'shell' | 'spire';
+
+function paintCity(c: PwCanvas, k: PwKit, o: Z1SkylineOpts) {
+  const H = c.h;
+  const ground = H - 1;
+  const near = k.ramp(o.hex, { light: 0.4, sat: 0.9 });
+  const far = k.ramp(0x363a50, { light: 0.34, sat: 0.8, dark: 0.3 });
+  const smoke = k.ramp(0x2c2838, { light: 0.34, sat: 0.7, dark: 0.3 });
+  const fog = k.ramp(o.fog, { light: 0.3 });
+  const warm = k.ramp(0xffc477, { light: 0.4 });
+  const cool = k.ramp(0xa8c4ff, { light: 0.4 });
+  const fire = k.ramp(0xd8522a, { light: 0.4, sat: 1.1 });
+  const red = k.ramp(0xff3020, { light: 0.4 });
+  const moonCol = colOf(o.moonAz);
+  const wrap = (x: number) => wrapX(x);
+  const put = (x: number, y: number, r: number, t: number, f = 0) => {
+    if (y >= 0 && y < H) c.set(wrap(x), y, r, t, f);
+  };
+
+  // The haze: smoke lying in the air between the blocks, a ragged top, two tones, a broken edge.
+  for (let x = 0; x < TW; x++) {
+    const lump = vn(x, 73, 201) * 12 + vn(x, 31, 203) * 7 + vn(x, 13, 205) * 3;
+    const top = Math.round(ground - 16 - lump);
+    for (let y = Math.max(0, top); y <= ground; y++) {
+      const u = (y - top) / Math.max(1, ground - top);
+      if (y === top && bayer(x, y) > 0.55) continue;
+      c.set(x, y, smoke, u < 0.45 ? 2.5 : 2);
+    }
+  }
+
+  /** One tower: its own top profile, drawn column by column. */
+  const tower = (cx: number, w: number, h: number, kind: Tower, r: number, t0: number, salt: number) => {
+    const x0 = cx - (w >> 1);
+    const top = new Int16Array(w);
+    const lit = wrapX(moonCol - cx) > TW / 2 ? 0 : w - 1;
+    for (let i = 0; i < w; i++) {
+      const m = Math.abs(i - (w - 1) / 2) / (w / 2);
+      let tt = h;
+      if ((kind === 'step' || kind === 'tank') && m > 0.6) tt = Math.round(h * 0.76);
+      if (kind === 'step' && m > 0.84) tt = Math.round(h * 0.54);
+      if (kind === 'spire') tt = Math.round(h * (0.55 + 0.45 * Math.pow(1 - m, 2.2)));
+      if (kind === 'snapped') tt = Math.round(h * (1 - (0.42 * i) / w)) - (i % 5 === 2 ? 3 : 0) - (i % 7 === 4 ? 2 : 0);
+      if (kind === 'shell') tt = Math.round(h * (0.74 + vn(i, 11, salt + 3) * 0.26)) - (i % 3 === 0 ? 2 : 0);
+      top[i] = tt;
+    }
+    // A hand on the roofline: runs of 2 to 7 columns moved a texel or two, never level for more than 7.
+    {
+      let i = 0;
+      let run = 0;
+      while (i < w) {
+        run++;
+        const n = 2 + Math.floor(hash2(run, salt, 211) * 6);
+        const d = Math.round((hash2(run, salt, 213) - 0.5) * 4.2) * (kind === 'spire' ? 0 : 1);
+        for (let j = 0; j < n && i + j < w; j++) top[i + j] += d;
+        i += n;
+      }
+    }
+    // Body, with the face toward the moon a tone up and the corners of the shape rimmed.
+    for (let i = 0; i < w; i++) {
+      const yt = ground - top[i];
+      for (let y = Math.max(0, yt); y <= ground; y++) put(x0 + i, y, r, t0 + (i === lit ? 0.9 : 0));
+      put(x0 + i, yt, r, t0 + 1.1);
+      if (i > 0 && i < w - 1 && Math.abs(top[i - 1] - top[i]) > 1) put(x0 + i, yt + 1, r, t0 + 0.7);
+    }
+    const flat = (u: number) => top[Math.max(0, Math.min(w - 1, Math.floor(u * w)))];
+    if (kind === 'snapped') {
+      // Bent girders sticking out of the break.
+      const bx = x0 + w - 3;
+      const by = ground - flat(0.92);
+      put(bx, by - 2, r, t0 + 1);
+      put(bx + 1, by - 3, r, t0 + 1);
+      put(bx + 1, by - 4, r, t0 + 0.5);
+      put(bx - 5, by - 1, r, t0 + 1);
+      put(bx - 5, by - 2, r, t0 + 0.6);
+      put(bx - 6, by - 3, r, t0 + 0.6);
+    }
+    if (kind === 'shell') {
+      // Gutted: the floors are gone, so the sky shows through window holes; a fire in one or two.
+      for (let f = 0; f < 9; f++) {
+        const wx = x0 + 2 + Math.floor(hash2(f, 1, salt + 7) * (w - 4));
+        const wy = ground - Math.floor(hash2(f, 2, salt + 7) * (h * 0.7)) - 4;
+        const ww = 1 + (hash2(f, 3, salt + 7) > 0.5 ? 1 : 0);
+        const wh = 2 + (hash2(f, 4, salt + 7) > 0.6 ? 1 : 0);
+        const flame = hash2(f, 5, salt + 7) > 0.78;
+        for (let a = 0; a < ww; a++) for (let b = 0; b < wh; b++) {
+          if (flame) put(wx + a, wy + b, fire, b === 0 ? 4 : 3, PWF.GLOW);
+          else put(wx + a, wy + b, 0, 0);
+        }
+      }
+    }
+    if (kind === 'tank') {
+      // A timber tank on legs on the setback: round shoulders, a pointed cap.
+      const tx = x0 + Math.round(w * 0.7);
+      const ty = ground - flat(0.7) - 8;
+      for (let a = 0; a < 6; a++) {
+        const crown = a === 0 || a === 5 ? 1 : 0;
+        for (let b = crown; b < 5; b++) put(tx + a, ty + b, r, a === (lit ? 5 : 0) ? t0 + 1 : t0 + 0.2);
+      }
+      put(tx + 2, ty - 1, r, t0 + 0.6);
+      put(tx + 3, ty - 1, r, t0 + 0.6);
+      put(tx + 2, ty - 2, r, t0 + 0.3);
+      for (let b = 5; b < 8; b++) {
+        put(tx + 1, ty + b, r, t0);
+        put(tx + 4, ty + b, r, t0);
+      }
+    }
+    if (kind === 'mast' || kind === 'spire') {
+      const mx = x0 + (w >> 1);
+      const my = ground - flat(0.5);
+      const mh = kind === 'spire' ? 10 : 15;
+      for (let b = 0; b < mh; b++) put(mx, my - b, r, t0 + 0.5);
+      put(mx - 1, my - 5, r, t0);
+      put(mx + 1, my - 6, r, t0);
+      put(mx, my - mh, red, 5, PWF.GLOW);
+    }
+    // Windows: a few uneven clumps of 2 to 6, each its own colour, on no common grid.
+    const clumps = 1 + Math.floor((w * h) / (kind === 'shell' ? 900 : 240));
+    for (let n = 0; n < clumps; n++) {
+      const cxx = x0 + 2 + Math.floor(hash2(n, 1, salt + 13) * (w - 4));
+      const cyy = ground - 3 - Math.floor(hash2(n, 2, salt + 13) * (h * 0.78));
+      const count = 2 + Math.floor(hash2(n, 3, salt + 13) * 5);
+      const col = hash2(n, 4, salt + 13) < 0.72 ? warm : cool;
+      for (let m = 0; m < count; m++) {
+        const ox = Math.round((hash2(m, n, salt + 17) - 0.5) * 5);
+        const oy = Math.round((hash2(m, n, salt + 19) - 0.5) * 6);
+        const px = cxx + ox * 1;
+        const py = cyy + oy;
+        const i = px - x0;
+        if (i < 1 || i >= w - 1 || py <= ground - top[i] + 1) continue;
+        if (!c.at(wrap(px), py)) continue;
+        put(px, py, col, hash2(m, n, salt + 23) < 0.25 ? 4 : 3, PWF.GLOW);
+        if (m === 0 && hash2(n, 7, salt + 13) > 0.6) put(px + 1, py, col, 3, PWF.GLOW);
+      }
+    }
+  };
+
+  // Round the rest of the compass the towers are spaced by a walker (back rank, then front).
+  const fillRank = (r: number, t0: number, minH: number, maxH: number, seed: number) => {
+    let x = 0;
+    let i = 0;
+    while (x < TW) {
+      const w = 14 + Math.floor(hash2(i, 2, seed) * 26);
+      const h = minH + Math.floor(hash2(i, 3, seed) * (maxH - minH));
+      const k0 = hash2(i, 4, seed);
+      const kind: Tower = k0 < 0.26 ? 'step' : k0 < 0.42 ? 'tank' : k0 < 0.56 ? 'mast' : k0 < 0.66 ? 'spire' : k0 < 0.74 ? 'snapped' : k0 < 0.82 ? 'shell' : 'flat';
+      const az = Math.abs(x + w / 2 > TW / 2 ? x + w / 2 - TW : x + w / 2);
+      if (az > 94) tower(x + (w >> 1), w, h, kind, r, t0, seed * 7 + i);
+      x += w + (hash2(i, 5, seed) > 0.72 ? 3 + Math.floor(hash2(i, 6, seed) * 8) : 0);
+      i++;
+    }
+  };
+  fillRank(far, 2.2, 20, 54, 301);
+  fillRank(near, 1.9, 12, 40, 311);
+  // At the end of Main Street (az 0, where the eye rests in every road frame): placed by hand.
+  const hero: [number, number, number, Tower, 0 | 1][] = [
+    [-82, 26, 40, 'flat', 0],
+    [-58, 22, 54, 'spire', 0],
+    [-34, 30, 46, 'snapped', 0],
+    [6, 26, 60, 'step', 0],
+    [46, 24, 50, 'mast', 0],
+    [84, 28, 36, 'tank', 0],
+    [-72, 20, 30, 'tank', 1],
+    [-46, 24, 26, 'shell', 1],
+    [-18, 30, 38, 'step', 1],
+    [20, 22, 32, 'shell', 1],
+    [52, 30, 26, 'flat', 1],
+    [90, 22, 30, 'mast', 1],
+  ];
+  hero.forEach(([x, w, h, kind, rank], i) => tower(wrapX(x), w, h, kind, rank ? near : far, rank ? 1.9 : 2.2, 401 + i * 11));
+  // Foot: fades into the fog colour (dithered).
+  for (let y = H - 14; y < H; y++) {
+    const t = (y - (H - 14)) / 14;
+    for (let xx = 0; xx < TW; xx++) {
+      if (!c.at(xx, y)) continue;
+      if (t > 0.85 || bayer(xx, y) < t) c.set(xx, y, fog, 3);
+    }
+  }
+}
+
+/** Value noise along one axis (0 … 1): `period` texels between knots; `salt` picks the knots. */
+function vn(x: number, period: number, salt: number): number {
+  const u = x / period;
+  const i = Math.floor(u);
+  const f = u - i;
+  return hash2(i, salt, 37) + (hash2(i + 1, salt, 37) - hash2(i, salt, 37)) * f * f * (3 - 2 * f);
 }

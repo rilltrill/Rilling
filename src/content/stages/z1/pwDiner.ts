@@ -5,7 +5,7 @@ import { PW_TPM, PWF } from '../../pixelworld/canvas';
 import { FONT_5x7, neonText, textWidth } from '../../pixelworld/font';
 import { roofTile } from '../../pixelworld/surfaces';
 import { z1DinerTiles, type Z1DinerTiles } from '../../pixelworld/z1diner';
-import { dinerSignLayout, paintDinerBacking } from '../../pixelworld/z1dinerflat';
+import { dinerSignLayout } from '../../pixelworld/z1dinerflat';
 
 /**
  * The chrome diner in ART: PIXEL WORLD: every part `buildDiner` tagged
@@ -201,9 +201,7 @@ export class Z1Diner {
     const oh = H - 12;
     const tile = atlas.tile(`z1diner|roff|${W}x${H}|${r0}`, ow, oh, (c, k) => {
       const dead = k.ramp(0x5a1a30, { light: 0.4 });
-      // (The drawn backing sheet itself, so when the r is dark it sits on what is painted round it.)
-      paintDinerBacking(c, k, W, H, -r0, -6, ow, oh);
-      // The whole word in dead tube colour, shifted so only the 'r' falls inside this tile.
+      // Only the dead tube: the tile is cut out everywhere else (a backing here would be lit differently from the sheet round it, a visible oblong).
       neonText(c, info.text, x0 - r0, y0 - 6, f, dead, { ...to, core: 2, halo: 1 });
       for (let i = 0; i < c.flag.length; i++) c.flag[i] &= ~PWF.GLOW;
     });

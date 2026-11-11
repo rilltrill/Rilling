@@ -3,22 +3,29 @@ import { PwAtlas } from '../../pixelworld/atlas';
 import { PwBatch } from '../../pixelworld/batch';
 import { Z1_FLATS, type FlatDef } from '../../pixelworld/z1flats';
 import { FLAT_TPM } from '../../pixelworld/elevation';
+import { PW_TPM } from '../../pixelworld/canvas';
 import { sidewalkTile } from '../../pixelworld/surfaces';
 import type { PwTile } from '../../pixelworld/atlas';
 import {
   DINER_FRONT_H,
   DINER_FRONT_TPM,
   DINER_FRONT_W,
+  DINER_SIGN_STRUTS,
   MARQUEE_END_H,
+  MARQUEE_BOARD_H,
+  MARQUEE_BOARD_W,
   MARQUEE_END_W,
   MARQUEE_H,
   MARQUEE_SOFFIT_H,
   MARQUEE_SOFFIT_W,
   MARQUEE_W,
   paintDinerFront,
+  paintDinerSign,
+  paintMarqueeBoard,
   paintMarqueeEnd,
   paintMarqueeFace,
   paintMarqueeSoffit,
+  type DinerSignLayout,
 } from '../../pixelworld/z1dinerflat';
 import type { ZoneId } from './town';
 
@@ -96,6 +103,8 @@ function placementOf(g: THREE.Object3D): Placement | null {
 export class Z1Flats {
   readonly atlas = new PwAtlas('z1-flats', { upscale: false, skyline: true });
   private batches = new Map<ZoneId, PwBatch>();
+  /** The diner's front and sign: their light is painted on, so no local lamp bands them (one extra draw call in that zone). */
+  private ownLight = new Map<ZoneId, PwBatch>();
   private tiles = new Map<string, PwTile>();
   /** Old facade stretches of the flats that were swung back: wall light decals there have nothing to land on. */
   private swung: { x: number; z0: number; z1: number }[] = [];
@@ -113,6 +122,12 @@ export class Z1Flats {
   private batch(id: ZoneId): PwBatch {
     let b = this.batches.get(id);
     if (!b) this.batches.set(id, (b = new PwBatch(this.atlas)));
+    return b;
+  }
+
+  private ownLightBatch(id: ZoneId): PwBatch {
+    let b = this.ownLight.get(id);
+    if (!b) this.ownLight.set(id, (b = new PwBatch(this.atlas)));
     return b;
   }
 
@@ -202,11 +217,21 @@ export class Z1Flats {
 
   /** The diner as a cut-out front: the classic front's bands go, holes are left where the glass and the door are. */
   stageDiner(id: ZoneId, g: THREE.Object3D) {
-    const b = this.batch(id);
+    const b = this.ownLightBatch(id);
     g.updateMatrixWorld(true);
     const t = this.tile('diner-front', DINER_FRONT_W, DINER_FRONT_H, paintDinerFront, DINER_FRONT_TPM);
     b.setMatrix(g.matrixWorld);
     b.rect(_o.set(-9.25, 0, 0.18), X, Y, DINER_FRONT_W / DINER_FRONT_TPM, DINER_FRONT_H / DINER_FRONT_TPM, t);
+    b.setMatrix(null);
+  }
+
+  /** The "Diner" sign's sheet (its board frame `s`): on the same footing as the front it stands on, its halo painted. */
+  stageDinerSign(id: ZoneId, s: THREE.Object3D, l: DinerSignLayout, cyan: number, pink: number) {
+    const b = this.ownLightBatch(id);
+    s.updateMatrixWorld(true);
+    const t = this.tile(`diner-sign-${l.w}x${l.h}`, l.w, l.h + DINER_SIGN_STRUTS, paintDinerSign(l, cyan, pink), PW_TPM);
+    b.setMatrix(s.matrixWorld);
+    b.rect(_o.set(-l.w / 2 / PW_TPM, -l.h / 2 / PW_TPM - DINER_SIGN_STRUTS / PW_TPM, 0.01), X, Y, l.w / PW_TPM, (l.h + DINER_SIGN_STRUTS) / PW_TPM, t);
     b.setMatrix(null);
   }
 
@@ -225,6 +250,10 @@ export class Z1Flats {
     // Ends: flared wings against the wall (near end is seen coming up the road).
     const ew = MARQUEE_END_W / FLAT_TPM;
     const eh = MARQUEE_END_H / FLAT_TPM;
+    // The lettered board, panelled; a dropped panel hangs below the classic board's line.
+    const bw = MARQUEE_BOARD_W / FLAT_TPM;
+    const bh = MARQUEE_BOARD_H / FLAT_TPM;
+    b.rect(_o.set(-bw / 2, 0.5625 - bh, 3.29), X, Y, bw, bh, this.tile('marquee-board', MARQUEE_BOARD_W, MARQUEE_BOARD_H, paintMarqueeBoard, PW_TPM));
     const end = this.tile('marquee-end', MARQUEE_END_W, MARQUEE_END_H, paintMarqueeEnd);
     b.rect(_o.set(7.05, -eh / 2 - 0.1, 3.2), NZ, Y, ew, eh, end);
     b.rect(_o.set(-7.05, -eh / 2 - 0.1, 0), Z, Y, ew, eh, end, { flipU: true });
@@ -236,6 +265,10 @@ export class Z1Flats {
     this.atlas.build();
     for (const [id, b] of this.batches) {
       const mesh = b.build(undefined, { gain: gain(id) });
+      if (mesh) zones[id].add(mesh);
+    }
+    for (const [id, b] of this.ownLight) {
+      const mesh = b.build(undefined, { gain: gain(id), noLocal: true });
       if (mesh) zones[id].add(mesh);
     }
   }

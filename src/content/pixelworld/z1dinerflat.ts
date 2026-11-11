@@ -1,5 +1,5 @@
 import type { PwKit, PwPainter } from './atlas';
-import { PWF, type PwCanvas } from './canvas';
+import { bayer, PWF, PwCanvas } from './canvas';
 import { hash2 } from './surfaces';
 import { FONT_5x7, FONT_BOLD, drawText, neonText, textWidth } from './font';
 import { fontScaleFor } from './signs';
@@ -52,9 +52,9 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
   const neonDead = k.ramp(0x5a2a44, { light: 0.32 });
   const seed = 311;
   // Panels: every 2.5 to 3.4 m the sheet stops at a riveted seam and the next one sits a texel or two
-  // higher or lower; a few have gone, the dark frame behind showing.
+  // higher or lower. Where the rails would run on for more than half the frame at the hold, a section has
+  // gone (placed by hand, 30 to 60 texels each, the rail's own ends torn): bare ribs show, not a black hole.
   const off = new Int8Array(W);
-  const gone = new Uint8Array(W);
   const seam: number[] = [];
   {
     let x = 12 + Math.floor(hash2(1, 3, seed) * 30);
@@ -65,20 +65,26 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
       const h = hash2(i, 7, seed);
       dy = h < 0.4 ? 1 : h < 0.65 ? -1 : h < 0.82 ? 2 : -2;
       off.fill(dy, x, Math.min(W, x + len));
-      if (hash2(i, 9, seed) > 0.8) gone.fill(1, x + 6, Math.min(W, x + 6 + 40 + Math.floor(hash2(i, 11, seed) * 36)));
       x += len;
     }
   }
+  const mark = (spans: [number, number][]) => {
+    const g = new Uint8Array(W);
+    for (const [a, b] of spans) g.fill(1, Math.round(a * DINER_FRONT_TPM), Math.round(b * DINER_FRONT_TPM));
+    return g;
+  };
+  const goneHead = mark([[1.75, 2.72], [4.86, 5.86], [10.75, 11.45], [15.2, 16.05]]);
+  const goneKick = mark([[3.55, 4.65], [8.6, 9.3], [13.7, 14.8]]);
   const sag = (x: number) => off[x] + Math.round((vnoise(x, 120, seed) - 0.5) * 2);
   const dent = (x: number, s: number) => (vnoise(x, 18 + s * 7, seed + s) > 0.78 ? -1.1 : 0);
   /** A fluted chrome strip between world heights: vertical flutes, a lit top, a dark bottom. */
-  const fluted = (y0: number, y1: number, s: number) => {
+  const fluted = (y0: number, y1: number, s: number, gone: Uint8Array) => {
     const r0 = rowOf(y1);
     const r1 = rowOf(y0);
     for (let x = 0; x < W; x++) {
+      if (gone[x]) continue;
       const d = sag(x);
       for (let y = r0 + d; y < r1 + d; y++) {
-        if (gone[x]) continue;
         const f = (x + s) % 9;
         let t = f < 2 ? 3.9 : f < 4 ? 2.9 : f < 7 ? 2 : 1.3;
         t += dent(x, s);
@@ -89,7 +95,7 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
     }
   };
   /** A flat coloured strip with a lit top edge and a shadow under it. */
-  const strip = (y0: number, y1: number, ramp: number, tone: number) => {
+  const strip = (y0: number, y1: number, ramp: number, tone: number, gone: Uint8Array) => {
     const r0 = rowOf(y1);
     const r1 = rowOf(y0);
     for (let x = 0; x < W; x++) {
@@ -98,15 +104,28 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
       for (let y = r0 + d; y < r1 + d; y++) c.set(x, y, ramp, y === r0 + d ? tone + 1 : y === r1 + d - 1 ? tone - 1.3 : tone);
     }
   };
-  const checker = (y0: number, y1: number) => {
+  /** Chequer tile whose columns are set by hand (9 to 15 texels), so the top edge never reads as crenellation; a tile here and there has fallen. */
+  const checker = (y0: number, y1: number, salt: number, gone: Uint8Array) => {
     const r0 = rowOf(y1);
     const r1 = rowOf(y0);
+    const col = new Int16Array(W);
+    {
+      let x = 0;
+      for (let i = 0; x < W; i++) {
+        const w = 9 + Math.floor(hash2(i, salt, seed + 71) * 7);
+        col.fill(i, x, Math.min(W, x + w));
+        x += w;
+      }
+    }
     for (let x = 0; x < W; x++) {
       if (gone[x]) continue;
       const d = sag(x);
       for (let y = r0 + d; y < r1 + d; y++) {
-        const on = (Math.floor(x / 12) + Math.floor((y - r0) / 12)) & 1;
-        if (on) c.set(x, y, white, 3.2);
+        const rowN = Math.floor((y - r0 - d) / 12);
+        const missing = hash2(col[x], rowN, seed + salt + 73) > 0.9;
+        const on = (col[x] + rowN) & 1;
+        if (missing) c.set(x, y, ink, 1.6 + ((x ^ y) & 1) * 0.4);
+        else if (on) c.set(x, y, white, 3.2 - (hash2(col[x], rowN, seed + salt + 77) > 0.7 ? 0.6 : 0));
         else c.set(x, y, ink, 1.1);
       }
     }
@@ -130,16 +149,26 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
   }
   yield;
   // The header and kick: bands of chrome, enamel and chequer, as the classic layout has them.
-  fluted(3.3, 4.4, 2);
-  strip(3.82, 4.02, enamel, 2.6);
-  checker(4.0, 4.26);
-  fluted(0.04, 1.0, 5);
-  strip(0.68, 0.86, enamel, 2.6);
-  checker(0.25, 0.5);
+  fluted(3.3, 4.4, 2, goneHead);
+  strip(3.82, 4.02, enamel, 2.6, goneHead);
+  checker(4.0, 4.26, 3, goneHead);
+  // (Over the chequer, a plain rail instead of more flutes: at the hold those flutes stood on the tile like teeth.)
+  for (let x = 0; x < W; x++) {
+    if (goneHead[x]) continue;
+    const y0 = rowOf(4.4) + sag(x);
+    const y1 = rowOf(4.27) + sag(x);
+    for (let y = y0; y < y1; y++) c.set(x, y, chrome, y === y0 ? 3.9 : y === y1 - 1 ? 1.2 : 2.5 + dent(x, 11) * 0.5);
+  }
+  fluted(0.04, 1.0, 5, goneKick);
+  strip(0.68, 0.86, enamel, 2.6, goneKick);
+  checker(0.25, 0.5, 7, goneKick);
   yield;
   // The seams, with rivets: a dark joint and a lit edge, bent where the sheet has sprung.
+  const headBand: readonly [number, number] = [rowOf(4.42), rowOf(3.3)];
+  const kickBand: readonly [number, number] = [rowOf(1.0), rowOf(0.04)];
   for (const sx of seam) {
-    for (const [y0, y1] of [[rowOf(4.42), rowOf(3.3)], [rowOf(1.0), rowOf(0.04)]] as const) {
+    for (const [y0, y1, gone] of [[...headBand, goneHead], [...kickBand, goneKick]] as const) {
+      if (gone[sx]) continue;
       for (let y = y0; y < y1; y++) {
         c.set(sx, y + sag(sx), ink, 0.9);
         c.set(sx + 1, y + sag(sx + 1), chrome, 3.9);
@@ -147,14 +176,32 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
       for (let y = y0 + 5; y < y1 - 2; y += 14) c.set(sx + 4, y + sag(sx + 4), chrome, 4.6);
     }
   }
-  // Where a panel has gone: the frame's dark, bare steel ribs, rust down from the wound.
-  for (let x = 0; x < W; x++) {
-    if (!gone[x]) continue;
-    for (const [a, b] of [[rowOf(4.42), rowOf(3.3)], [rowOf(1.0), rowOf(0.04)]] as const) {
-      for (let y = a; y < b; y++) c.set(x, y, ink, x % 14 < 2 ? 1.6 : 0.5);
+  // Where a panel has gone: the frame's bare steel ribs every 6 texels (a rail across them), rust running down from the wound,
+  // the torn sheet's edge lit. Never a solid black area: at the hold a black gap read as a hole in the card, or a bin.
+  const wound = (gone: Uint8Array, a: number, b: number, rustBelow: boolean) => {
+    for (let x = 0; x < W; x++) {
+      if (!gone[x]) continue;
+      const edgeL = !gone[x - 1];
+      const edgeR = !gone[x + 1];
+      for (let y = a; y < b; y++) {
+        const rib = x % 6 < 2;
+        const rail = (y - a) % 26 < 3;
+        c.set(x, y, rib || rail ? chrome : ink, rib ? (x % 6 === 0 ? 2.9 : 1.9) : rail ? 2.2 : 0.9 + (((x + y) & 3) === 0 ? 0.5 : 0));
+        if (hash2(x >> 1, y >> 4, seed + 81) > 0.8) c.tint(x, y, rust);
+      }
+      // The sheet's torn end: stepped, lit, its top and bottom bitten unevenly.
+      if (edgeL || edgeR) {
+        const lip = 2 + Math.floor(hash2(x, 4, seed + 83) * 3);
+        for (let y = a + lip; y < b - lip; y++) c.set(x, y, chrome, 4.2);
+      }
+      if (rustBelow && x % 3 !== 1) {
+        const len = 6 + Math.floor(hash2(x, 19, seed + 87) * 22);
+        for (let j = 0; j < len; j++) c.tint(x, b + j, rust, -0.6);
+      }
     }
-    if (hash2(x >> 3, 5, seed + 31) > 0.55) for (let j = 0; j < 22; j++) c.tint(x, rowOf(3.3) + j, rust, -0.8);
-  }
+  };
+  wound(goneHead, headBand[0], headBand[1], true);
+  wound(goneKick, kickBand[0], kickBand[1], false);
   // Long neon tube under the header, broken and dead in stretches.
   {
     const yn = rowOf(3.31);
@@ -200,12 +247,56 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
     }
   }
   {
-    // Menu board in a chrome frame, lit.
+    // Menu board in a chrome frame, lit: mid-dark enamel, a heading in the neon's colour, four rows of big blocks
+    // (one-texel lettering is gone by the time this reaches the 288-line frame, and left a black hole in the chrome).
     const mx = colOf(7.7);
     const my = rowOf(2.75);
+    const board = k.ramp(0x5a2a44, { light: 0.34, sat: 0.9, dark: 0.45 });
     c.rect(mx, my, 60, 70, chrome, 3);
-    c.rect(mx + 4, my + 4, 52, 62, ink, 1, PWF.GLOW);
-    for (let i = 0; i < 7; i++) c.hline(mx + 10, my + 12 + i * 8, 36 - (i * 3) % 16, white, 3.4, PWF.GLOW);
+    c.rect(mx + 4, my + 4, 52, 62, board, 2.3, PWF.GLOW);
+    drawText(c, 'MENU', mx + 7, my + 8, FONT_5x7, neon, 4.6, { flag: PWF.GLOW, spacing: 1 });
+    for (let i = 0; i < 4; i++) {
+      for (let col2 = 0; col2 < 2; col2++) {
+        const x = mx + 8 + col2 * 24;
+        const w = 16 + ((i * 3 + col2 * 5) % 5);
+        c.rect(x, my + 22 + i * 10, w, 4, white, 3.2 - (i === 2 ? 0.8 : 0), PWF.GLOW);
+      }
+    }
+  }
+  yield;
+  // Roof clutter that breaks the canopy's line: an AC box on rails and a hooded vent.
+  {
+    const box0 = colOf(-5.0);
+    const boxW = 66;
+    const boxH = 36;
+    const yB = Math.max(top[box0 + 6], top[box0 + boxW - 6]) + 3;
+    const metal = k.ramp(0x7a8088, { light: 0.34, sat: 0.7, dark: 0.45 });
+    // Rails, a cable, the body: louvres on the left, the fan's round grille on the right.
+    c.rect(box0 + 4, yB - 3, 10, 5, ink, 1.4);
+    c.rect(box0 + boxW - 14, yB - 3, 10, 5, ink, 1.4);
+    for (let x = box0; x < box0 + boxW; x++) {
+      const bow = Math.round(Math.sin(((x - box0) / boxW) * Math.PI) * 1.4);
+      for (let y = yB - boxH - bow; y < yB - 2; y++) {
+        const yy = y - (yB - boxH - bow);
+        let t = yy < 2 ? 3.7 : y > yB - 5 ? 1.2 : 2.2;
+        if (x === box0) t = 3.2;
+        if (x > box0 + boxW - 4) t = 1.3;
+        if (x < box0 + 36 && yy > 5 && y < yB - 7 && yy % 4 < 1) t = 1;
+        if (hash2(x >> 2, y >> 3, seed + 51) > 0.8) t -= 0.5;
+        c.set(x, y, metal, t);
+      }
+    }
+    c.ellipse(box0 + 50, yB - boxH + 19, 11, 11, ink, 1.1);
+    c.ellipse(box0 + 50, yB - boxH + 19, 6, 6, metal, 2);
+    c.line(box0 + 41, yB - boxH + 10, box0 + 59, yB - boxH + 28, metal, 3);
+    c.line(box0 + 59, yB - boxH + 10, box0 + 41, yB - boxH + 28, metal, 3);
+    for (let j = 0; j < 24; j++) c.tint(box0 + 12 + (j & 1), yB + j, rust, -0.4);
+    // The hooded vent on the far canopy: a short stack, a raked cap.
+    const vx = colOf(4.1);
+    const vy = top[vx] + 2;
+    for (let x = vx - 9; x < vx + 9; x++) for (let y = vy - 36; y < vy; y++) c.set(x, y, metal, x < vx - 6 ? 3.4 : x > vx + 5 ? 1.2 : 2.2);
+    c.poly([vx - 17, vy - 34, vx + 17, vy - 38, vx + 10, vy - 49, vx - 12, vy - 46], metal, (x) => (x < vx ? 3.3 : 1.6));
+    c.hline(vx - 9, vy - 20, 18, rust, 1.4);
   }
   yield;
   // Cut the holes: the panes, the door, a texel of ragged weatherstrip round each.
@@ -225,6 +316,64 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
       c.set(x1, y, ink, 0.8);
     }
   }
+  // A strip of the header peeled off its frame and hanging in front of the glass (over the hole: nothing shoots it).
+  {
+    const sx = colOf(-3.95);
+    const y0 = rowOf(3.32);
+    const len = 58;
+    for (let j = 0; j < len; j++) {
+      const sw = 12 - Math.floor(j / 12);
+      const curl = Math.round(Math.sin(j * 0.13) * 2 + j * 0.06);
+      for (let i = 0; i < sw; i++) {
+        if (j > len - 6 && i < 3 && hash2(i, j, seed + 53) > 0.4) continue;
+        const f = (i + 1) % 9;
+        c.set(sx + i + curl, y0 + j, chrome, i === 0 ? 3.9 : i === sw - 1 ? 1.1 : f < 3 ? 3 : 2);
+      }
+      c.shift(sx + sw + curl, y0 + j, -1);
+    }
+  }
+  yield;
+  // Things standing against the foot of the wall, cutting the kick's long lines: a dented bin, a stack of milk crates.
+  {
+    const bx = colOf(-7.25);
+    const bw = 38;
+    const by = H - 1;
+    const bh = 50;
+    const bin = k.ramp(0x54585e, { light: 0.34, sat: 0.7, dark: 0.45 });
+    c.ellipse(bx + bw / 2, by, bw * 0.75, 6, ink, 0.8);
+    for (let x = bx; x < bx + bw; x++) {
+      const u = (x - bx) / bw;
+      const round = Math.round(Math.sin(u * Math.PI) * 2);
+      const t0 = u < 0.14 ? 3.5 : u > 0.82 ? 1.2 : u > 0.6 ? 1.9 : 2.5;
+      for (let y = by - bh - round; y <= by - round; y++) {
+        const hoop = (y - (by - bh - round)) % 17 < 2;
+        c.set(x, y, bin, hoop ? t0 + 0.8 : t0);
+      }
+      c.set(x, by - bh - round - 1, bin, 3.8);
+    }
+    c.poly([bx - 3, by - bh - 4, bx + bw + 3, by - bh - 6, bx + bw - 4, by - bh - 12, bx + 3, by - bh - 11], bin, (x) => (x < bx + bw * 0.55 ? 3.2 : 1.8));
+    for (let i = 0; i < 16; i++) c.shift(bx + 10 + Math.round(hash2(i, 2, seed + 57) * 16), by - 24 - Math.round(hash2(i, 3, seed + 57) * 22), -1.6);
+    // Crates: three, unevenly stacked, slats and a broken corner.
+    const crate = k.ramp(0x7a5a3a, { light: 0.34, dark: 0.45 });
+    const cr = colOf(2.95);
+    const cw = 44;
+    const ch = 26;
+    const putCrate = (x: number, y: number) => {
+      c.rect(x, y, cw, ch, crate, 2);
+      for (let j = 0; j < 3; j++) {
+        c.rect(x, y + j * 9, cw, 6, crate, 2.9);
+        c.hline(x, y + j * 9, cw, crate, 3.7);
+        c.hline(x, y + j * 9 + 5, cw, crate, 1.4);
+      }
+      c.rect(x, y, 4, ch, crate, 3.3);
+      c.rect(x + cw - 4, y, 4, ch, crate, 1.5);
+    };
+    c.ellipse(cr + 48, H - 1, 62, 5, ink, 0.8);
+    putCrate(cr, H - ch);
+    putCrate(cr + 47, H - ch);
+    putCrate(cr + 22, H - 2 * ch);
+    c.poly([cr + 22 + cw - 12, H - 2 * ch, cr + 22 + cw, H - 2 * ch, cr + 22 + cw, H - 2 * ch + 11], 0, 0);
+  }
   // Bullet pocks, a rusty stain or two across the chrome, the outline in ink.
   for (let i = 0; i < 70; i++) {
     const x = Math.floor(hash2(i, 13, seed) * W);
@@ -236,6 +385,32 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
     }
   }
   yield;
+  // The neon's wash: laid in by hand, not by a light that cuts off on some column. It starts under the sign's middle, comes
+  // down over the chrome and enamel-white in three ramps (12 texels each, stepped, a dithered seam), ends on a panel joint.
+  {
+    const nearest = (want: number) => seam.reduce((best, x) => (Math.abs(x - want) < Math.abs(best - want) ? x : best), seam[0]);
+    const jNear = nearest(colOf(-5.7));
+    const jFar = nearest(colOf(5.1));
+    const hot = 0xe67fd2;
+    const mix = (from: number, t: number) => {
+      const ch = (v: number, w: number) => Math.round(v + (w - v) * t);
+      return (ch(from >> 16, hot >> 16) << 16) | (ch((from >> 8) & 255, (hot >> 8) & 255) << 8) | ch(from & 255, hot & 255);
+    };
+    const washChrome = [0.3, 0.62, 1].map((t) => k.ramp(mix(0x9aa4ae, t), { light: 0.4, sat: 0.85, dark: 0.42 }));
+    const washWhite = [0.3, 0.62, 1].map((t) => k.ramp(mix(0xd6d0c0, t), { light: 0.34, dark: 0.45 }));
+    for (let y = 0; y < H; y++) {
+      const nudge = Math.floor(hash2(y >> 2, 7, seed + 61) * 4);
+      for (let x = jNear; x <= jFar; x++) {
+        const r = c.at(x, y);
+        if (r !== chrome && r !== white) continue;
+        const d = Math.min(x - jNear, jFar - x);
+        const e = d + nudge + (bayer(x, y) > 0.5 ? 2 : 0);
+        const lvl = e < 12 ? 0 : e < 24 ? 1 : 2;
+        c.tint(x, y, r === chrome ? washChrome[lvl] : washWhite[lvl]);
+      }
+    }
+  }
+  yield;
   c.outline(0.5, true);
 };
 
@@ -244,7 +419,7 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
 /** Sign card: the classic board's size, plus the struts under it. */
 export const DINER_SIGN_STRUTS = 32;
 
-interface SignLayout {
+export interface DinerSignLayout {
   w: number;
   h: number;
   x0: number;
@@ -253,7 +428,7 @@ interface SignLayout {
 }
 
 /** The layout of the classic `neonSign` for this text (and of the buzzing r's overlay). */
-export function dinerSignLayout(size: number, bw: number, bh: number): SignLayout {
+export function dinerSignLayout(size: number, bw: number, bh: number): DinerSignLayout {
   const f = FONT_5x7;
   const scale = fontScaleFor('script', size * 0.9);
   const to = { scale, script: true, spacing: 1 };
@@ -293,14 +468,16 @@ export function paintDinerBacking(c: PwCanvas, k: PwKit, w: number, h: number, o
       if ((u + 3) % 70 < 2 || (v + 2) % 22 < 1) t -= 0.8;
       if ((u + 3) % 70 === 2) t += 0.6;
       c.set(x, y, sheet, t);
-      if (vnoise(u, 26, seed + 3) > 0.62 && vnoise(v, 14, seed + 5) > 0.5) c.set(x, y, rust, 1.8);
+      // Rust creeps in from the edge and the rivet lines in ragged runs (two-dimensional noise: never a band crossed by a band).
+      const creep = (d < 16 ? (16 - d) / 16 : 0) * 0.5 + (hash2(u >> 3, v >> 2, seed + 7) - 0.5) * 0.5;
+      if (creep > 0.42 && hash2(u, v, seed + 9) > 0.35) c.set(x, y, rust, 1.8 + (hash2(u, v, seed + 11) > 0.6 ? 0.5 : 0));
       if (d < 3) c.set(x, y, edge, d < 1 ? 1 : 3.2);
       if (((u + 31) % 70 === 5 || (u + 31) % 70 === 16) && (v + 2) % 22 < 2) c.set(x, y, edge, 4.2);
     }
   }
 }
 
-export function paintDinerSign(l: SignLayout, cyanHex: number, pinkHex: number): PwPainter {
+export function paintDinerSign(l: DinerSignLayout, cyanHex: number, pinkHex: number): PwPainter {
   return (c, k) => {
     const W = l.w;
     const H = l.h;
@@ -321,6 +498,46 @@ export function paintDinerSign(l: SignLayout, cyanHex: number, pinkHex: number):
     // The classic script, in its classic place (the buzzing r stays aligned over it).
     const to = { scale: l.scale, script: true, spacing: 1 };
     neonText(c, 'Diner', l.x0, l.y0, FONT_5x7, neon, { ...to, core: 5, halo: 2 });
+    // The tube's light on the sheet: three stepped rings hugging the letters, 2 to 4 texels out, each ring's
+    // edge broken with an ordered dither, so it follows the shape and has no straight side.
+    {
+      const washA = k.ramp(0x8a3a6a, { light: 0.32, sat: 0.9, dark: 0.4 });
+      const washB = k.ramp(0xb0467c, { light: 0.34, sat: 1.0, dark: 0.4 });
+      // A mask of the letters and of the halo the text set, then four dilations (each texel: which pass reached it).
+      const dist = new Uint8Array(W * H);
+      const idx = (x: number, y: number) => y * W + x;
+      let front: number[] = [];
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          if (c.flag[idx(x, y)] & PWF.GLOW && c.at(x, y) === neon) {
+            dist[idx(x, y)] = 1;
+            front.push(x, y);
+          }
+        }
+      }
+      for (let d = 2; d <= 5; d++) {
+        const next: number[] = [];
+        for (let i = 0; i < front.length; i += 2) {
+          for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = front[i] + dx;
+            const ny = front[i + 1] + dy;
+            if (nx < 0 || ny < 0 || nx >= W || ny >= H || dist[idx(nx, ny)]) continue;
+            dist[idx(nx, ny)] = d;
+            next.push(nx, ny);
+          }
+        }
+        front = next;
+      }
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const d = dist[idx(x, y)];
+          if (d < 2 || c.flag[idx(x, y)] & PWF.GLOW || !c.at(x, y)) continue;
+          // d = 2, 3: the near ring, 4: the far one, 5: its dithered fringe.
+          if (d === 5 && bayer(x, y) < 0.5) continue;
+          c.tint(x, y, d <= 3 ? washB : washA, d <= 3 ? 0.5 : 0);
+        }
+      }
+    }
     // Struts: two lattice legs and a brace down to the roof deck, rim-lit, wide enough to read at the diner hold.
     const iron = k.ramp(0x8a8f96, { light: 0.4, sat: 0.7, dark: 0.45 });
     const top = H;
@@ -400,6 +617,126 @@ export const paintMarqueeFace: PwPainter = (c, k) => {
   }
   for (let x = W - 90; x < W - 72; x++) for (let y = valance(x) - 12; y < H; y++) c.set(x, y, 0, 0);
   c.outline(0.5, true);
+};
+
+/**
+ * The lettered board of the marquee (a card over the face, 12.6 m of it as the classic board, plus rows under it for the panel that
+ * has dropped). A long blank cream band with a word at one end was the strongest modelled read left on the street, so it is five framed
+ * panels now: their own light, their own words, dark mullions every 2.5 m, letter rails along them. One panel is dead, one cracked with the
+ * tube showing, one hanging off its top fixings. Edges stepped by hand, so the raster's even staircase is broken.
+ */
+export const MARQUEE_BOARD_W = 404;
+export const MARQUEE_BOARD_H = 48;
+const BOARD_ROWS = 36;
+
+export const paintMarqueeBoard: PwPainter = (c, k) => {
+  const face = k.ramp(0xf4e2c0, { light: 0.35 });
+  const dim = k.ramp(0xc7a884, { light: 0.34, sat: 0.7 });
+  const deadFace = k.ramp(0x6e6a64, { light: 0.32, sat: 0.5, dark: 0.45 });
+  const inkR = k.ramp(0x2a0e12, { light: 0.4 });
+  const rail = k.ramp(0x6a4a40, { light: 0.4 });
+  const frame = k.ramp(0x4a2228, { light: 0.45 });
+  const tube = k.ramp(0xfff8e8, { light: 0.3 });
+  const seed = 367;
+  // Panels (x0 … x1): column 0 is the far end of the street, the last is the near one.
+  const panels: { x0: number; x1: number; kind: 'lit' | 'dead' | 'cracked' | 'hang'; a?: string; b?: string; dy: number; dim?: boolean }[] = [
+    { x0: 0, x1: 78, kind: 'lit', a: 'NO', b: 'REFUNDS', dy: 0 },
+    { x0: 82, x1: 164, kind: 'lit', a: 'LAST SHOW', b: 'TONIGHT', dy: 1, dim: true },
+    { x0: 168, x1: 240, kind: 'dead', dy: 0 },
+    { x0: 244, x1: 326, kind: 'cracked', a: 'THE END', b: 'OF DAYS', dy: 0 },
+    { x0: 330, x1: 404, kind: 'hang', a: 'NOW', b: 'SHOWING', dy: 8 },
+  ];
+  for (const p of panels) {
+    const tW = p.x1 - p.x0;
+    const ramp = p.kind === 'dead' ? deadFace : p.dim ? dim : face;
+    const tilt = p.kind === 'hang' ? 3 : 0;
+    // The edges, a texel in or out every 8 to 12 columns.
+    let offT = 0;
+    let offB = 0;
+    let nextT = 8 + Math.floor(hash2(p.x0, 1, seed) * 5);
+    let nextB = 8 + Math.floor(hash2(p.x0, 2, seed) * 5);
+    for (let i = 0; i < tW; i++) {
+      if (i === nextT) { offT = offT ? 0 : 1; nextT += 8 + Math.floor(hash2(i, 3, seed) * 5); }
+      if (i === nextB) { offB = offB ? 0 : 1; nextB += 8 + Math.floor(hash2(i, 5, seed) * 5); }
+      const x = p.x0 + i;
+      const drop = p.dy + Math.round((i / tW) * tilt);
+      const yTop = offT + drop;
+      const yBot = BOARD_ROWS - 1 - offB + drop;
+      const lit = p.kind !== 'dead';
+      for (let y = yTop; y <= yBot; y++) {
+        const e = y - yTop;
+        const f = yBot - y;
+        if (e < 2 || f < 2) c.set(x, y, frame, e === 0 ? 4 : f === 0 ? 1 : 2);
+        else {
+          const wear = hash2(x >> 4, y >> 2, seed + p.x0) > 0.86 ? -0.6 : 0;
+          c.set(x, y, ramp, (lit ? 3.4 : 2.4) + wear, lit ? PWF.GLOW : 0);
+        }
+      }
+      // Side frame.
+      if (i < 2 || i >= tW - 2) for (let y = yTop; y <= yBot; y++) c.set(x, y, frame, i === 0 ? 3.6 : i === tW - 1 ? 1 : 2);
+    }
+    // Letter rails and the slotted letters, one or two hanging askew; a small lean on a hung panel.
+    const putLine = (txt: string | undefined, row: number) => {
+      if (!txt) return;
+      const dy = p.dy + row;
+      for (let i = 0; i < tW - 8; i++) {
+        const x = p.x0 + 4 + i;
+        c.set(x, dy - 1 + Math.round((i / tW) * tilt), rail, 2, PWF.GLOW);
+        c.set(x, dy + 12 + Math.round((i / tW) * tilt), rail, 2, PWF.GLOW);
+      }
+      const f = FONT_BOLD;
+      const tw = textWidth(txt, f, { spacing: 1 });
+      const x0 = p.x0 + Math.max(4, Math.round((tW - tw) / 2));
+      let x = x0;
+      for (let i = 0; i < txt.length; i++) {
+        const ch = txt[i];
+        const w = textWidth(ch, f, { spacing: 1 });
+        const hang = hash2(i, txt.length + row, seed + p.x0) > 0.86 ? 2 : 0;
+        const lean = Math.round(((x - p.x0) / tW) * tilt);
+        drawText(c, ch, x, dy + hang + lean, f, inkR, 1, { spacing: 1 });
+        x += w;
+      }
+    };
+    if (p.kind !== 'dead') {
+      putLine(p.a, 4);
+      putLine(p.b, 20);
+    } else {
+      // The dead panel: a letter or two still clinging to a rail, the rails themselves bare, grime in runs.
+      for (let i = 4; i < tW - 4; i++) if (hash2(i >> 3, 5, seed + 9) > 0.3) c.set(p.x0 + i, 15, rail, 1.4);
+      drawText(c, 'R', p.x0 + 14, 4, FONT_BOLD, inkR, 1);
+      for (let i = 0; i < 26; i++) {
+        const sx = p.x0 + 6 + Math.floor(hash2(i, 4, seed + 13) * (tW - 12));
+        const len = 6 + Math.floor(hash2(i, 5, seed + 13) * 20);
+        for (let j = 0; j < len; j++) c.shift(sx, 3 + j, -0.8);
+      }
+    }
+    if (p.kind === 'cracked') {
+      // A crack across the face: the panel gone along it, the tube behind showing.
+      const cx0 = p.x0 + 22;
+      const cx1 = p.x0 + 56;
+      for (let x = cx0; x < cx1; x++) {
+        const u = (x - cx0) / (cx1 - cx0);
+        const yMid = 16 + Math.round(u * 8 + Math.sin(u * 9) * 2);
+        const half = 1 + Math.round(Math.sin(u * Math.PI) * 3.2);
+        for (let y = yMid - half; y <= yMid + half; y++) c.set(x, y, inkR, 0.7);
+        c.set(x, yMid - half - 1, frame, 2);
+        c.set(x, yMid + half + 1, face, 2.2, PWF.GLOW);
+      }
+      for (let x = cx0 + 4; x < cx1 - 3; x++) {
+        const u = (x - cx0) / (cx1 - cx0);
+        c.set(x, 18 + Math.round(u * 8), tube, 4.6, PWF.GLOW);
+      }
+    }
+  }
+  // Mullions: dark uprights with a bolt, standing a little higher than the panels either side.
+  for (const m of [79, 165, 241, 327]) {
+    for (let y = 0; y < BOARD_ROWS + 2; y++) {
+      for (let i = 0; i < 3; i++) c.set(m + i, y, frame, i === 0 ? 2.7 : i === 2 ? 0.8 : 1.5);
+    }
+    c.set(m + 1, 5, frame, 4.2);
+    c.set(m + 1, BOARD_ROWS - 4, frame, 4.2);
+  }
+  c.outline(0.5, false);
 };
 
 /** The underside: a tin ceiling in three tones, warm toward the wall, rows of little recessed bulbs, panels sprung. */
