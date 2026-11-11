@@ -52,8 +52,10 @@ export function drawnAim(world: World, camera: THREE.PerspectiveCamera, e: Entit
   const shoot = (x: number, y: number): string => {
     const c = shoot1(x, y);
     if (c !== 'miss' && c !== 'limb') return c;
+    // (Far figures: a 40-pixel-tall figure's torso is 4 pixels wide, so the rounding of the sprite grid is a bigger share.)
+    const r = map.h < 60 ? 2.5 : 1.5;
     for (let i = 0; i < 4; i++) {
-      const c2 = shoot1(x + (i === 0 ? 1.5 : i === 1 ? -1.5 : 0), y + (i === 2 ? 1.5 : i === 3 ? -1.5 : 0));
+      const c2 = shoot1(x + (i === 0 ? r : i === 1 ? -r : 0), y + (i === 2 ? r : i === 3 ? -r : 0));
       if (c2 !== 'miss' && c2 !== 'limb') return c2;
     }
     return c;
