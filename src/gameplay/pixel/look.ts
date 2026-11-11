@@ -51,7 +51,7 @@ export const CAST_STYLES: Record<CastLookId, CastStyle> = {
 };
 
 /** The look used when nothing selects one (`&castlook=`, `CASTLOOK`). */
-export const DEFAULT_CAST_LOOK: CastLookId = '0';
+export const DEFAULT_CAST_LOOK: CastLookId = 'b';
 
 export function isCastLook(v: unknown): v is CastLookId {
   return v === '0' || v === 'b';
