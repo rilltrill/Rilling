@@ -677,7 +677,6 @@ export class Elev {
       c.hline(sx, y + 3, 3, r.stone, 1);
     }
     for (let i = 0; i < pw; i++) c.shift(px + i, y, -1.2);
-    void v;
   }
 
   private sill(x: number, y: number, w: number, v: number) {
@@ -733,7 +732,7 @@ export class Elev {
 
   /** The pane area of a window: (x, y, w, h) inside the frame. */
   private glass(x: number, y: number, w: number, h: number, kind: WinKind, v: number) {
-    const { c, r, k, seed } = this;
+    const { c, r, k } = this;
     const G = PWF.GLOW;
     if (kind === 'boarded') {
       // Boards: 3–5 planks nailed across, not one sheet; a gap or two shows the dark.
@@ -902,7 +901,6 @@ export class Elev {
         c.line(cx, cy, cx + Math.round(Math.cos(ang) * (3 + (a % 3) * 3)), cy + Math.round(Math.sin(ang) * (3 + (a % 3) * 3)), r.glassSky, 3.4);
       }
     }
-    void seed;
   }
 
   // ─── Value structure: the picture's own light ─────────────────────────────
@@ -938,7 +936,7 @@ export class Elev {
 
   /** Rising damp and street grime along the foot of the wall: a ragged band, darker, with moss flecks at the very bottom. */
   footGrime(heightM = 0.9): this {
-    const { c, x0, x1, H, seed, r } = this;
+    const { c, x0, x1, H, seed } = this;
     const moss = this.k.ramp(0x4a5a30, { light: 0.3, sat: 0.8, dark: 0.45 });
     for (let x = x0; x < x1; x++) {
       const top = H - Math.round((heightM * this.tpm) * (0.55 + vnoise(x, 23, seed + 501) * 0.7));
@@ -951,7 +949,6 @@ export class Elev {
         if (c.at(x, y)) c.ramp[y * c.w + x] = moss;
       }
     }
-    void r;
     return this;
   }
 
@@ -1038,20 +1035,18 @@ export class Elev {
 
   /** A clump of bills pasted over each other at eye level. */
   bills(x: number, y: number, w: number, h: number): this {
-    const { k, seed, r } = this;
-    const hexes = [0x8a8068, 0x6a4a3a, 0x445064, 0x8c8470, 0x5a6240];
+    const { seed } = this;
+    const hexes = [0x6e6856, 0x5a4638, 0x3e4656, 0x6a6452, 0x4e543a];
     let px = x;
     let i = 0;
     while (px < x + w - 10) {
-      const bw = 14 + Math.round(hash2(i, 3, seed) * 14);
-      const bh = 16 + Math.round(hash2(i, 5, seed) * 14);
+      const bw = 12 + Math.round(hash2(i, 3, seed) * 12);
+      const bh = 13 + Math.round(hash2(i, 5, seed) * 12);
       const by = y + Math.round(hash2(i, 7, seed) * Math.max(1, h - bh));
       this.poster(px, by, bw, bh, hexes[Math.floor(hash2(i, 9, seed) * hexes.length)]);
       px += Math.round(bw * 0.7);
       i++;
     }
-    void k;
-    void r;
     return this;
   }
 
@@ -1169,21 +1164,20 @@ export class Elev {
   }
 
   /** Louvred shutters, one at each side of an opening; `state`: open (flat to the wall) or `hang` (one has dropped on its hinge). */
-  shutters(x: number, y: number, w: number, h: number, hex: number, state: 'open' | 'hang' = 'open', v = 0): this {
+  shutters(x: number, y: number, w: number, h: number, hex: number, state: 'open' | 'hang' = 'open'): this {
     const { c, k, r } = this;
     const ramp = k.ramp(hex, { light: 0.34, sat: 0.85, dark: 0.45 });
     const sw = Math.round(w * 0.42);
-    const leaf = (lx: number, ly: number, droop: number) => {
+    const leaf = (lx: number, ly: number) => {
       c.rect(lx, ly, sw, h, r.ink, 0);
       c.rect(lx + 1, ly + 1, sw - 2, h - 2, ramp, 3);
       for (let j = 3; j < h - 3; j += 3) c.hline(lx + 2, ly + j, sw - 4, ramp, 1);
       c.vline(lx + 1, ly + 1, h - 2, ramp, 4);
       c.vline(lx + sw - 2, ly + 1, h - 2, ramp, 1);
-      void droop;
     };
-    leaf(x - sw - 1, y, 0);
+    leaf(x - sw - 1, y);
     if (state === 'open') {
-      leaf(x + w + 1, y, 0);
+      leaf(x + w + 1, y);
     } else {
       // Dropped on its top hinge: the leaf hangs at an angle, its foot out from the wall.
       const lx = x + w + 2;
@@ -1194,7 +1188,6 @@ export class Elev {
         c.set(lx + off + sw, y + j, r.ink, 0);
       }
     }
-    void v;
     return this;
   }
 
@@ -1253,7 +1246,7 @@ export class Elev {
    * fascia, transom, glass over a riser, a recessed door. `room` draws what is behind the glass.
    */
   shopfront(x0: number, x1: number, yTop: number, o: { room: (rx: number, ry: number, rw: number, rh: number) => void; door?: number; riser?: number; frameRamp?: number; fascia?: number; bays?: number; doorKind?: 'dark' | 'lit' }): this {
-    const { c, r, H, seed } = this;
+    const { c, r, H } = this;
     const fr = o.frameRamp ?? r.iron;
     const fas = o.fascia ?? fr;
     const riser = o.riser ?? r.stone;
@@ -1315,7 +1308,6 @@ export class Elev {
       c.rect(dx - 2, H - 5, doorW + 4, 5, r.stone, 3);
       c.hline(dx - 2, H - 5, doorW + 4, r.stone, 4);
     }
-    void seed;
     return this;
   }
 
@@ -1558,7 +1550,7 @@ export class Elev {
 
   /** What stands near the glass: rails, tables, display stands (drawn big: close to the viewer). */
   private frontOfShop(x: number, y: number, w: number, h: number, kind: RoomKind, lit: boolean, bay: number) {
-    const { c, r, seed } = this;
+    const { c, r } = this;
     const G = lit ? PWF.GLOW : 0;
     const base = y + h;
     if (kind === 'pawn' || kind === 'closed') {
@@ -1593,8 +1585,6 @@ export class Elev {
       c.rect(x + 2, base - 16, w - 4, 16, r.wood, 1.6, G);
       for (let i = 4; i < w - 4; i += 6) c.vline(x + i, base - 16, 16, r.wood, 3.4, G);
     }
-    void seed;
-    void bay;
   }
 }
 

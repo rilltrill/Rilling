@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { PwAtlas } from '../../pixelworld/atlas';
 import { PwBatch } from '../../pixelworld/batch';
 import { Z1_FLATS, type FlatDef } from '../../pixelworld/z1flats';
-import { FLAT_PAD, FLAT_TPM } from '../../pixelworld/elevation';
+import { FLAT_TPM } from '../../pixelworld/elevation';
 import { sidewalkTile } from '../../pixelworld/surfaces';
 import type { ZoneId } from './town';
 
@@ -164,5 +164,3 @@ export class Z1Flats {
     }
   }
 }
-
-void FLAT_PAD;

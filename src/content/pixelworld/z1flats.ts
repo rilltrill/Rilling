@@ -1,6 +1,6 @@
 import type { PwPainter } from './atlas';
 import { bayer, PWF } from './canvas';
-import { Elev, FLAT_PAD, FLAT_TPM, vnoise, type ElevWallColours, type RoomKind, type WinKind } from './elevation';
+import { Elev, FLAT_PAD, FLAT_TPM, vnoise, type ElevWallColours, type WinKind } from './elevation';
 import { hash2 } from './surfaces';
 import { drawText, FONT_BOLD, FONT_5x7, textWidth } from './font';
 
@@ -177,7 +177,7 @@ const paintPawn: PwPainter = (c, k) => {
   e.drainpipe(0.5, h - 1);
   e.band(e.Y(GROUND_H - 0.15), 5, e.r.stone);
   const sy = e.Y(3.65);
-  e.shopfront(e.X(0.8), e.X(14.5), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'pawn'), door: e.X(15.2), doorKind: 'lit', frameRamp: e.r.iron, riser: e.k.ramp(0x4a3a2a, { light: 0.36 }) });
+  e.shopfront(e.X(0.8), e.X(14.5), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'pawn', { hex: 0x967a44 }), door: e.X(15.2), doorKind: 'lit', frameRamp: e.r.iron, riser: e.k.ramp(0x4a3a2a, { light: 0.36 }) });
   e.pilaster(e.x0, e.Y(GROUND_H), e.H, 10);
   e.pilaster(e.X(17.3), e.Y(GROUND_H), e.H, 10);
   e.fixture(e.X(0.2), e.Y(2.2), 'meter');
@@ -221,6 +221,7 @@ const paintLaundry: PwPainter = (c, k) => {
   e.pilaster(e.X(6.2), cy + 14, e.Y(GROUND_H), 8);
   e.pilaster(e.X(11.9), cy + 14, e.Y(GROUND_H), 8);
   e.drainpipe(0.45, h - 0.2);
+  e.wire(0.5, h - 0.4, 6.2, h - 0.9, 0.5);
   e.band(e.Y(GROUND_H - 0.1), 5, e.r.stone);
   const sy = e.Y(3.65);
   e.shopfront(e.X(0.8), e.X(13.9), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'laundry', { hex: 0x8aa8a0 }), door: e.X(14.8), doorKind: 'lit', riser: e.k.ramp(0x3a5060, { light: 0.36 }) });
@@ -265,7 +266,7 @@ const paintRialto: PwPainter = (c, k) => {
   e.band(e.Y(GROUND_H + 1.8), 3, e.r.stone);
   e.band(e.Y(GROUND_H - 0.1), 6, e.r.stone);
   const sy = e.Y(3.75);
-  e.shopfront(e.X(2.6), e.X(17.4), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'lobby', { hex: 0xb86a4a }), door: e.X(9), doorKind: 'lit', frameRamp: e.k.ramp(0x241a1e, { light: 0.36 }), riser: e.k.ramp(0x5a1a24, { light: 0.36 }) });
+  e.shopfront(e.X(2.6), e.X(17.4), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'lobby', { hex: 0x9c5a42 }), door: e.X(9), doorKind: 'lit', frameRamp: e.k.ramp(0x241a1e, { light: 0.36 }), riser: e.k.ramp(0x5a1a24, { light: 0.36 }) });
   e.pilaster(e.X(2.2), e.Y(4.5), e.H, 10);
   e.pilaster(e.X(17.5), e.Y(4.5), e.H, 10);
   e.bills(e.X(0.5), e.Y(3.8), 50, 62);
@@ -339,7 +340,7 @@ const paintLiquor: PwPainter = (c, k) => {
   row(e, 0, [2.2, 5.3, 10.7, 13.8], ['lit', 'dark', 'curtain', 'boarded'], { head: 'lintel' });
   e.band(e.Y(GROUND_H + 0.1), 4, e.r.stone);
   const sy = e.Y(3.8);
-  e.shopfront(e.X(0.8), e.X(13.2), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'liquor', { hex: 0xb07a44 }), door: e.X(13.6), doorKind: 'lit', riser: e.k.ramp(0x5a2a2a, { light: 0.34 }) });
+  e.shopfront(e.X(0.8), e.X(13.2), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'liquor', { hex: 0x8a6438 }), door: e.X(13.6), doorKind: 'lit', riser: e.k.ramp(0x5a2a2a, { light: 0.34 }) });
   e.fixture(e.X(14.1), e.Y(2.2), 'meter');
   e.fixture(e.X(0.1), e.Y(3.2), 'vent');
   e.bills(e.X(13.9), e.Y(3.4), 30, 40);
@@ -417,7 +418,7 @@ const paintHotel: PwPainter = (c, k) => {
   for (let f = 0; f < 3; f++) row(e, f, cols, T[f], { w: 30, h: 52, head: f === 2 ? 'arch' : 'lintel' });
   e.band(e.Y(GROUND_H - 0.05), 7, e.r.stone);
   const sy = e.Y(3.8);
-  e.shopfront(e.X(1.1), e.X(20.3), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'lobby', { hex: 0xc4894a }), door: e.X(10.0), doorKind: 'lit', bays: 7, frameRamp: e.k.ramp(0x2a241f, { light: 0.34 }), riser: e.k.ramp(0x5c3a30, { light: 0.34 }) });
+  e.shopfront(e.X(1.1), e.X(20.3), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'lobby', { hex: 0x946a42 }), door: e.X(10.0), doorKind: 'lit', bays: 7, frameRamp: e.k.ramp(0x2a241f, { light: 0.34 }), riser: e.k.ramp(0x5c3a30, { light: 0.34 }) });
   e.drainpipe(0.45, h - 0.3);
   e.bills(e.X(20.5), e.Y(3.2), 40, 60);
   e.fixture(e.X(0.8), e.Y(2.0), 'meter');
@@ -451,7 +452,7 @@ const paintCafe: PwPainter = (c, k) => {
   cols.forEach((cm, i) => e.shutters(e.X(cm) - 17, sillOf(e, 0) - 54, 34, 54, 0x3a5a4a, i === 3 ? 'hang' : 'open'));
   e.band(e.Y(GROUND_H - 0.1), 5, e.r.stone);
   const sy = e.Y(3.8);
-  e.shopfront(e.X(0.9), e.X(14.4), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'cafe', { hex: 0xa07840 }), door: e.X(15), doorKind: 'lit', frameRamp: e.k.ramp(0x2a3a2a, { light: 0.34 }), riser: e.k.ramp(0x4a3a2a, { light: 0.34 }) });
+  e.shopfront(e.X(0.9), e.X(14.4), sy, { room: (x, y, rw, rh) => e.room(x, y, rw, rh, 'cafe', { hex: 0x846a3e }), door: e.X(15), doorKind: 'lit', frameRamp: e.k.ramp(0x2a3a2a, { light: 0.34 }), riser: e.k.ramp(0x4a3a2a, { light: 0.34 }) });
   e.bills(e.X(16.0), e.Y(3.8), 42, 56);
   e.fixture(e.X(16.2), e.Y(1.6), 'box');
   e.crack(e.X(5), e.Y(9.0), 28);
@@ -487,6 +488,7 @@ const paintW4: PwPainter = (c, k) => {
   c.rect(dx + 9, e.Y(2.9), 40, e.Y(0) - e.Y(2.9), e.r.wood, 2);
   c.rect(dx + 14, e.Y(2.7), 30, 26, e.r.glassDark, 2);
   e.drainpipe(15.5, h - 1);
+  e.wire(15.5, h - 1, 11.0, h - 1.6, 0.7);
   e.tag(e.X(1.0), e.Y(1.7), 'RUN', 0xe89a38, 0x3a1e08, 2);
   e.clothesline(e.X(5.3), e.X(10.7), sillOf(e, 0) - 66);
   e.bills(e.X(10.2), e.Y(2.2), 40, 44);
@@ -851,4 +853,3 @@ export const Z1_FLATS: FlatDef[] = [
   flat('shutterblock', 20, buildingH(3), 1.2, paintShutterBlock, [awning('awn', 18.5, 0x2a4a3a, AW_CREAM, 0, 3.35, 0.8)]),
 ];
 
-void ({} as RoomKind);
