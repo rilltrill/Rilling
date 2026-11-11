@@ -11,6 +11,8 @@ import { initPlatform } from './platform';
 import { pwStoreEnable } from './content/pixelworld/store';
 import { pwUpscale } from './content/pixelworld/atlas';
 import { pwAxisLevels } from './content/pixelworld/material';
+import { pwLight, pwMoodBoot, pwMoodTweak } from './content/pixelworld/light';
+import { RetroPass } from './core/RetroPass';
 import { pwDebugBoot, pwDebugSet } from './core/debugView';
 
 function parseFlags(q: URLSearchParams): DebugFlags {
@@ -62,7 +64,14 @@ function main() {
   if (query.get('pwup') === '0') pwUpscale(false);
   // … and `&pwaniso=0` picks one level for both texel axes, as the first pass drew.
   if (query.get('pwaniso') === '0') pwAxisLevels(false);
-  // Dev / audit: `&pwdebug=mag|lvl|tone|ramp` compiles the PixelWorld debug views in; tools switch them with `__pwDebug(view)`.
+  // … and `&pwlight=0` lights paint as the first pass did (Lambert × paint, smooth fog, the monitor's tone curve and dither).
+  if (query.get('pwlight') === '0') pwLight(false);
+  // Look-dev: `&pwmood=pivot:0.3,steps:1` lays values over every stage's mood; `__pwMood({ pivot: 0.3 })` changes the live one.
+  pwMoodBoot(query.get('pwmood'));
+  (window as unknown as { __pwMood: typeof pwMoodTweak }).__pwMood = pwMoodTweak;
+  // Tests of the fallback: `&pwrt=8` draws the scene into an 8-bit target even where half-float is there.
+  if (query.get('pwrt') === '8') RetroPass.force8 = true;
+  // Dev / audit: `&pwdebug=mag|lvl|tone|ramp|steps|light` compiles the PixelWorld debug views in; tools switch them with `__pwDebug(view)`.
   pwDebugBoot(query.get('pwdebug'));
   (window as unknown as { __pwDebug: typeof pwDebugSet }).__pwDebug = pwDebugSet;
 

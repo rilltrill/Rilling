@@ -142,14 +142,104 @@ first run). Spend texels where the rail camera is: unique paint near, tinted wra
 
 ## 5. Light (the pipeline's job; painters paint for it)
 
-World texels are stored as *(ramp, tone)*. The material turns the light arriving at a texel
-into a whole number of tone STEPS along that texel's own ramp (dithered in texel space at the
-band edges), so lit and shaded paint is always a palette colour, shadows shift toward the
-ramp's violet end and light toward its warm end. Ramps are extended beyond the six painted
-tones (deeper night tones, brighter lit tones). Fog is bands, not a blend. Painters therefore:
-paint as if evenly lit (tones 1–5 for form, 0 for outline), put GLOW only on light sources,
-and paint fixed pools (lamp on a wall, neon on a shopfront) into the tile with tone shifts;
-moving or flickering light comes from the stage lights through the material.
+World texels are stored as *(ramp, tone)*; the palette holds each ramp as 16 tones (the six
+painted ones in the middle, five deeper toward a deep blue-violet, five brighter toward a warm
+white). The material (`content/pixelworld/light.ts`; in full: docs/ARCHITECTURE.md, *PIXEL-ART
+LIGHT*) does four things with the stage's lights:
+
+1. **Steps.** The light on a texel becomes a WHOLE NUMBER OF TONES:
+   `steps = round(mood.steps × log2(light / mood.pivot))`, and the texel is shown at painted
+   tone + steps of its own ramp. At the stage's pivot light a texel shows exactly the colour
+   you painted. A lamp's pool is 2–3 rings of whole tones; the edge of a ring is a few pixels
+   of 2 × 2 ordered dither glued to the texels (it never crawls), and a facet in even light is
+   never dithered at all.
+2. **Tint and shade.** A ring takes ONE tint from the light that makes it (the sky's blue, a
+   sodium lamp's orange, an emergency lamp's red), and everything below its painted tone
+   leans to the stage's `shade` (half one step down, whole from two).
+3. **Fog in bands** toward the stage's fog colour, their edges dithered on the frame's grid:
+   a far wall sits a visible step back, like a layer of a 2D backdrop.
+4. **Palette-true output.** The lit colour is written so that the arcade-monitor pass shows it
+   unchanged and does not dither it. What you paint is what arrives on the screen (the first
+   pass showed a pool painted #1c273d as #0d111e, under a screen-door).
+
+### The mood of a stage
+
+One `PwMood` per stage (`X_MOOD` in `stages/<id>/pixel.ts`; a stage may set another before it
+builds a zone's materials):
+
+| stage | pivot | steps / stop | lo … hi | tint | shade | torch | film | where the light sits (its level × paint) |
+|---|---|---|---|---|---|---|---|---|
+| z1 MAIN STREET | 0.55 | 0.75 | −2 … +2 | 0.8 | `0x9a90e8` blue-violet | 0 | 0 | moonlit road and pavement (0.41–0.47) 0; walls (0.17–0.29) −1; under awnings, away from the moon −2; beside a lamp, the fire, a neon 0 … +1 |
+| z2 ST. MERCY | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x90b8c8` teal | 0 | 0 | ward and bay ambient (0.11–0.22) −1; under a tube, in the emergency lamp's reach (0.3–0.45) 0; unlit ceilings and far rooms (0.03) −2 |
+| z3 HIGHWAY | 0.5 | 0.75 | −2 … +1 | 1.5 | `0xd098d8` magenta-violet | 1 | 0 | sunlit road and fronts (0.50–0.54) 0; faces turned from the sun, under the bridge (0.11–0.36) −1; beside a fire (0.8) +1 |
+| d1 JUNGLE RUN | 0.95 | 0.75 | −2 … +1 | 0.5 | `0xa8c0f0` sky blue | 1 | 1 | everything the sun reaches (0.97) 0; shaded sides −1 |
+| d2 RESEARCH LABS | 0.65 | 0.75 | −2 … +2 | 0.7 | `0xa4b4ec` cold blue | 0 | 0 | floors under the room's light (0.65) 0; walls (0.29) −1; ceilings and unlit rooms (0.04–0.08) −2; the atrium's lit path +1 |
+| d3 STORM | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x8c98f0` deep blue | 1 | 0 | open ground, lamp pools, the jeep's headlights (0.3–0.65) 0; facets turned from the sky (0.11–0.28) −1; a lightning flash +1 … +2 |
+
+- `pivot`: the light at which paint shows as painted. `node scripts/pixel-mood.mjs --shots
+  "z1:5:150:street"` prints the light levels of a shot (percentiles of the first pass's
+  paint multiplier) and the share of the frame at each step; choose the pivot at the light of
+  the stage's open ground and lamp pools, so that walls and everything less lit sink one step
+  into the shade and only unlit corners two. `--moods "a=pivot:0.4;b=pivot:0.6,tint:1"`
+  re-shoots the same frozen frame under variants; `__pwMood({ pivot: 0.4 })` in the console
+  changes the live mood; `&pwdebug=steps` shows the steps (green = as painted, cyan −1, blue
+  −2, yellow +1, orange +2).
+- `steps` (tones a stop of light; 0.75): more = more rings and harder contrast. `lo` / `hi`:
+  how far down the unlit corners go and how far a lamp's core may bleach paint (−2 … +2;
+  +1 where a stage has no lamps to speak of).
+- `tint`: how far the light's colour leans the paint (0 … 1; above 1 exaggerates it: a
+  sunset). `shade`: a PALE colour — its chroma is what counts; a saturated one drowns the
+  paint. `white`: the light your paint is painted for, if not white.
+- `torch`: how much of the spot lights counts for the painted world. The shoulder torch that
+  follows the camera (z1, z2, d2) is for the cast; on paint it was a pale disc under the gun
+  that travelled with the view, so those moods set 0. Headlights (d3) count.
+- `film`: how much of the monitor's tone curve stays on lit paint. 0 = palette-true, the rule
+  for anything painted from now on. d1's first-pass ground was tuned through the curve in
+  full sun (it lifts and saturates mid tones) and keeps it (1) until it is repainted — set it
+  back to 0 with the repaint and pick the bright ramps yourself.
+- `fogBands` (6), `edge` / `fogEdge` (the dithered edges' width in frame pixels: 5 / 4).
+
+### Painting for it
+
+- **Paint as if evenly lit, at the pivot**: the picture you paint is what a lamp shows. The
+  pipeline makes the night around it. Do not paint a tile dark because the stage is dark.
+- **Tones for form**: base on 3, the lit top / left edge 4, small highlights 5, the shadow side
+  and recesses 2, core shadows and cast shadows 1, outlines and the deepest cracks 0 only.
+  Light moves the WHOLE tile: one step down your 4-3-2 reads as 3-2-1 (and leans to the shade),
+  two steps down as 2-1-0. A surface painted mostly in tones 0–1 has nowhere to go at night
+  (below tone 0 the ramp's steps part by hue more than by lightness), and one painted mostly
+  in 4–5 bleaches to the pale end inside a pool. Keep the body of every form on 2–4.
+- **Ramps**: night stages want ramps whose tone 0 is a deep colour, not black
+  (`k.ramp(hex, { dark: 0.5 })`; the darkest painted tone around #14122a, §4.6). Hue-shift is
+  in the ramp: a ramp made with a `shadowHue` shifts further as the light takes it down.
+- **Fixed pools** (a lamp on a wall, a neon wash on a shopfront, a lit doorway's spill): paint
+  them INTO the tile — one tone up inside the ring, two in the core, the ring's edge a seam of
+  2–3 texels of dither (`PWF.DITHER` with a fractional tone, or a hand checker), in a warmer
+  ramp where the lamp is coloured (the pipeline cannot tint a painted pool). Where a pool spans
+  many tiles (a street lamp on the road) keep it as a stepped overlay made with
+  `pwLightOverlay(material)` (z1's `LightPools`, `pwPoolTexture`: flat rings; the lit pixels
+  stay on whole colours) — flat steps only, a soft gradient would band. Real stage lights are
+  for light that MOVES or FLICKERS (a fire, a buzzing neon, headlights, lightning): each is a
+  ring of whole tones that travels over your paint.
+- **GLOW** (`PWF.GLOW`) is for the light sources themselves: the lit window, the tube, the lamp
+  head, the screen, the flame. A glow texel ignores light and fog bands apply to it; it shows
+  as painted in the darkest corner, so it is the brightest thing in a night frame — keep it
+  small. The halo a source throws on the wall beside it is PAINT (tones up), not glow. A
+  material's `glow` gain moves glow texels in whole steps (a dead tube: 0.1 = two tones down).
+- **Vertex tints** (NEUTRAL tiles in a material's colour) multiply after the lookup: handy, but
+  a tinted texel is not a palette colour and its shadows do not travel the ramp. Hero surfaces
+  get their own ramps.
+- **Dither**: band edges are the pipeline's 2 × 2 pattern on your texels. A large painted
+  checker under a pool's edge beats against it; use painted dither for seams, not for fills.
+- **Backdrops** (sky, skylines, ranges) are unlit and still go through the monitor's tone
+  curve, like the fog colour and everything classic that fades into it: paint the horizon in
+  the stage's fog hex as before; `pwFilmHex(hex)` (light.ts) is the colour a backdrop texel or
+  the fog shows as, when lit paint must match it. They are no longer dithered by the monitor.
+- **In motion**: `node scripts/pixel-motion.mjs --shots "z1:3:60:move"` compares consecutive
+  1/60 s steps (painted-tone changes = what the camera's motion alone does; light-step and
+  fog-band changes on top of it) and writes a strip of the frames. A light that flickers
+  flips whole tones: keep fast flicker local and small, and give it a calm branch under
+  `world.settings.reduceFlashes` as the stages do.
 
 ## 6. The pipeline (foundation)
 
@@ -179,11 +269,9 @@ Described in full in docs/ARCHITECTURE.md, *PIXEL WORLD 2 pipeline*. What exists
   `{ axes: false }`.
 - **Debug views and the audit** (§8).
 
-Still to come (the light part): ramp-step lighting through the extended palette (§5), banded
-fog, palette-true output through the arcade-monitor pass. Until then the material lights paint
-as the first pass did (palette colour × Lambert), so smooth gradients and the monitor's
-ordered dither are still in every frame — the audit's `tiny` column measures exactly that and
-cannot pass yet.
+- **Light** (§5): ramp-step light, the band's tint and the stage's shade, banded fog,
+  palette-true output through the arcade-monitor pass; `&pwlight=0` lights paint as the first
+  pass did (A/B).
 
 ## 7. Definition of done for a scene
 
@@ -202,12 +290,18 @@ cannot pass yet.
   `node scripts/pixel-world.mjs --base http://localhost:<port> --out <dir> --modes pixel
   --retro pixel --vw 624 --vh 288 --dsf 3 --shots "z1:5:150:label,…"`. Phone view:
   `--vw 844 --vh 390 --dsf 2 --retro crt`. The first pass's frames: `/tmp/pw2/base/`.
-  `--extra "&pwup=0&pwaniso=0"` draws the first pass from the new formats (A/B).
+  `--extra "&pwup=0&pwaniso=0&pwlight=0"` draws the first pass from the new formats (A/B).
 - **Debug views**: add `&pwdebug=mag` (frame pixels across one stored texel: green ≤ 1.25,
   yellow ≤ 1.5, orange ≤ 2, red > 2 — the density check of §3), `lvl` (the same for the texel
-  actually drawn), `tone` (painted tone, glow magenta) or `ramp` (a hue per ramp) to any
-  `retro=pixel|crt` URL; everything that is not painted world is black. `__pwDebug('mag')`
-  in the console switches views on a frozen frame.
+  actually drawn), `tone` (painted tone, glow magenta), `ramp` (a hue per ramp), `steps` (the
+  tones the light moves each texel: green as painted, cyan −1, blue −2, violet ≤ −3, yellow +1,
+  orange +2, red ≥ +3, glow white), `light` (the light itself, dark red … yellow) or `fog` (the
+  fog band) to any `retro=pixel|crt` URL; everything that is not painted world is black.
+  `__pwDebug('mag')` in the console switches views on a frozen frame.
+- **Mood and motion**: `scripts/pixel-mood.mjs` (a shot's light levels, the same frame under
+  mood variants) and `scripts/pixel-motion.mjs` (consecutive frames: paint / light / fog
+  changes, strips) — §5. `&pwlight=0` = the first pass's light, `&pwmood=key:value,…` = values
+  over every stage's mood.
 - **Audit**: `node scripts/pixel-audit.mjs --base http://localhost:<port> --out <dir>
   [--shots "z1:5:150:label,…"]` (default: three views a stage and its boss) — per shot, on the
   exact 624 × 288 frame: `>1.5` / `>2` share of world pixels whose texel is wider than 1.5 / 2

@@ -356,7 +356,8 @@ const FRAG_MAP = /* glsl */ `
     fPaint = pc.rgb * vFMisc.y;
     fRim = pc.a < 0.99 ? 1.0 : 0.0;
     #ifdef PW_DEBUG
-      pwDbg = pwDbgMag(vFTex, 1.0, ivec2(lv));
+      // (Plants are not painted world: black in the views of its texels and its light.)
+      pwDbg = uPwDebug < 2.5 ? pwDbgMag(vFTex, 1.0, ivec2(lv)) : vec3(0.0);
     #endif
   }
 `;

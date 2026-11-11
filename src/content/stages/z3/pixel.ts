@@ -17,6 +17,7 @@ import { BAY_FRAMES, z3BayWater, z3BridgeHouse, z3ContainerTile, z3ExitSign, z3H
 import { z3FlareFire, z3FlarePool, z3FlareStick, z3FootingTile, z3SteelPoleTile, z3TunnelLamp } from '../../pixelworld/z3roadside';
 import { tintFor } from '../../pixelworld/batch';
 import { pwMaterial, pwTick, type PwMaterialOptions } from '../../pixelworld/material';
+import { pwMood, type PwMood } from '../../pixelworld/light';
 import { Z3FxAtlas } from '../../pixelworld/z3fx';
 import type { PwCarRecord } from './props';
 import type { Ctx } from './scenery';
@@ -83,7 +84,12 @@ export function dropUntagged(o: THREE.Object3D, drop: THREE.Object3D[], glows = 
   walk(o);
 }
 
+/** The mood of the sunset highway (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
+export const Z3_MOOD: Partial<PwMood> = { pivot: 0.5, hi: 1, tint: 1.5, shade: 0xd098d8 };
+
 export class Z3PixelWorld {
+  /** Set before any material is made: every PixelWorld material of the stage is lit under it. */
+  readonly mood = pwMood(Z3_MOOD);
   readonly atlas = new PwAtlas('z3');
   readonly skyAtlas = new PwAtlas('z3-sky', { levels: 1 });
   readonly rule: TileRule;

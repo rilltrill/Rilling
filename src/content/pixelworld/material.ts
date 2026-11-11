@@ -3,11 +3,15 @@ import { Kit } from '../kit/ModelKit';
 import { PW_PAL_DEEP, PW_TPM } from './canvas';
 import type { PwAtlas } from './atlas';
 import { PW_DEBUG_DECL, pwDebugPatch, pwDebugSetup } from '../../core/debugView';
+import { PW_LIGHT_DECL, pwLightOn, pwLightPatch, pwLightUniforms, pwMoodNow, type PwMoodUniforms } from './light';
 
 /**
- * PixelWorld materials: a flat-shaded Lambert (stage lights, flashlight, fog,
- * tone mapping exactly like the 3D scenery) whose colour comes from the stage's
- * PixelWorld atlas, texel by texel:
+ * PixelWorld materials: flat-shaded, lit by the stage's own lights (hemisphere, sun,
+ * flashlight, lamps, muzzle flash: three.js's Lambert sum) — but the light does not
+ * multiply the paint: it moves each texel a whole number of tones along its palette
+ * row, tints it, fog comes in bands and the pixel reaches the screen as the palette
+ * colour it is (PIXEL-ART LIGHT: `light.ts`, per-stage `PwMood`). The colour comes
+ * from the stage's PixelWorld atlas, texel by texel:
  *
  *  - the atlas holds INDICES (ramp, tone, glow: `PWI`), the palette texture the
  *    colours (a row a ramp): `pwTexel` fetches the texel whole and looks its
@@ -28,20 +32,24 @@ import { PW_DEBUG_DECL, pwDebugPatch, pwDebugSetup } from '../../core/debugView'
  *    + `uPwBias`) and fetched whole (`texelFetch`): hard pixel-art texels, the
  *    hand-made levels take over before anything is minified enough to crawl;
  *  - texel classes: cut out (discarded: railings, fences, signs' outlines,
- *    graffiti), glow (lit windows, neon, lamps: emitted at their painted colour
- *    × `uPwGlow`, unaffected by the lights), lit;
- *  - vertex colours (white by default) tint a vertex: per-building hue shifts,
- *    painted ambient occlusion at wall feet.
+ *    graffiti), glow (lit windows, neon, lamps: their painted colour, moved by
+ *    `uPwGlow` in whole tones, unaffected by the lights), lit;
+ *  - vertex colours (white by default) tint a vertex after the palette lookup:
+ *    a NEUTRAL tile in its material's colour, per-building hue shifts.
+ * `&pwlight=0` (`pwLight(false)`) makes the materials light paint as the first pass
+ * did (palette colour × Lambert, smooth fog, the monitor's tone curve and dither).
  */
 
 export interface PwMaterialOptions {
   /** World-position projection instead of a UV attribute. */
   planar?: boolean;
   side?: THREE.Side;
-  /** Multiplier of lit texels (match the stage's 3D scenery brightness; default 1). */
+  /** Multiplier of the light on lit texels (a brighter room, a darker one; default 1). */
   gain?: number;
-  /** Multiplier of glow texels (default 1). */
+  /** Gain of glow texels (default 1 = as painted; applied in whole tone steps: `pwGlowSteps`). */
   glow?: number;
+  /** The mood the material is lit under (default: the one set last with `pwMood`). */
+  mood?: PwMoodUniforms;
   /** Level bias (default 0.5: level 0 until a texel is 1.4 pixels' worth). */
   bias?: number;
   /**
@@ -87,11 +95,14 @@ export function pwLevelFor(rho: number, levels: number, bias = PW_MIP_BIAS, scal
  *  - `pwScale(rect)`: stored texels per painted texel of the tile (1, or 2: `rect.w` < 0);
  *  - `pwLevel(rho, s, bias, maxLv)`: the level for `rho` painted texels a pixel;
  *  - `pwFetch(org, t, s, lv)`: the texel at painted coords `t` inside the tile at `org`.
+ * Each leaves `pwRT` = the (ramp id, painted tone) of the texel it returned: the lit materials
+ * look the colour up again once the light has said how many tones to move it.
  * Samplers are highp by name: the index is rebuilt from two normalised bytes.
  */
 export const PW_FETCH = /* glsl */ `
   uniform highp sampler2D uPwAtlas;
   uniform highp sampler2D uPwPal;
+  ivec2 pwRT = ivec2(0);
   #ifdef PW_DEBUG
     vec3 pwDbgTexel = vec3(0.0);
   #endif
@@ -100,6 +111,7 @@ export const PW_FETCH = /* glsl */ `
     int ramp = b.x | ((b.y & 15) << 8);
     if (ramp == 0) return vec4(0.0);
     int tone = (b.y >> 4) & 7;
+    pwRT = ivec2(ramp, tone);
     #ifdef PW_DEBUG
       // tone: 0 blue … 5 orange, glow magenta; ramp: a hue an id (paler for odd ids).
       if (uPwDebug > 3.5) {
@@ -144,13 +156,19 @@ export const PW_FETCH = /* glsl */ `
       int along = alongU ? p.x : p.y;
       ivec2 p0 = p - ax * (along - ((along >> sh) << sh));
       vec4 c0 = pwTexel(p0, lo);
+      ivec2 r0 = pwRT;
       vec4 c1 = pwTexel(p0 + ax, lo);
+      ivec2 r1 = pwRT;
       // (A block of two: the pair counted twice, so the votes below read the same.)
       vec4 c2 = c0;
       vec4 c3 = c1;
+      ivec2 r2 = r0;
+      ivec2 r3 = r1;
       if (sh > 1) {
         c2 = pwTexel(p0 + ax * 2, lo);
+        r2 = pwRT;
         c3 = pwTexel(p0 + ax * 3, lo);
+        r3 = pwRT;
       }
       vec4 a = vec4(c0.a, c1.a, c2.a, c3.a);
       vec4 isLit = step(0.85, a);
@@ -166,10 +184,11 @@ export const PW_FETCH = /* glsl */ `
       vec3 e3 = c3.rgb - mean;
       vec4 d = vec4(dot(e0, e0), dot(e1, e1), dot(e2, e2), dot(e3, e3)) + (1.0 - w) * 1e6;
       vec4 best = c0;
+      pwRT = r0;
       float bd = d.x;
-      if (d.y < bd) { best = c1; bd = d.y; }
-      if (d.z < bd) { best = c2; bd = d.z; }
-      if (d.w < bd) { best = c3; }
+      if (d.y < bd) { best = c1; pwRT = r1; bd = d.y; }
+      if (d.z < bd) { best = c2; pwRT = r2; bd = d.z; }
+      if (d.w < bd) { best = c3; pwRT = r3; }
       return best;
     }
   #endif
@@ -213,6 +232,7 @@ const VERT_BEGIN = /* glsl */ `
 const FRAG_DECL = /* glsl */ `
   ${PW_DEBUG_DECL}
   ${PW_FETCH}
+  ${PW_LIGHT_DECL}
   uniform float uPwBias;
   uniform float uPwGain;
   uniform float uPwGlow;
@@ -228,9 +248,16 @@ const FRAG_DECL = /* glsl */ `
   #endif
 `;
 
-/** Atlas fetch: multiplies the painted colour (linear) into `diffuseColor`, sets `pwEmit` (glow texels), discards cut-outs. */
+/**
+ * Atlas fetch: discards cut-outs. Ramp-step light (`PW_LIGHT`): leaves the texel (`pwRT`), its
+ * class (`pwGlowK`) and its coords at the level drawn (`pwQ`: the dither's grid) for `PW_LIGHT_OUT`
+ * and `diffuseColor` white, so the lights sum over a white surface. Else (the first pass's light,
+ * backdrops): multiplies the painted colour (linear) into `diffuseColor`, sets `pwEmit` (glow texels).
+ */
 const FRAG_MAP = /* glsl */ `
   vec3 pwEmit = vec3(0.0);
+  float pwGlowK = 0.0;
+  ivec2 pwQ = ivec2(0);
   {
     #ifdef PW_PLANAR
       vec3 pn = cross(dFdx(vPwPos), dFdy(vPwPos));
@@ -249,9 +276,11 @@ const FRAG_MAP = /* glsl */ `
       // Animated strip: wrap / clamp inside one frame, then step to the current frame.
       float fh = rs.y / uPwAnim.x;
       vec2 t = vPwRect.z > 0.0 ? mod(pu, vec2(rs.x, fh)) : clamp(pu, vec2(0.0), vec2(rs.x, fh) - 0.001);
+      vec2 tq = t;
       t.y += floor(mod(uPwTime * uPwAnim.y, uPwAnim.x)) * fh;
     #else
       vec2 t = vPwRect.z > 0.0 ? mod(pu, rs) : clamp(pu, vec2(0.0), rs - 0.001);
+      vec2 tq = t;
     #endif
     #ifdef PW_ANISO
       ivec2 lv;
@@ -261,9 +290,14 @@ const FRAG_MAP = /* glsl */ `
       vec4 pc = pwFetch(vPwRect.xy, t, ps, lv.x);
     #endif
     if (pc.a < 0.25) discard;
-    float glowK = pc.a < 0.85 ? 1.0 : 0.0;
-    diffuseColor.rgb *= pc.rgb * (1.0 - glowK) * uPwGain;
-    pwEmit = pc.rgb * glowK * uPwGlow;
+    pwGlowK = pc.a < 0.85 ? 1.0 : 0.0;
+    #ifdef PW_LIGHT
+      // (The frame of a strip does not move the pattern: \`tq\` is the texel inside its frame.)
+      pwQ = ivec2(floor(tq * ps)) >> lv;
+    #else
+      diffuseColor.rgb *= pc.rgb * (1.0 - pwGlowK) * uPwGain;
+      pwEmit = pc.rgb * pwGlowK * uPwGlow;
+    #endif
     #ifdef PW_DEBUG
       pwDbg = uPwDebug > 2.5 ? pwDbgTexel : pwDbgMag(pu, ps, lv);
     #endif
@@ -271,16 +305,27 @@ const FRAG_MAP = /* glsl */ `
 `;
 
 const cacheByAtlas = new WeakMap<PwAtlas, Map<string, THREE.MeshLambertMaterial>>();
+/** A number a mood (materials are cached by what they are lit under). */
+const moodIds = new WeakMap<PwMoodUniforms, number>();
+let moodSeq = 0;
+function moodId(m: PwMoodUniforms): number {
+  let id = moodIds.get(m);
+  if (id === undefined) moodIds.set(m, (id = ++moodSeq));
+  return id;
+}
 
 /** The (cached, Kit-tracked) PixelWorld material for an atlas + options. */
 export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.MeshLambertMaterial {
   let byKey = cacheByAtlas.get(atlas);
   if (!byKey) cacheByAtlas.set(atlas, (byKey = new Map()));
-  const key = `${o.planar ? 'p' : 'u'}|${o.side ?? 0}|${o.gain ?? 1}|${o.glow ?? 1}|${o.bias ?? PW_MIP_BIAS}|${o.fog ?? true}|${o.density ?? PW_TPM}|${o.tag ?? ''}|${o.anim ? `${o.anim.frames}x${o.anim.fps}` : ''}|${axesOn && o.axes !== false ? 'x' : ''}`;
+  const mood = o.mood ?? pwMoodNow();
+  const lit = pwLightOn();
+  const key = `${o.planar ? 'p' : 'u'}|${o.side ?? 0}|${o.gain ?? 1}|${o.glow ?? 1}|${o.bias ?? PW_MIP_BIAS}|${o.fog ?? true}|${o.density ?? PW_TPM}|${o.tag ?? ''}|${o.anim ? `${o.anim.frames}x${o.anim.fps}` : ''}|${axesOn && o.axes !== false ? 'x' : ''}|${lit ? moodId(mood) : ''}`;
   const hit = byKey.get(key);
   if (hit) return hit;
   const uniforms: Record<string, { value: unknown }> = {
     ...pwAtlasUniforms(atlas),
+    ...pwLightUniforms(mood),
     uPwBias: { value: o.bias ?? PW_MIP_BIAS },
     uPwGain: { value: o.gain ?? 1 },
     uPwGlow: { value: o.glow ?? 1 },
@@ -295,6 +340,7 @@ export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.Mes
   if (o.anim) defines.PW_ANIM = '';
   // (Backdrops, billboards and sprites face the camera: one level is right for them.)
   if (axesOn && o.axes !== false) defines.PW_ANISO = '';
+  if (lit) defines.PW_LIGHT = '';
   pwDebugSetup(defines, uniforms);
   m.defines = defines;
   m.userData.pw = uniforms;
@@ -303,13 +349,15 @@ export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.Mes
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>\n${VERT_DECL}`).replace('#include <begin_vertex>', VERT_BEGIN);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${FRAG_DECL}`)
-      .replace('#include <map_fragment>', FRAG_MAP)
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += pwEmit;');
+    shader.fragmentShader = pwLightPatch(
+      shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${FRAG_DECL}`)
+        .replace('#include <map_fragment>', FRAG_MAP)
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += pwEmit;'),
+    );
     shader.fragmentShader = pwDebugPatch(shader.fragmentShader);
   };
-  m.customProgramCacheKey = () => `pixelWorld2|${o.planar ? 'p' : 'u'}|${o.anim ? 'a' : ''}`;
+  m.customProgramCacheKey = () => `pixelWorld3|${o.planar ? 'p' : 'u'}|${o.anim ? 'a' : ''}`;
   m.name = `pw:${atlas.name}`;
   Kit.track(m);
   byKey.set(key, m);
@@ -317,13 +365,17 @@ export function pwMaterial(atlas: PwAtlas, o: PwMaterialOptions = {}): THREE.Mes
 }
 
 /**
- * Unlit PixelWorld material (backdrop layers, sky): painted colour as is (× `gain`; tone-mapped
- * like the classic sky domes, so a backdrop painted in the fog colour meets the fogged scenery),
- * no lights, no fog, cut-outs discarded.
+ * Unlit PixelWorld material (backdrop layers, sky): painted colour as is (× `gain`), no lights, no
+ * fog, cut-outs discarded. A backdrop's paint goes THROUGH the monitor's tone curve, like the
+ * classic sky domes and like everything the scene fog is blended into — so a backdrop painted in
+ * the fog colour meets the fogged scenery at the horizon, and a stage can scale it in scene space
+ * (lightning, the live fog) — but it is written on the monitor's colour lattice (`pwFilmSnap`): the
+ * same picture, without the pass's ordered dither over the painted sky.
  */
 export function pwBackdropMaterial(atlas: PwAtlas, o: { gain?: number; depthWrite?: boolean; tag?: string } = {}): THREE.MeshBasicMaterial {
   const uniforms: Record<string, { value: unknown }> = {
     ...pwAtlasUniforms(atlas),
+    ...pwLightUniforms(),
     uPwBias: { value: PW_MIP_BIAS },
     uPwGain: { value: o.gain ?? 1 },
     uPwGlow: { value: o.gain ?? 1 },
@@ -334,6 +386,7 @@ export function pwBackdropMaterial(atlas: PwAtlas, o: { gain?: number; depthWrit
   };
   const m = new THREE.MeshBasicMaterial({ color: 0xffffff, vertexColors: true, fog: false, depthWrite: o.depthWrite ?? false, side: THREE.DoubleSide });
   const defines: Record<string, string> = {};
+  const snap = pwLightOn();
   pwDebugSetup(defines, uniforms);
   m.defines = defines;
   m.userData.pw = uniforms;
@@ -346,9 +399,10 @@ export function pwBackdropMaterial(atlas: PwAtlas, o: { gain?: number; depthWrit
       // Unlit: glow and lit texels alike are shown at their painted colour.
       // (A backdrop is black in every debug view: painted at the screen's own density, never part of the audit.)
       .replace('#include <map_fragment>', FRAG_MAP + '\n  diffuseColor.rgb = (diffuseColor.rgb + pwEmit);\n  #ifdef PW_DEBUG\n    pwDbg = vec3(0.0);\n  #endif');
+    if (snap) shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', '#include <opaque_fragment>\n  gl_FragColor.rgb = pwFilmSnap(gl_FragColor.rgb);');
     shader.fragmentShader = pwDebugPatch(shader.fragmentShader);
   };
-  m.customProgramCacheKey = () => 'pixelWorldBackdrop2';
+  m.customProgramCacheKey = () => `pixelWorldBackdrop3${snap ? 's' : ''}`;
   m.name = `pwBackdrop:${atlas.name}`;
   return Kit.track(m);
 }

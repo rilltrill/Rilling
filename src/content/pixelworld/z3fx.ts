@@ -4,6 +4,8 @@ import { PwAtlas, type PwPainter, type PwTile } from './atlas';
 import { bayer, PWF, type PwCanvas } from './canvas';
 import { PW_DEBUG_DECL, pwDebugPatch, pwDebugSetup } from '../../core/debugView';
 import { PW_FETCH, pwAtlasUniforms } from './material';
+import { PW_MONITOR_GLSL, pwLightOn } from './light';
+import { MONITOR } from '../../core/RetroPass';
 import { hash2 } from './surfaces';
 import { z1FlameTile, Z1_FLAME_FRAMES, Z1_FLAME_H, Z1_FLAME_W } from './z1fire';
 
@@ -191,7 +193,11 @@ export function pwSpriteMaterial(atlas: PwAtlas, tile: PwTile, o: { frames?: num
     uPwAnim: { value: new THREE.Vector3(frames, o.fps ?? 0, cells) },
     uPwMaxLv: { value: atlas.levels - 1 },
     uPwGain: { value: o.gain ?? 1 },
+    uPwMon: MONITOR.uPwMon,
   };
+  // (As the backdrops: the paint goes through the monitor's tone curve, fog and all, but lands on
+  // its colour lattice — painted smoke and flames without the pass's ordered dither over them.)
+  const snap = pwLightOn();
   const m = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: o.fog ?? true });
   const defines: Record<string, string> = {};
   pwDebugSetup(defines, uniforms);
@@ -234,6 +240,7 @@ export function pwSpriteMaterial(atlas: PwAtlas, tile: PwTile, o: { frames?: num
         `#include <common>
         ${PW_DEBUG_DECL}
         ${PW_FETCH}
+        ${PW_MONITOR_GLSL}
         uniform float uPwTime;
         uniform vec4 uPwRect;
         uniform float uPwScale;
@@ -261,13 +268,14 @@ export function pwSpriteMaterial(atlas: PwAtlas, tile: PwTile, o: { frames?: num
           if (pc.a < 0.25) discard;
           diffuseColor.rgb *= pc.rgb * uPwGain;
           #ifdef PW_DEBUG
-            pwDbg = uPwDebug > 2.5 ? pwDbgTexel : pwDbgMag(pu, uPwScale, ivec2(lv));
+            pwDbg = uPwDebug > 4.5 ? vec3(0.0) : uPwDebug > 2.5 ? pwDbgTexel : pwDbgMag(pu, uPwScale, ivec2(lv));
           #endif
         }`,
       );
+    if (snap) shader.fragmentShader = shader.fragmentShader.replace('#include <fog_fragment>', '#include <fog_fragment>\n  gl_FragColor.rgb = pwFilmSnap(gl_FragColor.rgb);');
     shader.fragmentShader = pwDebugPatch(shader.fragmentShader);
   };
-  m.customProgramCacheKey = () => 'z3pwSprite4';
+  m.customProgramCacheKey = () => `z3pwSprite5${snap ? 's' : ''}`;
   m.name = 'pw:z3-sprite';
   void o.glow;
   void PWF;

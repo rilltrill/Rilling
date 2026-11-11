@@ -3,6 +3,7 @@ import { Kit } from '../content/kit/ModelKit';
 import { PwAtlas, type PwTile } from '../content/pixelworld/atlas';
 import { PwBatch, tintFor } from '../content/pixelworld/batch';
 import { pwBackdropMaterial, pwMaterial, pwTick } from '../content/pixelworld/material';
+import { pwMood, type PwMood } from '../content/pixelworld/light';
 import { PwBackdrop } from '../content/pixelworld/backdrop';
 import { PW_BACKDROP_TPD } from '../content/pixelworld/canvas';
 import {
@@ -379,6 +380,7 @@ export class MenuPwCity {
 
   /** Build every mesh (the atlases are laid out here; painted now or behind the title's opening black). */
   finish(scene: THREE.Scene, own: Own): { backdrop: PwBackdrop; flameMat: THREE.Material; neon: THREE.Mesh } {
+    pwMood(MENU_CITY_MOOD);
     const neon = this.neonSign();
     const lit = this.b.build(undefined, { gain: MENU_CITY_GAIN })!;
     const cut = this.cut.build(undefined, { gain: MENU_CITY_GAIN, side: THREE.DoubleSide });
@@ -425,6 +427,8 @@ export class MenuPwCity {
 
 /** Scenery gain under the night street's lights (moonlit hemisphere, the lamp, the fire): a dim street the logo sits on. */
 const MENU_CITY_GAIN = 0.85;
+/** The night street's mood (PIXEL-ART LIGHT: content/pixelworld/light.ts) — MAIN STREET's, a little deeper: the logo sits on it. */
+const MENU_CITY_MOOD: Partial<PwMood> = { pivot: 0.5, tint: 0.8, shade: 0x9a90e8 };
 
 // ─── JUNGLE ─────────────────────────────────────────────────────────────────
 
@@ -513,6 +517,7 @@ export class MenuPwJungle {
   }
 
   finish(scene: THREE.Scene, own: Own): { backdrop: PwBackdrop } {
+    pwMood(MENU_JUNGLE_MOOD);
     const lit = this.b.build(undefined, { gain: MENU_JUNGLE_GAIN })!;
     scene.add(lit);
     const flora = this.flora.build();
@@ -556,6 +561,8 @@ export class MenuPwJungle {
 const MENU_JUNGLE_BIOME = { ...D1_BIOME, leaf: 0x2a5a24, leafLight: 0x3e7a2a, leafDark: 0x1e461a };
 
 const MENU_JUNGLE_GAIN = 1.5;
+/** The sunset jungle's mood: the paint as painted in the low sun and leaning its orange (the highway's sunset), violet where it does not reach. */
+const MENU_JUNGLE_MOOD: Partial<PwMood> = { pivot: 0.9, hi: 1, tint: 1.5, shade: 0xd098d8, film: 1 };
 
 /** Backdrop materials' gain (lightning flashes the painted sky). */
 export function backdropGain(b: PwBackdrop, k: number) {

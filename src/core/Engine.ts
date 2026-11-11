@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { QualityLevel, RetroMode } from './types';
-import { RetroPass, RETRO_MIN_SCALE } from './RetroPass';
+import { MONITOR_EXPOSURE, RetroPass, RETRO_MIN_SCALE } from './RetroPass';
 import { ResolutionGovernor } from './Resolution';
 import { pwDebug } from './debugView';
 
@@ -96,7 +96,7 @@ export class Engine {
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = MONITOR_EXPOSURE;
     this.renderer.shadowMap.enabled = false;
     // The retro pass renders twice per frame; count stats per frame, not per render call.
     this.renderer.info.autoReset = false;

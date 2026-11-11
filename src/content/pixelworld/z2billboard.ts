@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Kit } from '../kit/ModelKit';
 import { pwRect, type PwAtlas, type PwTile } from './atlas';
 import { PW_FETCH, PW_MIP_BIAS, pwAtlasUniforms } from './material';
+import { PW_LIGHT_DECL, pwLightOn, pwLightPatch, pwLightUniforms } from './light';
 import { PW_DEBUG_DECL, pwDebugPatch, pwDebugSetup } from '../../core/debugView';
 
 /**
@@ -13,8 +14,9 @@ import { PW_DEBUG_DECL, pwDebugPatch, pwDebugSetup } from '../../core/debugView'
  * are ONE draw per zone (culled with it): each sprite is a quad whose four
  * vertices share the prop's foot position and carry their corner offset; the
  * vertex shader spreads them along the camera's horizontal right vector.
- * Flat-shaded Lambert (stage lights, flashlight, fog) like the scenery; cut-out
- * texels are discarded (depth-correct against characters). Never raycast.
+ * Lit like the scenery (stage lights, flashlight, fog: ramp-step light under the
+ * stage's mood, `light.ts`); cut-out texels are discarded (depth-correct against
+ * characters). Never raycast.
  */
 
 const VERT_DECL = /* glsl */ `
@@ -41,6 +43,7 @@ const VERT_BEGIN = /* glsl */ `
 const FRAG_DECL = /* glsl */ `
   ${PW_DEBUG_DECL}
   ${PW_FETCH}
+  ${PW_LIGHT_DECL}
   uniform float uPwBias;
   uniform float uPwGain;
   uniform float uPwGlow;
@@ -51,6 +54,8 @@ const FRAG_DECL = /* glsl */ `
 
 const FRAG_MAP = /* glsl */ `
   vec3 pwEmit = vec3(0.0);
+  float pwGlowK = 0.0;
+  ivec2 pwQ = ivec2(0);
   {
     vec2 pu = vPwUv;
     vec2 pg = max(abs(dFdx(pu)), abs(dFdy(pu)));
@@ -61,9 +66,13 @@ const FRAG_MAP = /* glsl */ `
     vec2 t = clamp(pu, vec2(0.0), rs - 0.001);
     vec4 pc = pwFetch(vPwRect.xy, t, ps, lv);
     if (pc.a < 0.25) discard;
-    float glowK = pc.a < 0.85 ? 1.0 : 0.0;
-    diffuseColor.rgb *= pc.rgb * (1.0 - glowK) * uPwGain;
-    pwEmit = pc.rgb * glowK * uPwGlow;
+    pwGlowK = pc.a < 0.85 ? 1.0 : 0.0;
+    #ifdef PW_LIGHT
+      pwQ = ivec2(floor(t * ps)) >> lv;
+    #else
+      diffuseColor.rgb *= pc.rgb * (1.0 - pwGlowK) * uPwGain;
+      pwEmit = pc.rgb * pwGlowK * uPwGlow;
+    #endif
     #ifdef PW_DEBUG
       pwDbg = uPwDebug > 2.5 ? pwDbgTexel : pwDbgMag(pu, ps, ivec2(lv));
     #endif
@@ -72,14 +81,16 @@ const FRAG_MAP = /* glsl */ `
 
 const mats = new WeakMap<PwAtlas, Map<number, THREE.MeshLambertMaterial>>();
 
-/** The (cached, Kit-tracked) billboard material for an atlas. */
+/** The (cached, Kit-tracked) billboard material for an atlas, lit under the current mood (`pwMood`). */
 export function z2BillboardMaterial(atlas: PwAtlas, gain = 1): THREE.MeshLambertMaterial {
   let byGain = mats.get(atlas);
   if (!byGain) mats.set(atlas, (byGain = new Map()));
   const hit = byGain.get(gain);
   if (hit) return hit;
+  const lit = pwLightOn();
   const uniforms: Record<string, { value: unknown }> = {
     ...pwAtlasUniforms(atlas),
+    ...pwLightUniforms(),
     uPwBias: { value: PW_MIP_BIAS },
     uPwGain: { value: gain },
     uPwGlow: { value: 1 },
@@ -87,6 +98,7 @@ export function z2BillboardMaterial(atlas: PwAtlas, gain = 1): THREE.MeshLambert
   };
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff, vertexColors: true, flatShading: true, side: THREE.DoubleSide });
   const defines: Record<string, string> = {};
+  if (lit) defines.PW_LIGHT = '';
   pwDebugSetup(defines, uniforms);
   m.defines = defines;
   m.userData.pw = uniforms;
@@ -94,13 +106,15 @@ export function z2BillboardMaterial(atlas: PwAtlas, gain = 1): THREE.MeshLambert
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>\n${VERT_DECL}`).replace('#include <begin_vertex>', VERT_BEGIN);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${FRAG_DECL}`)
-      .replace('#include <map_fragment>', FRAG_MAP)
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += pwEmit;');
+    shader.fragmentShader = pwLightPatch(
+      shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${FRAG_DECL}`)
+        .replace('#include <map_fragment>', FRAG_MAP)
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += pwEmit;'),
+    );
     shader.fragmentShader = pwDebugPatch(shader.fragmentShader);
   };
-  m.customProgramCacheKey = () => 'z2Billboard2';
+  m.customProgramCacheKey = () => 'z2Billboard3';
   m.name = `pwBill:${atlas.name}`;
   Kit.track(m);
   byGain.set(gain, m);

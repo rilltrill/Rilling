@@ -36,6 +36,7 @@ import { Kit } from '../../kit/ModelKit';
 import { M, type FacadeRecord } from './props';
 import type { ZoneId } from './town';
 import { pwMaterial, pwTick } from '../../pixelworld/material';
+import { pwMood, type PwMood } from '../../pixelworld/light';
 import { z1FlameLevels, z1TongueFlameTile, Z1_FLAME_FRAMES, Z1_FLAME_H, Z1_FLAME_LEVELS, Z1_FLAME_W } from '../../pixelworld/z1fire';
 import { PUFF_CELLS, PUFF_COLS, pwSpriteMaterial, z3PuffTile } from '../../pixelworld/z3fx';
 import { pwPuffTexture } from './vfx';
@@ -109,7 +110,12 @@ const Y = new THREE.Vector3(0, 1, 0);
 const Z = new THREE.Vector3(0, 0, 1);
 const NZ = new THREE.Vector3(0, 0, -1);
 
+/** The mood of MAIN STREET at night (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
+export const Z1_MOOD: Partial<PwMood> = { pivot: 0.55, tint: 0.8, shade: 0x9a90e8, torch: 0 };
+
 export class Z1PixelWorld {
+  /** Set before any material is made: every PixelWorld material of the stage is lit under it. */
+  readonly mood = pwMood(Z1_MOOD);
   readonly atlas = new PwAtlas('z1');
   readonly skyAtlas = new PwAtlas('z1-sky', { levels: 1 });
   private batches = new Map<ZoneId, PwBatch>();

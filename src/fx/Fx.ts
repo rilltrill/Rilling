@@ -105,6 +105,14 @@ function lightness(hex: number): number {
 }
 
 /**
+ * Where the muzzle flash's light sits in the VIEW (metres right / up of the eye's line; it rides
+ * with the camera at the gun's distance). Materials that weigh it apart from the lights of the
+ * world know it by this (content/pixelworld/light.ts).
+ */
+export const MUZZLE_VIEW_X = 0.25;
+export const MUZZLE_VIEW_Y = -0.1;
+
+/**
  * World-space visual effects. Everything is pooled — calling these every shot is fine.
  *
  * Draws: soft particles (smoke, dust, blood) · glow particles (fire, sparks) ·
@@ -969,7 +977,7 @@ export class Fx {
     if (!cam) return;
     // Just ahead of the eye, slightly right/low (where the gun would be) — lights the
     // ground around the player and puts a warm kick on enemies in front.
-    this.flashLight.position.set(0.25, -0.1, -this.muzzleAhead).applyMatrix4(cam.matrixWorld);
+    this.flashLight.position.set(MUZZLE_VIEW_X, MUZZLE_VIEW_Y, -this.muzzleAhead).applyMatrix4(cam.matrixWorld);
   }
 
   private splash(point: THREE.Vector3, lod: number) {

@@ -728,15 +728,17 @@ Junk falls back to the default.
   blocked / slow open, a failed read or a full disk (QuotaExceededError: the store is cleared,
   writes stop for the session) — the game simply paints. The dev server keeps it off (its
   `define` would not follow edits): `&pwstore=<tag>` turns it on for benchmarks.
-- **Material** (`material.ts`): flat-shaded Lambert (stage lights, flashlight, fog, tone
-  mapping exactly like the 3D scenery) whose colour is fetched texel by texel
-  (`texelFetch` of the index, then of its palette entry; level = log2(texels per pixel) +
-  bias, picked per texel axis): hard texels, the hand-made levels take over before anything
-  crawls. Per vertex: the tile rect (`pwRect(tile)`: w < 0 = module, clamped; w > 0 =
-  tileable, wrapped inside its rect; h < 0 = stored at 2×), PAINTED-texel UV (or PLANAR:
-  projected world position, 24 B a vertex for big bakes), vertex colour (tint / painted AO).
-  `gain` matches the stage's scenery brightness; `anim` plays vertical strip tiles (water,
-  flicker).
+- **Material** (`material.ts`, `light.ts`): flat-shaded, lit by the stage's own lights (hemisphere,
+  sun / moon, flashlight, lamps, muzzle flash: three.js's Lambert sum) — but the light does not
+  multiply the paint: it moves each texel a whole number of tones along its palette row, tints
+  it, fog comes in bands and the pixel reaches the screen as the palette colour it is (*PIXEL-ART
+  LIGHT*, below; a `PwMood` per stage). The texel is fetched whole (`texelFetch` of the index;
+  level = log2(texels per pixel) + bias, picked per texel axis): hard texels, the hand-made
+  levels take over before anything crawls. Per vertex: the tile rect (`pwRect(tile)`: w < 0 =
+  module, clamped; w > 0 = tileable, wrapped inside its rect; h < 0 = stored at 2×),
+  PAINTED-texel UV (or PLANAR: projected world position, 24 B a vertex for big bakes), vertex
+  colour (the tint of a NEUTRAL tile, multiplied after the palette lookup). `gain` scales the
+  light a material gets (a brighter room); `anim` plays vertical strip tiles (water, flicker).
 - **Batch** (`batch.ts`): `PwBatch` collects quads into ONE mesh per batch (one draw):
   `rect` (wrap tiles map at `PW_TPM` from `u0/v0`, modules stretch, `sub` / `flipU`,
   `tintRGB` for NEUTRAL tiles), `box`, `ribbon` (a strip along points with v running along
@@ -795,10 +797,14 @@ Junk falls back to the default.
    core and a halo ring; painted signs on boards. Size signs like the classic ones
    (`pwSign.bw/bh`: the classic board; letters `size` m tall caps).
 6. **Glow** (`PWF.GLOW`) only for light sources: lit windows, neon, lamps, screens, lava.
-   Light ON surfaces is the stage's lights, plus pixel light pools (stepped rings with
-   Bayer-dithered step edges, screened over the surface: `pwPoolTexture`).
+   Light ON surfaces is the stage's lights through the ramp-step material (*PIXEL-ART LIGHT*:
+   rings of whole tones, dithered edges), or painted into the tile as tone shifts; the first
+   pass's pixel light pools (stepped rings blended over the surface: `pwPoolTexture`) keep
+   working as `pwLightOverlay` materials (the lit pixels stay on whole colours).
 7. **Horizons match the fog**: a backdrop's horizon band is the stage fog colour up to
    the elevation the fogged scenery reaches (fogged trees must sit on haze, not on blue).
+   Backdrop paint and the fog colour both go through the monitor's tone curve (`pwFilmHex(hex)`
+   is what either shows as); lit paint does not — it shows as painted.
 8. **Gameplay never changes**: no new occluders, colliders, raycast targets or RNG draws.
    PixelWorld meshes are `noMerge`, `userData.pixelWorld`, `raycast` disabled.
 
@@ -882,10 +888,10 @@ backdrops, the store, deferred paint) works as described, on new formats.
 - **Shader** (`PW_FETCH` in material.ts, shared by the lit material, the backdrop material,
   z2's billboards and z3's sprites): `pwTexel(ip, lv)` fetches the two bytes, rebuilds ramp /
   tone / glow (samplers declared `highp`), and looks the colour up at column 5 + tone —
-  rgb = the painted colour, a = the class (0 cut, 0.5 glow, 1 lit). The lighting is still
-  the first pass's: palette colour of the PAINTED tone × Lambert, glow emitted, fog, tone
-  mapping (the extended columns are for the ramp-step lighting that comes next). Vertex
-  tints (NEUTRAL tiles, painted AO) multiply after the lookup, as before.
+  rgb = the painted colour, a = the class (0 cut, 0.5 glow, 1 lit) — leaving `pwRT` = (ramp,
+  tone) for the lit materials, which look the colour up again at column 5 + tone + the light's
+  steps (*PIXEL-ART LIGHT*, below: the extended columns are what light moves a texel through).
+  Backdrops and sprites show the painted colour itself. Vertex tints multiply after the lookup.
 - **Levels and the passes that re-make them** work on texels: `reduceRect` picks, per 2 × 2,
   the texel nearest the block's mean COLOUR (through the palette) within its majority class —
   the same choice as the RGBA version made. `pwTileLevel(d, tile, k)` gives level `k` of a
@@ -936,19 +942,25 @@ backdrops, the store, deferred paint) works as described, on new formats.
   all. A material's `bias` still applies per axis: z2 / d2 keep their first-pass biases of
   1.0 (walls) and 1.5 (floors), i.e. texels of 1.4–2.8 pixels — lower them when those
   stages are repainted.
-- **Flags**: `&pwup=0` (no 2× storage) and `&pwaniso=0` (one level for both axes) together
-  give the first pass's frames from the new formats (the parity check: 7 of the 9 reference
-  shots identical to the pixel, the other two within the run-to-run flicker of a lamp and
-  a fire); `pwUpscale(on)` / `pwAxisLevels(on)` are read when tiles are registered /
-  materials made.
-- **Debug views** (`core/debugView.ts`; `&pwdebug=mag|lvl|tone|ramp` compiles them in,
-  `window.__pwDebug(view)` switches on the same frame): `mag` = frame pixels across the
+- **Flags**: `&pwup=0` (no 2× storage), `&pwaniso=0` (one level for both texel axes) and
+  `&pwlight=0` (the first pass's light: palette colour × Lambert, smooth fog, the monitor's
+  tone curve and dither) together give the first pass's frames from the new formats (the parity
+  check: 7 of the 9 reference shots identical to the pixel, the other two within the run-to-run
+  flicker of a lamp and a fire); `pwUpscale(on)` / `pwAxisLevels(on)` / `pwLight(on)` are read
+  when tiles are registered / materials made. `&pwmood=pivot:0.4,shade:0x9a90e8` lays values
+  over every stage's mood; `&pwrt=8` forces the 8-bit scene target (the fallback's test).
+- **Debug views** (`core/debugView.ts`; `&pwdebug=mag|lvl|tone|ramp|steps|light|fog` compiles
+  them in, `window.__pwDebug(view)` switches on the same frame): `mag` = frame pixels across the
   widest side of one stored texel (green ≤ 1.25, yellow ≤ 1.5, orange ≤ 2, red > 2), `lvl`
   = the same for the texel actually drawn (its level per axis), `tone` = the painted tone
-  (0 blue … 5 orange, glow magenta), `ramp` = a hue per ramp id. View colours are written
-  × 4096 into the float scene target and the monitor pass keeps only those pixels, at their
-  own hue: the cast, classic scenery and backdrops are black, rain and light pools do not
-  tint the view. FLORA billboards take part in `mag` / `lvl`.
+  (0 blue … 5 orange, glow magenta), `ramp` = a hue per ramp id, `steps` = the tones the light
+  moves each texel (violet ≤ −3, blue −2, cyan −1, green 0 = as painted, yellow +1, orange +2,
+  red ≥ +3, glow white), `light` = the light before it is cut into steps (stops, −8 … +4 on the
+  green channel: `scripts/pixel-mood.mjs` reads a stage's light levels back from it), `fog` =
+  the fog band (magenta clear … blue all fog). View colours are written × 4096 into the float
+  scene target and the monitor pass keeps only those pixels, at their own hue: the cast, classic
+  scenery and backdrops are black, rain and light pools do not tint the view. FLORA billboards
+  take part in `mag` / `lvl` only.
 - **Audit** (`node scripts/pixel-audit.mjs --base <dev url> --out <dir> [--shots …]`; 24
   default shots: three views a stage and its boss): the exact 624 × 288 art frame, as drawn
   and in `mag` / `lvl`, on one frozen frame. Per shot: share of world pixels with a texel
@@ -996,6 +1008,104 @@ backdrops, the store, deferred paint) works as described, on new formats.
   stage's textures from the session cache without touching IndexedDB; dropping it would
   make both an asynchronous 15–35 MB store read (or, where there is no store, a repaint).
   It is two bytes a texel instead of four.
+
+### PIXEL-ART LIGHT (ramp-step light, banded fog, palette-true output)
+
+`content/pixelworld/light.ts` is the model (the per-stage `PwMood`, the GLSL every lit
+PixelWorld material shares, and its arithmetic again in TypeScript for
+`tests/unit/pixel-world-light.test.ts`); `material.ts` and `z2billboard.ts` call it,
+`core/RetroPass.ts` exports what a palette-true pixel must know of the monitor (`MONITOR`).
+The first pass multiplied the paint by a smooth Lambert term, blended fog in and left the
+result to the monitor pass: smooth gradients over walls, grey-black shadows, an ordered-dither
+screen-door over every painted colour, and no colour on screen that anyone had painted.
+
+- **Steps.** three.js's Lambert sum runs over a WHITE surface (`diffuseColor` is left alone:
+  `pwLightPatch`), which gives the light as the factor the first pass multiplied the paint by:
+  irradiance / π × the material's `gain`. Its luminance `Y` becomes whole tones:
+  `steps = round(mood.steps × log2(Y / mood.pivot))`, kept inside `mood.lo … mood.hi`, and the
+  colour is the texel's palette row at column 5 + painted tone + steps (clamped to the 16
+  columns). Light at the pivot shows paint exactly as painted. A painted tone is 1.2–1.8 stops
+  of luminance from the next, so `steps` ≈ 0.75 a stop keeps a lamp's falloff about as
+  contrasty as it was and gives its pool 2–3 rings.
+- **Band edges** are ordered-dithered in TEXEL space: the threshold is the 2 × 2 pattern (a
+  quarter of the texels, a checker, three quarters: `pwBayer`) on the texel's coordinates at
+  the level drawn (per axis: `pwQ`), so the pattern is glued to the surface, one frame pixel
+  coarse where texels are 1:1, and cannot crawl. Its width is `mood.edge` FRAME PIXELS, taken
+  from the screen-space slope of the light (`fwidth`), at most 0.75 of a step: a pool's edge is
+  a few pixels of hand dither, and an evenly lit facet (no slope) is never dithered at all —
+  no screen-door over a wall that happens to sit near a band's edge.
+- **Tint.** The lights are split in two groups: what is the same all over a facet (sky /
+  ground hemisphere and the sun or moon, taken back out of three.js's direct sum) and what
+  falls off across it (lamps, fire, muzzle flash, and as much of the spot lights as
+  `mood.torch` counts: they are evaluated again and the rest subtracted). A band's tint is the chroma
+  (luminance 1) of the even light plus as much of the local light as makes the band's own
+  light — one colour for the whole ring, wherever the lamp's falloff puts a texel inside it —
+  raised to `mood.tint` and divided by `mood.white` (the light the paint was painted for).
+  Below the painted tone the stage's `mood.shade` comes in (half of its chroma one step
+  down, all of it from two): the night's blue-violet, a ward's teal.
+- **Glow texels** take no light: their painted colour, moved by the material's glow gain in
+  whole steps (`pwGlowSteps`: `uPwGlow` 1 = as painted; d3's flash, z2's dead tubes). **Vertex
+  colours** (NEUTRAL tints) multiply after the lookup, whole.
+- **Fog** is `mood.fogBands` bands (three.js's own fog factor, rounded) toward the colour
+  everything else fades to — the scene fog as the monitor shows it (`pwFilmHex`) — mixed in
+  display space, the edge between two bands dithered on the FRAME grid over `mood.fogEdge`
+  pixels (same slope rule): a band's edge is a line at a fixed depth, it sits still on the
+  screen while the camera travels and scenery passes through it like through a layer of a 2D
+  backdrop.
+- **Palette-true output.** The display colour is snapped to the monitor's lattice (31 steps a
+  channel; at most level 30: `MONITOR_TOP` — the top level needs a scene value of 6.9, which
+  the CRT bloom would smear) and written as the scene value the pass's tone curve maps there
+  (`pwToScene`: the fitted ACES has a closed-form inverse), with alpha `128 / 255` as a flag.
+  The pass rounds flagged pixels instead of dithering them. In the half-float target the value
+  survives exactly enough that the dither would do nothing anyway (unit-tested through
+  half-float rounding); an 8-bit target (`&pwrt=8` forces it) holds dark values coarsely, so
+  there the flag is what keeps the screen-door off, and darks land within a level or two.
+  Anything transparent drawn over a world pixel changes its alpha with its colour (normal and
+  additive blending both do): rain, smoke, glass, glows are dithered over the world as ever.
+  A stepped light overlay that is itself paint (z1's `LightPools`, z2's pools) is made with
+  `pwLightOverlay(material)` — it leaves alpha alone, so the lit pixels stay flagged and land
+  on whole colours. Without a monitor pass (DISPLAY OFF) the display colour is written
+  straight to the canvas.
+- **Backdrops and painted sprites** (`pwBackdropMaterial`, `pwSpriteMaterial`) are unlit and
+  keep going THROUGH the tone curve (stages scale them in scene space: lightning, d3's live
+  fog ratio; and the horizon must meet the fog, which the classic materials, FLORA and the
+  cast also fade to through the curve) — but land on the lattice colour nearest what the pass
+  would show (`pwFilmSnap`): the same picture without the dither over the painted sky.
+- **Moods** (`pwMood(X_MOOD)` in each stage's `pixel.ts`, before any material is made; the
+  title vignettes in `ui/menuPixel.ts`; materials are cached per mood, `pwMaterial(atlas,
+  { mood })` names one):
+
+  | stage | pivot | steps / stop | lo … hi | tint | shade | torch | film | fog bands | where the light sits (its level × paint) |
+  |---|---|---|---|---|---|---|---|---|---|
+  | z1 MAIN STREET | 0.55 | 0.75 | −2 … +2 | 0.8 | `0x9a90e8` blue-violet | 0 | 0 | 6 | moonlit road and pavement (0.41–0.47) 0; walls (0.17–0.29) −1; under awnings, away from the moon −2; beside a lamp, the fire, a neon 0 … +1 |
+  | z2 ST. MERCY | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x90b8c8` teal | 0 | 0 | 6 | ward and bay ambient (0.11–0.22) −1; under a tube, in the emergency lamp's reach (0.3–0.45) 0; unlit ceilings and far rooms (0.03) −2 |
+  | z3 HIGHWAY | 0.5 | 0.75 | −2 … +1 | 1.5 | `0xd098d8` magenta-violet | 1 | 0 | 6 | sunlit road and fronts (0.50–0.54) 0; faces turned from the sun, under the bridge (0.11–0.36) −1; beside a fire (0.8) +1 |
+  | d1 JUNGLE RUN | 0.95 | 0.75 | −2 … +1 | 0.5 | `0xa8c0f0` sky blue | 1 | 1 | 6 | everything the sun reaches (0.97) 0; shaded sides −1 |
+  | d2 RESEARCH LABS | 0.65 | 0.75 | −2 … +2 | 0.7 | `0xa4b4ec` cold blue | 0 | 0 | 6 | floors under the room's light (0.65) 0; walls (0.29) −1; ceilings and unlit rooms (0.04–0.08) −2; the atrium's lit path +1 |
+  | d3 STORM | 0.45 | 0.75 | −2 … +2 | 0.8 | `0x8c98f0` deep blue | 1 | 0 | 6 | open ground, lamp pools, the jeep's headlights (0.3–0.65) 0; facets turned from the sky (0.11–0.28) −1; a lightning flash +1 … +2 |
+  | title: night street | 0.5 | 0.75 | −2 … +2 | 0.8 | `0x9a90e8` | 1 | 0 | 6 | as z1 (no torch there) |
+  | title: sunset jungle | 0.9 | 0.75 | −2 … +1 | 1.5 | `0xd098d8` | 1 | 1 | 6 | z3's sunset over d1's paint |
+
+  `pivot` is chosen from the stage's light levels (`node scripts/pixel-mood.mjs --shots …`
+  prints percentiles of the light on the painted world and the share of pixels at each step,
+  and re-shoots the same frozen frame under `--moods "a=pivot:0.4;b=pivot:0.6,tint:1"`;
+  `__pwMood({ pivot: 0.4 })` changes the live mood from the console). The night stages sit
+  their open ground at the painted tone and everything the moon or the room's light reaches
+  less one step down, in the stage's shade; two steps only where no light reaches (ceilings,
+  undersides); what a lamp, a fire or a neon lights comes back up a step or two.
+  `torch` is how much of the SPOT lights counts: z1, z2 and d2 carry a shoulder torch on the
+  camera so that whoever stands in the middle of the frame reads — on painted ground it was a
+  pale disc under the gun, travelling with the view (the tell of a lit 3D scene), so their
+  moods leave it out of the world (the cast keeps it: its own pipeline); d3's are the jeep's
+  headlights and count. `film` is how much of the monitor's tone curve stays on lit paint
+  (0: what is painted is what is shown): d1's paint was tuned through the curve in full sun,
+  which lifts and saturates mid tones — without it the ground sat duller than its plants
+  (which keep the curve), so d1 keeps all of it; still whole colours, never dithered.
+- **Flicker.** Light that changes over time moves whole tones: a neon's buzz, a surge, the
+  lightning. The stage code that drives those lights already calms them under
+  `reduceFlashes`, and the materials add nothing of their own. Measured (`node
+  scripts/pixel-motion.mjs`: consecutive 1/60 s steps of a shot, in the `tone`, `steps` and
+  `fog` views): MOTIONTEXT
 
 ### How to convert a stage
 
@@ -1485,9 +1595,11 @@ render / settle / total ms (`scripts/load-bench.mjs`).
 
 `?stage=z1` jump into a stage · `&art=3d|sprites|pixel` ART: CLASSIC / PIXEL CAST / PIXEL WORLD (default) ·
 `&pwstore=<tag>` persist painted atlases on the dev server (version `dev-<tag>`; `0` = off) ·
-`&pwdebug=mag|lvl|tone|ramp` PixelWorld debug views (`1` = compiled in, off until
-`__pwDebug(view)`) · `&pwup=0` no 2× fallback · `&pwaniso=0` one level for both texel axes
-(both off = the first pass's frames) ·
+`&pwdebug=mag|lvl|tone|ramp|steps|light|fog` PixelWorld debug views (`1` = compiled in, off
+until `__pwDebug(view)`) · `&pwup=0` no 2× fallback · `&pwaniso=0` one level for both texel
+axes · `&pwlight=0` the first pass's light (all three off = the first pass's frames) ·
+`&pwmood=pivot:0.4,tint:1` values over every stage's mood (`__pwMood({…})` changes the live
+one) · `&pwrt=8` an 8-bit scene target (the fallback of the palette-true output) ·
 `&spriteLook=pal:0,dirs:8` sprite look tuning · `&beat=5` start at beat 5 · `&autoplay=1`
 aimbot · `&god=1` invulnerable · `&speed=2` time scale · `&debug=1` beat
 overlay · `&seed=42` · `&mute=1` · `&retro=crt|pixel|off` force the arcade-monitor
