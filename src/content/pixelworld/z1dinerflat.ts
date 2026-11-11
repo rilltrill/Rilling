@@ -18,12 +18,16 @@ const TPM = 32;
 
 // ─── The diner's front ────────────────────────────────────────────────────
 
-/** The front card: local x −9.25 … +9.25 (the classic front is W = 18 wide at x 0), y 0 … 5.7. */
-export const DINER_FRONT_W = 592;
-export const DINER_FRONT_H = 184;
+/**
+ * The front card: local x −9.25 … +9.25 (the classic front is W = 18 wide at x 0), y 0 … 5.75.
+ * Painted at 48 texels a metre, not the flats' 32: the player stands about 10 m from it at the diner hold.
+ */
+export const DINER_FRONT_TPM = 48;
+export const DINER_FRONT_W = 888;
+export const DINER_FRONT_H = 276;
 const X0 = 9.25;
-const colOf = (x: number) => Math.round((x + X0) * TPM);
-const rowOf = (y: number) => DINER_FRONT_H - Math.round(y * TPM);
+const colOf = (x: number) => Math.round((x + X0) * DINER_FRONT_TPM);
+const rowOf = (y: number) => DINER_FRONT_H - Math.round(y * DINER_FRONT_TPM);
 
 /** Which window opening a column is in (null = a post): the classic mullions at −8.25 + i × 3.3 stay where they were. */
 const OPENINGS: [number, number][] = [
@@ -56,12 +60,12 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
     let x = 12 + Math.floor(hash2(1, 3, seed) * 30);
     let dy = 0;
     for (let i = 0; x < W; i++) {
-      const len = 80 + Math.floor(hash2(i, 5, seed) * 30);
+      const len = 120 + Math.floor(hash2(i, 5, seed) * 46);
       seam.push(x);
       const h = hash2(i, 7, seed);
       dy = h < 0.4 ? 1 : h < 0.65 ? -1 : h < 0.82 ? 2 : -2;
       off.fill(dy, x, Math.min(W, x + len));
-      if (hash2(i, 9, seed) > 0.8) gone.fill(1, x + 4, Math.min(W, x + 4 + 26 + Math.floor(hash2(i, 11, seed) * 24)));
+      if (hash2(i, 9, seed) > 0.8) gone.fill(1, x + 6, Math.min(W, x + 6 + 40 + Math.floor(hash2(i, 11, seed) * 36)));
       x += len;
     }
   }
@@ -75,8 +79,8 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
       const d = sag(x);
       for (let y = r0 + d; y < r1 + d; y++) {
         if (gone[x]) continue;
-        const f = (x + s) % 6;
-        let t = f < 1 ? 3.9 : f < 3 ? 2.9 : f < 5 ? 2 : 1.3;
+        const f = (x + s) % 9;
+        let t = f < 2 ? 3.9 : f < 4 ? 2.9 : f < 7 ? 2 : 1.3;
         t += dent(x, s);
         if (y - r0 < 2) t = 4;
         if (r1 - y < 2) t = 1;
@@ -101,7 +105,7 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
       if (gone[x]) continue;
       const d = sag(x);
       for (let y = r0 + d; y < r1 + d; y++) {
-        const on = ((x >> 3) + ((y - r0) >> 3)) & 1;
+        const on = (Math.floor(x / 12) + Math.floor((y - r0) / 12)) & 1;
         if (on) c.set(x, y, white, 3.2);
         else c.set(x, y, ink, 1.1);
       }
@@ -110,7 +114,7 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
   // Roofline first: a streamlined canopy that steps up over the middle, its edge dented, a corner torn.
   const top = new Int16Array(W).fill(H);
   for (let x = 0; x < W; x++) {
-    const m = x / TPM;
+    const m = x / DINER_FRONT_TPM;
     const t = (a: number, b: number, v: number, w = 0) => (m >= a && m < b ? v + w : -1);
     let hm = Math.max(t(0, 2.1, 4.55), t(2.1, 2.5, 4.55, (m - 2.1) * 0.7), t(2.5, 7.2, 4.85), t(7.2, 7.5, 4.85, (m - 7.2) * 1.4), t(7.5, 11.4, 5.3), t(11.4, 11.7, 5.3, -(m - 11.4) * 1.3), t(11.7, 16.1, 4.85), t(16.1, 16.4, 4.85, -(m - 16.1) * 0.8), t(16.4, 18.5, 4.55));
     if (m > 16.8 && m < 17.7) hm -= (Math.sin(((m - 16.8) / 0.9) * Math.PI) * 0.34 + (vnoise(x, 5, seed + 21) - 0.5) * 0.16);
@@ -140,7 +144,7 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
         c.set(sx, y + sag(sx), ink, 0.9);
         c.set(sx + 1, y + sag(sx + 1), chrome, 3.9);
       }
-      for (let y = y0 + 4; y < y1 - 2; y += 9) c.set(sx + 3, y + sag(sx + 3), chrome, 4.6);
+      for (let y = y0 + 5; y < y1 - 2; y += 14) c.set(sx + 4, y + sag(sx + 4), chrome, 4.6);
     }
   }
   // Where a panel has gone: the frame's dark, bare steel ribs, rust down from the wound.
@@ -176,10 +180,12 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
     const lean = Math.round((hash2(px, 3, seed) - 0.5) * 3);
     for (let y = yWin0; y < yWin1; y++) {
       const xo = Math.round(((y - yWin0) / (yWin1 - yWin0)) * lean);
-      c.set(px - 2 + xo, y, chrome, 3.9);
+      c.set(px - 3 + xo, y, chrome, 3.9);
+      c.set(px - 2 + xo, y, chrome, 3.2);
       c.set(px - 1 + xo, y, chrome, 2.8);
       c.set(px + xo, y, chrome, 2.2);
-      c.set(px + 1 + xo, y, chrome, 1.2);
+      c.set(px + 1 + xo, y, chrome, 1.8);
+      c.set(px + 2 + xo, y, chrome, 1.2);
     }
   }
   // The end bays: a porthole panel round the door, a menu frame at the near end.
@@ -188,8 +194,8 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
     const x1 = colOf(b);
     for (let y = yWin0; y < yWin1; y++) {
       for (let x = x0; x < x1; x++) {
-        const f = (x + 2) % 6;
-        c.set(x, y, chrome, (f < 1 ? 3.7 : f < 3 ? 2.7 : f < 5 ? 2 : 1.3) + dent(x, 3));
+        const f = (x + 2) % 9;
+        c.set(x, y, chrome, (f < 2 ? 3.7 : f < 4 ? 2.7 : f < 7 ? 2 : 1.3) + dent(x, 3));
       }
     }
   }
@@ -197,9 +203,9 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
     // Menu board in a chrome frame, lit.
     const mx = colOf(7.7);
     const my = rowOf(2.75);
-    c.rect(mx, my, 40, 46, chrome, 3);
-    c.rect(mx + 3, my + 3, 34, 40, ink, 1, PWF.GLOW);
-    for (let i = 0; i < 6; i++) c.hline(mx + 7, my + 8 + i * 6, 24 - (i * 3) % 12, white, 3.4, PWF.GLOW);
+    c.rect(mx, my, 60, 70, chrome, 3);
+    c.rect(mx + 4, my + 4, 52, 62, ink, 1, PWF.GLOW);
+    for (let i = 0; i < 7; i++) c.hline(mx + 10, my + 12 + i * 8, 36 - (i * 3) % 16, white, 3.4, PWF.GLOW);
   }
   yield;
   // Cut the holes: the panes, the door, a texel of ragged weatherstrip round each.
@@ -220,7 +226,7 @@ export const paintDinerFront: PwPainter = function* (c: PwCanvas, k: PwKit) {
     }
   }
   // Bullet pocks, a rusty stain or two across the chrome, the outline in ink.
-  for (let i = 0; i < 46; i++) {
+  for (let i = 0; i < 70; i++) {
     const x = Math.floor(hash2(i, 13, seed) * W);
     const y = rowOf(4.3) + Math.floor(hash2(i, 17, seed) * (rowOf(0.2) - rowOf(4.3)));
     if (c.at(x, y)) {

@@ -7,6 +7,7 @@ import { sidewalkTile } from '../../pixelworld/surfaces';
 import type { PwTile } from '../../pixelworld/atlas';
 import {
   DINER_FRONT_H,
+  DINER_FRONT_TPM,
   DINER_FRONT_W,
   MARQUEE_END_H,
   MARQUEE_END_W,
@@ -149,9 +150,9 @@ export class Z1Flats {
     if (p.end) this.end(b, p.end);
   }
 
-  private tile(key: string, tw: number, th: number, paint: import('../../pixelworld/atlas').PwPainter) {
+  private tile(key: string, tw: number, th: number, paint: import('../../pixelworld/atlas').PwPainter, density = FLAT_TPM) {
     let t = this.tiles.get(key);
-    if (!t) this.tiles.set(key, (t = this.atlas.tile(`flat|${key}`, tw, th, paint, { upscale: false, density: FLAT_TPM })));
+    if (!t) this.tiles.set(key, (t = this.atlas.tile(`flat|${key}`, tw, th, paint, { upscale: false, density })));
     return t;
   }
 
@@ -203,9 +204,9 @@ export class Z1Flats {
   stageDiner(id: ZoneId, g: THREE.Object3D) {
     const b = this.batch(id);
     g.updateMatrixWorld(true);
-    const t = this.tile('diner-front', DINER_FRONT_W, DINER_FRONT_H, paintDinerFront);
+    const t = this.tile('diner-front', DINER_FRONT_W, DINER_FRONT_H, paintDinerFront, DINER_FRONT_TPM);
     b.setMatrix(g.matrixWorld);
-    b.rect(_o.set(-9.25, 0, 0.18), X, Y, DINER_FRONT_W / FLAT_TPM, DINER_FRONT_H / FLAT_TPM, t);
+    b.rect(_o.set(-9.25, 0, 0.18), X, Y, DINER_FRONT_W / DINER_FRONT_TPM, DINER_FRONT_H / DINER_FRONT_TPM, t);
     b.setMatrix(null);
   }
 
