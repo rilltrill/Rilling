@@ -10,6 +10,9 @@ import type { Entity, ShotHit } from '../../src/gameplay/Entity';
 import type { Enemy } from '../../src/gameplay/Enemy';
 import { PixelFigure, PART, sdRoundCone, sdTriangle, MAX_PRIMS, MAX_KPX, NEAR_CLIP, type FigureSample } from '../../src/gameplay/pixel/figure';
 import { makeRamp, Mat, STEPS, materialTable } from '../../src/gameplay/pixel/materials';
+import { DrawnCast, newDrawnSprite } from '../../src/gameplay/pixel/drawn/DrawnCast';
+import { setCastLook } from '../../src/gameplay/pixel/look';
+import { drawnAim, drawnReport } from './drawnAim';
 import { nullHud } from './sim';
 
 /**
@@ -377,3 +380,27 @@ describe('PixelCast near the camera (no giant texels)', () => {
 function toNdc(camera: THREE.Camera, obj: THREE.Object3D, y: number): THREE.Vector3 {
   return obj.localToWorld(new THREE.Vector3(0, y, 0)).project(camera);
 }
+
+describe('PixelCast alignment — drawn figures (castlook=d)', () => {
+  it('the worker zombie: head and torso of the drawing are where the rig is', () => {
+    setCastLook('d');
+    try {
+      const rows: [string, ReturnType<typeof drawnAim>][] = [];
+      const dc = new DrawnCast(null);
+      for (const dist of [3.5, 7]) {
+        for (const yaw of [0, 50]) {
+          const { world, camera } = makeWorld();
+          const z = createEnemy('walker', world, { pos: new THREE.Vector3(0.4, 0, -dist), frame: 'world', entry: 'walk', hpMul: 1, speedMul: 1, opts: { variant: 'worker' } }) as Enemy;
+          world.add(z);
+          for (let i = 0; i < 14; i++) world.update(1 / 60);
+          z.root.rotation.y = Math.atan2(-z.root.position.x, dist) + (yaw * Math.PI) / 180;
+          rows.push([`walker d${dist} y${yaw}`, drawnAim(world, camera, z, dc, newDrawnSprite())]);
+        }
+      }
+      const rep = drawnReport(rows);
+      expect(rep.bad, rep.bad.join('; ')).toEqual([]);
+    } finally {
+      setCastLook('b');
+    }
+  });
+});

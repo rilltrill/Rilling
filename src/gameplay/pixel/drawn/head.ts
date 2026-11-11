@@ -222,14 +222,19 @@ function liveFace(d: Draw, s: HeadSpec, g: HeadGroups, view: ViewId) {
       return;
     }
     // A white, a pupil looking at the player, a brow lifted with fear.
-    poly(d, 0.08, n - wide, 0.09, n + wide, -0.03, n + wide, -0.04, n - wide);
+    poly(d, 0.065, n - wide, 0.065, n + wide, -0.015, n + wide, -0.02, n - wide);
     pen.shade(g.head, 0, R.white, 4);
-    const ex = d.px(B.head, 0.02, n + wide * 0.15);
-    const ey = d.py(B.head, 0.02, n + wide * 0.15);
+    const ex = d.px(B.head, 0.02, n + wide * 0.1);
+    const ey = d.py(B.head, 0.02, n + wide * 0.1);
     pen.plot(Math.floor(ex), Math.floor(ey), g.head, 0, R.hairDark, 1);
-    if (lod >= 2) pen.plot(Math.floor(ex) + 1, Math.floor(ey), g.head, 0, R.hairDark, 1);
+    if (lod >= 2) {
+      pen.plot(Math.floor(ex) + 1, Math.floor(ey), g.head, 0, R.hairDark, 1);
+      // Upper lid.
+      poly(d, 0.08, n - wide * 1.1, 0.08, n + wide * 1.1, 0.06, n + wide * 1.05, 0.06, n - wide);
+      pen.shade(g.head, 0, s.skin, 2);
+    }
     if (lod >= 1) {
-      poly(d, 0.14, n - wide * 1.2, 0.18, n + wide * 1.25, 0.14, n + wide * 1.25, 0.1, n - wide * 1.2);
+      poly(d, 0.16, n - wide * 1.2, 0.2, n + wide * 1.2, 0.17, n + wide * 1.25, 0.12, n - wide * 1.2);
       pen.shade(g.head, 0, R.hairDark, 2);
     }
   };
@@ -248,10 +253,10 @@ function liveFace(d: Draw, s: HeadSpec, g: HeadGroups, view: ViewId) {
     pen.plot(x - 1, y, g.head, 0, R.blood, 1);
     return;
   }
-  poly(d, -0.27, mid + w, -0.37, mid + w * 0.7, -0.37, mid - w * 0.7, -0.27, mid - w);
+  poly(d, -0.28, mid + w * 0.75, -0.35, mid + w * 0.55, -0.35, mid - w * 0.55, -0.28, mid - w * 0.75);
   pen.shade(g.head, 0, R.blood, 1);
   if (lod >= 2) {
-    poly(d, -0.27, mid + w * 0.8, -0.27, mid - w * 0.8, -0.3, mid - w * 0.6, -0.3, mid + w * 0.6);
+    poly(d, -0.275, mid + w * 0.62, -0.275, mid - w * 0.62, -0.3, mid - w * 0.5, -0.3, mid + w * 0.5);
     pen.shade(g.head, 0, R.teeth, 4);
   }
 }

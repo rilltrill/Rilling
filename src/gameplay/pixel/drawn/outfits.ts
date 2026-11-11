@@ -259,11 +259,11 @@ function collar(d: Draw, view: ViewId, ramp: number, under: number) {
   const pen = d.pen;
   const c = (s: number) => {
     pen.begin();
-    d.pt(B.neck, 0.0, s * 0.27, true);
-    d.pt(B.neck, -0.06, s * 0.45, true);
-    d.pt(B.neck, -0.2, s * 0.2, true);
-    d.pt(B.neck, -0.08, s * 0.02, true);
-    pen.fill(ramp, 3, PARTT, G.collar, -1);
+    d.pt(B.neck, 0.02, s * 0.3, true);
+    d.pt(B.neck, -0.05, s * 0.5, true);
+    d.pt(B.neck, -0.17, s * 0.38, true);
+    d.pt(B.neck, -0.06, s * 0.1, true);
+    pen.fill(ramp, 3, PARTT, G.collar, -2);
   };
   if (view === 0) {
     c(1);
@@ -474,16 +474,18 @@ function hiVisVest(d: Draw, view: ViewId) {
     }
   }
   if (d.lod >= 2 && view === 0) {
-    // Blood soaked through from a wound below the ribs (a drawn shape, not speckle).
+    // A dark bite in the side, with a run of blood down the vest.
     pen.begin();
-    d.pt(B.pelvis, 0.46, 0.18);
-    d.pt(B.waist, 0.1, 0.16);
-    d.pt(B.waist, 0.34, 0.28);
-    d.pt(B.waist, 0.2, 0.42);
-    d.pt(B.waist, 0.02, 0.38);
-    d.pt(B.pelvis, 0.4, 0.42);
-    d.pt(B.pelvis, 0.28, 0.5);
-    d.pt(B.pelvis, 0.3, 0.3);
+    d.pt(B.waist, 0.2, 0.3);
+    d.pt(B.waist, 0.34, 0.2);
+    d.pt(B.waist, 0.18, 0.1);
+    d.pt(B.waist, 0.02, 0.18);
+    pen.shade(G.vest, 0, R.blood, 1);
+    pen.begin();
+    d.pt(B.waist, 0.1, 0.2);
+    d.pt(B.pelvis, 0.46, 0.2);
+    d.pt(B.pelvis, 0.3, 0.16);
+    d.pt(B.waist, 0.06, 0.12);
     pen.shade(G.vest, 0, R.blood, 2);
   }
 }
@@ -607,8 +609,8 @@ export const FLANNEL: FigureDef = {
     }
     shape(d, NECK_F, B.neck, R.skinLive, PARTH, G.neck, 2, 0);
     if (view <= 2) {
-      // White tee at the open collar.
-      polyB(d, B.chest, view === 1 ? [0.5, -0.02, 0.5, 0.26, 0.22, 0.24] : [0.5, -0.18, 0.5, 0.18, 0.22, 0.02], true);
+      // White tee in the open neck.
+      polyB(d, B.chest, view === 1 ? [0.54, 0.0, 0.54, 0.24, 0.3, 0.16] : view === 2 ? [0.5, 0.2, 0.5, 0.36, 0.3, 0.3] : [0.54, -0.14, 0.54, 0.16, 0.32, 0.01], true);
       d.pen.fill(R.white, 3, PARTT, G.collar, -1);
     }
     if (!isBack(view)) collar(d, view, shirt, G.neck);

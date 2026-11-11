@@ -204,6 +204,43 @@ if (which.has('look')) {
   put(s, renderer.draw(fig, pose, fr, v, 180), 1660, 860, 1, '180');
   s.save(`${out}/look-${fig.name}-${v}.png`);
 }
+if (which.has('measure')) {
+  // Canon, measured on the standing figures at 180 texels tall: the outline of the trunk alone
+  // (arms excluded, from the part map) against docs/PIXELWORLD3.md.
+  const canon = (name, def, pose) => {
+    const f = renderer.draw(def, POSES[pose], 0, 0, 180);
+    const headH = 180 / 6.25;
+    const headW = headH * 0.8;
+    const width = (y, part) => {
+      let min = 1e9, max = -1;
+      for (let x = 0; x < f.w; x++) {
+        const v = f.part[y * f.w + x];
+        if (part ? v === part : v !== 0) { if (x < min) min = x; if (x > max) max = x; }
+      }
+      return max < 0 ? 0 : max - min + 1;
+    };
+    let crotch = f.h;
+    for (let y = f.h - 1; y > f.h * 0.3; y--) {
+      let runs = 0, prev = 0;
+      for (let x = 0; x < f.w; x++) {
+        const on = f.pixels[y * f.w + x] ? 1 : 0;
+        if (on && !prev) runs++;
+        prev = on;
+      }
+      if (runs >= 2) crotch = y;
+      else if (crotch !== f.h) break;
+    }
+    const rows = Array.from({ length: f.h }, (_, y) => y);
+    const within = (a, b, part) => rows.filter((y) => y > a * f.h && y < b * f.h).map((y) => width(y, part));
+    const shoulderAll = Math.max(...within(0.16, 0.3));
+    const chest = Math.max(...within(0.2, 0.3, 2));
+    const waist = Math.min(...within(0.34, 0.47, 2));
+    const hips = Math.max(...within(0.46, 0.55, 2));
+    console.log(`${name}: heads tall ${(f.h / headH).toFixed(2)} | shoulders (with arms) ${(shoulderAll / headW).toFixed(2)} head-widths | chest ${(chest / headW).toFixed(2)} | waist ${(waist / headW).toFixed(2)} | hips ${(hips / headW).toFixed(2)} | crotch at ${(((f.h - crotch) / f.h) * 100).toFixed(1)} % of height`);
+  };
+  canon('worker', WORKER, 'zidle');
+  canon('flannel', FLANNEL, 'civstand');
+}
 if (which.has('anim')) {
   // Animation strips.
   const strips = [
@@ -226,7 +263,7 @@ if (which.has('states')) {
   // Windup, death, cower, plead.
   const rows = [
     ['worker', WORKER, ['zidle', 'zwindup', 'zlunge', 'zstagger', 'zdeath']],
-    ['flannel', FLANNEL, ['civstand', 'civcower', 'civplead', 'civrun']],
+    ['flannel', FLANNEL, ['civstand', 'civcower', 'civplead']],
   ];
   const k2 = Math.max(1, k - 1);
   const s = new Sheet(1760, (px * k2 + 60) * 2 * 2);
@@ -239,9 +276,9 @@ if (which.has('states')) {
       for (const p of poses) {
         const frames = POSES[p];
         for (let i = 0; i < frames.length; i++) {
-          if (i > 1 && p !== 'zwindup' && p !== 'zdeath') continue;
+          if (i > 0 && p !== 'zwindup' && p !== 'zdeath' && p !== 'zstagger') continue;
           put(s, renderer.draw(def, frames, i, view, px), x, y, k2, `${p}${frames.length > 1 ? ' ' + i : ''}`);
-          x += p === 'zdeath' && i === frames.length - 1 ? 340 : 200;
+          x += p === 'zdeath' && i === frames.length - 1 ? 340 : p === 'zdeath' ? 260 : 200;
         }
       }
       row++;
@@ -250,28 +287,37 @@ if (which.has('states')) {
   s.save(`${out}/states.png`);
 }
 if (which.has('sizes')) {
-  // Sizes at texel scale, silhouettes.
+  // Texels at x1 (the size the game shows them) and x3; silhouettes at 60.
   const sizes = [60, 110, 180];
-  const s = new Sheet(1760, 900);
-  let y = 200;
-  s.text(10, 8, 'sizes (texels x1 first row, x3 below); solid-black silhouettes');
+  const s = new Sheet(1760, 1060);
+  s.text(10, 8, 'sizes: texels x1 (as in the game), x3; solid-black silhouettes at 60');
+  let y0 = 40;
   for (const [name, def] of FIGS) {
     const pose = POSES[name === 'worker' ? 'zshamble' : 'civrun'];
-    let x = 80;
+    s.text(10, y0, name);
+    let x = 110;
     for (const sz of sizes) {
       for (const v of [0, 1, 2]) {
-        put(s, renderer.draw(def, pose, 1, v, sz), x, y, 1, v === 0 ? String(sz) : '');
-        put(s, renderer.draw(def, pose, 1, v, sz), x, y + 240, 3, '');
-        x += sz * 0.7 + 30;
+        put(s, renderer.draw(def, pose, 2, v, sz), x, y0 + 210, 1, '');
+        x += Math.max(sz * 0.55, 40) + 34;
       }
+      x += 30;
     }
-    y += 0;
-    x = 980;
-    for (const v of [0, 1, 2, 3]) {
-      put(s, renderer.draw(def, pose, 1, v, 60), x, y + 180, 1, '', true);
-      x += 60;
+    x = 40;
+    for (const sz of sizes) {
+      for (const v of [0, 1, 2]) {
+        const fig = renderer.draw(def, pose, 2, v, sz);
+        put(s, fig, x + (fig.w * 3) / 2, y0 + 210 + sz * 3 + 20, 3, `${sz}`);
+        x += Math.max(fig.w * 3, 90) + 16;
+      }
+      x += 10;
     }
-    y += 420;
+    x = 1180;
+    for (const v of [0, 1, 2, 3, 4]) {
+      put(s, renderer.draw(def, pose, 2, v, 60), x, y0 + 210, 1, '', true);
+      x += 52;
+    }
+    y0 += 530;
   }
   s.save(`${out}/sizes.png`);
 }

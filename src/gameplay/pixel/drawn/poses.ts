@@ -70,14 +70,14 @@ export const ZSHAMBLE: PoseKey[] = doubled(ZSHAMBLE6);
 
 /** Arms coming up to grab: two frames rising, one at full reach. */
 export const ZWINDUP: PoseKey[] = [
-  zPose({ py: -0.1, cLean: 14, hPitch: 4, hRoll: -10, cTilt: -6, aL: [50, 16, 40], aR: [60, 18, 36], lL: [10, 6, 16], lR: [-6, 10, 12] }),
-  zPose({ py: -0.14, cLean: 18, hPitch: -6, hRoll: -6, cTilt: -3, aL: [85, 18, 30], aR: [95, 20, 26], lL: [14, 6, 18], lR: [-12, 12, 18] }),
-  zPose({ py: -0.2, cLean: 22, lean: 8, hPitch: -14, hRoll: 0, aL: [112, 22, 16], aR: [120, 24, 14], lL: [20, 8, 24], lR: [-20, 12, 26] }),
+  zPose({ py: -0.1, cLean: 14, hPitch: 4, hRoll: -10, cTilt: -6, aL: [50, 7, 40], aR: [60, 8, 36], lL: [10, 6, 16], lR: [-6, 10, 12] }),
+  zPose({ py: -0.14, cLean: 18, hPitch: -6, hRoll: -6, cTilt: -3, aL: [85, 7, 30], aR: [95, 9, 26], lL: [14, 6, 18], lR: [-12, 12, 18] }),
+  zPose({ py: -0.2, cLean: 22, lean: 8, hPitch: -14, hRoll: 0, aL: [112, 8, 16], aR: [120, 9, 14], lL: [20, 8, 24], lR: [-20, 12, 26] }),
 ];
 
 /** The lunge: the whole body thrown at the camera. */
 export const ZLUNGE: PoseKey[] = [
-  zPose({ py: -0.26, lean: 16, cLean: 24, hPitch: -20, aL: [125, 26, 10], aR: [130, 26, 8], lL: [26, 8, 30], lR: [-26, 12, 20] }),
+  zPose({ py: -0.26, lean: 16, cLean: 24, hPitch: -20, aL: [125, 8, 10], aR: [130, 9, 8], lL: [26, 8, 30], lR: [-26, 12, 20] }),
 ];
 
 /** Rocked back by a hit. */

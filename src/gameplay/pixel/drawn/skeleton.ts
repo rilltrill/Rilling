@@ -24,7 +24,7 @@ export const BODY = {
   chestToNeck: 0.52,
   neckToHead: 0.55,
   /** Shoulder joints from the chest origin. */
-  shoulderX: 0.62,
+  shoulderX: 0.56,
   shoulderUp: 0.25,
   upperArm: 1.1,
   foreArm: 0.86,
