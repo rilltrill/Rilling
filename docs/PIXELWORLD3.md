@@ -98,6 +98,6 @@ The set, round 2:
 - The Rialto's marquee is three cards (`stageMarquee`): a shaped face with a stepped crest and scalloped valance, a tin soffit in three tones with rows of little bulbs, a flared end. The chase bulbs animate on the old rows, on the face.
 - The boss square's hotel box is gone (no side wall beside PRIME MEATS), its flat re-using the hotel painting; the bank is a real pediment with dentils, columns on steps and a clock in a stone round.
 - Structure varies by building: recessed centre bay (pawn), bay window column (cafe), tall narrow house jammed against a lower range (w4), stair windows stepping up one end (w6), top storey half fallen (liquor), a carriage arch through the shutters (the shuttered block), three tall arched lights instead of window rows (Rialto).
-- The rake is still 25 degrees; the teeth option (`&pwflats=teeth`, three steep wings cut along drawn piers) was tried and not kept because (see the report) the wings are mostly hidden behind each other.
+- The rake is 35 degrees (`FLAT_RAKE`; the 22 m hotel's near end still sits inside its old 14 m footprint, and at 35 each wing reads nearer square-on than at 25). Three narrower teeth at 50 degrees were tried on the same paintings and dropped: at those angles each tooth hides most of the next, so a shopfront is seen as slices and the single painting is lost.
 - Budgets: `wall glows` are dropped only on the stretch of old facade that actually swung back (`swungAt` is a span, not a circle).
 

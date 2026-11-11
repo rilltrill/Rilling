@@ -702,7 +702,7 @@ const paintBank: PwPainter = function* (c, k) {
   e.patch(e.X(0.8), e.Y(8.4), 120, 44, e.r.alt);
   e.cornice(e.Y(h - 0.7), { h: 15 });
   yield;
-  drawText(c, 'FIRST NATIONAL', e.X(10) - textWidth('FIRST NATIONAL', FONT_BOLD, { spacing: 1 }) / 2, e.Y(h - 1.6), FONT_BOLD, e.r.ink, 1, { spacing: 1 });
+  drawText(c, 'FIRST NATIONAL', e.X(10) - textWidth('FIRST NATIONAL', FONT_BOLD, { spacing: 1 }) / 2, e.Y(h - 1.2), FONT_BOLD, e.r.ink, 1, { spacing: 1 });
   // The pediment: tympanum recessed a tone, raking cornices with dentils, a black cast shadow under them.
   const cx = e.X(10);
   const halfW = Math.round(6.3 * FLAT_TPM);
