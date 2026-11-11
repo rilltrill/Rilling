@@ -277,8 +277,8 @@ export const TRUNK_MAP = [B.pelvis, B.waist, B.chest] as const;
 /** Front: traps sloping into the shoulders, ribcage, waist, the shirt's hem over the hips. */
 export const TRUNK_F: readonly Pt[] = [
   [C, 0.5, 0.16],
-  [C, 0.44, 0.4],
-  [C, 0.34, 0.66],
+  [C, 0.41, 0.36],
+  [C, 0.27, 0.64],
   [C, 0.02, 0.68],
   [C, -0.28, 0.62],
   [C, -0.54, 0.52],
@@ -293,15 +293,15 @@ export const TRUNK_F: readonly Pt[] = [
   [C, -0.54, -0.52],
   [C, -0.28, -0.62],
   [C, 0.02, -0.68],
-  [C, 0.34, -0.66],
-  [C, 0.44, -0.4],
+  [C, 0.27, -0.64],
+  [C, 0.41, -0.36],
   [C, 0.5, -0.16],
 ];
 
 export const TRUNK_Q: readonly Pt[] = [
   [C, 0.5, 0.18],
-  [C, 0.42, 0.42],
-  [C, 0.26, 0.6],
+  [C, 0.4, 0.4],
+  [C, 0.22, 0.6],
   [C, -0.04, 0.6],
   [C, -0.32, 0.54],
   [C, -0.55, 0.43],
@@ -316,8 +316,8 @@ export const TRUNK_Q: readonly Pt[] = [
   [C, -0.55, -0.55],
   [C, -0.28, -0.66],
   [C, 0.04, -0.7],
-  [C, 0.32, -0.64],
-  [C, 0.44, -0.36],
+  [C, 0.26, -0.64],
+  [C, 0.4, -0.36],
   [C, 0.5, -0.12],
 ];
 

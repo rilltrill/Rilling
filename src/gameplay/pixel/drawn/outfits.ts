@@ -365,8 +365,8 @@ function hiVisVest(d: Draw, view: ViewId) {
   if (view === 0) {
     // Over the chest; nipped at the waist, a short flare, a torn hem; the neck opening a deep V.
     d.pt(B.chest, 0.47, 0.17, true);
-    d.pt(B.chest, 0.38, 0.5);
-    d.pt(B.chest, 0.06, 0.5);
+    d.pt(B.chest, 0.36, 0.46);
+    d.pt(B.chest, 0.04, 0.5);
     d.pt(B.chest, -0.28, 0.56);
     d.pt(B.waist, 0.0, 0.46);
     d.pt(B.pelvis, 0.3, 0.5);
@@ -382,8 +382,8 @@ function hiVisVest(d: Draw, view: ViewId) {
     d.pt(B.pelvis, 0.3, -0.5);
     d.pt(B.waist, 0.0, -0.46);
     d.pt(B.chest, -0.28, -0.56);
-    d.pt(B.chest, 0.06, -0.5);
-    d.pt(B.chest, 0.38, -0.5);
+    d.pt(B.chest, 0.04, -0.5);
+    d.pt(B.chest, 0.36, -0.46);
     d.pt(B.chest, 0.47, -0.17, true);
     d.pt(B.chest, -0.02, 0.0, true);
   } else if (view === 4) {
