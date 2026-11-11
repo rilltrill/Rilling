@@ -49,7 +49,8 @@ for (let i = 0; i < 100; i++) {
 await page.evaluate(async (place) => {
   const g = window.__game;
   const w = g.world;
-  const reg = await import('/src/content/registry.ts');
+  const regUrl = performance.getEntriesByType('resource').map((r) => r.name).find((n) => n.includes('/src/content/registry.ts')) ?? '/src/content/registry.ts';
+  const reg = await import(regUrl);
   const threeUrl = performance.getEntriesByType('resource').map((r) => r.name).find((n) => /\/deps\/three\.js/.test(n));
   const THREE = await import(threeUrl);
   const cam = w.camera;
@@ -65,7 +66,10 @@ await page.evaluate(async (place) => {
     pos.y = w.groundAt(pos.x, pos.z);
     let e;
     if (p.id === 'civ') {
-      const { Civilian } = await import('/src/gameplay/Civilian.ts');
+      // (The module instance the running game already loaded: a dev server serves an edited file
+      // with a cache-busting query, and a fresh import of the plain path would be a second copy.)
+      const civUrl = performance.getEntriesByType('resource').map((r) => r.name).find((n) => n.includes('/src/gameplay/Civilian.ts')) ?? '/src/gameplay/Civilian.ts';
+      const { Civilian } = await import(civUrl);
       e = new Civilian(w, pos, 'world', p.variant ?? 'worker', { act: p.acts || 'plead' });
     } else e = reg.createEnemy(p.id, w, { pos, frame: 'world', entry: 'walk', hpMul: 1, speedMul: 1, opts: p.variant ? { variant: p.variant } : {} });
     w.add(e);

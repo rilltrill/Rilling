@@ -32,6 +32,8 @@ const SHELF_STEP = 16;
 const NECK_BEND = 0.35;
 /** Most the drawn head may sink into the neck, and stretch out of it (hu). */
 const NECK_DOWN = 0.15;
+/** See `bias`: hu toward the leading side. */
+const CHEST_BIAS_Q = -0.2;
 const NECK_UP = 0.2;
 /** Head-offset buckets a redraw may travel: a state change must not snap the head across the neck. */
 const HEAD_TRAVEL = 2;
@@ -600,6 +602,10 @@ export class DrawnCast {
     if (tc > 0) {
       b[2] = (tx / tc + 0.5 - f.d.cx) / S - sk.sx[J.chest];
       b[3] = (f.d.cy - ty / tc - 0.5) / S - sk.sy[J.chest];
+      // Three-quarter view: the rig's near arm crosses its own chest, on the side away from the
+      // way it faces; the drawn chest is centred a little toward the leading side so a shot at
+      // the middle of the drawing is on the chest box, not that arm.
+      if (view === 1) b[2] += CHEST_BIAS_Q;
     }
     return b;
   }

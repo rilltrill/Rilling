@@ -865,6 +865,7 @@ export class SpriteArt {
   private drawn: DrawnCast;
   private drawnMat: THREE.ShaderMaterial;
   private drawnQuery = newDrawnQuery();
+  private fogDisplay = new THREE.Color();
   look: SpriteLook = { ...DEFAULT_LOOK };
   readonly stats: SpriteStats = {
     sprites: 0,
@@ -1140,6 +1141,9 @@ export class SpriteArt {
     }
     this.syncEntities();
     this.drawn.beginFrame();
+    // The fog colour of a drawn sprite, tone mapped once a frame instead of once a sprite.
+    const fogC = this.world.scene.fog?.color;
+    if (fogC) toDisplay(fogC, this.expU.value, this.fogDisplay);
     if (this.drawnStage !== (this.world.stage?.id ?? '')) {
       this.drawnStage = this.world.stage?.id ?? '';
       const sl = castStageLight(this.world.stage?.id, this.night);
@@ -1951,8 +1955,7 @@ export class SpriteArt {
         a = THREE.MathUtils.clamp((D - fl.near) / Math.max(1e-3, fl.far - fl.near), 0, 1);
       }
       fa = Math.round(a * sl.fog * 6) / 6;
-      toDisplay(fog.color, this.expU.value, _sc);
-      (u.uFog.value as THREE.Vector4).set(_sc.r, _sc.g, _sc.b, fa);
+      (u.uFog.value as THREE.Vector4).set(this.fogDisplay.r, this.fogDisplay.g, this.fogDisplay.b, fa);
     }
     // Billboard: the sprite's ground point on the rig's, snapped to whole frame pixels.
     const w = entry.w;

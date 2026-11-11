@@ -710,7 +710,7 @@ function reachArm(d: Draw, side: number, shirt: number, skin: number, level: num
     // At a distance a grabbing hand is one solid mitt, a dozen texels across, cutting into the
     // silhouette: fingers are not there to see, the shape coming at you is.
     const lead = (side === 0) === (d.key.leadL === true);
-    if (d.S < 13.5) hand(d, HAND_MITT, hb, skin, hg, (lead ? 6.4 : 5.4) / d.S / 0.17);
+    if (d.S < 13.5) hand(d, HAND_MITT, hb, skin, hg, (lead ? 5.2 : 4.2) / d.S / 0.17);
     else hand(d, handTbl, hb, skin, hg, lead ? 1.3 : 1);
     if (d.lod >= 2 && handTbl === HAND_SPLAY) {
       // Into the cupped palm: the dark of it, the heel of the hand lit, a crook in every finger.
