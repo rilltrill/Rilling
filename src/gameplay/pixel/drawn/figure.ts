@@ -211,6 +211,10 @@ export function makeFigureRenderer() {
     const hpx = d.S;
     d.lod = hpx < 11 ? 0 : hpx < 18 ? 1 : hpx < 30 ? 2 : 3;
     d.frames();
+    // Sleeves flow into the shoulder, trousers into the hip: no seam line round the joint.
+    const R = 0.38 * d.S;
+    pen.suppress(d.cx + sk.sx[J.shL] * d.S, d.cy - sk.sy[J.shL] * d.S, R);
+    pen.suppress(d.cx + sk.sx[J.shR] * d.S, d.cy - sk.sy[J.shR] * d.S, R);
     def.paint(d, view);
     pen.ink();
     return d;

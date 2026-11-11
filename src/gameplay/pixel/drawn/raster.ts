@@ -95,6 +95,11 @@ export class Pen {
   /** Interior-line tone offset by group (0 = no line against neighbours); set when a group is first filled. */
   readonly lineDelta = new Int8Array(256);
   private serial = 0;
+  /** Circles (texels) inside which no interior line is drawn: a sleeve flows into the shoulder, not a paper doll's seam. */
+  private supX = new Float32Array(16);
+  private supY = new Float32Array(16);
+  private supR = new Float32Array(16);
+  private supN = 0;
   /** Paint serial of the group most recently filled, by group id. */
   private gOrder = new Uint16Array(256);
 
@@ -110,6 +115,17 @@ export class Pen {
     this.lineDelta.fill(0);
     this.gOrder.fill(0);
     this.serial = 0;
+    this.supN = 0;
+  }
+
+  /** No interior line within radius `r` of (x, y) (texels). */
+  suppress(x: number, y: number, r: number) {
+    if (this.supN < 16) {
+      this.supX[this.supN] = x;
+      this.supY[this.supN] = y;
+      this.supR[this.supN] = r * r;
+      this.supN++;
+    }
   }
 
   begin() {
@@ -429,6 +445,16 @@ export class Pen {
           if (g2 !== g && g2 !== 0 && order[m] < o) {
             line = true;
             break;
+          }
+        }
+        if (line) {
+          for (let q = 0; q < this.supN; q++) {
+            const dx = x + 0.5 - this.supX[q];
+            const dy = y + 0.5 - this.supY[q];
+            if (dx * dx + dy * dy < this.supR[q]) {
+              line = false;
+              break;
+            }
           }
         }
         if (line) {
