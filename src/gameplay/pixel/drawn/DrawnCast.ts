@@ -514,7 +514,8 @@ export class DrawnCast {
     if (wantY > wantHi) wantY = wantHi;
     // The offset is whole texels (every other one on big and on far figures): the head then moves
     // on the sprite's grid instead of jumping by a fraction of a head unit, and far figures share rasters.
-    const tb = size < 60 || size >= 100 ? 2 : 1;
+    // (Under 40 texels a head is 6 wide: a 2-texel step would be a third of it, so those stay exact.)
+    const tb = size >= 100 || (size >= 40 && size < 60) ? 2 : 1;
     const lm = Math.round(0.7 * S);
     let hxq = Math.round(Math.max(-lm, Math.min(lm, wantX)) / k / tb) * tb;
     let hyq = Math.round(Math.max(-lm, Math.min(lm, wantY)) / k / tb) * tb;

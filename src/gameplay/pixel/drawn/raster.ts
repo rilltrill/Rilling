@@ -114,6 +114,9 @@ export class Pen {
   private gOrder = new Uint16Array(256);
   /** Groups whose outer edge takes a dark tone instead of the ink (a far hat's brim). */
   private soft = new Uint8Array(256);
+  /** Flood-fill scratch for `dropSpecks`. */
+  private stack = new Int32Array(1 << 16);
+  private seen = new Uint8Array(0);
   /** Corners to take out of the outline (a figure has a few hundred at most). */
   private shaved = new Int32Array(8192);
 
@@ -489,6 +492,60 @@ export class Pen {
   }
 
   /**
+   * Takes out texels floating free of the figure (a far hat's tip, a far fingertip): at a few dozen
+   * texels tall the curves round off to specks of 1 to 6 texels that the ink would make into black
+   * dots beside the body. Tiny components only: a whole hand or foot is never removed.
+   */
+  private dropSpecks(x0: number, y0: number, x1: number, y1: number) {
+    const c = this.c;
+    const w = c.w;
+    const idx = c.idx;
+    const area = w * c.h;
+    if (this.seen.length !== area) this.seen = new Uint8Array(area);
+    const seen = this.seen;
+    for (let y = y0; y <= y1; y++) seen.fill(0, y * w + x0, y * w + x1 + 1);
+    const stack = this.stack;
+    let best = 0;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) {
+          const i = y * w + x;
+          if (idx[i] === 0 || seen[i] === 1 + pass) continue;
+          // Pass 0 sizes every component (the largest is kept); pass 1 removes the small ones.
+          let sp = 0;
+          stack[sp++] = i;
+          seen[i] = 1 + pass;
+          let n = 0;
+          let head = 0;
+          while (head < sp) {
+            const k = stack[head++];
+            n++;
+            for (let dy = -w; dy <= w; dy += w) {
+              for (let dx = -1; dx <= 1; dx++) {
+                const m = k + dy + dx;
+                if (m < 0 || m >= area || idx[m] === 0 || seen[m] === 1 + pass) continue;
+                seen[m] = 1 + pass;
+                if (sp < stack.length) stack[sp++] = m;
+              }
+            }
+          }
+          if (pass === 0) {
+            if (n > best) best = n;
+          } else if (n <= 6 && n < best) {
+            for (let q = 0; q < sp; q++) {
+              const k = stack[q];
+              idx[k] = 0;
+              c.part[k] = 0;
+              c.group[k] = 0;
+              c.base[k] = 0;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Ends the figure. The ink line round the silhouette of the UNION (never per part: no paper
    * doll), then the thinner interior lines, on the nearer side of every boundary between groups.
    */
@@ -506,6 +563,7 @@ export class Pen {
     // Pixel-perfect outline: a corner texel with empty space on two adjacent sides and the
     // silhouette turning through it is taken out, so the line steps diagonally instead of in L-shapes.
     this.shaveCorners(x0, y0, x1, y1);
+    this.dropSpecks(x0, y0, x1, y1);
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         const k = y * w + x;

@@ -130,10 +130,14 @@ export function drawnAim(world: World, camera: THREE.PerspectiveCamera, e: Entit
       const py = (v.y * 0.5 + 0.5) * GH;
       const i = Math.floor((px - st.left) / st.k);
       const j = map.h - 1 - Math.floor((py - st.bottom) / st.k);
-      if (i >= 0 && j >= 0 && i < map.w && j < map.h) {
-        const p = map.part[j * map.w + col(i)];
-        if (p === PART_OF[want]) return p;
-        best = p || best;
+      // (A far figure's head is 4 or 5 texels across: one texel of grid rounding is a real share of it.)
+      const r = map.h < 60 ? 1 : 0;
+      for (let y = Math.max(0, j - r); y <= Math.min(map.h - 1, j + r); y++) {
+        for (let x = Math.max(0, i - r); x <= Math.min(map.w - 1, i + r); x++) {
+          const p = map.part[y * map.w + col(x)];
+          if (p === PART_OF[want]) return p;
+          best = p || best;
+        }
       }
     }
     return best;

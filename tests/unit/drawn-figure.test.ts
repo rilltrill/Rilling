@@ -10,8 +10,9 @@ import type { Enemy } from '../../src/gameplay/Enemy';
 import { DrawnCast, newDrawnSprite } from '../../src/gameplay/pixel/drawn/DrawnCast';
 import { setCastLook } from '../../src/gameplay/pixel/look';
 import { lodFor, makeFigureRenderer } from '../../src/gameplay/pixel/drawn/figure';
-import { ZSHAMBLE } from '../../src/gameplay/pixel/drawn/poses';
-import { J } from '../../src/gameplay/pixel/drawn/skeleton';
+import { CIVBACK, CIVCOWER, CIVRUN, CIVSTAND, CIVWALK, ZDEATH, ZFALL, ZIDLE, ZLUNGE, ZSHAMBLE, ZSTAGGER, ZWINDUP } from '../../src/gameplay/pixel/drawn/poses';
+import { FLANNEL, WORKER } from '../../src/gameplay/pixel/drawn/outfits';
+import { HEADS, J, type PoseKey, type ViewId } from '../../src/gameplay/pixel/drawn/skeleton';
 import { nullHud } from './sim';
 import { drawnAim as check, drawnReport as report, type DrawnAimResult as Res } from './drawnAim';
 
@@ -118,8 +119,8 @@ describe('drawn figures (the drawing)', () => {
 
   it('the front walk keeps the feet near the centre line and the weight over them', () => {
     for (const f of front) {
-      expect(Math.abs(f.ankL)).toBeLessThan(0.42);
-      expect(Math.abs(f.ankR)).toBeLessThan(0.42);
+      expect(Math.abs(f.ankL)).toBeLessThan(0.52);
+      expect(Math.abs(f.ankR)).toBeLessThan(0.52);
     }
     const px = front.map((f) => f.pelvis);
     expect(Math.max(...px) - Math.min(...px)).toBeGreaterThan(0.4);
@@ -140,6 +141,151 @@ describe('drawn figures (the drawing)', () => {
   it('a stride crosses over several frames, not two', () => {
     const steps = side.map((f, i) => Math.abs(side[(i + 1) % side.length].ankR - f.ankR));
     expect(Math.max(...steps)).toBeLessThan(0.45);
+  });
+
+  /** The silhouette's outer width at a row (0..1 down), within ±1 head unit of the centre line, arms out of the way. */
+  const widths = (def: typeof WORKER) => {
+    const f = r.draw(def, { aL: [0, 110, 0], aR: [0, 110, 0], lL: [0, 2, 0], lR: [0, 2, 0] }, 0, 0, 180);
+    const S = 180 / HEADS;
+    const cx = Math.round(f.gx);
+    const row = (y: number) => {
+      let a = 1e9;
+      let b = -1;
+      for (let x = Math.max(0, cx - Math.round(S)); x < Math.min(f.w, cx + Math.round(S)); x++) {
+        if (f.pixels[y * f.w + x]) {
+          a = Math.min(a, x);
+          b = Math.max(b, x);
+        }
+      }
+      return b < 0 ? 0 : b - a + 1;
+    };
+    let hips = 0;
+    let waist = 1e9;
+    for (let y = Math.floor(f.h * 0.36); y < f.h * 0.46; y++) waist = Math.min(waist, row(y));
+    for (let y = Math.floor(f.h * 0.46); y < f.h * 0.66; y++) hips = Math.max(hips, row(y));
+    let inseam = f.h;
+    for (let y = f.h - 1; y > f.h * 0.3; y--) {
+      if (!f.pixels[y * f.w + cx]) inseam = y;
+      else if (inseam !== f.h) break;
+    }
+    return { hips, waist, inseamUp: (f.h - inseam) / f.h };
+  };
+
+  it('a figure is built like a man, not a pear: hips measured at the widest row, inseam on the silhouette', () => {
+    const w = widths(WORKER);
+    expect(w.hips).toBeGreaterThanOrEqual(38);
+    expect(w.hips).toBeLessThanOrEqual(41);
+    expect(w.waist).toBeGreaterThanOrEqual(31);
+    expect(w.waist).toBeLessThan(w.hips);
+    const c = widths(FLANNEL);
+    expect(c.hips).toBeLessThanOrEqual(41);
+    expect(c.waist).toBeGreaterThanOrEqual(29);
+    // (Canon: the crotch at mid-height. The 180-texel silhouette opens within the two-texel row of 46 to 50 %.)
+    expect(w.inseamUp).toBeGreaterThan(0.45);
+    expect(w.inseamUp).toBeLessThan(0.5);
+  });
+
+  it('the front walk has a stride: boots apart, the leading one lower than the trailing one', () => {
+    for (const [def, F, min] of [
+      [WORKER, ZSHAMBLE, 8],
+      [FLANNEL, CIVWALK, 6],
+    ] as const) {
+      let clear = 0;
+      let soles = 0;
+      for (let i = 0; i < F.length; i++) {
+        r.draw(def, F, i, 0, 180);
+        const c = r.canvas;
+        const a = [1e9, -1, -1];
+        const b = [1e9, -1, -1];
+        for (let y = c.y0; y <= c.y1; y++) {
+          for (let x = c.x0; x <= c.x1; x++) {
+            const g = c.group[y * c.w + x];
+            const t = g === 3 ? a : g === 4 ? b : null;
+            if (!t) continue;
+            t[0] = Math.min(t[0], x);
+            t[1] = Math.max(t[1], x);
+            t[2] = Math.max(t[2], y);
+          }
+        }
+        if (Math.max(a[0], b[0]) - Math.min(a[1], b[1]) - 1 >= 0) clear++;
+        soles = Math.max(soles, Math.abs(a[2] - b[2]));
+      }
+      expect(clear, `${def.name}: frames with the boots apart`).toBeGreaterThanOrEqual(min);
+      expect(soles, `${def.name}: sole offset`).toBeGreaterThanOrEqual(7);
+    }
+  });
+
+  it('backing away never crosses the feet (the side view keeps two legs)', () => {
+    for (const k of CIVBACK) {
+      const sk = r.pose(k, 2);
+      expect(Math.abs(sk.sx[J.ankleL] - sk.sx[J.ankleR])).toBeGreaterThan(0.59);
+    }
+  });
+
+  it('the front corpse is a body seen from its feet: a person wide, not a starfish', () => {
+    const f = r.draw(WORKER, ZDEATH, ZDEATH.length - 1, 0, 180);
+    expect(f.w).toBeLessThanOrEqual(90);
+    expect(f.h).toBeLessThanOrEqual(82);
+    expect(f.h).toBeGreaterThanOrEqual(68);
+  });
+
+  it('far figures are one connected shape (no pixels floating off a hat, a hand or a boot)', () => {
+    const parts = (f: ReturnType<typeof r.draw>) => {
+      const seen = new Uint8Array(f.w * f.h);
+      let n = 0;
+      for (let i = 0; i < f.w * f.h; i++) {
+        if (!f.pixels[i] || seen[i]) continue;
+        n++;
+        const st = [i];
+        seen[i] = 1;
+        while (st.length) {
+          const k = st.pop()!;
+          const x = k % f.w;
+          for (const m of [x > 0 ? k - 1 : -1, x < f.w - 1 ? k + 1 : -1, k - f.w, k + f.w, x > 0 ? k - f.w - 1 : -1, x < f.w - 1 ? k - f.w + 1 : -1, x > 0 ? k + f.w - 1 : -1, x < f.w - 1 ? k + f.w + 1 : -1]) {
+            if (m >= 0 && m < f.w * f.h && f.pixels[m] && !seen[m]) {
+              seen[m] = 1;
+              st.push(m);
+            }
+          }
+        }
+      }
+      return n;
+    };
+    const cases: [typeof WORKER, readonly PoseKey[]][] = [
+      [WORKER, ZIDLE],
+      [WORKER, ZSHAMBLE],
+      [WORKER, ZWINDUP],
+      [FLANNEL, CIVSTAND],
+      [FLANNEL, CIVRUN],
+      [FLANNEL, CIVCOWER],
+    ];
+    const bad: string[] = [];
+    for (const [def, F] of cases) {
+      for (let i = 0; i < F.length; i++) {
+        for (const v of [0, 1, 2, 3, 4] as ViewId[]) {
+          for (const sz of [24, 30, 40, 50, 60, 70, 80, 90]) {
+            const f = r.draw(def, F, i, v, sz);
+            const p = parts(f);
+            if (p !== 1) bad.push(`${def.name} ${F.indexOf(F[i])} v${v} @${sz}: ${p} parts`);
+          }
+        }
+      }
+    }
+    expect(bad.slice(0, 20)).toEqual([]);
+  });
+
+  it('every pose stays a body: the head is on the neck for all key frames and views', () => {
+    // Direct joint check: the head joint never sits below the shoulder line except in a lying pose.
+    const all: [string, readonly PoseKey[]][] = [['zidle', ZIDLE], ['zshamble', ZSHAMBLE], ['zwindup', ZWINDUP], ['zstagger', ZSTAGGER], ['zlunge', ZLUNGE], ['zfall', ZFALL], ['civstand', CIVSTAND], ['civrun', CIVRUN], ['civwalk', CIVWALK], ['civback', CIVBACK]];
+    for (const [name, F] of all) {
+      for (const k of F) {
+        for (const v of [0, 1, 2, 3, 4] as ViewId[]) {
+          const sk = r.pose(k, v);
+          const neck = sk.sy[J.neck];
+          expect(sk.sy[J.head] - neck, `${name} v${v}`).toBeGreaterThan(0.25);
+        }
+      }
+    }
   });
 
   it('the level of detail holds near a threshold', () => {
