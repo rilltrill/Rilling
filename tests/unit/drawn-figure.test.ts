@@ -7,7 +7,7 @@ import { AudioSystem } from '../../src/audio/Audio';
 import { DEFAULT_SETTINGS } from '../../src/core/types';
 import { Civilian, type CivPhase } from '../../src/gameplay/Civilian';
 import type { Enemy } from '../../src/gameplay/Enemy';
-import { DrawnCast, newDrawnSprite } from '../../src/gameplay/pixel/drawn/DrawnCast';
+import { DrawnCast, newDrawnQuery, newDrawnSprite } from '../../src/gameplay/pixel/drawn/DrawnCast';
 import { setCastLook } from '../../src/gameplay/pixel/look';
 import { lodFor, makeFigureRenderer } from '../../src/gameplay/pixel/drawn/figure';
 import { CIVBACK, CIVCOWER, CIVRUN, CIVSTAND, CIVWALK, ZDEATH, ZFALL, ZIDLE, ZLUNGE, ZSHAMBLE, ZSTAGGER, ZWINDUP } from '../../src/gameplay/pixel/drawn/poses';
@@ -103,6 +103,65 @@ describe('drawn figures (aim)', () => {
     }
     const rep = report(rows);
     expect(rep.bad, JSON.stringify(rep.bad.slice(0, 20), null, 1)).toEqual([]);
+  });
+});
+
+describe('drawn figures (the neck)', () => {
+  setCastLook('d');
+  const limit = (st: { hx: number; hy: number; size: number; k: number }) => {
+    const S = (st.size * st.k) / HEADS;
+    // The vertical offset, in the same quantised units `place` stores: 0.2 hu up, 0.15 down, one quantum of rounding.
+    return { up: 0.2 * S + (st.size >= 100 ? 2 : 1.5), down: 0.15 * S + (st.size >= 100 ? 2 : 1.5) };
+  };
+
+  it('a walker\'s head never leaves its neck, in any state or at any distance', () => {
+    for (const dist of [3, 5, 8, 12]) {
+      const { world, camera } = makeWorld();
+      const z = createEnemy('walker', world, { pos: new THREE.Vector3(0.4, 0, -dist), frame: 'world', entry: 'walk', hpMul: 1, speedMul: 1, opts: { variant: 'worker' } }) as Enemy;
+      world.add(z);
+      for (let i = 0; i < 30; i++) world.update(1 / 60);
+      const dc = new DrawnCast(null);
+      const st = newDrawnSprite();
+      const q = newDrawnQuery();
+      for (const state of ['advance', 'windup', 'recover', 'stagger', 'dying'] as const) {
+        z.setState(state);
+        for (let f = 0; f < 10; f++) {
+          world.update(1 / 60);
+          world.scene.updateMatrixWorld(true);
+          camera.updateMatrixWorld();
+          expect(z.drawnFigure!(q), state).toBe(true);
+          dc.beginFrame();
+          const r = dc.place(camera, z.root, q, 720, 288, st);
+          if (typeof r !== 'object') continue;
+          const L = limit(st);
+          expect(st.hy, `${state} @${dist} f${f}`).toBeLessThanOrEqual(L.up);
+          expect(st.hy, `${state} @${dist} f${f}`).toBeGreaterThanOrEqual(-L.down);
+        }
+      }
+    }
+  });
+
+  it('a civilian\'s head never leaves its neck, cowering included', () => {
+    const phases: CivPhase[] = ['plead', 'cower', 'flee', 'hide', 'backaway', 'startle', 'stumble', 'leave', 'arrive'];
+    for (const ph of phases) {
+      const { world, camera } = makeWorld();
+      const c = new Civilian(world, new THREE.Vector3(-0.3, 0, -4), 'world', 'worker', { act: 'plead' });
+      world.add(c);
+      const dc = new DrawnCast(null);
+      const st = newDrawnSprite();
+      const q = newDrawnQuery();
+      for (let f = 0; f < 12; f++) {
+        c.debugPose(ph, 0.05 + f * 0.08);
+        world.scene.updateMatrixWorld(true);
+        expect(c.drawnFigure!(q), ph).toBe(true);
+        dc.beginFrame();
+        const r = dc.place(camera, c.root, q, 720, 288, st);
+        if (typeof r !== 'object') continue;
+        const L = limit(st);
+        expect(st.hy, `${ph} f${f}`).toBeLessThanOrEqual(L.up);
+        expect(st.hy, `${ph} f${f}`).toBeGreaterThanOrEqual(-L.down);
+      }
+    }
   });
 });
 

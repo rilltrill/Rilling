@@ -98,6 +98,8 @@ export interface PoseKey {
   front?: PoseKey;
   /** In a front-view reach, the left arm (not the right) is the one that comes in low and big. */
   leadL?: boolean;
+  /** Front and back views: how far from the centre line the knees are drawn (a crouch seen from the front reads by its knees). */
+  kneeSpread?: number;
   /** A body lying with its feet toward the viewer: joints come from a hand-plotted table, not the bones. */
   corpse?: boolean;
 }

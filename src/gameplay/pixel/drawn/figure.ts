@@ -414,6 +414,12 @@ export function makeFigureRenderer() {
     else floorDepth(d, key, view);
     placeReach(d, key, view);
     placeShins(d, view);
+    // A crouch seen from the front: the thighs come at the viewer, so the knees are drawn out to
+    // the sides, or the crouched figure reads as a short man standing up.
+    if (key.kneeSpread && (view === 0 || view === 4)) {
+      sk.sx[J.kneeL] = view === 0 ? key.kneeSpread : -key.kneeSpread;
+      sk.sx[J.kneeR] = view === 0 ? -key.kneeSpread : key.kneeSpread;
+    }
     d.frames();
     if (d.corpse) {
       // Seen end on from the feet, the torso is short and the head small and far.

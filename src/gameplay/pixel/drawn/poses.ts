@@ -199,7 +199,7 @@ export const ZDEATH: PoseKey[] = [
     lL: [80, 14, 130],
     lR: [86, 18, 134],
     // From the front the chest stays low and the head tips forward above the collar, chin on the chest.
-    front: { noGround: true, py: -2.0, lean: 12, cLean: 8, sLean: 6, hPitch: 26, hRoll: -14, aL: [6, 16, 20], aR: [16, 22, 20], lL: [80, 14, 130], lR: [86, 18, 134] },
+    front: { noGround: true, py: -2.0, lean: 12, cLean: 8, sLean: 6, hPitch: 26, hRoll: -14, aL: [6, 16, 20], aR: [16, 22, 20], lL: [80, 14, 130], lR: [86, 18, 134], kneeSpread: 0.72 },
   },
   // Fallen on the back, seen from the side: flat on the street, one knee loose, the head in line with the spine.
   {
@@ -277,7 +277,7 @@ export const CIVBACK: PoseKey[] = Array.from({ length: 8 }, (_, i) => civBackFra
  * comes up, and the whole drawing has to duck with it, not the head slide down a still body.
  */
 function cowerKey(py: number): PoseKey {
-  const k: PoseKey = { noReach: true, py, lean: 22, sLean: 16, cLean: 14, hPitch: 24, hRoll: 6, aL: [110, 14, 118], aR: [124, 16, 122] };
+  const k: PoseKey = { noReach: true, py, lean: 22, sLean: 16, cLean: 14, hPitch: 24, hRoll: 6, aL: [110, 14, 118], aR: [124, 16, 122], kneeSpread: 0.86 };
   return { ...k, lL: foot(1, k, 0.32, 0.3), lR: foot(-1, k, -0.34, 0.24) };
 }
 export const CIVCOWER: PoseKey[] = [cowerKey(-1.25), cowerKey(-1.6), cowerKey(-1.95)];
