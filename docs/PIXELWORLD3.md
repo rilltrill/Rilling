@@ -68,7 +68,7 @@ In PIXEL WORLD the visible boxes are deleted (the hidden boxes stay for gameplay
   the pawnbroker's balls, a rooftop billboard, and each building's roof clutter (chimneys, tanks, aerials, vents) as
   separate cut-out cards standing a little behind the wall (parallax, and no painted sky in the atlas).
 - `stages/z1/pwFlats.ts`: staging. `Z1Flats.stage()` deletes a building's visible meshes (the hidden occluders stay),
-  lays the flat and its cards, and for `raked` flats turns the group about the flat's far end (25°, the near end swinging
+  lays the flat and its cards, and for `raked` flats turns the group about the flat's far end (35°, the near end swinging
   back inside the old footprint: `FLAT_RAKE`), floors the wedge of sidewalk that opens, and darkens the wall glows that
   have nothing to land on. Placements are chosen per building in `AT`; `&pwflats=parallel` or `&pwflats=<degrees>` overrides
   for look-dev. The RIALTO stays `parallel` (its marquee is a real box with animated chase bulbs on the old facade), the boss
