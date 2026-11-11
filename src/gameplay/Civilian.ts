@@ -9,6 +9,10 @@ import { buildHumanoid, type HumanoidRig } from '../content/kit/humanoid';
 import { Kit } from '../content/kit/ModelKit';
 import { bakeHumanoid, releaseGeos, ZT, type BakedHumanoid, type ZSurface } from '../content/enemies/zombieKit';
 import { humanLook, paintHuman, type HumanLook, type HumanPose } from '../content/pixel/human';
+import type { DrawnQuery } from './pixel/drawn/DrawnCast';
+import { FLANNEL } from './pixel/drawn/outfits';
+import { civilianFrame } from './pixel/drawn/states';
+import { isDrawnEveryone } from './pixel/look';
 import type { PixelFigure } from './pixel/figure';
 import { CIV_STAMP, HAND } from './pixel/stamps';
 import {
@@ -1386,6 +1390,22 @@ export class Civilian extends Entity {
     } else p.bubble = this.bubble;
     p.speed = this.phase === 'flee' || this.phase === 'leave' || this.phase === 'stumble' || this.phase === 'arrive' ? this.speed : 0;
     return paintHuman(f, this.rig, this.look, p);
+  }
+
+  /** PIXEL WORLD 3 (`castlook=d`): round one draws the civilian in the flannel shirt. */
+  override drawnFigure(q: DrawnQuery): boolean {
+    if (this.look.outfit !== 'flannel' && !isDrawnEveryone()) return false;
+    const pick = civilianFrame(this.phase, this.phaseT, this.shot, this.age, this.age * 13.5);
+    q.def = FLANNEL;
+    q.frames = pick.frames;
+    q.frame = pick.frame;
+    q.scale = this.rig.scale;
+    q.flags = 0;
+    q.lockView = this.shot;
+    q.chest.setFromMatrixPosition(this.rig.torsoMesh.matrixWorld);
+    const hm = this.rig.head.matrixWorld.elements;
+    q.head.set(hm[12] + hm[4] * 0.13, hm[13] + hm[5] * 0.13, hm[14] + hm[6] * 0.13);
+    return true;
   }
 
   override onShot(hit: ShotHit): ShotOutcome {

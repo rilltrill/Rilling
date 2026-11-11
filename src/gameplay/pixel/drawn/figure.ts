@@ -61,6 +61,8 @@ export class Draw {
   /** Sign making `n > 0` lateral (front/back views) or screen right (the others). */
   sg = new Float32Array(B.count);
   time = 0;
+  /** Damage drawn into this frame (bits 0-1 left arm, 2-3 right arm: 0 whole, 1 forearm gone, 2 arm gone; bit 4 headless). */
+  flags = 0;
 
   constructor(pen: Pen) {
     this.pen = pen;
@@ -198,13 +200,16 @@ export function makeFigureRenderer() {
   const d = new Draw(pen);
 
   /** Paint figure `def` in pose `key` into the canvas; `pxTall` = texels of a 6.25-head figure. */
-  function paint(def: FigureDef, key: PoseKey, view: ViewId, pxTall: number) {
+  function paint(def: FigureDef, key: PoseKey, view: ViewId, pxTall: number, hx = 0, hy = 0, flags = 0) {
     canvas.clear();
     pen.reset();
     d.view = view;
+    d.flags = flags;
     const sk = d.sk;
     buildPose(sk, key, def.ground !== false && !key.noGround);
     project(sk, view);
+    sk.sx[J.head] += hx * 0.1;
+    sk.sy[J.head] += hy * 0.1;
     d.S = pxTall / HEADS;
     d.cx = canvas.w / 2;
     d.cy = canvas.h - 8;
@@ -250,5 +255,12 @@ export function makeFigureRenderer() {
     };
   }
 
-  return { canvas, draw, paint, d };
+  /** The skeleton of a pose for one view, without drawing it (placement). */
+  function pose(key: PoseKey, view: ViewId) {
+    buildPose(d.sk, key, !key.noGround);
+    project(d.sk, view);
+    return d.sk;
+  }
+
+  return { canvas, draw, paint, d, pose };
 }

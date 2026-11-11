@@ -15,6 +15,8 @@ import {
  */
 
 export interface FigureDef {
+  /** Small number for the frame cache's keys. */
+  id: number;
   name: string;
   ground?: boolean;
   paint(d: Draw, view: ViewId): void;
@@ -133,7 +135,7 @@ function boots(d: Draw, ramp: number, view: ViewId) {
       // Laces.
       for (let i = 0; i < 3; i++) {
         const a = 0.1 - i * 0.09;
-        const n = view === 2 ? 0.12 : view === 1 || view === 3 ? 0.1 : 0;
+        const n = (view as number) === 2 ? 0.12 : view === 1 || (view as number) === 3 ? 0.1 : 0;
         pen.begin();
         pen.add(bx(n - 0.08), by(a));
         pen.add(bx(n + 0.08), by(a + 0.03));
@@ -286,6 +288,39 @@ function sleeve(d: Draw, tbl: readonly Pt[], map: readonly number[], ramp: numbe
   }
   pen.fill(ramp, 3, PARTL, group, -2);
   d.wedge(ARM_SHADE_F, map, group);
+}
+
+/** A stump of a limb: the torn end of the sleeve, meat and a knob of bone (level 1: at the elbow; 2: at the shoulder). */
+function stump(d: Draw, tbl: readonly Pt[], map: readonly number[], ramp: number, group: number, level: number) {
+  const pen = d.pen;
+  pen.begin();
+  if (level === 1) {
+    for (let i = 0; i < tbl.length; i++) {
+      const p = tbl[i];
+      if (p[0] === 1) continue;
+      d.pt(map[p[0]], p[1], p[2], p[3] === 1);
+    }
+    d.pt(map[0], 1.04, 0.14, true);
+    d.pt(map[0], 1.1, 0.02, true);
+    d.pt(map[0], 1.04, -0.12, true);
+  } else {
+    for (let i = 0; i < tbl.length; i++) {
+      const p = tbl[i];
+      if (p[0] === 1 || p[1] > 0.3) continue;
+      d.pt(map[0], p[1], p[2], p[3] === 1);
+    }
+    d.pt(map[0], 0.42, 0.16, true);
+    d.pt(map[0], 0.48, 0.0, true);
+    d.pt(map[0], 0.42, -0.14, true);
+  }
+  pen.fill(ramp, 3, PARTL, group, -2);
+  d.wedge(ARM_SHADE_F, map, group);
+  // The wet end: meat, a dark rim, the knob of bone.
+  const t = level === 1 ? 0.97 : 0.36;
+  polyB(d, map[0], [t, 0.16, t + 0.16, 0.12, t + 0.2, -0.02, t + 0.15, -0.14, t, -0.16]);
+  pen.fill(R.blood, 2, PARTL, group, 0);
+  polyB(d, map[0], [t + 0.04, 0.06, t + 0.14, 0.03, t + 0.13, -0.05, t + 0.05, -0.05]);
+  pen.shade(group, 0, R.bone, 3);
 }
 
 function hand(d: Draw, tbl: readonly Pt[], bone: number, ramp: number, group: number, narrow: number) {
@@ -452,16 +487,34 @@ function hiVisVest(d: Draw, view: ViewId) {
 
 const WORK_HEAD: HeadSpec = { skin: R.skinDead, dead: true, hair: R.hairDark, hat: R.hat, jaw: 0.6 };
 
+/** Draws an arm honouring the damage flags. */
+function workerArm(d: Draw, tbl: readonly Pt[], map: readonly number[], group: number, level: number, handTbl: readonly Pt[], handBone: number, hgroup: number, narrow: number) {
+  if (level === 0) {
+    sleeve(d, tbl, map, R.shirtGrey, group, R.shirtGrey, 1);
+    hand(d, handTbl, handBone, R.skinDead, hgroup, narrow);
+  } else stump(d, tbl, map, R.shirtGrey, group, level);
+}
+
+/** A neck stump for a headless figure. */
+function neckStump(d: Draw) {
+  const pen = d.pen;
+  polyB(d, B.neck, [-0.05, 0.3, 0.3, 0.26, 0.4, 0.1, 0.36, -0.14, 0.2, -0.28, -0.05, -0.3]);
+  pen.fill(R.blood, 2, PARTT, G.neck, 0);
+  polyB(d, B.neck, [0.1, 0.08, 0.28, 0.06, 0.3, -0.06, 0.12, -0.06]);
+  pen.shade(G.neck, 0, R.bone, 3);
+}
+
 export const WORKER: FigureDef = {
+  id: 0,
   name: 'worker',
   paint(d, view) {
     const shirt = R.shirtGrey;
     const armTbl = view === 2 ? ARM_S : view === 1 || view === 3 ? ARM_Q : ARM_F;
     const trunkTbl = view === 2 ? TRUNK_S : view === 1 || view === 3 ? TRUNK_Q : TRUNK_F;
-    if (isSideish(view)) {
-      sleeve(d, armTbl, ARM_L, shirt, G.armFar, shirt, 1);
-      hand(d, HAND_CLAW, B.haL, R.skinDead, G.handF, view === 2 ? 0.7 : 0.85);
-    }
+    const lvlL = d.flags & 3;
+    const lvlR = (d.flags >> 2) & 3;
+    const headless = (d.flags & 16) !== 0;
+    if (isSideish(view)) workerArm(d, armTbl, ARM_L, G.armFar, lvlL, HAND_CLAW, B.haL, G.handF, view === 2 ? 0.7 : 0.85);
     boots(d, R.boot, view);
     jeans(d, R.denim, view);
     belt(d, R.belt, view, true);
@@ -471,17 +524,14 @@ export const WORKER: FigureDef = {
     shape(d, NECK_F, B.neck, R.skinDead, PARTH, G.neck, 2, 0);
     hiVisVest(d, view);
     if (!isBack(view)) collar(d, view, shirt, G.neck);
-    paintHead(d, WORK_HEAD, HG, view);
+    if (headless) neckStump(d);
+    else paintHead(d, WORK_HEAD, HG, view);
     if (isSideish(view)) {
-      sleeve(d, armTbl, ARM_R, shirt, G.armNear, shirt, 1);
-      hand(d, HAND_CLAW, B.haR, R.skinDead, G.handN, view === 2 ? 0.7 : 0.85);
+      workerArm(d, armTbl, ARM_R, G.armNear, lvlR, HAND_CLAW, B.haR, G.handN, view === 2 ? 0.7 : 0.85);
     } else {
-      sleeve(d, armTbl, ARM_L, shirt, G.armFar, shirt, 1);
-      sleeve(d, armTbl, ARM_R, shirt, G.armNear, shirt, 1);
-      hand(d, HAND_CLAW, B.haL, R.skinDead, G.handF, 1);
-      hand(d, HAND_CLAW, B.haR, R.skinDead, G.handN, 1);
+      workerArm(d, armTbl, ARM_L, G.armFar, lvlL, HAND_CLAW, B.haL, G.handF, 1);
+      workerArm(d, armTbl, ARM_R, G.armNear, lvlR, HAND_CLAW, B.haR, G.handN, 1);
     }
-    d.pen.begin();
   },
 };
 
@@ -515,6 +565,7 @@ function check(d: Draw, group: number, bone: number, a0: number, a1: number, n0:
 const FLANNEL_HEAD: HeadSpec = { skin: R.skinLive, dead: false, hair: R.hairDark, hat: -1, jaw: 0.5 };
 
 export const FLANNEL: FigureDef = {
+  id: 1,
   name: 'flannel',
   paint(d, view) {
     const shirt = R.flannel;

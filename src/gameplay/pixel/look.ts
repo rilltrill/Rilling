@@ -18,7 +18,7 @@
  * read once when this module loads).
  */
 
-export type CastLookId = '0' | 'b';
+export type CastLookId = '0' | 'b' | 'd';
 
 export interface CastStyle {
   id: CastLookId;
@@ -43,18 +43,22 @@ export interface CastStyle {
   small: number;
   /** Figures at least this tall get full dark ink where a limb crosses the trunk. */
   big: number;
+  /** Humanoids are shown as drawn figures (`gameplay/pixel/drawn`), not painted over the rig. */
+  drawn?: boolean;
 }
 
 export const CAST_STYLES: Record<CastLookId, CastStyle> = {
   '0': { id: '0', name: 'CONTOUR (before)', cel: 0, base: 3, shadow: 1, line: 1, hi: 0, ink: 0.42, band: 0, ground: 0, small: 45, big: 110 },
   b: { id: 'b', name: 'CEL', cel: 2, base: 3, shadow: 1, line: 1, hi: 2, ink: 0.5, band: 0.5, ground: 1, small: 70, big: 110 },
+  // PIXEL WORLD 3 (docs/PIXELWORLD3.md): people are drawn (`drawn/`), everything else stays CEL.
+  d: { id: 'd', name: 'DRAWN', cel: 2, base: 3, shadow: 1, line: 1, hi: 2, ink: 0.5, band: 0.5, ground: 1, small: 70, big: 110, drawn: true },
 };
 
 /** The look used when nothing selects one (`&castlook=`, `CASTLOOK`). */
 export const DEFAULT_CAST_LOOK: CastLookId = 'b';
 
 export function isCastLook(v: unknown): v is CastLookId {
-  return v === '0' || v === 'b';
+  return v === '0' || v === 'b' || v === 'd';
 }
 
 function envLook(): CastLookId {
@@ -66,6 +70,17 @@ function envLook(): CastLookId {
 
 let current: CastStyle = CAST_STYLES[envLook()];
 let version = 0;
+
+/** Look-dev: every zombie walker shows the worker figure, every civilian the flannel one (`&drawnfig=all`; round one only draws two outfits). */
+let drawnEveryone = false;
+
+export function setDrawnEveryone(on: boolean) {
+  drawnEveryone = on;
+}
+
+export function isDrawnEveryone(): boolean {
+  return drawnEveryone;
+}
 
 /** The active style. */
 export function castStyle(): CastStyle {

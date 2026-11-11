@@ -370,7 +370,6 @@ export class Pen {
     this.flatten(closed);
     const pn = this.pn;
     if (pn < 2) return;
-    const c = this.c;
     const end = closed ? pn : pn - 1;
     for (let i = 0; i < end; i++) {
       const j = (i + 1) % pn;

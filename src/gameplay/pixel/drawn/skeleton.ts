@@ -174,7 +174,7 @@ function mulV(m: Float32Array, x: number, y: number, z: number, i: number, ox: n
   sk.z[i] = oz + m[2] * x + m[5] * y + m[8] * z;
 }
 
-const NONE: readonly number[] = [0, 0, 0, 0];
+const NONE: readonly (number | undefined)[] = [0, 0, 0, 0];
 
 /** Forward kinematics: `k` to the joints of `sk`, figure frame. `ground`: keep the lowest foot on y = 0. */
 export function buildPose(sk: Skeleton, k: PoseKey, ground = true) {
@@ -239,7 +239,7 @@ export function buildPose(sk: Skeleton, k: PoseKey, ground = true) {
   }
 }
 
-function limb(sk: Skeleton, parent: Float32Array, a: number, b: number, c: number, d: number, p: readonly number[], l1: number, l2: number, l3: number, side: number) {
+function limb(sk: Skeleton, parent: Float32Array, a: number, b: number, c: number, d: number, p: readonly (number | undefined)[], l1: number, l2: number, l3: number, side: number) {
   identity(_R1);
   // Swing forward: the arm hanging down (−y) comes up toward +z, so about x by −swing.
   rot(_R1, 0, -(p[0] ?? 0));
@@ -254,7 +254,7 @@ function limb(sk: Skeleton, parent: Float32Array, a: number, b: number, c: numbe
   mulV(_R1, 0, -l3, 0, d, sk.x[c], sk.y[c], sk.z[c], sk);
 }
 
-function leg(sk: Skeleton, a: number, b: number, c: number, d: number, p: readonly number[], parent: Float32Array) {
+function leg(sk: Skeleton, a: number, b: number, c: number, d: number, p: readonly (number | undefined)[], parent: Float32Array) {
   const side = a === J.hipL ? 1 : -1;
   identity(_R1);
   rot(_R1, 0, -(p[0] ?? 0));

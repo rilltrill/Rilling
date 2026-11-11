@@ -1,4 +1,4 @@
-import { B, type Draw, type Pt } from './figure';
+import { B, type Pt } from './figure';
 
 /**
  * DRAWN FIGURES: the anatomy tables. Limbs are outlines in bone space (bone 0 / 1 of the limb, t

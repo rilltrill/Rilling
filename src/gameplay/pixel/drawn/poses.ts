@@ -13,8 +13,44 @@ export const ZIDLE: PoseKey[] = [
   zPose({ px: 0.06, tilt: 4, sTilt: -3, cTilt: -5, hRoll: -8, aL: [6, 6, 18], aR: [10, 10, 26], lL: [4, 3, 8], lR: [-3, 5, 4], py: -0.04 }),
 ];
 
+/** A linear in-between of two keys (an animator's in-between; the keys hold the design). */
+export function blendKey(a: PoseKey, b: PoseKey, t: number): PoseKey {
+  const mix = (x: number | undefined, y: number | undefined) => (x ?? 0) + ((y ?? 0) - (x ?? 0)) * t;
+  const arr = (x: readonly (number | undefined)[] | undefined, y: readonly (number | undefined)[] | undefined): [number, number, number, number] => [mix(x?.[0], y?.[0]), mix(x?.[1], y?.[1]), mix(x?.[2], y?.[2]), mix(x?.[3], y?.[3])];
+  return {
+    px: mix(a.px, b.px),
+    py: mix(a.py, b.py),
+    pz: mix(a.pz, b.pz),
+    lean: mix(a.lean, b.lean),
+    tilt: mix(a.tilt, b.tilt),
+    turn: mix(a.turn, b.turn),
+    sLean: mix(a.sLean, b.sLean),
+    sTilt: mix(a.sTilt, b.sTilt),
+    sTurn: mix(a.sTurn, b.sTurn),
+    cLean: mix(a.cLean, b.cLean),
+    cTilt: mix(a.cTilt, b.cTilt),
+    cTurn: mix(a.cTurn, b.cTurn),
+    hPitch: mix(a.hPitch, b.hPitch),
+    hRoll: mix(a.hRoll, b.hRoll),
+    hYaw: mix(a.hYaw, b.hYaw),
+    aL: arr(a.aL, b.aL),
+    aR: arr(a.aR, b.aR),
+    lL: arr(a.lL, b.lL),
+    lR: arr(a.lR, b.lR),
+  };
+}
+
+/** Doubles a cycle with in-betweens (six keys drawn, twelve frames shown: about 12 a second at a walk). */
+function doubled(keys: PoseKey[]): PoseKey[] {
+  const out: PoseKey[] = [];
+  for (let i = 0; i < keys.length; i++) {
+    out.push(keys[i], blendKey(keys[i], keys[(i + 1) % keys.length], 0.5));
+  }
+  return out;
+}
+
 /** Zombie shamble, six frames: a stiff planted leg, the other dragged through. */
-export const ZSHAMBLE: PoseKey[] = [
+const ZSHAMBLE6: PoseKey[] = [
   // 0: left foot planted forward, right trailing.
   zPose({ px: 0.05, py: -0.06, tilt: 5, sTilt: -3, cTilt: -5, turn: 6, sTurn: -10, hRoll: -8, aL: [-8, 10, 20], aR: [30, 16, 30], lL: [20, 4, 8], lR: [-14, 8, 16] }),
   // 1: weight rolling onto the left leg.
@@ -28,6 +64,9 @@ export const ZSHAMBLE: PoseKey[] = [
   // 5: passing: the left foot dragged past.
   zPose({ px: -0.08, py: 0.04, tilt: -6, sTilt: 6, cTilt: -3, turn: 3, sTurn: -2, hRoll: -9, aL: [12, 10, 28], aR: [14, 14, 26], lL: [4, 10, 44], lR: [-2, 6, 6] }),
 ];
+
+/** The cycle shown: twelve frames. */
+export const ZSHAMBLE: PoseKey[] = doubled(ZSHAMBLE6);
 
 /** Arms coming up to grab: two frames rising, one at full reach. */
 export const ZWINDUP: PoseKey[] = [
@@ -59,13 +98,14 @@ export const ZDEATH: PoseKey[] = [
 
 const cPose = (o: PoseKey): PoseKey => o;
 
+
 /** The living, standing: weight on a leg, an alert head. */
 export const CIVSTAND: PoseKey[] = [
   cPose({ px: 0.05, tilt: 3, sTilt: -4, cTilt: -3, hRoll: 4, aL: [4, 8, 16], aR: [6, 10, 22], lL: [2, 5, 6], lR: [-2, 12, 4] }),
 ];
 
 /** Running for her life: leaning in, arms pumping. */
-export const CIVRUN: PoseKey[] = [
+const CIVRUN6: PoseKey[] = [
   { lean: 10, sLean: 6, cLean: 6, py: -0.1, turn: 8, sTurn: -14, hPitch: -6, aL: [-40, 10, 82], aR: [46, 10, 94], lL: [52, 4, 26], lR: [-38, 8, 68] },
   { lean: 8, sLean: 6, cLean: 6, py: -0.02, turn: 5, sTurn: -9, hPitch: -6, aL: [-20, 8, 86], aR: [26, 8, 92], lL: [30, 4, 18], lR: [-18, 8, 80] },
   { lean: 8, sLean: 6, cLean: 4, py: 0.08, turn: -2, sTurn: 2, hPitch: -6, aL: [14, 8, 84], aR: [-6, 8, 88], lL: [0, 4, 30], lR: [-4, 8, 96] },
@@ -73,6 +113,8 @@ export const CIVRUN: PoseKey[] = [
   { lean: 8, sLean: 6, cLean: 6, py: -0.02, turn: -5, sTurn: 9, hPitch: -6, aL: [26, 8, 92], aR: [-20, 8, 86], lL: [-18, 8, 80], lR: [30, 4, 18] },
   { lean: 8, sLean: 6, cLean: 4, py: 0.08, turn: 2, sTurn: -2, hPitch: -6, aL: [-6, 8, 88], aR: [14, 8, 84], lL: [-4, 8, 96], lR: [0, 4, 30] },
 ];
+
+export const CIVRUN: PoseKey[] = doubled(CIVRUN6);
 
 /** Cowering: crouched, knees in, arms up over the head. */
 export const CIVCOWER: PoseKey[] = [
@@ -98,3 +140,6 @@ export const POSES = {
 } as const;
 
 export type PoseName = keyof typeof POSES;
+
+/** Each pose table's id (cache keys). */
+export const POSE_INDEX = new Map<readonly PoseKey[], number>(Object.values(POSES).map((f, i) => [f, i] as [readonly PoseKey[], number]));
