@@ -487,7 +487,7 @@ function paintCity(c: PwCanvas, k: PwKit, o: Z1SkylineOpts) {
   const ground = H - 1;
   const near = k.ramp(o.hex, { light: 0.4, sat: 0.9 });
   const far = k.ramp(0x363a50, { light: 0.34, sat: 0.8, dark: 0.3 });
-  const smoke = k.ramp(0x2c2838, { light: 0.34, sat: 0.7, dark: 0.3 });
+  const smoke = k.ramp(0x3e3856, { light: 0.34, sat: 0.7, dark: 0.3 });
   const fog = k.ramp(o.fog, { light: 0.3 });
   const warm = k.ramp(0xffc477, { light: 0.4 });
   const cool = k.ramp(0xa8c4ff, { light: 0.4 });
@@ -500,13 +500,17 @@ function paintCity(c: PwCanvas, k: PwKit, o: Z1SkylineOpts) {
   };
 
   // The haze: smoke lying in the air between the blocks, a ragged top, two tones, a broken edge.
+  // (It reaches well up behind the towers: the sky tile's pale horizon band has a ruler-straight top, and the far city must hide it.)
   for (let x = 0; x < TW; x++) {
-    const lump = vn(x, 73, 201) * 12 + vn(x, 31, 203) * 7 + vn(x, 13, 205) * 3;
-    const top = Math.round(ground - 16 - lump);
+    // (Its top stays above 8 degrees everywhere, over the sky tile's straight dither seam; the lumps ride up and down above that.)
+    const lump = vn(x, 73, 201) * 9 + vn(x, 31, 203) * 6 + vn(x, 13, 205) * 3 + vn(x, 7, 207) * 2;
+    const top = Math.round(ground - 52 - lump);
+    const lump2 = vn(x, 53, 211) * 12 + vn(x, 19, 213) * 6 + vn(x, 9, 215) * 3;
+    const top2 = Math.round(ground - 18 - lump2);
     for (let y = Math.max(0, top); y <= ground; y++) {
-      const u = (y - top) / Math.max(1, ground - top);
       if (y === top && bayer(x, y) > 0.55) continue;
-      c.set(x, y, smoke, u < 0.45 ? 2.5 : 2);
+      if (y >= top2) c.set(x, y, smoke, y === top2 && bayer(x, y) > 0.55 ? 2.5 : 1.8);
+      else c.set(x, y, smoke, y < top + 3 ? 2.9 : 2.6);
     }
   }
 

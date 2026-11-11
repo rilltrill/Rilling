@@ -724,19 +724,16 @@ export const paintMarqueeBoard: PwPainter = (c, k) => {
     }
     if (p.kind === 'cracked') {
       // A crack across the face: the panel gone along it, the tube behind showing.
-      const cx0 = p.x0 + 22;
-      const cx1 = p.x0 + 56;
+      const cx0 = p.x0 + 46;
+      const cx1 = p.x0 + 76;
       for (let x = cx0; x < cx1; x++) {
         const u = (x - cx0) / (cx1 - cx0);
-        const yMid = 16 + Math.round(u * 8 + Math.sin(u * 9) * 2);
-        const half = 1 + Math.round(Math.sin(u * Math.PI) * 3.2);
+        const yMid = 12 + Math.round(u * 14 + Math.sin(u * 9) * 2);
+        const half = 1 + Math.round(Math.sin(u * Math.PI) * 2);
         for (let y = yMid - half; y <= yMid + half; y++) c.set(x, y, inkR, 0.7);
         c.set(x, yMid - half - 1, frame, 2);
         c.set(x, yMid + half + 1, face, 2.2, PWF.GLOW);
-      }
-      for (let x = cx0 + 4; x < cx1 - 3; x++) {
-        const u = (x - cx0) / (cx1 - cx0);
-        c.set(x, 18 + Math.round(u * 8), tube, 4.6, PWF.GLOW);
+        if (x > cx0 + 3 && x < cx1 - 3 && x % 4 !== 0) c.set(x, yMid, tube, 4.6, PWF.GLOW);
       }
     }
   }

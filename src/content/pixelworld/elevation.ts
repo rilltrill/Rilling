@@ -389,9 +389,10 @@ export class Elev {
     const { c, r, seed } = this;
     const cx = this.X(cM);
     const yB = this.Y(baseM);
-    const w = Math.round((o.w ?? 2.5) * this.tpm);
-    const h = Math.round((o.h ?? 2.2) * this.tpm);
-    const legs = 42;
+    // (The real thing is bigger than it looks in the plans, and it is seen from a long way off: at 24 art pixels wide only its big shapes read.)
+    const w = Math.round((o.w ?? 3.6) * this.tpm);
+    const h = Math.round((o.h ?? 2.7) * this.tpm);
+    const legs = 62;
     const yLeg = yB - legs;
     const bow = Math.max(3, Math.round(w * 0.08));
     /** How high the near rim of a round tank rises in the middle (seen from below: the arch of a hoop). */
@@ -402,7 +403,8 @@ export class Elev {
     const iron = r.stone;
     // Four steel legs (the rear pair inset and shorter, a shade darker), each lit on its moon side; X braces between them.
     const leg = (lx: number, top: number, foot: number, lit: number) => {
-      for (let i = 0; i < 5; i++) c.line(lx + i, top, lx + i - Math.sign(lx - cx) * 2, foot, iron, i === 0 ? lit : i === 4 ? 0.7 : lit - 1.2);
+      // (Eight texels of steel, spread at the foot: they must read as legs from across the street.)
+      for (let i = 0; i < 8; i++) c.line(lx + i, top, lx + i - Math.sign(lx - cx) * 3, foot, iron, i < 2 ? lit : i === 7 ? 0.7 : lit - 1.1);
     };
     const rearDx = Math.round(w * 0.2);
     leg(cx - rearDx - 2, yLeg, yB - 8, 2.7);
@@ -421,7 +423,8 @@ export class Elev {
       const u = (x - cx) / (w / 2);
       const a0 = Math.asin(Math.max(-1, Math.min(1, u)));
       const stave = Math.floor((a0 + 1.6) * 4.2);
-      const light = u < -0.55 ? 3.4 : u < -0.05 ? 2.7 : u < 0.5 ? 1.9 : 1.2;
+      // A cylinder in five soft whole tones, no dark band down one side (from afar that read as a box's side face).
+      const light = u < -0.62 ? 3.5 : u < -0.2 ? 3.0 : u < 0.2 ? 2.6 : u < 0.62 ? 2.2 : 1.8;
       const tone = light + (stave % 3 === 0 ? 0.3 : 0) - (stave % 7 === 2 ? 0.5 : 0);
       const top = yT - arch(x);
       const foot = yT + h - arch(x);

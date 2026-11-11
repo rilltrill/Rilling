@@ -67,8 +67,8 @@ const WALL_ROOF: ElevWallColours = { wall: 0x6a6a70, brick: 0x76402f, stone: 0x9
 /** The card of one roof item (its Elev sized to the item), standing on the wall's top line behind it. */
 function roofCard(buildingId: string, i: number, it: RoofItem, wM: number, hTop: number): FlatCardDef {
   const [kind, xM, a] = it;
-  const cw = kind === 'tank' ? 3.1 : kind === 'aerial' ? 1.4 : (a ?? (kind === 'chim3' ? 1.4 : 1.1)) + 0.6;
-  const ch = kind === 'tank' ? 5.9 : kind === 'chim3' ? 4.2 : kind === 'chim' ? 3.3 : kind === 'aerial' ? 3.8 : 1.8;
+  const cw = kind === 'tank' ? 4.3 : kind === 'aerial' ? 1.4 : (a ?? (kind === 'chim3' ? 1.4 : 1.1)) + 0.6;
+  const ch = kind === 'tank' ? 7.6 : kind === 'chim3' ? 4.2 : kind === 'chim' ? 3.3 : kind === 'aerial' ? 3.8 : 1.8;
   const seed = (i + 1) * 37 + buildingId.length * 91;
   return {
     id: `r${i}`,
@@ -82,7 +82,7 @@ function roofCard(buildingId: string, i: number, it: RoofItem, wM: number, hTop:
     paint: (c, k) => {
       const e = new Elev(c, k, seed, WALL_ROOF, 0);
       const mid = cw / 2;
-      if (kind === 'tank') e.tank(mid, 0.75, { w: 2.5, h: 2.1 });
+      if (kind === 'tank') e.tank(mid, 0.75);
       else if (kind === 'chim') e.chimney(mid, a ?? 1, ch - 0.15, 0, { pots: 2 });
       else if (kind === 'chim3') e.chimney(mid, a ?? 1.3, ch - 0.15, 0, { pots: 3 });
       else if (kind === 'vent') e.vent(mid, 0.6);
