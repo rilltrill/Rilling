@@ -1,7 +1,8 @@
 import { B, type Draw, type Pt } from './figure';
 import { paintHead, type HeadGroups, type HeadSpec } from './head';
 import { R } from './palette';
-import type { ViewId } from './skeleton';
+import type { PoseKey, ViewId } from './skeleton';
+import { CIVSTAND, ZIDLE } from './poses';
 import {
   ARM_F, ARM_L, ARM_Q, ARM_R, ARM_S, ARM_SHADE_F, BOOT_F, BOOT_Q, BOOT_S, HAND_CLAW, HAND_OPEN, LEG_F, LEG_L, LEG_Q, LEG_R, LEG_S, LEG_SHADE_F, NECK_F, PELVIS_F, PELVIS_Q, PELVIS_S, TRUNK_F, TRUNK_MAP, TRUNK_Q, TRUNK_S,
 } from './body';
@@ -17,6 +18,8 @@ import {
 export interface FigureDef {
   /** Small number for the frame cache's keys. */
   id: number;
+  /** The pose its visual centres are measured in (aim alignment). */
+  rest: PoseKey;
   name: string;
   ground?: boolean;
   paint(d: Draw, view: ViewId): void;
@@ -506,6 +509,7 @@ function neckStump(d: Draw) {
 
 export const WORKER: FigureDef = {
   id: 0,
+  rest: ZIDLE[0],
   name: 'worker',
   paint(d, view) {
     const shirt = R.shirtGrey;
@@ -566,6 +570,7 @@ const FLANNEL_HEAD: HeadSpec = { skin: R.skinLive, dead: false, hair: R.hairDark
 
 export const FLANNEL: FigureDef = {
   id: 1,
+  rest: CIVSTAND[0],
   name: 'flannel',
   paint(d, view) {
     const shirt = R.flannel;

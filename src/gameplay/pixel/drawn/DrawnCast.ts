@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { makeFigureRenderer } from './figure';
 import type { FigureDef } from './outfits';
 import { RAMP_TONES } from './raster';
-import { J, type PoseKey, type ViewId } from './skeleton';
+import { HEADS, J, type PoseKey, type ViewId } from './skeleton';
 import { RAMPS, rampColors } from './palette';
 import { POSE_INDEX } from './poses';
 
@@ -17,6 +17,10 @@ import { POSE_INDEX } from './poses';
 
 export const ATLAS_SIZE = 2048;
 const ATLAS = ATLAS_SIZE;
+
+const _rp = new THREE.Vector3();
+const _v = new THREE.Vector3();
+const _c = new THREE.Vector3();
 /** Most rasters a frame (each ≈ 1 ms at the biggest size: the rest wait a frame or two). */
 export const MAX_RASTERS = 3;
 /** Whole figure texels tall (above: texels double). */
@@ -42,10 +46,60 @@ export interface DrawnQuery {
   chest: THREE.Vector3;
   /** Keep the current view (while falling the rig's axes say nothing about facing). */
   lockView: boolean;
+  /**
+   * The rig's arm angles (degrees; swing forward, outward, elbow flex), when the drawn arms should
+   * follow it: seen from the side the arms cross the torso (a hit there is a limb hit on the
+   * rig), and in a windup the reach has to be where the hands are. `armsAlways`: in every view.
+   */
+  armsFromRig: boolean;
+  armsAlways: boolean;
+  aL: [number, number, number];
+  aR: [number, number, number];
 }
 
+const DEG = 180 / Math.PI;
+
+/** Reads the rig's arm rotations into a query: same axes as the hand-drawn keyframes (a forward swing is the rig's negative x rotation). */
+export function rigArms(q: DrawnQuery, armL: { shoulder: THREE.Object3D; elbow: THREE.Object3D }, armR: { shoulder: THREE.Object3D; elbow: THREE.Object3D }) {
+  q.aL[0] = -armL.shoulder.rotation.x * DEG;
+  q.aL[1] = armL.shoulder.rotation.z * DEG;
+  q.aL[2] = -armL.elbow.rotation.x * DEG;
+  q.aR[0] = -armR.shoulder.rotation.x * DEG;
+  q.aR[1] = -armR.shoulder.rotation.z * DEG;
+  q.aR[2] = -armR.elbow.rotation.x * DEG;
+  q.armsFromRig = true;
+}
+
+/** Arm-angle buckets for the cache key: 20° steps are finer than a sprite's arm can show at these sizes. */
+function bucket(v: number, lo: number, n: number): number {
+  return Math.max(0, Math.min(n - 1, Math.round((v - lo) / 20)));
+}
+
+const _pk: PoseKey = {};
+const _aL: [number, number, number, number] = [0, 0, 0, 0];
+const _aR: [number, number, number, number] = [0, 0, 0, 0];
+
+/** Scratch pose: `key` with its arms replaced by the query's rig arms (quantised). */
+function withRigArms(key: PoseKey, q: DrawnQuery): PoseKey {
+  Object.assign(_pk, ZERO_POSE, key);
+  _aL[0] = bucket(q.aL[0], -60, 12) * 20 - 60;
+  _aL[1] = key.aL?.[1] ?? 10;
+  _aL[2] = bucket(q.aL[2], 0, 8) * 20;
+  _aL[3] = key.aL?.[3] ?? 0;
+  _aR[0] = bucket(q.aR[0], -60, 12) * 20 - 60;
+  _aR[1] = key.aR?.[1] ?? 10;
+  _aR[2] = bucket(q.aR[2], 0, 8) * 20;
+  _aR[3] = key.aR?.[3] ?? 0;
+  _pk.aL = _aL;
+  _pk.aR = _aR;
+  return _pk;
+}
+
+const ZERO_POSE: PoseKey = { px: 0, py: 0, pz: 0, lean: 0, tilt: 0, turn: 0, sLean: 0, sTilt: 0, sTurn: 0, cLean: 0, cTilt: 0, cTurn: 0, hPitch: 0, hRoll: 0, hYaw: 0, noGround: false };
+
+
 export function newDrawnQuery(): DrawnQuery {
-  return { def: null, frames: null, frame: 0, flags: 0, scale: 1, head: new THREE.Vector3(), chest: new THREE.Vector3(), lockView: false };
+  return { def: null, frames: null, frame: 0, flags: 0, scale: 1, head: new THREE.Vector3(), chest: new THREE.Vector3(), lockView: false, armsFromRig: false, armsAlways: false, aL: [0, 0, 0], aR: [0, 0, 0] };
 }
 
 interface Entry {
@@ -71,15 +125,31 @@ interface Shelf {
   last: number;
 }
 
-/** Per-sprite state: the current view's hysteresis. */
+/** Per-sprite state: the current view, and where the last frame went (retro pixels; read by aim checks). */
 export interface DrawnSprite {
   view: ViewId;
   mirror: boolean;
+  /** Retro pixels per texel. */
+  k: number;
+  /** Sprite rectangle: left and bottom edges (retro pixels, y up), depth of the plane. */
+  left: number;
+  bottom: number;
+  depth: number;
+  /** The drawing asked for (tools re-render it to read its parts). */
+  size: number;
+  hx: number;
+  hy: number;
+  frame: number;
+  pose: PoseKey | null;
+  def: FigureDef | null;
+  flags: number;
 }
 
 export function newDrawnSprite(): DrawnSprite {
-  return { view: 0, mirror: false };
+  return { view: 0, mirror: false, k: 1, left: 0, bottom: 0, depth: 1, size: 0, hx: 0, hy: 0, frame: 0, pose: null, def: null, flags: 0 };
 }
+
+export type Placement = Entry | 'away' | 'near' | 'wait';
 
 export class DrawnCast {
   readonly atlas: THREE.DataTexture;
@@ -87,7 +157,7 @@ export class DrawnCast {
   private data = new Uint8Array(ATLAS * ATLAS);
   private pal = new Uint8Array(RAMP_TONES * RAMPS.length * 4);
   private colors = rampColors();
-  private renderer: THREE.WebGLRenderer;
+  private renderer: THREE.WebGLRenderer | null;
   private fig = makeFigureRenderer();
   private entries = new Map<number, Entry>();
   private shelves: Shelf[] = [];
@@ -95,12 +165,14 @@ export class DrawnCast {
   private upload = new Uint8Array(480 * 480);
   private frame = 0;
   private atlasReady = false;
+  /** Per-figure-and-view centroid offsets (see `bias`). */
+  private biases = new Map<number, Float32Array>();
   /** Rasters this frame. */
   rasters = 0;
   // Stats.
   stats = { rasters: 0, hits: 0, misses: 0, near: 0, rasterMs: 0, entries: 0 };
 
-  constructor(renderer: THREE.WebGLRenderer) {
+  constructor(renderer: THREE.WebGLRenderer | null) {
     this.renderer = renderer;
     const t = new THREE.DataTexture(this.data, ATLAS, ATLAS, THREE.RedFormat, THREE.UnsignedByteType);
     t.minFilter = THREE.NearestFilter;
@@ -150,8 +222,8 @@ export class DrawnCast {
     return ATLAS * ATLAS + RAMP_TONES * RAMPS.length * 4;
   }
 
-  private static key(fig: number, pose: number, frame: number, view: number, size: number, hx: number, hy: number, flags: number): number {
-    return size + 1000 * (fig + 16 * (pose + 32 * (frame + 16 * (view + 8 * (hx + 16 * (hy + 16 * flags))))));
+  private static key(fig: number, pose: number, frame: number, view: number, size: number, hx: number, hy: number, flags: number, arms: number): number {
+    return size + 1000 * (fig + 16 * (pose + 32 * (frame + 12 * (view + 8 * (hx + 16 * (hy + 16 * (flags + 32 * arms)))))));
   }
 
   /** Puts a shelf for a figure `h` tall; may evict the least recently used shelf. */
@@ -221,6 +293,7 @@ export class DrawnCast {
 
   private uploadRegion(x: number, y: number, w: number, h: number) {
     const r = this.renderer;
+    if (!r) return; // (node tests rasterise without a GPU)
     const gl = r.getContext() as WebGL2RenderingContext;
     if (!this.atlasReady) {
       r.initTexture(this.atlas);
@@ -239,9 +312,9 @@ export class DrawnCast {
    * The frame to show for a query: the exact one, or one rastered now while there is budget; else
    * the nearest cached size of the same drawing (null only if nothing like it has been drawn yet).
    */
-  frameFor(q: DrawnQuery, frames: readonly PoseKey[], fig: number, poseId: number, frameIndex: number, view: ViewId, size: number, hx: number, hy: number): Entry | null {
+  frameFor(q: DrawnQuery, pose: PoseKey, fig: number, poseId: number, frameIndex: number, view: ViewId, size: number, hx: number, hy: number, arms: number): Entry | null {
     const flags = q.flags;
-    const key = DrawnCast.key(fig, poseId, frameIndex, view, size, hx, hy, flags);
+    const key = DrawnCast.key(fig, poseId, frameIndex, view, size, hx + 7, hy + 7, flags, arms);
     const hit = this.entries.get(key);
     if (hit) {
       this.stats.hits++;
@@ -251,7 +324,7 @@ export class DrawnCast {
     }
     this.stats.misses++;
     if (this.rasters < MAX_RASTERS) {
-      const e = this.raster(key, q.def!, frames[frameIndex], view, size, hx, hy, flags);
+      const e = this.raster(key, q.def!, pose, view, size, hx, hy, flags);
       if (e) return e;
     }
     // Nearest cached size of this drawing.
@@ -259,7 +332,7 @@ export class DrawnCast {
       for (let sgn = -1; sgn <= 1; sgn += 2) {
         const sz = size + d * 2 * sgn;
         if (sz < 20) continue;
-        const near = this.entries.get(DrawnCast.key(fig, poseId, frameIndex, view, sz, hx, hy, flags));
+        const near = this.entries.get(DrawnCast.key(fig, poseId, frameIndex, view, sz, hx + 7, hy + 7, flags, arms));
         if (near) {
           this.stats.near++;
           near.used = this.frame;
@@ -269,6 +342,145 @@ export class DrawnCast {
       }
     }
     return null;
+  }
+
+  /**
+   * Places a drawn figure for this redraw: the frame to show and where (`st`), or why not.
+   * Feet on the rig's ground point; chest over the rig's chest (the sprite shifts sideways);
+   * head on the rig's head (the neck is redrawn to reach it). Pure of GL: tests and tools call it too.
+   */
+  place(cam: THREE.PerspectiveCamera, root: THREE.Object3D, q: DrawnQuery, gw: number, gh: number, st: DrawnSprite): Placement {
+    const P = cam.projectionMatrix.elements;
+    const inv = cam.matrixWorldInverse;
+    const m = root.matrixWorld.elements;
+    _rp.setFromMatrixPosition(root.matrixWorld);
+    _v.copy(_rp).applyMatrix4(inv);
+    const D = -_v.z;
+    if (D < cam.near * 2) return 'near';
+    const projX = (x: number, z: number) => (((P[0] * x + P[8] * z) / -z) * 0.5 + 0.5) * gw;
+    const projY = (y: number, z: number) => (((P[5] * y + P[9] * z) / -z) * 0.5 + 0.5) * gh;
+    const gx = projX(_v.x, _v.z);
+    const gy = projY(_v.y, _v.z);
+    if (gx < -0.2 * gw || gx > 1.2 * gw || gy < -0.4 * gh || gy > 1.5 * gh) return 'away';
+    // Size: the rig's height at the ground point's depth, in frame pixels; texels double past the cap.
+    const full = q.scale * 1.83 * ((P[5] * gh) / (2 * D));
+    const k = full > MAX_FIGURE_PX ? Math.ceil(full / MAX_FIGURE_PX) : 1;
+    const size = sizeStep(full / k);
+    // View: the figure's forward against the camera, nearest drawn view (with hysteresis).
+    _c.setFromMatrixPosition(cam.matrixWorld).sub(_rp);
+    const cl = Math.hypot(_c.x, _c.z);
+    if (cl > 1e-4 && !q.lockView) {
+      _c.x /= cl;
+      _c.z /= cl;
+      const fx = m[8];
+      const fz = m[10];
+      const cm = cam.matrixWorld.elements;
+      const fr = fx * cm[0] + fz * cm[2];
+      const fc = fx * _c.x + fz * _c.z;
+      const a = Math.abs(Math.atan2(fr, fc)) / (Math.PI / 4);
+      if (Math.abs(a - st.view) > 0.62) st.view = Math.round(a) as ViewId;
+      st.mirror = fr < 0 && st.view !== 0 && st.view !== 4;
+    }
+    const v = st.view;
+    const flip = st.mirror ? -1 : 1;
+    const frames = q.frames!;
+    let pose = frames[q.frame];
+    let arms = 0;
+    if (q.armsFromRig && (q.armsAlways || v === 1 || v === 2 || v === 3)) {
+      pose = withRigArms(pose, q);
+      arms = 1 + bucket(q.aL[0], -60, 12) + 12 * (bucket(q.aL[2], 0, 8) + 8 * (bucket(q.aR[0], -60, 12) + 12 * bucket(q.aR[2], 0, 8)));
+    }
+    const bias = this.bias(q.def!, v);
+    const sk = this.joints(pose, v);
+    const S = (size * k) / HEADS;
+    // Aim fairness: the sprite's torso goes over the rig's torso, its head over the rig's head
+    // (each measured at its drawn centre).
+    _v.copy(q.chest).applyMatrix4(inv);
+    const rigCx = projX(_v.x, _v.z) - gx;
+    _v.copy(q.head).applyMatrix4(inv);
+    const rigHx = projX(_v.x, _v.z) - gx;
+    const rigHy = projY(_v.y, _v.z) - gy;
+    let shift = Math.round(rigCx - flip * (sk.sx[J.chest] + bias[2]) * S);
+    const lim = Math.round(1.2 * S);
+    if (shift > lim) shift = lim;
+    if (shift < -lim) shift = -lim;
+    let hxq = Math.round(((rigHx - shift) * flip - (sk.sx[J.head] + bias[0]) * S) / (S * 0.1));
+    let hyq = Math.round((rigHy - (sk.sy[J.head] + bias[1]) * S) / (S * 0.1));
+    hxq = Math.max(-7, Math.min(7, hxq));
+    hyq = Math.max(-7, Math.min(7, hyq));
+    const entry = this.frameFor(q, pose, q.def!.id, poseIdOf(frames), q.frame, v, size, hxq, hyq, arms);
+    if (!entry) return 'wait';
+    st.k = k;
+    st.size = size;
+    st.hx = hxq;
+    st.hy = hyq;
+    st.pose = pose;
+    st.def = q.def;
+    st.frame = q.frame;
+    st.flags = q.flags;
+    st.depth = Math.max(D, cam.near * 4) - Math.min(0.1, D * 0.02);
+    const gxs = st.mirror ? entry.w - entry.gx : entry.gx;
+    st.left = Math.round(gx) + shift - gxs * k;
+    st.bottom = Math.round(gy) + (entry.gy - entry.h) * k;
+    return entry;
+  }
+
+  /** Re-renders a frame's part map (tests / aim tools): width, height and the buffer of PART codes. */
+  debugParts(def: FigureDef, pose: PoseKey, view: ViewId, size: number, hx: number, hy: number, flags: number) {
+    const f = this.fig;
+    f.paint(def, pose, view, size, hx, hy, flags);
+    const c = f.canvas;
+    const w = c.x1 - c.x0 + 1;
+    const h = c.y1 - c.y0 + 1;
+    const part = new Uint8Array(w * h);
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) part[j * w + i] = c.part[(j + c.y0) * c.w + i + c.x0];
+    return { w, h, part, gx: f.d.cx - c.x0, gy: f.d.cy - c.y0 };
+  }
+
+  /**
+   * The visual centre of the drawn head and torso, against the joints the figure is placed by (a
+   * hat brim, a nose, the hair: the head's centre is not its joint), by view, in hu. Measured once
+   * from a raster of the figure's rest pose; aim alignment uses it.
+   */
+  private bias(def: FigureDef, view: ViewId): Float32Array {
+    let b = this.biases.get(def.id * 8 + view);
+    if (b) return b;
+    b = new Float32Array(4);
+    this.biases.set(def.id * 8 + view, b);
+    const f = this.fig;
+    f.paint(def, def.rest, view, 160);
+    const c = f.canvas;
+    const S = 160 / HEADS;
+    let hc = 0,
+      hx = 0,
+      hy = 0,
+      tc = 0,
+      tx = 0,
+      ty = 0;
+    for (let y = c.y0; y <= c.y1; y++) {
+      for (let x = c.x0; x <= c.x1; x++) {
+        const p = c.part[y * c.w + x];
+        if (p === 1) {
+          hc++;
+          hx += x;
+          hy += y;
+        } else if (p === 2) {
+          tc++;
+          tx += x;
+          ty += y;
+        }
+      }
+    }
+    const sk = f.d.sk;
+    if (hc > 0) {
+      b[0] = (hx / hc + 0.5 - f.d.cx) / S - sk.sx[J.head];
+      b[1] = (f.d.cy - hy / hc - 0.5) / S - sk.sy[J.head];
+    }
+    if (tc > 0) {
+      b[2] = (tx / tc + 0.5 - f.d.cx) / S - sk.sx[J.chest];
+      b[3] = (f.d.cy - ty / tc - 0.5) / S - sk.sy[J.chest];
+    }
+    return b;
   }
 
   /** Pose joints for placement (the skeleton of the pose that would be rastered). */

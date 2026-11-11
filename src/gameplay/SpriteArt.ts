@@ -10,8 +10,7 @@ import { buildPalette, linearToOklab, PALETTE_MAX, paletteRamps, type PaletteId 
 import { PixelFigure } from './pixel/figure';
 import { PixelCast, type CastEnv } from './pixel/PixelCast';
 import { castStageLight, castStyle, castStyleVersion } from './pixel/look';
-import { ATLAS_SIZE, DrawnCast, MAX_FIGURE_PX, newDrawnQuery, newDrawnSprite, poseIdOf, sizeStep, type DrawnSprite } from './pixel/drawn/DrawnCast';
-import { HEADS, J } from './pixel/drawn/skeleton';
+import { ATLAS_SIZE, DrawnCast, newDrawnQuery, newDrawnSprite, type DrawnSprite } from './pixel/drawn/DrawnCast';
 import { RAMP_TONES } from './pixel/drawn/raster';
 import { RAMPS } from './pixel/drawn/palette';
 
@@ -1910,76 +1909,27 @@ export class SpriteArt {
     const t0 = performance.now();
     const gw = this.gridW;
     const gh = this.gridH;
-    const P = cam.projectionMatrix.elements;
-    const inv = cam.matrixWorldInverse;
     const root = s.obj;
-    const m = root.matrixWorld.elements;
-    _v.setFromMatrixPosition(root.matrixWorld);
-    _d.copy(_v).applyMatrix4(inv);
-    const D = -_d.z;
-    if (D < cam.near * 2) return null; // Through the lens: the impostor handles near clipping.
-    const projX = (x: number, z: number) => (((P[0] * x + P[8] * z) / -z) * 0.5 + 0.5) * gw;
-    const projY = (y: number, z: number) => (((P[5] * y + P[9] * z) / -z) * 0.5 + 0.5) * gh;
-    const gx = projX(_d.x, _d.z);
-    const gy = projY(_d.y, _d.z);
-    if (gx < -0.2 * gw || gx > 1.2 * gw || gy < -0.4 * gh || gy > 1.5 * gh) {
+    const st = this.drawnSpriteOf(s);
+    const r = this.drawn.place(cam, root, q, gw, gh, st);
+    if (r === 'away') {
       s.ready = false;
       s.away = true;
       s.cost = 1;
       return false;
     }
-    // Size: the rig's height at the ground point's depth, in frame pixels; texels double past the cap.
-    const pxPerM = (P[5] * gh) / (2 * D);
-    const full = q.scale * 1.83 * pxPerM;
-    const k = full > MAX_FIGURE_PX ? Math.ceil(full / MAX_FIGURE_PX) : 1;
-    const size = sizeStep(full / k);
-    // View: the figure's forward against the camera, nearest drawn view (with hysteresis).
-    const st = this.drawnSpriteOf(s);
-    _c.setFromMatrixPosition(cam.matrixWorld).sub(_v);
-    const cl = Math.hypot(_c.x, _c.z);
-    if (cl > 1e-4 && !q.lockView) {
-      _c.x /= cl;
-      _c.z /= cl;
-      const fx = m[8];
-      const fz = m[10];
-      const cm = cam.matrixWorld.elements;
-      const fr = fx * cm[0] + fz * cm[2];
-      const fc = fx * _c.x + fz * _c.z;
-      const a = Math.abs(Math.atan2(fr, fc)) / (Math.PI / 4);
-      const sv = st.view as number;
-      if (Math.abs(a - sv) > 0.62) st.view = Math.round(a) as 0 | 1 | 2 | 3 | 4;
-      st.mirror = fr < 0 && st.view !== 0 && st.view !== 4;
-    }
-    const v = st.view as 0 | 1 | 2 | 3 | 4;
-    const flip = st.mirror ? -1 : 1;
-    const frames = q.frames;
-    const poseId = poseIdOf(frames);
-    const pose = frames[q.frame];
-    const sk = this.drawn.joints(pose, v);
-    const S = (size * k) / HEADS;
-    // Aim fairness: the sprite's chest goes over the rig's chest, its head over the rig's head.
-    _d.copy(q.chest).applyMatrix4(inv);
-    const rigCx = projX(_d.x, _d.z) - gx;
-    const rigCy = projY(_d.y, _d.z) - gy;
-    _d.copy(q.head).applyMatrix4(inv);
-    const rigHx = projX(_d.x, _d.z) - gx;
-    const rigHy = projY(_d.y, _d.z) - gy;
-    let shift = Math.round(rigCx - flip * sk.sx[J.chest] * S);
-    const lim = Math.round(1.2 * S);
-    if (shift > lim) shift = lim;
-    if (shift < -lim) shift = -lim;
-    let hxq = Math.round(((rigHx - shift) * flip - sk.sx[J.head] * S) / (S * 0.1));
-    let hyq = Math.round((rigHy - sk.sy[J.head] * S) / (S * 0.1));
-    hxq = Math.max(-7, Math.min(7, hxq));
-    hyq = Math.max(-7, Math.min(7, hyq));
-    void rigCy;
-    const figId = q.def.id;
-    const entry = this.drawn.frameFor(q, frames, figId, poseId, q.frame, v, size, hxq + 7, hyq + 7);
-    if (!entry) {
+    if (r === 'wait') {
       // Nothing like it drawn yet (and no budget): stay as is; try again next frame.
       s.next = this.world.time;
       return s.ready;
     }
+    if (r === 'near') return null; // Through the lens: the impostor handles near clipping.
+    const P = cam.projectionMatrix.elements;
+    const D = st.depth;
+    const entry = r;
+    const k = st.k;
+    const left = st.left;
+    const bottom = st.bottom;
     if (s.mesh.material !== this.drawnMatOf(s)) s.mesh.material = this.drawnMatOf(s);
     const dm = s.drawnMat!;
     const u = dm.uniforms;
@@ -2005,9 +1955,6 @@ export class SpriteArt {
     // Billboard: the sprite's ground point on the rig's, snapped to whole frame pixels.
     const w = entry.w;
     const h = entry.h;
-    const gxs = st.mirror ? w - entry.gx : entry.gx;
-    const left = Math.round(gx) + shift - gxs * k;
-    const bottom = Math.round(gy) + (entry.gy - h) * k;
     const rx0 = (left / gw) * 2 - 1;
     const ry0 = (bottom / gh) * 2 - 1;
     const rx1 = ((left + w * k) / gw) * 2 - 1;

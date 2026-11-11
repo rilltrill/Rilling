@@ -8,7 +8,7 @@ import { registerEnemy } from '../registry';
 import { Kit } from '../kit/ModelKit';
 import type { HumanoidRig, Limb } from '../kit/humanoid';
 import type { PixelFigure } from '../../gameplay/pixel/figure';
-import type { DrawnQuery } from '../../gameplay/pixel/drawn/DrawnCast';
+import { rigArms, type DrawnQuery } from '../../gameplay/pixel/drawn/DrawnCast';
 import { WORKER } from '../../gameplay/pixel/drawn/outfits';
 import { zombieFrame } from '../../gameplay/pixel/drawn/states';
 import { isDrawnEveryone } from '../../gameplay/pixel/look';
@@ -220,7 +220,11 @@ export abstract class Zombie extends Enemy {
     q.scale = this.r.scale;
     q.flags = this.severed[0] | (this.severed[1] << 2) | (this.headless ? 16 : 0);
     q.lockView = this.state === 'dying';
-    q.chest.setFromMatrixPosition(this.r.torsoMesh.matrixWorld);
+    rigArms(q, this.r.armL, this.r.armR);
+    q.armsAlways = this.state === 'windup' || this.state === 'recover';
+    // (Rig pivots stay live; the baked meshes' matrices do not. The torso hitbox centre is 22 cm up the spine.)
+    const sm = this.r.spine.matrixWorld.elements;
+    q.chest.set(sm[12] + sm[4] * 0.22, sm[13] + sm[5] * 0.22, sm[14] + sm[6] * 0.22);
     const hm = this.r.head.matrixWorld.elements;
     const hs = 0.13 * this.b.look.headSize;
     q.head.set(hm[12] + hm[4] * hs, hm[13] + hm[5] * hs, hm[14] + hm[6] * hs);
