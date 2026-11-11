@@ -37,7 +37,7 @@ export function z3BayWater(atlas: PwAtlas): PwTile {
         }
       }
     }
-  }, { wrap: true });
+  }, { wrap: true, frames: BAY_FRAMES });
 }
 
 /** Freighter hull (wrap 64 × 64): rusty red-brown plates, a porthole row, the boot-top line, rust runs. */

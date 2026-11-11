@@ -4,6 +4,7 @@ import { bayer, PWF } from './canvas';
 import type { PwAtlas, PwTile } from './atlas';
 import { FONT_BOLD, rasterText, textWidth } from './font';
 import { darken, hash2, smooth } from './surfaces';
+import { pwLightOverlay } from './light';
 
 /**
  * ST. MERCY HOSPITAL's ambulance bay ground for PIXEL WORLD:
@@ -175,7 +176,7 @@ export function z2PuddleTile(atlas: PwAtlas, light: PuddleLight, variant = 0): P
         }
       }
     }
-  });
+  }, { frames: F });
 }
 
 /** A sign's light shimmering on the wet ground under it (cut out): stacked broken dashes, densest under the sign. */
@@ -258,6 +259,8 @@ export function z2LightPool(tex: THREE.Texture, color: number, x: number, y: num
   const mat = Kit.track(
     new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(color).multiplyScalar(strength), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: true }),
   );
+  // (Stepped rings are paint: the lit pixels stay on whole colours, undithered.)
+  pwLightOverlay(mat);
   mat.userData.pixelWorld = true;
   const m = new THREE.Mesh(Kit.track(new THREE.PlaneGeometry(w, d)), mat);
   m.rotation.x = -Math.PI / 2;
@@ -388,7 +391,7 @@ const poolMats = new WeakMap<THREE.Texture, THREE.MeshBasicMaterial>();
 function poolMat(tex: THREE.Texture): THREE.MeshBasicMaterial {
   let m = poolMats.get(tex);
   if (!m) {
-    m = Kit.track(new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: true }));
+    m = pwLightOverlay(Kit.track(new THREE.MeshBasicMaterial({ map: tex, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: true })));
     m.userData.pixelWorld = true;
     poolMats.set(tex, m);
   }

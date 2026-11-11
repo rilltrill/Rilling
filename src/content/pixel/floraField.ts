@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Kit, RETRO_FOLIAGE } from '../kit/ModelKit';
 import { FloraCanvas, FloraPalette, FloraRng, resolveCanvas, RIM_ALPHA } from './floraPaint';
 import { floraMats, type FloraBiome, type FloraSpecies } from './floraSpecies';
+import { PW_DEBUG_DECL, pwDebugPatch, pwDebugSetup } from '../../core/debugView';
 
 /**
  * FLORA billboards (ART: SPRITES scenery). The stage's plants are painted once
@@ -315,6 +316,7 @@ const FRAG_DECL = /* glsl */ `
   varying vec3 vFLocN;
   flat varying vec4 vFBox;
   flat varying vec4 vFMisc;
+  ${PW_DEBUG_DECL}
 `;
 
 /**
@@ -353,6 +355,10 @@ const FRAG_MAP = /* glsl */ `
     // Lighting runs on white (light only); the painted colour is applied after it (FRAG_LIGHT).
     fPaint = pc.rgb * vFMisc.y;
     fRim = pc.a < 0.99 ? 1.0 : 0.0;
+    #ifdef PW_DEBUG
+      // (Plants are not painted world: black in the views of its texels and its light.)
+      pwDbg = uPwDebug < 2.5 ? pwDbgMag(vFTex, 1.0, ivec2(lv)) : vec3(0.0);
+    #endif
   }
 `;
 
@@ -581,7 +587,7 @@ export class FloraField {
     Kit.track(tex);
     Kit.track(pal);
     const rim = new THREE.Color(this.o.rim ?? 0).multiplyScalar(this.o.rimStrength ?? 1);
-    const uniforms = {
+    const uniforms: Record<string, { value: unknown }> = {
       uFAtlas: { value: tex },
       uFPal: { value: pal },
       uFTime: this.time,
@@ -594,6 +600,9 @@ export class FloraField {
     const lights = floraLightsChunk();
     if (!lights) throw new Error('flora: three lights_fragment_begin changed shape');
     const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
+    const defines: Record<string, string> = {};
+    pwDebugSetup(defines, uniforms);
+    m.defines = defines;
     // (Exposed for tests and look-dev tuning.)
     m.userData.flora = uniforms;
     m.onBeforeCompile = (shader) => {
@@ -609,6 +618,7 @@ export class FloraField {
         .replace('#include <lights_fragment_begin>', lights)
         .replace('#include <aomap_fragment>', FRAG_LIGHT)
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += uFRim * fRim;');
+      shader.fragmentShader = pwDebugPatch(shader.fragmentShader);
     };
     m.customProgramCacheKey = () => 'floraBillboard2';
     m.name = 'flora-billboard';

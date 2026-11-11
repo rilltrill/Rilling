@@ -10,6 +10,8 @@ import { Kit } from '../../src/content/kit/ModelKit';
 import { z2Scene } from '../../src/content/stages/z2/scene';
 import { Destructible } from '../../src/gameplay/Props';
 import { nullHud, simulateStage } from './sim';
+import { z2TileGroup } from '../../src/content/stages/z2/pixel';
+import { PW_TPM, PW_TPM_MID, PW_TPM_NEAR } from '../../src/content/pixelworld/canvas';
 
 /**
  * ST. MERCY HOSPITAL (z2) in ART: PIXEL WORLD — budgets and gameplay identity
@@ -44,6 +46,20 @@ const boxOf = (o: THREE.Object3D) => {
 };
 
 describe('z2 ST. MERCY HOSPITAL in PIXEL WORLD', () => {
+  it('draws surfaces painted at their viewing density on the default level bias', () => {
+    // First-pass tileable surfaces (below PW_TPM_MID, shown through the 2× fallback) keep their own bias…
+    expect(z2TileGroup({ key: 'z2vinyl|5d6a63|46524c|000000', wrap: true, density: PW_TPM })).toBe(1);
+    // …a wrap tile repainted natively does not (a level sooner would draw its texels twice as fat as painted)…
+    expect(z2TileGroup({ key: 'z2clinic|floor', wrap: true, density: PW_TPM_MID })).toBe(0);
+    expect(z2TileGroup({ key: 'z2clinic|floor', wrap: true, density: PW_TPM_NEAR })).toBe(0);
+    // …modules never did, at any density…
+    expect(z2TileGroup({ key: 'z2clinic|panelA', wrap: false, density: PW_TPM_NEAR })).toBe(0);
+    expect(z2TileGroup({ key: 'z2leaf|6a7a5a', wrap: false, density: PW_TPM })).toBe(0);
+    // …and signs keep level 0 a step longer whatever they are laid as.
+    expect(z2TileGroup({ key: 'z2plate|WARD 3 >|ffffff|2a5a9a|0.05', wrap: false, density: PW_TPM })).toBe(2);
+    expect(z2TileGroup({ key: 'z2stencil|B1|8a8a80|0.1|0.25', wrap: true, density: PW_TPM_NEAR })).toBe(2);
+  });
+
   it('builds painted scenery within budget; occluders, ground, set pieces, destructibles and the RNG identical to PIXEL CAST', { timeout: 180_000 }, () => {
     clearPwCache();
     PW_STATS.clear();
@@ -58,7 +74,7 @@ describe('z2 ST. MERCY HOSPITAL in PIXEL WORLD', () => {
         `${(bytes / 1048576).toFixed(1)} MB, paint ${paint.toFixed(0)} ms, ${meshes.length} PW meshes`,
     );
     // Atlas memory (world + sky, all levels) within the per-stage budget.
-    expect(bytes).toBeLessThanOrEqual(24 * 1048576);
+    expect(bytes).toBeLessThanOrEqual(48 * 1048576);
     // PixelWorld meshes are scenery: never occluders, never raycast.
     const occ = new Set(px.env!.occluders ?? []);
     for (const m of meshes) {

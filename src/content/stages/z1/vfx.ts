@@ -4,6 +4,7 @@ import { Kit } from '../../kit/ModelKit';
 import { Rng } from '../../../core/Rng';
 import { EnvKit } from '../../kit/EnvKit';
 import { applyRetroArray, bakeMerge, texGlow, type RetroParams } from './bake';
+import { pwLightOverlay } from '../../pixelworld/light';
 
 /**
  * Cheap atmospheric effects for MAIN STREET: fake light pools and volumetric
@@ -150,24 +151,77 @@ export class LightPools {
   }
 
   /**
-   * ART: PIXEL WORLD's pools: the stepped pixel rings (`map`) LIFT what they land
-   * on (dst × (1 + pool), never screened toward white), so the painted asphalt /
-   * flags keep their clusters and read lit, not washed into a flat disc. Pale
-   * lights are warmed (halogen headlamps, the floodlight: never a grey disc),
-   * street lamps throw an ellipse along the street, and every pool is gentler.
-   * `colorOf` / `setColorAt` work as for `build` (instance colours = colour × k
+   * ART: PIXEL WORLD's pools: painted light, not a soft disc. Each pool is three flat steps (two
+   * on a wall) whose edges are drawn ON THE SURFACE'S OWN TEXEL GRID (64 a metre: the same
+   * stair-steps as the paint under it, never a fat screen-door), hand-wobbled round the compass,
+   * each ending in a row of broken dashes — the brush's stepped band, done per fragment so a
+   * pool of any size costs no texture. Ground pools LIFT what they land on (dst × (1 + pool):
+   * the painted asphalt / flags keep their forms and read lit); wall splashes are screened and
+   * kept faint. Pale lights are warmed (halogen headlamps, the floodlight: never a grey disc),
+   * street lamps throw an ellipse along the street. Far away the grid coarsens with the pixel, so
+   * nothing sparkles. `colorOf` / `setColorAt` work as for `build` (instance colours = colour × k
    * × `PW_POOL_GAIN`).
    */
-  buildPixel(map: THREE.Texture, wallSquash = 1): THREE.InstancedMesh {
-    // Ground pools lift the surface; wall splashes stay screened (a lift would turn every lit shop window
-    // they cross into a bright disc). Two meshes, the same instance indices (each zero-sized in the other).
+  buildPixel(wallSquash = 1): THREE.InstancedMesh {
+    // Two meshes, the same instance indices (each zero-sized in the other).
     const make = (wall: boolean) => {
-      const mat = Kit.track(new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, toneMapped: false, fog: true }));
+      const mat = Kit.track(new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, toneMapped: false, fog: true }));
       mat.blending = THREE.CustomBlending;
       mat.blendEquation = THREE.AddEquation;
       mat.blendSrc = wall ? THREE.OneMinusDstColorFactor : THREE.DstColorFactor;
       mat.blendDst = THREE.OneFactor;
       mat.premultipliedAlpha = true;
+      // Stepped rings are paint: what they light stays on whole colours (the monitor does not dither it).
+      pwLightOverlay(mat);
+      mat.onBeforeCompile = (sh) => {
+        const decl = 'varying vec2 vPwPool;\nflat varying vec4 vPwPoolO;';
+        sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>\n${decl}`).replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+  {
+    // The pool's own frame in metres: x / y along the quad's axes, the origin at its centre; and where that
+    // centre sits on the surface's texel grid (so the steps land on the paint's texels).
+    vec3 ax = instanceMatrix[0].xyz;
+    vec3 ay = instanceMatrix[1].xyz;
+    float sx = length(ax);
+    float sy = length(ay);
+    vPwPool = position.xy * vec2(sx, sy);
+    vec3 c = instanceMatrix[3].xyz;
+    vPwPoolO = vec4(dot(c, ax / max(sx, 1e-5)), dot(c, ay / max(sy, 1e-5)), sx * 0.5, sy * 0.5);
+  }`,
+        );
+        sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>\n${decl}`).replace(
+          '#include <color_fragment>',
+          `#include <color_fragment>
+  {
+    // Texel coords on the surface (64 a metre), coarsened by whole octaves where a texel is under a pixel.
+    vec2 tc = (vPwPool + vPwPoolO.xy) * 64.0;
+    float rho = max(length(dFdx(tc)), length(dFdy(tc)));
+    float cell = exp2(max(0.0, floor(log2(max(rho, 1e-3)) + 0.5)));
+    vec2 ti = floor(tc / cell);
+    vec2 q = ((ti + 0.5) * cell / 64.0 - vPwPoolO.xy) / vPwPoolO.zw;
+    float r = length(q);
+    float a = atan(q.y, q.x);
+    float seed = vPwPoolO.x * 3.1 + vPwPoolO.y * 1.7;
+    // Texels across the pool's shorter half-axis: one texel as a share of the radius.
+    float tex = cell / (64.0 * min(vPwPoolO.z, vPwPoolO.w));
+    float lvl = 0.0;
+    for (int k = 0; k < ${wall ? 2 : 3}; k++) {
+      float fk = float(k);
+      float e = (${wall ? '0.92 - fk * 0.42' : '0.94 - fk * 0.3'}) * (1.0 + 0.05 * sin(a * 3.0 + seed + fk * 1.7) + 0.035 * sin(a * 5.0 + seed * 2.0 + fk * 2.9));
+      float d = (e - r) / tex;
+      // Inside the step, or on its fringe: every other row, a dash of 3–6 texels out of every 8, one row out.
+      float cellx = floor(ti.x / 8.0);
+      float h = fract(sin(cellx * 12.9898 + ti.y * 78.233 + fk * 37.7 + seed) * 43758.5453);
+      bool dash = mod(ti.y, 2.0) < 0.5 && d > -3.5 && d < -1.0 && fract(ti.x / 8.0) < 0.35 + 0.4 * h && h > 0.25;
+      if (d >= 0.0 || dash) lvl = fk + 1.0; else break;
+    }
+    if (lvl < 0.5) discard;
+    diffuseColor.rgb *= ${wall ? 'lvl == 1.0 ? 0.3 : 0.8' : 'lvl == 1.0 ? 0.22 : lvl == 2.0 ? 0.5 : 0.9'};
+  }`,
+        );
+      };
+      mat.customProgramCacheKey = () => `z1PixelPool3${wall ? 'w' : 'g'}`;
       const mesh = new THREE.InstancedMesh(Kit.track(new THREE.PlaneGeometry(1, 1)), mat, Math.max(1, this.defs.length));
       this.defs.forEach((d, i) => {
         const isWall = d.wallYaw !== undefined;
@@ -391,55 +445,33 @@ export class LightBeams {
         '#include <color_fragment>',
         `#include <color_fragment>
   {
-    ivec2 bp = ivec2(mod(gl_FragCoord.xy, 4.0));
-    int bi = bp.y * 4 + bp.x;
-    float bt = (float(bi == 0 ? 0 : bi == 1 ? 8 : bi == 2 ? 2 : bi == 3 ? 10 : bi == 4 ? 12 : bi == 5 ? 4 : bi == 6 ? 14 : bi == 7 ? 6 : bi == 8 ? 3 : bi == 9 ? 11 : bi == 10 ? 1 : bi == 11 ? 9 : bi == 12 ? 15 : bi == 13 ? 7 : bi == 14 ? 13 : 5) + 0.5) / 16.0;
     float rad = vPwDim.x;
     float len = vPwDim.y;
-    float seed = vPwDim.z * 7.31;
     float t = vPwCard.y / len;
-    // Across the cone (−1…1) at this depth: rays fan out from the head.
+    // Across the cone (−1…1) at this depth.
     float u = vPwCard.x / max(rad * mix(0.22, 1.0, clamp(t, 0.0, 1.0)), 1e-3);
-    // Halo: two stepped rings round the lamp head (metres).
+    float au = abs(u);
+    // Halo: two flat rings round the lamp head (metres).
     float hr = clamp(rad * 0.18, 0.25, 0.5);
     float d = length(vPwCard) / hr;
-    float b = d < 0.5 ? 0.9 : d < 1.0 ? 0.5 : 0.0;
-    if (t > 0.0) {
-      // The body of the shaft: brightest under the head, falling off to nothing at the cone's edges and
-      // well above the ground (so its silhouette is a dithered fade, never a hard wedge).
-      float au = abs(u);
-      float fill = 0.5 * pow(max(0.0, 1.0 - au), 1.3) * pow(max(0.0, 1.0 - t / 0.9), 1.4);
-      // Rays: four broad strips at fixed fan angles from the lamp's seed, each fading out at its own
-      // length; their edges hand-broken per 20 cm row.
-      float row = floor(vPwCard.y / 0.2);
-      float rays = 0.0;
-      for (int i = 0; i < 4; i++) {
-        float fi = float(i);
-        float h1 = fract(sin(seed + fi * 12.9898) * 43758.5453);
-        float h2 = fract(sin(seed * 1.7 + fi * 78.233) * 43758.5453);
-        float c = -0.6 + fi * 0.4 + (h1 - 0.5) * 0.2;
-        float w = 0.1 + h2 * 0.1;
-        float jit = (fract(sin(row * 19.19 + fi * 5.3 + seed) * 23421.631) - 0.5) * 0.05;
-        float e = abs(u - c - jit) / w;
-        float L = 0.5 + h1 * 0.4;
-        float fade = 1.0 - smoothstep(L * 0.4, L, t);
-        rays += (0.22 + 0.16 * h2) * max(0.0, 1.0 - e) * fade;
-      }
-      b = max(b, fill + rays);
+    float q = d < 0.5 ? 3.0 : d < 1.0 ? 2.0 : 0.0;
+    if (t > 0.0 && au < 1.0) {
+      // The shaft: a cut-out cone in three flat steps — a bright core under the head, a body, a skirt — each
+      // step ending lower down; the cone's two edges are the only dither (one pixel of checker).
+      float body = t < 0.22 ? (au < 0.3 ? 2.0 : 1.0) : t < 0.5 ? (au < 0.55 ? 1.0 : 0.5) : t < 0.8 ? (au < 0.7 ? 0.5 : 0.0) : 0.0;
+      bool edge = au > 0.86 || (t > 0.72 && t < 0.8);
+      bool chk = mod(floor(gl_FragCoord.x) + floor(gl_FragCoord.y), 2.0) < 0.5;
+      if (edge && !chk) body = 0.0;
+      // Far lamps keep only the core under the head (no wedge standing in the fog).
+      if (vPwZ > 24.0 && (body < 1.0 || t > 0.3)) body = 0.0;
+      q = max(q, body);
     }
-    // Far lamps ease off (a halo and faint rays), so no distant solid wedge.
-    float far = 1.0 - 0.55 * smoothstep(12.0, 48.0, vPwZ);
-    b *= far;
-    // Four flat steps, ordered-dithered across the seam between them.
-    float st = b * 4.0;
-    float f = fract(st);
-    float q = floor(st) + (f > 0.45 ? step(bt, (f - 0.45) / 0.55) : 0.0);
     if (q <= 0.0) discard;
     diffuseColor.rgb *= q / 4.0;
   }`,
       );
     };
-    mat.customProgramCacheKey = () => 'z1PixelShaft2';
+    mat.customProgramCacheKey = () => 'z1PixelShaft3';
     // A strip: x across (−1…1), y from just above the head (+) down the beam (−1 = its full length).
     const g = new THREE.BufferGeometry();
     const pos: number[] = [];
@@ -500,7 +532,7 @@ export class WetReflections {
       new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: true, side: THREE.DoubleSide }),
     );
     mat.onBeforeCompile = (sh) => {
-      const decl = 'varying vec2 vPwR;\nflat varying vec2 vPwRD;';
+      const decl = 'varying vec2 vPwR;\nflat varying vec3 vPwRD;';
       sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>\n${decl}`).replace(
         '#include <project_vertex>',
         `vec4 mvPosition;
@@ -518,7 +550,7 @@ export class WetReflections {
     vec2 side = vec2(-d.y, d.x);
     vec3 P = foot + vec3(d.x, 0.0, d.y) * (start + position.y * L) + vec3(side.x, 0.0, side.y) * (position.x * w);
     vPwR = vec2(position.x, position.y);
-    vPwRD = vec2(L, float(gl_InstanceID));
+    vPwRD = vec3(L, float(gl_InstanceID), w);
     mvPosition = modelViewMatrix * vec4(P, 1.0);
     gl_Position = projectionMatrix * mvPosition;
   }`,
@@ -527,28 +559,33 @@ export class WetReflections {
         '#include <color_fragment>',
         `#include <color_fragment>
   {
-    ivec2 bp = ivec2(mod(gl_FragCoord.xy, 4.0));
-    int bi = bp.y * 4 + bp.x;
-    float bt = (float(bi == 0 ? 0 : bi == 1 ? 8 : bi == 2 ? 2 : bi == 3 ? 10 : bi == 4 ? 12 : bi == 5 ? 4 : bi == 6 ? 14 : bi == 7 ? 6 : bi == 8 ? 3 : bi == 9 ? 11 : bi == 10 ? 1 : bi == 11 ? 9 : bi == 12 ? 15 : bi == 13 ? 7 : bi == 14 ? 13 : 5) + 0.5) / 16.0;
     float v = vPwR.y;
     float seed = vPwRD.y * 3.17;
-    // 10 cm rows: each a dash of its own width (some missing), the streak wavering.
-    float row = floor(v * vPwRD.x / 0.1);
+    // The streak in its own texels (64 a metre along and across), coarsened by octaves with distance: rungs
+    // two texels deep with one or two rungs' gap, each rung its own width, the column wavering and
+    // thinning toward the eye — the same ladder the puddles are painted with, in three flat steps, no dither.
+    vec2 tc = vec2(vPwR.x * vPwRD.z, v * vPwRD.x) * 64.0;
+    float rho = max(length(dFdx(tc)), length(dFdy(tc)));
+    float cell = exp2(max(0.0, floor(log2(max(rho, 1e-3)) + 0.5)));
+    vec2 ti = floor(tc / cell);
+    float row = floor(ti.y / 2.0);
     float h1 = fract(sin(row * 12.9898 + seed) * 43758.5453);
     float h2 = fract(sin(row * 78.233 + seed * 1.3) * 23421.631);
-    float wdt = (0.25 + 0.75 * h1) * (1.0 - v * 0.6);
-    float off = (h2 - 0.5) * 0.25 * v;
-    float on = abs(vPwR.x * 2.0 - off) < wdt && h2 > 0.18 ? 1.0 : 0.0;
-    float b = on * pow(1.0 - v, 1.3) * (0.55 + 0.45 * h1);
-    float st = b * 3.0;
-    float f = fract(st);
-    float q = floor(st) + (f > 0.4 ? step(bt, (f - 0.4) / 0.6) : 0.0);
-    if (q <= 0.0) discard;
-    diffuseColor.rgb *= q / 3.0;
+    float halfW = vPwRD.z * 32.0 / cell;
+    float wdt = max(1.5, halfW * (0.3 + 0.7 * h1) * (1.0 - v * 0.7));
+    float off = floor((h2 - 0.5) * halfW * 0.5 * v);
+    float ax = abs(ti.x + 0.5 - off);
+    bool on = ax < wdt && h2 > 0.22 + v * 0.3 && mod(row, 3.0) < 2.0;
+    if (!on) discard;
+    float st = v < 0.3 ? 3.0 : v < 0.62 ? 2.0 : 1.0;
+    // Rung tips a step dimmer.
+    if (ax > wdt - 1.0) st -= 1.0;
+    if (st <= 0.0) discard;
+    diffuseColor.rgb *= st / 3.0 * (0.7 + 0.3 * h1);
   }`,
       );
     };
-    mat.customProgramCacheKey = () => 'z1PixelWetRefl';
+    mat.customProgramCacheKey = () => 'z1PixelWetRefl2';
     const g = new THREE.BufferGeometry();
     const pos: number[] = [];
     const idx: number[] = [];

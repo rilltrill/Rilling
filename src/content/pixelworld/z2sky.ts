@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Kit } from '../kit/ModelKit';
 import { bayer, PW_BACKDROP_TPD, PWF, type PwCanvas } from './canvas';
-import type { PwAtlas, PwKit, PwTile } from './atlas';
+import { pwRect, type PwAtlas, type PwKit, type PwTile } from './atlas';
 import { hash2, smooth } from './surfaces';
 
 /**
@@ -855,7 +855,7 @@ export function z2SkyDome(tile: PwTile, mat: THREE.Material, o: { radius: number
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     geo.setAttribute('pwUv', new THREE.Float32BufferAttribute(uv, 2));
     const rect = new Int16Array(n * 4);
-    for (let i = 0; i < n; i++) rect.set([tile.x, tile.y, tile.w, tile.h], i * 4);
+    for (let i = 0; i < n; i++) rect.set(pwRect(tile, true), i * 4);
     geo.setAttribute('pwRect', new THREE.BufferAttribute(rect, 4));
     geo.setAttribute('color', new THREE.BufferAttribute(new Uint8Array(n * 3).fill(255), 3, true));
     geo.setIndex(idx);

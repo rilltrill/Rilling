@@ -2,6 +2,7 @@ import { describe, it } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { encodePng, flipRows } from './pwPng';
+import { pwIndexToRgba } from '../../src/content/pixelworld/canvas';
 
 /**
  * HIGHWAY TO HELL (z3) PIXEL WORLD look-dev (skipped unless Z3_LAB is set):
@@ -24,7 +25,8 @@ describe.skipIf(!OUT)('z3 PIXEL WORLD look-dev', () => {
     const { nullHud } = await import('./sim');
     const runs = Number(process.env.Z3_BENCH ?? 1);
     const best = new Map<string, number>();
-    let atlasData: { name: string; w: number; h: number; levels: { data: Uint8Array; width: number; height: number }[] }[] = [];
+    // (Read back from the materials: the indexed levels and the palette they are drawn with.)
+    let atlasData: { name: string; w: number; h: number; pal: Uint8Array; levels: { data: Uint8Array; width: number; height: number }[] }[] = [];
     for (let r = 0; r < runs; r++) {
       clearPwCache();
       PW_STATS.clear();
@@ -88,16 +90,16 @@ describe.skipIf(!OUT)('z3 PIXEL WORLD look-dev', () => {
           console.log(`${atlas.name} rebuild (min of 3): ${best.toFixed(1)} ms wall, ${bestCpu.toFixed(1)} ms cpu`);
         }
         // The atlases (scene textures named pw:<atlas>).
-        const seen = new Set<THREE.Texture>();
+        const seen = new Map<THREE.Texture, THREE.DataTexture>();
         w.scene.traverse((o) => {
           const m = (o as THREE.Mesh).material as THREE.Material | undefined;
-          const u = (m?.userData?.pw as { uPwAtlas?: { value: THREE.DataTexture } } | undefined)?.uPwAtlas?.value;
-          if (u && !seen.has(u)) seen.add(u);
+          const pw = m?.userData?.pw as { uPwAtlas?: { value: THREE.DataTexture }; uPwPal?: { value: THREE.DataTexture } } | undefined;
+          if (pw?.uPwAtlas?.value && pw.uPwPal?.value && !seen.has(pw.uPwAtlas.value)) seen.set(pw.uPwAtlas.value, pw.uPwPal.value);
         });
-        atlasData = [...seen].map((t) => {
+        atlasData = [...seen].map(([t, p]) => {
           const img = t.image as { width: number; height: number; data: Uint8Array };
           const levels = (t.mipmaps?.length ? (t.mipmaps as unknown as { data: Uint8Array; width: number; height: number }[]) : [{ data: img.data, width: img.width, height: img.height }]);
-          return { name: t.name, w: img.width, h: img.height, levels };
+          return { name: t.name, w: img.width, h: img.height, pal: (p.image as { data: Uint8Array }).data, levels };
         });
       }
       w.dispose();
@@ -109,7 +111,7 @@ describe.skipIf(!OUT)('z3 PIXEL WORLD look-dev', () => {
       for (const l of [0, 2]) {
         const lv = a.levels[l];
         if (!lv) continue;
-        writeFileSync(`${OUT}/${a.name.replace(/[^a-z0-9-]/gi, '_')}-l${l}.png`, await encodePng(flipRows(lv.data, lv.width, lv.height), lv.width, lv.height, 1, [255, 0, 255]));
+        writeFileSync(`${OUT}/${a.name.replace(/[^a-z0-9-]/gi, '_')}-l${l}.png`, await encodePng(flipRows(pwIndexToRgba(new Uint16Array(lv.data.buffer, lv.data.byteOffset, lv.data.byteLength >> 1), a.pal), lv.width, lv.height), lv.width, lv.height, 1, [255, 0, 255]));
       }
     }
   });

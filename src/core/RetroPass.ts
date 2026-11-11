@@ -1,10 +1,39 @@
 import * as THREE from 'three';
 import type { QualityLevel, RetroMode } from './types';
+import { PW_DEBUG_FLOOR, PW_DEBUG_KEY, pwDebug } from './debugView';
 
 /** Vertical resolution of the arcade "board" per quality level (Sega Model 2 ran at 384 lines). */
 const LINES: Record<QualityLevel, number> = { low: 224, medium: 288, high: 360 };
 /** Lowest line-count multiplier dynamic resolution may use. */
 export const RETRO_MIN_SCALE = 0.7;
+/** Exposure of the monitor's tone curve (the renderer's `toneMappingExposure`: Engine sets it once). */
+export const MONITOR_EXPOSURE = 1.05;
+/** Colour levels a channel of the monitor (15-bit colour: 0 … 31). */
+export const MONITOR_LEVELS = 31;
+/**
+ * The brightest level a palette-true pixel is written at. The top level needs a scene value of 6.9
+ * (the tone curve's shoulder), which the CRT's phosphor bloom would spread over its neighbours as no
+ * tone-mapped paint ever did; one level under it (247 of 255) needs 2.1.
+ */
+export const MONITOR_TOP = 30;
+/** Alpha a palette-true pixel is written with (its flag: see `MONITOR`). */
+const EXACT_ALPHA = 128 / 255;
+
+/**
+ * What a material that writes PALETTE-TRUE pixels needs to know of the pass its pixel goes through
+ * (content/pixelworld/light.ts): a shared uniform — x the exposure of the tone curve the pass will
+ * apply (0: there is no pass, the frame goes straight to the canvas), y its colour levels (0: no
+ * lattice), z the top level such a pixel may take, w the alpha to write. Such a material snaps its
+ * display colour to the lattice and writes the scene value the curve maps there, with `w` as its
+ * alpha: the pass ROUNDS a pixel that still carries that alpha to its nearest level instead of
+ * dithering it. In the half-float target the value survives so exactly that rounding and dithering
+ * give the same colour anyway; an 8-bit target cannot hold it that finely, there the flag is what
+ * keeps the ordered dither off painted art. Anything transparent drawn over the pixel changes its
+ * alpha with its colour (normal and additive blending both do), so rain, smoke, glass and glows are
+ * dithered over the world as ever — except an overlay made not to (`pwLightOverlay`: a stepped
+ * light pool, which is paint), whose pixels stay flagged and land on whole colours.
+ */
+export const MONITOR = { uPwMon: { value: new THREE.Vector4(0, 0, MONITOR_TOP, 1) } };
 
 const _css = new THREE.Vector2();
 const _out = new THREE.Vector2();
@@ -27,6 +56,10 @@ const FRAG = /* glsl */ `
   uniform float uExposure;
   uniform float uLevels;  // colour levels per channel after quantisation
   uniform float uTime;
+  uniform float uExact;   // alpha of the pixels to round, not dither (palette-true ones: see MONITOR)
+  #ifdef PW_DEBUG
+    uniform float uPwDebug;
+  #endif
 
   vec3 aces(vec3 x) {
     const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
@@ -50,9 +83,9 @@ const FRAG = /* glsl */ `
     uv += uv * o * o * uCrt;
     return uv * 0.5 + 0.5;
   }
-  vec3 sampleScene(vec2 uv) {
+  vec4 sampleScene(vec2 uv) {
     vec2 cell = (floor(uv * uRes) + 0.5) / uRes;
-    return texture2D(tScene, cell).rgb;
+    return texture2D(tScene, cell);
   }
   void main() {
     vec2 uv = curve(vUv);
@@ -61,21 +94,33 @@ const FRAG = /* glsl */ `
       return;
     }
     vec2 px = uv * uRes;
+    #ifdef PW_DEBUG
+      // A PixelWorld debug view (core/debugView.ts): only the keyed pixels, at their own hue; the rest black.
+      if (uPwDebug > 0.5) {
+        vec3 k = sampleScene(uv).rgb;
+        float m = max(k.r, max(k.g, k.b));
+        gl_FragColor = vec4(m >= ${PW_DEBUG_FLOOR.toFixed(1)} ? k / m : vec3(0.0), 1.0);
+        return;
+      }
+    #endif
     // Slight convergence error toward the edges (CRT only).
     vec2 ca = (uv - 0.5) * (0.9 * uCrt) / uRes;
     vec3 col;
+    vec4 here = sampleScene(uv);
     col.r = sampleScene(uv + ca).r;
-    col.g = sampleScene(uv).g;
+    col.g = here.g;
     col.b = sampleScene(uv - ca).b;
     // Cheap phosphor bloom: bright neighbours bleed a little.
     vec2 o = 1.5 / uRes;
-    vec3 n = sampleScene(uv + vec2(o.x, 0.0)) + sampleScene(uv - vec2(o.x, 0.0)) +
-             sampleScene(uv + vec2(0.0, o.y)) + sampleScene(uv - vec2(0.0, o.y));
+    vec3 n = sampleScene(uv + vec2(o.x, 0.0)).rgb + sampleScene(uv - vec2(o.x, 0.0)).rgb +
+             sampleScene(uv + vec2(0.0, o.y)).rgb + sampleScene(uv - vec2(0.0, o.y)).rgb;
     vec3 bloom = max(n * 0.25 - 0.55, 0.0);
     col = aces((col + bloom * 0.6 * uCrt) * uExposure);
     col = toSRGB(col);
     // 15-bit-era colour depth with ordered dithering on the low-res grid.
     float th = (bayer4(px) + 0.5) / 16.0 - 0.5;
+    // (A palette-true pixel, flagged in alpha, is rounded to its level: no dither over painted art.)
+    if (abs(here.a - uExact) < 0.003) th = 0.0;
     col = clamp(floor(col * uLevels + 0.5 + th) / uLevels, 0.0, 1.0);
     if (uCrt > 0.0) {
       // Scanlines: each low-res row is a bright beam with darker gaps.
@@ -125,9 +170,12 @@ export class RetroPass {
         uOut: { value: new THREE.Vector2(1, 1) },
         uCrt: { value: 1 },
         uExposure: { value: 1.05 },
-        uLevels: { value: 31 },
+        uLevels: { value: MONITOR_LEVELS },
         uTime: { value: 0 },
+        uExact: { value: 0 },
+        uPwDebug: pwDebug.view,
       },
+      defines: pwDebug.compiled ? { PW_DEBUG: '' } : {},
       depthTest: false,
       depthWrite: false,
       toneMapped: false,
@@ -136,8 +184,12 @@ export class RetroPass {
     quad.frustumCulled = false;
     this.scene.add(quad);
     const ext = renderer.extensions;
-    this.hdr = !!(ext.has('EXT_color_buffer_half_float') || ext.has('EXT_color_buffer_float'));
+    this.hdr = !!(ext.has('EXT_color_buffer_half_float') || ext.has('EXT_color_buffer_float')) && !RetroPass.force8;
+    this.mat.uniforms.uExact.value = EXACT_ALPHA;
   }
+
+  /** `&pwrt=8` (tests of the fallback): the scene target is 8-bit even where half-float is there. */
+  static force8 = false;
 
   get enabled() {
     return this.mode !== 'off';
@@ -147,6 +199,13 @@ export class RetroPass {
     this.mode = mode;
     this.quality = quality;
     this.mat.uniforms.uCrt.value = mode === 'crt' ? 1 : 0;
+    this.link();
+  }
+
+  /** Tell the palette-true materials what their pixels go through (`MONITOR`). */
+  private link() {
+    if (this.mode === 'off') MONITOR.uPwMon.value.set(0, 0, MONITOR_TOP, 1);
+    else MONITOR.uPwMon.value.set(this.renderer.toneMappingExposure, MONITOR_LEVELS, MONITOR_TOP, EXACT_ALPHA);
   }
 
   /** Low-res target size for an output of (w, h) CSS pixels. */
@@ -192,6 +251,9 @@ export class RetroPass {
     u.uOut.value.copy(out);
     u.uTime.value = this.time;
     u.uExposure.value = r.toneMappingExposure;
+    this.link();
+    // (Debug views are keyed through the float target; an 8-bit one would clamp the key away.)
+    if (pwDebug.compiled) pwDebug.gain.value = this.hdr ? PW_DEBUG_KEY : 1;
     r.setRenderTarget(rt);
     r.clear();
     r.render(scene, camera);

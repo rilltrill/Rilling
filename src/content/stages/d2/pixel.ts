@@ -3,6 +3,7 @@ import type { TexName } from '../../kit/Textures';
 import { PwAtlas, type PwTile } from '../../pixelworld/atlas';
 import { PwBatch } from '../../pixelworld/batch';
 import { pwMaterial } from '../../pixelworld/material';
+import { pwMood, type PwMood } from '../../pixelworld/light';
 import { NEUTRAL_HEX } from '../../pixelworld/retexture';
 import { chequerTile, corrugatedTile, grateTile, hazardTile, tilesTile } from '../../pixelworld/surfaces';
 import { rubbleTile } from '../../pixelworld/d2green';
@@ -55,7 +56,12 @@ interface RoomBatches {
 /** Debug / look-dev: the last RESEARCH LABS painter built (tile dumps). */
 export const D2_DEBUG: { last: D2PixelWorld | null } = { last: null };
 
+/** The mood of the labs at night (PIXEL-ART LIGHT: content/pixelworld/light.ts; the table in docs/PIXELWORLD2.md §5). */
+export const D2_MOOD: Partial<PwMood> = { pivot: 0.65, tint: 0.7, shade: 0xa4b4ec, torch: 0 };
+
 export class D2PixelWorld {
+  /** Set before any material is made: every PixelWorld material of the stage is lit under it. */
+  readonly mood = pwMood(D2_MOOD);
   readonly atlas = new PwAtlas('d2');
   /** Unlit far panels (night sky planes, the moon, jungle flats): one level, no mip pass (never minified much). */
   readonly skyAtlas = new PwAtlas('d2-sky', { levels: 1 });

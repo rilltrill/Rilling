@@ -822,7 +822,7 @@ export function d3FireModule(atlas: PwAtlas, frames: number, variant = 0): PwTil
       // Sparks above the licks.
       for (let i = 0; i < 4; i++) c.set(Math.floor(hash2(i, f, 67 + variant) * W), y0 + Math.floor(hash2(i, f, 68 + variant) * FH * 0.4), core, 4.4, PWF.GLOW);
     }
-  });
+  }, { frames });
 }
 
 /** A windsock (module 84 × 26 = 2.6 × 0.8 m, cut out, the mast end on the LEFT): orange / white bands tapering, wet, a frayed tail. */

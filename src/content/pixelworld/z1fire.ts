@@ -1,5 +1,5 @@
-import { PWF, type PwCanvas } from './canvas';
-import type { PwAtlas, PwAtlasData, PwKit, PwTile } from './atlas';
+import { PWF, PWI, pwPalAt, type PwCanvas } from './canvas';
+import { pwTileLevel, type PwAtlas, type PwAtlasData, type PwKit, type PwTile } from './atlas';
 import { hash2 } from './surfaces';
 
 /**
@@ -31,7 +31,7 @@ const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
 /** The flame strip (`variant` 0 / 1: two out-of-step fires so neighbours never flicker together). */
 export function z1TongueFlameTile(atlas: PwAtlas, variant: number): PwTile {
-  return atlas.tile(`z1fire2|${variant}|${Z1_FLAME_FRAMES}`, Z1_FLAME_W, Z1_FLAME_H * Z1_FLAME_FRAMES, (c, k) => paintTongues(c, k, variant));
+  return atlas.tile(`z1fire2|${variant}|${Z1_FLAME_FRAMES}`, Z1_FLAME_W, Z1_FLAME_H * Z1_FLAME_FRAMES, (c, k) => paintTongues(c, k, variant), { frames: Z1_FLAME_FRAMES });
 }
 
 function paintTongues(c: PwCanvas, k: PwKit, variant: number) {
@@ -148,15 +148,17 @@ const levelled = new WeakSet<PwAtlasData>();
 export function z1FlameLevels(data: PwAtlasData, tiles: readonly PwTile[]) {
   if (levelled.has(data)) return;
   levelled.add(data);
-  const L0 = data.levels[0];
-  const W0 = L0.width;
-  const src = L0.data;
-  for (let l = 1; l < Math.min(Z1_FLAME_LEVELS, data.levels.length); l++) {
-    const lv = data.levels[l];
-    const s = 1 << l;
-    for (const t of tiles) {
-      const x0 = t.x >> l;
-      const y0 = t.y >> l;
+  const P = data.pal;
+  for (const t of tiles) {
+    // (Levels at the tile's painted scale: a strip stored at 2× keeps the upscaler's copy above them.)
+    const L0 = pwTileLevel(data, t, 0);
+    if (!L0) continue;
+    const src = L0.idx;
+    const W0 = L0.width;
+    for (let l = 1; l < Z1_FLAME_LEVELS; l++) {
+      const lv = pwTileLevel(data, t, l);
+      if (!lv) break;
+      const s = 1 << l;
       const w = Math.ceil(t.w / s);
       const h = Math.ceil(t.h / s);
       for (let y = 0; y < h; y++) {
@@ -167,49 +169,48 @@ export function z1FlameLevels(data: PwAtlasData, tiles: readonly PwTile[]) {
           let g = 0;
           let b = 0;
           for (let yy = 0; yy < s; yy++) {
-            const sy = t.y + y * s + yy;
-            if (sy >= t.y + t.h) continue;
+            const sy = y * s + yy;
+            if (sy >= t.h) continue;
             for (let xx = 0; xx < s; xx++) {
-              const sx = t.x + x * s + xx;
-              if (sx >= t.x + t.w) continue;
+              const sx = x * s + xx;
+              if (sx >= t.w) continue;
               n++;
-              const i = (sy * W0 + sx) * 4;
-              if (src[i + 3] === 0) continue;
+              const tx = src[(L0.y + sy) * W0 + L0.x + sx];
+              if (!(tx & PWI.RAMP)) continue;
               on++;
-              r += src[i];
-              g += src[i + 1];
-              b += src[i + 2];
+              const q = pwPalAt(tx);
+              r += P[q];
+              g += P[q + 1];
+              b += P[q + 2];
             }
           }
-          const di = ((y0 + y) * lv.width + x0 + x) * 4;
+          const di = (lv.y + y) * lv.width + lv.x + x;
           if (on * 2 < n || on === 0) {
-            lv.data[di] = lv.data[di + 1] = lv.data[di + 2] = lv.data[di + 3] = 0;
+            lv.idx[di] = 0;
             continue;
           }
           r /= on;
           g /= on;
           b /= on;
-          let best = -1;
+          let best = 0;
           let bd = Infinity;
           for (let yy = 0; yy < s; yy++) {
-            const sy = t.y + y * s + yy;
-            if (sy >= t.y + t.h) continue;
+            const sy = y * s + yy;
+            if (sy >= t.h) continue;
             for (let xx = 0; xx < s; xx++) {
-              const sx = t.x + x * s + xx;
-              if (sx >= t.x + t.w) continue;
-              const i = (sy * W0 + sx) * 4;
-              if (src[i + 3] === 0) continue;
-              const d = (src[i] - r) ** 2 + (src[i + 1] - g) ** 2 + (src[i + 2] - b) ** 2;
-              if (d < bd) {
-                bd = d;
-                best = i;
+              const sx = x * s + xx;
+              if (sx >= t.w) continue;
+              const tx = src[(L0.y + sy) * W0 + L0.x + sx];
+              if (!(tx & PWI.RAMP)) continue;
+              const q = pwPalAt(tx);
+              const dd = (P[q] - r) ** 2 + (P[q + 1] - g) ** 2 + (P[q + 2] - b) ** 2;
+              if (dd < bd) {
+                bd = dd;
+                best = tx;
               }
             }
           }
-          lv.data[di] = src[best];
-          lv.data[di + 1] = src[best + 1];
-          lv.data[di + 2] = src[best + 2];
-          lv.data[di + 3] = src[best + 3];
+          lv.idx[di] = best;
         }
       }
     }
@@ -223,7 +224,7 @@ export function z1FlameLevels(data: PwAtlasData, tiles: readonly PwTile[]) {
  * `variant` 0 / 1: two out-of-step fires.
  */
 export function z1FlameTile(atlas: PwAtlas, variant: number): PwTile {
-  return atlas.tile(`z1fire|${variant}|${Z1_FLAME_FRAMES}`, Z1_FLAME_W, Z1_FLAME_H * Z1_FLAME_FRAMES, (c, k) => paintFlames(c, k, variant));
+  return atlas.tile(`z1fire|${variant}|${Z1_FLAME_FRAMES}`, Z1_FLAME_W, Z1_FLAME_H * Z1_FLAME_FRAMES, (c, k) => paintFlames(c, k, variant), { frames: Z1_FLAME_FRAMES });
 }
 
 function paintFlames(c: PwCanvas, k: PwKit, variant: number) {

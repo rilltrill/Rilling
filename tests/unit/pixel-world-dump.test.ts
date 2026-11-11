@@ -1,7 +1,8 @@
 import { describe, it } from 'vitest';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { PwPalette } from '../../src/content/pixelworld/canvas';
-import { paintTile, PwAtlas } from '../../src/content/pixelworld/atlas';
+import { PwPalette, pwIndexToRgba } from '../../src/content/pixelworld/canvas';
+import { paintTile, PwAtlas, pwLevelRgba } from '../../src/content/pixelworld/atlas';
+import { pwUpscale2x } from '../../src/content/pixelworld/upscale';
 import { encodePng, flipRows } from './pwPng';
 import { lookdevBackdrops, lookdevTiles } from '../../src/content/pixelworld/lookdev';
 
@@ -9,7 +10,8 @@ import { lookdevBackdrops, lookdevTiles } from '../../src/content/pixelworld/loo
  * PixelWorld look-dev dump (skipped unless PW_DUMP is set):
  *   PW_DUMP=/tmp/pixelworld/tiles npx vitest run tests/unit/pixel-world-dump.test.ts
  * writes every look-dev tile at ×3 (wrap tiles 2×2 to check the seams) and the
- * packed atlas (level 0 and level 2) as PNGs.
+ * packed atlas (level 0 and level 2) as PNGs. With PW_UP=1 also `<tile>_up.png`:
+ * the tile as painted (×6) beside the pixel-art upscaler's 2× copy (×3).
  */
 const OUT = process.env.PW_DUMP;
 
@@ -39,12 +41,24 @@ describe.skipIf(!OUT)('PixelWorld look-dev dump', () => {
       }
       const name = t.key.replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 80);
       writeFileSync(`${out}/${name}.png`, await encodePng(img, w, h, t.w >= 1024 ? 1 : 3, [255, 0, 255]));
+      if (process.env.PW_UP && t.w < 1024) {
+        const up = pwIndexToRgba(pwUpscale2x(c, t.wrap), pal.rgba);
+        const W2 = t.w * 2;
+        const pair = new Uint8Array(W2 * 2 * t.h * 2 * 4);
+        for (let y = 0; y < t.h * 2; y++) {
+          for (let x = 0; x < W2; x++) {
+            pair.set(rgba.subarray(((y >> 1) * t.w + (x >> 1)) * 4, ((y >> 1) * t.w + (x >> 1)) * 4 + 4), (y * W2 * 2 + x) * 4);
+            pair.set(up.subarray((y * W2 + x) * 4, (y * W2 + x) * 4 + 4), (y * W2 * 2 + W2 + x) * 4);
+          }
+        }
+        writeFileSync(`${out}/${name}_up.png`, await encodePng(pair, W2 * 2, t.h * 2, 3, [255, 0, 255]));
+      }
     }
     if (!only) {
       const d = atlas.build();
       for (const l of [0, 2]) {
         const lv = d.levels[l];
-        writeFileSync(`${out}/_atlas-l${l}.png`, await encodePng(flipRows(lv.data, lv.width, lv.height), lv.width, lv.height, 1, [255, 0, 255]));
+        writeFileSync(`${out}/_atlas-l${l}.png`, await encodePng(flipRows(pwLevelRgba(d, l), lv.width, lv.height), lv.width, lv.height, 1, [255, 0, 255]));
       }
       console.log(`atlas ${d.w}×${d.h}, ${(d.bytes / 1048576).toFixed(2)} MB, ${d.ms.toFixed(0)} ms, ${d.texels} texels`);
     }
@@ -143,7 +157,7 @@ describe.skipIf(!process.env.PW_STAGE_SKY || !OUT)('PixelWorld stage panorama du
     const d = atlas.build();
     const lv = d.levels[0];
     mkdirSync(OUT!, { recursive: true });
-    writeFileSync(`${OUT}/_${id}-sky.png`, await encodePng(flipRows(lv.data, lv.width, lv.height), lv.width, lv.height, 1, [255, 0, 255]));
+    writeFileSync(`${OUT}/_${id}-sky.png`, await encodePng(flipRows(pwLevelRgba(d, 0), lv.width, lv.height), lv.width, lv.height, 1, [255, 0, 255]));
     console.log(`${id} sky ${d.w}×${d.h}`);
   });
 });
