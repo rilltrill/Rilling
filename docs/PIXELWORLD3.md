@@ -71,7 +71,7 @@ In PIXEL WORLD the visible boxes are deleted (the hidden boxes stay for gameplay
   lays the flat and its cards, and for `raked` flats turns the group about the flat's far end (35°, the near end swinging
   back inside the old footprint: `FLAT_RAKE`), floors the wedge of sidewalk that opens, and darkens the wall glows that
   have nothing to land on. Placements are chosen per building in `AT`; `&pwflats=parallel` or `&pwflats=<degrees>` overrides
-  for look-dev. The RIALTO stays `parallel` (its marquee is a real box with animated chase bulbs on the old facade), the boss
+  for look-dev. The RIALTO stays `parallel` (the marquee's animated chase bulbs stand on the old facade; since round 2 the marquee is cards, not a box), the boss
   square's PRIME MEATS and bank stand square to the camera (`facing`).
 - One atlas (`z1-flats`, skyline-packed: `PwAtlas(..., { skyline: true })`) and one draw call a zone; lit `Z1_FLAT_GAIN`
   (2.6; 1.7 in the square, zone E) so a wall lands on the mood's pivot and shows as painted.
